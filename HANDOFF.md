@@ -1,25 +1,29 @@
-# Handoff — Etap 0B (target runtime provisioned) + Etap 0C (evidence durability)
+# Handoff — Etap 0B (runtime) + 0C (evidence durability) + 0D/S2 (gateway lifecycle live)
 
-- Data: 2026-07-23
-- Sesja: utrwalenie i uspójnienie evidence Etapu 0B (Etap 0C). Bez kodu produkcyjnego, bez S1–S8.
+- Data: 2026-07-24 (live run S2: 2026-07-23)
+- Sesja: live spike **S2** — natywny gateway jako systemd **user** service w VM `hermes-box`.
+  Bez kodu produkcyjnego, bez S1 i S3–S8, bez model/messaging credentials, bez workerów.
 - Wykonawca: Claude Code (Opus 4.8) w imieniu wzslr821
 - Adresat: LLM-głowa projektu (orchestrator). `AGENTS.md` pozostaje nadrzędny.
 
 > **Status planu:** Etap 0 **NIE jest ukończony** (INCOMPLETE). Target runtime istnieje
-> (S0-TARGET-VM: PASS), ale live S1–S8 nie zostały wykonane. Nie oznaczaj Etapu 0 jako completed.
+> (S0-TARGET-VM: PASS) i S2 (gateway/systemd lifecycle) jest **PASS** live, ale S1 i S3–S8 nie zostały
+> wykonane. Nie oznaczaj Etapu 0 jako completed. Jeden dowiedziony slice ≠ GO.
 
-## Gate status (bieżący, po provisioningu)
+## Gate status (bieżący, po S2)
 
 ```text
 S0-HOST:        PASS
 S0-TARGET-VM:   PASS
+S2:             PASS   (native gateway systemd user-service lifecycle, live w VM)
 Etap 0:         INCOMPLETE
 Demo A:         NO-GO
 Demo B:         NO-GO
 ```
 
-**NO-GO reason:** target runtime istnieje, ale S1–S8 nie mają wymaganego live evidence. Provisioning
-≠ GO. Bramki mogą zmienić się dopiero po zebraniu i review live evidence (fail closed, AGENTS §9).
+**NO-GO reason:** runtime istnieje i S2 jest dowiedzione live, ale S1, S3, S4, S5 (live), S6, S7, S8
+nie mają wymaganego live evidence. Bramki mogą zmienić się dopiero po zebraniu i review pozostałego
+live evidence (fail closed, AGENTS §9).
 
 ## Co jest udowodnione
 
@@ -28,6 +32,18 @@ Demo B:         NO-GO
   Lima v2.2.0 → `hermes-box` (Ubuntu 24.04.4 arm64, vz); Docker Engine 29.6.2 client↔server; Hermes
   v0.19.0 upstream 91546b83; git 2.43.0; Python 3.12.3; cały stan Hermes/HB/Docker na natywnym ext4;
   **brak macOS host share** w VM. To dowodzi *istnienia* runtime, nie zachowania S1–S8.
+- **S2 (PASS) — native gateway systemd user-service lifecycle (live w VM):** unit
+  `hermes-gateway.service` (user scope, `/home/hermes/.config/systemd/user/`), `Restart=always`,
+  `WantedBy=default.target`, `HERMES_HOME=/home/hermes/.hermes`, brak `0.0.0.0`. Przebieg: install
+  `--no-start-now --start-on-login` → enabled+inactive+MainPID=0; start → active/running (PID 2202);
+  SIGKILL → nadzorowany restart (PID 2306≠2202); native `restart` → PID 2387; stop → inactive/PID 0
+  + zwolniony dispatcher lock; **VM reboot** → auto-start przez linger (`Linger=yes` przetrwał),
+  PID 2512→884; uninstall → unit usunięty, `~/.hermes` i board DB zachowane. Embedded dispatcher
+  trzyma `~/.hermes/kanban/.dispatcher.lock` (CONTENDED gdy active / FREE gdy stopped). **`hermes
+  gateway status` kończy 0 w każdym stanie** (nawet nie-zainstalowany/zatrzymany) → exit 0 nie jest
+  postcondition (D2). Bez platform/modelu/workera; board `task_count=0`, `integrity_check=ok`
+  przez restart i reboot. Sterownik: [`spikes/s2_gateway_lifecycle.sh`](spikes/s2_gateway_lifecycle.sh);
+  evidence: [`docs/spike-results/evidence/s2-gateway-lifecycle/`](docs/spike-results/evidence/s2-gateway-lifecycle/).
 - **S5 (trójstopniowa klasyfikacja):**
   - **S5 legacy worktree characterization: PASS** — mechanika linked-worktree i rekonstrukcja
     dokładnego tree (host-side).
@@ -53,7 +69,11 @@ docs/spike-results/01..08 + 99-decision.md  (per-slice evidence + decyzja bramek
 docs/spike-results/evidence/etap-0b/s0-target-vm.txt     (zsanityzowany transcript, komendy + exit codes)
 docs/spike-results/evidence/etap-0b/lima-hermes-box.yaml (użyty config VM, byte-identyczny z resolved)
 docs/spike-results/evidence/etap-0b/SHA256SUMS           (manifest SHA-256 obu plików)
+docs/spike-results/evidence/s2-gateway-lifecycle/s2-gateway-lifecycle.txt  (S2 transcript, komendy + exit codes)
+docs/spike-results/evidence/s2-gateway-lifecycle/hermes-gateway.service    (wygenerowany unit, verbatim)
+docs/spike-results/evidence/s2-gateway-lifecycle/SHA256SUMS                (manifest SHA-256 obu plików)
 spikes/s5_git_boundary.sh                    (throwaway reprodukcja S5)
+spikes/s2_gateway_lifecycle.sh               (throwaway reproducible driver S2)
 ```
 
 Poprzednie surowe artefakty w `docs/spike-results/artifacts/` pozostają gitignored (konwencja repo dla
@@ -87,7 +107,8 @@ d843f8a478312e0ac130bd0074b39f68a3dbef9b  spike: establish pinned Lima target ru
 ## Otwarte S1–S8 (live nie wykonane — bramki NO-GO)
 
 - **S1** — brak live Desktop/WebSocket; potrzebna strategia mock/throwaway provider (bez realnych creds).
-- **S2** — in-VM gateway/systemd lifecycle: test jeszcze nie zaplanowany/wykonany.
+- **S2** — **PASS (rozwiązane)**: in-VM gateway/systemd **user-scope** lifecycle wykonany live (patrz
+  wyżej + `docs/spike-results/02-gateway-service.md`). Otwarte poza S2: scope `--system` nietestowany.
 - **S3 (live)** — realna egzekucja workera + SIGKILL→auto-reclaim + concurrent-claim atomicity: UNKNOWN.
 - **S4** — Docker istnieje w VM, ale isolation/freshness canaries nieuruchomione.
 - **S5 (live)** — materialized Git-free workspace boundary (ADR-0011): materializowany katalog bez
@@ -121,15 +142,12 @@ Zebrane w `docs/spike-results/00-runtime-versions.md` (sekcja „Etap 0B → Dev
 
 ## Następny slice (wybiera orchestrator)
 
-**Nie zaczynać Demo A. Nie startować S1 samodzielnie.** Po zaakceptowaniu tego evidence przez
-orchestratora następny slice to:
+**Nie zaczynać Demo A. Nie startować żadnego slice'a samodzielnie.** S2 jest dowiedzione;
+**wykonawca nie wybiera następnego slice'a — czeka na jawny handoff orchestratora.**
 
-> **S2 — in-VM gateway/systemd lifecycle characterization.** Bez model credentials.
-> Nie rozpoczynać bez nowego handoffu orchestratora.
-
-Kolejne slice'y (S1, S3 execution, S4, **S5 materialized Git-free workspace boundary**, S6, S7, S8) i
-finalna re-ewaluacja bramek Demo A/B — każdy na osobny handoff, z mock/throwaway modelem tam gdzie
-potrzebna egzekucja, bez realnych credentials.
+Kolejne slice'y (S1, S3 execution, S4, **S5 materialized Git-free workspace boundary**, S6, S7, S8),
+opcjonalny S2 **`--system` scope**, oraz finalna re-ewaluacja bramek Demo A/B — każdy na osobny
+handoff, z mock/throwaway modelem tam gdzie potrzebna egzekucja, bez realnych credentials.
 
 ## Files to read first
 
