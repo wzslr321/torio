@@ -1,0 +1,18 @@
+# TEMPLATE ONLY — render after spike confirms the installed Hermes CLI.
+[Unit]
+Description=Hermes Box Desktop backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HOME={{HOME}}
+WorkingDirectory={{HOME}}
+ExecStart={{HERMES_BINARY}} serve --host 127.0.0.1 --port {{PORT}}
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

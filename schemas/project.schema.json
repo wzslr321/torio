@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermes-box.local/schemas/project.schema.json",
+  "title": "Hermes Box project registry entry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_id", "display_name", "repo", "hermes", "worker", "verification", "integration"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "project_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
+    "display_name": {"type": "string", "minLength": 1, "maxLength": 120},
+    "repo": {
+      "type": "object", "additionalProperties": false,
+      "required": ["local_path", "default_branch", "remote"],
+      "properties": {
+        "local_path": {"type": "string", "pattern": "^/"},
+        "default_branch": {"type": "string", "minLength": 1},
+        "remote": {"type": "string", "minLength": 1}
+      }
+    },
+    "hermes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["board", "worker_profile"],
+      "properties": {
+        "board": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$"},
+        "worker_profile": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$"}
+      }
+    },
+    "worker": {
+      "type": "object", "additionalProperties": false,
+      "required": ["image", "network", "allowed_toolsets", "allowed_skills", "cpu", "memory_mb", "timeout_seconds"],
+      "properties": {
+        "image": {"type": "string", "pattern": "^.+@sha256:[0-9a-f]{64}$"},
+        "network": {"enum": ["none", "project-internal", "unrestricted"]},
+        "allowed_toolsets": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "allowed_skills": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "cpu": {"type": "number", "exclusiveMinimum": 0, "maximum": 32},
+        "memory_mb": {"type": "integer", "minimum": 256, "maximum": 65536},
+        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 86400}
+      }
+    },
+    "verification": {
+      "type": "object", "additionalProperties": false,
+      "required": ["image", "network", "commands"],
+      "properties": {
+        "image": {"type": "string", "pattern": "^.+@sha256:[0-9a-f]{64}$"},
+        "network": {"enum": ["none", "project-internal"]},
+        "commands": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["id", "argv", "timeout_seconds"],
+            "properties": {
+              "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$"},
+              "argv": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+              "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 7200}
+            }
+          }
+        }
+      }
+    },
+    "integration": {
+      "type": "object", "additionalProperties": false,
+      "required": ["mode", "target_ref", "push"],
+      "properties": {
+        "mode": {"const": "fast-forward-only"},
+        "target_ref": {"type": "string", "pattern": "^refs/heads/"},
+        "push": {"const": "explicit-human-only"}
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermes-box.local/schemas/task-request.schema.json",
+  "title": "Hermes Box task request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_id", "title", "specification", "acceptance_criteria"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "project_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
+    "title": {"type": "string", "minLength": 1, "maxLength": 200},
+    "specification": {"type": "string", "minLength": 1, "maxLength": 50000},
+    "acceptance_criteria": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "requested_base_ref": {"type": "string", "default": "HEAD"},
+    "labels": {"type": "array", "uniqueItems": true, "items": {"type": "string", "maxLength": 64}},
+    "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 200}
+  }
+}

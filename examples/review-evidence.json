@@ -1,0 +1,25 @@
+{
+  "schema_version": "1",
+  "project_id": "example-service",
+  "task_id": "t_example",
+  "execution_id": "018f47a2-7b77-4f57-8c9f-d244d1a9b901",
+  "created_at": "2026-07-23T17:20:55Z",
+  "base_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "review_commit": "cccccccccccccccccccccccccccccccccccccccc",
+  "review_tree": "dddddddddddddddddddddddddddddddddddddddd",
+  "review_diff_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "effective_policy_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "worker_image": "ghcr.io/example/hermes-worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "verifier_image": "ghcr.io/example/hermes-worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "target_ref": "refs/heads/main",
+  "verification": [
+    {
+      "command_id": "unit-tests",
+      "exit_code": 0,
+      "duration_ms": 1234,
+      "stdout_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "stderr_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "log_artifact": "artifacts/t_example/unit-tests.log"
+    }
+  ]
+}

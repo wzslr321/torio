@@ -1,0 +1,33 @@
+# Build
+/bin/
+/dist/
+*.test
+*.out
+__pycache__/
+*.py[cod]
+
+# Runtime/state
+.hermes-box/
+*.db
+*.db-shm
+*.db-wal
+state/
+logs/
+artifacts/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+config.local.yaml
+*.pem
+*.key
+
+# Worktrees and spikes
+.worktrees/
+spikes/output/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/

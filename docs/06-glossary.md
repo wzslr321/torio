@@ -1,0 +1,21 @@
+# Glossary
+
+- **Brain** — persistent Hermes profile służący do rozmowy, pamięci, planowania i submit.
+- **Worker Runtime** — zaufany proces Hermesa prowadzący model i routujący tools do backendu.
+- **Workload Container** — niezaufane środowisko terminal/file/candidate execution.
+- **Verifier Container** — świeże środowisko wykonujące trusted check commands na exact candidate snapshot.
+- **Control Plane / `hb`** — trusted policy, lifecycle, Git, evidence i approval system.
+- **Kanban task** — natywny element queue Hermesa.
+- **Execution** — jedna konkretna próba workera powiązana z Kanban run.
+- **Candidate** — zatrzymany snapshot zmian zapisany jako Git commit/tree.
+- **Review commit** — content-addressed commit utworzony przez control plane po zatrzymaniu workera.
+- **Effective policy** — pełna, znormalizowana i zahashowana polityka obowiązująca jedno execution.
+- **Admission** — walidacja requestu i policy przed opublikowaniem taska do execution.
+- **Approval** — human decision związana z exact OIDs i evidence hashes.
+- **Integration** — kontrolowane przesunięcie target ref do zatwierdzonego commit; w PoC fast-forward-only.
+- **Push** — osobna human-only operacja aktualizacji remote.
+- **Artifact ledger** — SQLite Hermes Box przechowujący policy/evidence facts, nie queue.
+- **TCB** — Trusted Computing Base.
+- **Fail closed** — niejednoznaczność lub błąd blokuje operację zamiast rozszerzać uprawnienia.
+- **Task branch** — niezaufana gałąź, na której worker produkuje zmiany.
+- **Trusted base** — zatwierdzony commit/branch będący źródłem policy i verification definitions.

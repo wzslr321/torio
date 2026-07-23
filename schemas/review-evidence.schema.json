@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermes-box.local/schemas/review-evidence.schema.json",
+  "title": "Hermes Box review evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_id", "task_id", "execution_id", "created_at", "base_commit", "review_commit", "review_tree", "review_diff_sha256", "effective_policy_sha256", "worker_image", "verifier_image", "target_ref", "verification"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "project_id": {"type": "string"},
+    "task_id": {"type": "string"},
+    "execution_id": {"type": "string", "format": "uuid"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "base_commit": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "review_commit": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "review_tree": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "review_diff_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "effective_policy_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "worker_image": {"type": "string", "pattern": "^.+@sha256:[0-9a-f]{64}$"},
+    "verifier_image": {"type": "string", "pattern": "^.+@sha256:[0-9a-f]{64}$"},
+    "target_ref": {"type": "string", "pattern": "^refs/heads/"},
+    "verification": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["command_id", "exit_code", "duration_ms", "stdout_sha256", "stderr_sha256"],
+        "properties": {
+          "command_id": {"type": "string"},
+          "exit_code": {"type": "integer"},
+          "duration_ms": {"type": "integer", "minimum": 0},
+          "stdout_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "stderr_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "log_artifact": {"type": "string"}
+        }
+      }
+    }
+  }
+}

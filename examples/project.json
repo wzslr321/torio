@@ -1,0 +1,35 @@
+{
+  "schema_version": "1",
+  "project_id": "example-service",
+  "display_name": "Example Service",
+  "repo": {
+    "local_path": "/home/hb-projects/example-service",
+    "default_branch": "main",
+    "remote": "origin"
+  },
+  "hermes": {
+    "board": "example-service",
+    "worker_profile": "worker-example-service"
+  },
+  "worker": {
+    "image": "ghcr.io/example/hermes-worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "network": "none",
+    "allowed_toolsets": ["file", "kanban-worker", "terminal"],
+    "allowed_skills": [],
+    "cpu": 2,
+    "memory_mb": 4096,
+    "timeout_seconds": 3600
+  },
+  "verification": {
+    "image": "ghcr.io/example/hermes-worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "network": "none",
+    "commands": [
+      {"id": "unit-tests", "argv": ["go", "test", "./..."], "timeout_seconds": 900}
+    ]
+  },
+  "integration": {
+    "mode": "fast-forward-only",
+    "target_ref": "refs/heads/main",
+    "push": "explicit-human-only"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "schema_version": "1",
+  "vm_name": "hermes-box",
+  "backend": {
+    "host": "127.0.0.1",
+    "port": 9119
+  },
+  "paths": {
+    "projects_root": "/home/hb-projects",
+    "transfer_mount": "/mnt/hermes-transfer"
+  },
+  "secrets": "[REDACTED: credentials are provisioned outside this file]"
+}

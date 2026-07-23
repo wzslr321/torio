@@ -1,0 +1,14 @@
+{
+  "schema_version": "1",
+  "project_id": "example-service",
+  "title": "Add bounded request timeout",
+  "specification": "Add a configurable request timeout without changing the public response schema.",
+  "acceptance_criteria": [
+    "Requests exceeding the configured duration are cancelled.",
+    "Existing unit tests continue to pass.",
+    "A new test proves timeout cancellation."
+  ],
+  "requested_base_ref": "refs/heads/main",
+  "labels": ["backend", "safe-worker"],
+  "idempotency_key": "example-timeout-2026-07-23"
+}
