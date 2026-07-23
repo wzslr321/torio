@@ -102,17 +102,45 @@ Gate:
 
 - PASS tylko jeśli task B nie widzi stanu A albo implementacja dostarcza zweryfikowany unique isolation key/fresh destroy.
 
-## S5 — Worktree without Git authority
+## S5 — Materialized Git-free workspace (per ADR-0011)
 
-1. Utwórz testowe repo i linked worktree na hoście VM.
-2. Zamontuj tylko worktree jako `/workspace`.
-3. Zapisz zawartość `.git` pointer i rzeczywiste zachowanie `git status`.
-4. Zamaskuj/odetnij `.git` bez blokowania edycji plików.
-5. Zmień tracked, untracked, deleted, executable bit i symlink.
-6. Po stopie candidate control plane ma odtworzyć exact diff/tree.
-7. Udowodnij, że workload nie może zmieniać innych refs/worktrees.
+> [ADR-0011](../adr/0011-materialized-git-free-workspaces.md) **supersedes ADR-0005**. The legacy
+> linked-worktree characterization (host-side) is a historical PASS and the masking-only security
+> hypothesis was refuted (FAIL); see `05-worktree-git-boundary.md`. The **live** S5 below is a
+> different mechanism — a materialized Git-free directory, **not** a worktree mounted as `/workspace`
+> — and is currently **UNKNOWN**. Do **not** run the superseded worktree-mount variant.
+
+Nowy live S5 wymaga:
+
+1. Trusted side tworzy testowe repo i exact base commit.
+2. Trusted side materializuje exact base tree do plain directory **poza** repo:
+   `/var/lib/hermes-box/workspaces/<task>/<run>/workspace`.
+3. Directory: **nie** jest Git worktree; **nie** zawiera preexisting `.git`; **nie** ma osiągalnego
+   repo-przodka.
+4. Kanban workspace kind: `dir:<prepared-workspace>` (nie `worktree`).
+5. Plain directory jest montowane jako `/workspace` do fresh container.
+6. Container otrzymuje `GIT_CEILING_DIRECTORIES=/workspace`.
+7. Wewnątrz kontenera potwierdź:
+   - `test ! -e /workspace/.git`,
+   - `git -C /workspace rev-parse --show-toplevel` kończy się non-zero,
+   - `git -C /workspace update-ref ...` kończy się non-zero,
+   - żaden ref trusted repo nie został zmieniony.
+8. Worker wykonuje: modyfikację tracked file, dodanie nowego pliku, deletion, executable-bit
+   transition, symlink.
+9. Po zatrzymaniu workera trusted side rekonstruuje exact tree przez isolated Git index:
+   `read-tree(base)` → `add -A` → `write-tree`.
+10. Rekonstrukcja zachowuje: deletion, tryby `100644`/`100755`, symlinki `120000`, deterministic
+    tree OID.
+11. Candidate preparation odrzuca: `.git` file/directory utworzone przez workload, nested repository
+    metadata, escaping symlink zgodnie z policy.
+12. Submodules i Git LFS pozostają jawnie **UNKNOWN**, dopóki nie zostaną osobno przetestowane.
 
 Evidence: `05-worktree-git-boundary.md`.
+
+Gate:
+
+- PASS tylko jeśli worker nie ma Git authority do trusted repo, negative Git tests przechodzą, refs
+  pozostają niezmienione, a trusted side rekonstruuje exact expected tree.
 
 ## S6 — Skills, env and credentials
 

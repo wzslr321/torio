@@ -1,143 +1,142 @@
-# Handoff — Etap 0 (runtime contract spike)
+# Handoff — Etap 0B (target runtime provisioned) + Etap 0C (evidence durability)
 
 - Data: 2026-07-23
-- Sesja: wykonanie wyłącznie Etapu 0 wg `docs/plans/01-spike.md` (bez kodu produkcyjnego)
+- Sesja: utrwalenie i uspójnienie evidence Etapu 0B (Etap 0C). Bez kodu produkcyjnego, bez S1–S8.
 - Wykonawca: Claude Code (Opus 4.8) w imieniu wzslr821
 - Adresat: LLM-głowa projektu (orchestrator). `AGENTS.md` pozostaje nadrzędny.
 
-> Uwaga o statusie planu: Etap 0 **NIE jest ukończony** — jest częściowo wykonany i częściowo
-> BLOCKED przez środowisko. Nie oznaczaj Etapu 0 jako completed. Bramka do Etapu 1 (Demo A) wymaga
-> `Demo A: GO` w `docs/spike-results/99-decision.md`, którego **nie ma** (jest NO-GO).
+> **Status planu:** Etap 0 **NIE jest ukończony** (INCOMPLETE). Target runtime istnieje
+> (S0-TARGET-VM: PASS), ale live S1–S8 nie zostały wykonane. Nie oznaczaj Etapu 0 jako completed.
 
-## Goal
-
-Zweryfikować realne zachowanie Hermes/Lima/Docker/Git na Apple Silicon **przed** kodem produkcyjnym,
-zapisać evidence w `docs/spike-results/`, i wydać osobne GO/NO-GO dla Demo A i Demo B. Bez
-implementacji Demo A/B. Bez zgadywania zachowania Hermesa.
-
-## Completed behavior
-
-- **S0-HOST (PASS):** spisana pełna macierz wersji/architektur **hosta macOS**; zidentyfikowany
-  Hermes commit; opisany wybrany compatibility surface bez zgadywania.
-- **S0-TARGET-VM (UNKNOWN/BLOCKED):** docelowy Linux arm64 runtime nie istniał w tej sesji (brak
-  Lima) — macierz S0 dla VM nie została zebrana. To osobny, nierozstrzygnięty poziom dowodu.
-- **S3 (PARTIAL):** potwierdzony **runtime** kontrakt kolejki Kanban bez modelu, w izolowanym
-  `HERMES_HOME` (bez zapisu do SQLite): create→`ready`, atomic claim z lockiem `<host>:<pid>`,
-  heartbeat, reclaim, jedna `run`-row na próbę, idempotency-key dedup, workspace kinds
-  `scratch`/`worktree`/`dir`.
-- **S5 (PASS dla mechaniki host-side):** scharakteryzowana granica Git worktree i rekonstrukcja
-  dokładnego tree przez zaufaną stronę.
-- **S4/S6 (source-of-truth):** kontrakt izolacji Dockera i wektory env/credential odczytane z kodu
-  zainstalowanego Hermesa (commit 91546b83), bo runtime jest BLOCKED.
-- **S1, S2, S7, S8:** oznaczone **BLOCKED** (nie PASS) — środowisko nie pozwala na eksperyment.
-
-Dwa ustalenia, które zmieniają sposób integracji `hb`:
-1. `hermes kanban claim` przy konflikcie **wypisuje odmowę, ale kończy się exit `0`** → adapter musi
-   parsować output / re-query status, nie ufać exit code.
-2. Natywny Kanban worktree powstaje **wewnątrz repo** (`<repo>/.worktrees/<id>`), **tworzy branch** i
-   daje ref-authoritative `.git`; a **samo zamaskowanie `.git` NIE odbiera władzy** (git discovery
-   wchodzi w górę do repo-przodka — odtworzone). CP musi przygotować własny workspace i wymusić
-   brak osiągalnego repo (mount-root / `GIT_CEILING_DIRECTORIES`).
-
-## Real verification commands + exit codes
-
-Tylko realnie uruchomione (bez fabrykacji). Pełne outputy: `docs/spike-results/*`.
+## Gate status (bieżący, po provisioningu)
 
 ```text
-uname -m                                   -> arm64                              (exit 0)
-sw_vers                                     -> macOS 26.5.2 (25F84)               (exit 0)
-limactl --version                           -> command not found                  (exit 127)
-hermes --version                            -> v0.19.0 upstream 91546b83          (exit 0)
-docker version                              -> Cannot connect to the daemon       (exit 1)
-git --version / go version                  -> 2.53.0 / go1.26.5                   (exit 0/0)
-
-# S5 (spikes/s5_git_boundary.sh + ceiling probe)
-git -C repo worktree add -b task-branch ../wt        (exit 0)
-cat wt/.git   -> gitdir: $HOME/.../repo/.git/worktrees/wt   (absolutna ścieżka hosta) (exit 0)
-mv wt/.git wt/.git.severed; git -C wt status         -> "On branch main" (ESCAPE)   (exit 0)
-   git -C wt update-ref refs/heads/attacker HEAD     -> utworzył ref w hermes-box    (exit 0)  [posprzątane]
-GIT_CEILING_DIRECTORIES=$OUT git -C wt status        -> "not a git repository"       (exit 128)
-git -C wt add -A && git -C wt write-tree             -> tree 2f3483bf… ; mody 100755/120000 (exit 0)
-
-# S3 (HERMES_HOME izolowany, bez modelu)
-hermes kanban init / boards create hbspike / create --json / claim / heartbeat / runs --json  (exit 0 każde)
-hermes kanban ... claim <już-running>  -> "cannot claim … lock=mac.home:18155"        (exit 0)  <- caveat
-hermes kanban ... reclaim / re-claim   -> run 1 reclaimed + run 2 running              (exit 0)
-create --idempotency-key spike-key-1 (x2) -> ten sam id t_94ffdbc9
-
-# walidacja artefaktów
-python3 scripts/validate_artifacts.py       -> PASS x4, internally consistent          (exit 0)
+S0-HOST:        PASS
+S0-TARGET-VM:   PASS
+Etap 0:         INCOMPLETE
+Demo A:         NO-GO
+Demo B:         NO-GO
 ```
 
-## Changed files
+**NO-GO reason:** target runtime istnieje, ale S1–S8 nie mają wymaganego live evidence. Provisioning
+≠ GO. Bramki mogą zmienić się dopiero po zebraniu i review live evidence (fail closed, AGENTS §9).
 
-- Zaktualizowane evidence (były `[NOT-RUN]`): `docs/spike-results/00…08` + `99-decision.md` (10 plików).
-- Nowy throwaway (reprodukcja S5, gitignore-safe lokalizacja `spikes/`): `spikes/s5_git_boundary.sh`.
-- Ten plik: `HANDOFF.md`.
-- **Brak** zmian w `cmd/`, `internal/`, `schemas/`, ADR-ach. Fixtures runtime (`spikes/output/`)
-  utworzone i **usunięte** po zebraniu evidence.
+## Co jest udowodnione
 
-## Decisions/contract changes
+- **S0-HOST (PASS):** macierz wersji/architektur hosta macOS (Etap 0A, historyczny baseline).
+- **S0-TARGET-VM (PASS):** docelowy Linux arm64 runtime **istnieje** i jego macierz S0 zebrano w-VM —
+  Lima v2.2.0 → `hermes-box` (Ubuntu 24.04.4 arm64, vz); Docker Engine 29.6.2 client↔server; Hermes
+  v0.19.0 upstream 91546b83; git 2.43.0; Python 3.12.3; cały stan Hermes/HB/Docker na natywnym ext4;
+  **brak macOS host share** w VM. To dowodzi *istnienia* runtime, nie zachowania S1–S8.
+- **S5 (trójstopniowa klasyfikacja):**
+  - **S5 legacy worktree characterization: PASS** — mechanika linked-worktree i rekonstrukcja
+    dokładnego tree (host-side).
+  - **S5 masking-only security hypothesis: FAIL** — samo zamaskowanie `.git` nie odbiera władzy
+    (discovery escapuje do repo-przodka); zaadresowane przez ADR-0011.
+  - **S5 materialized Git-free workspace live proof: UNKNOWN** — nowy mechanizm ADR-0011
+    (materializowany katalog bez `.git`, brak osiągalnego repo-przodka, `GIT_CEILING_DIRECTORIES=`
+    `/workspace`, negatywne `rev-parse`/`update-ref`, trusted exact-tree reconstruction) nie był
+    jeszcze wykonany w-VM. Superseded wariant worktree-mount **nie** będzie uruchamiany.
+- **S3 (PARTIAL):** kontrakt kolejki Kanban bez modelu w izolowanym `HERMES_HOME`:
+  create→`ready`, resolve workspace przy claim z lockiem `<host>:<pid>`, heartbeat, reclaim, jedna
+  `run`-row na próbę, idempotency-key dedup, workspace kinds `scratch`/`worktree`/`dir`.
+  **Sequential ownership guard i double-claim refusal: PASS. Concurrent claim atomicity pod realnym
+  race: UNKNOWN.**
+- **S4/S6 (source-of-truth):** kontrakt izolacji Dockera i wektory env/credential odczytane ze źródła
+  Hermesa (commit 91546b83); live half UNKNOWN.
 
-- **Żaden ADR ani contract nie został zmieniony** (AGENTS §9 — nie modyfikuję ADR-ów po cichu).
-- W `docs/spike-results/99-decision.md` są **rekomendacje** wymagające nowego/superseding ADR:
-  ADR-0005 (asercja „brak osiągalnego repo po masking” + ceiling), ADR-0004/`contracts/executor.md`
-  (przypięcie knobów Dockera), ADR-0007/`contracts/effective-policy.md` (pola polityki),
-  `contracts/cli.md` (claim = exit 0 przy konflikcie), odświeżenie `docs/07-source-verification.md`
-  do commitu 91546b83 po re-runie w VM. **Decyzję o ADR podejmuje głowa projektu, nie ta sesja.**
+## Tracked evidence (durable)
 
-## Security invariants checked (AGENTS §5)
-
-- #1 repos/state na Linux fs VM — **UNMET/BLOCKED**: brak Lima; Hermes działa na hoście macOS (topologia odrzucana przez ADR-0003).
-- #4 worker bez docker.sock — **wsparte ze źródła** (brak mountu socketa w `docker.py`); live BLOCKED.
-- #5 worker bez używalnego `.git`/push creds — **kluczowe ustalenie S5**: masking `.git` sam w sobie NIE wystarcza; natywny worktree daje władzę Git → CP musi ją odebrać i to zweryfikować.
-- #7 policy obejmuje host tools/MCP/skills/env — **wsparte ze źródła** (S6: `required_credential_files`, `terminal.credential_files`, `docker_forward_env`).
-- #3 świeży kontener per task — **BLOCKED** (brak daemona); źródło pokazuje **domyślnie reuse ON** → ryzyko do wyłączenia (S4).
-- #2,#6,#8–#14 — nie ćwiczone tej sesji (wymagają workera/Demo B lub VM). Nie deklaruję ich jako sprawdzone.
-
-## Known failures/blockers
-
-- **B1 Lima nieobecna** → blokuje S1, S2, reboot w S8, samą granicę zaufania.
-- **B2 Docker daemon down** (i to Docker Desktop, nie Docker-in-Lima) → blokuje S4, S7, sandbox-część S3/S6.
-- **B3 brak live model providera + brak headless Desktop drivera**; spike zabrania realnych credentials → blokuje live egzekucję S3 i live chat S1.
-- Wersja Hermesa (91546b83) różni się od referencyjnej (d9165d7a w `docs/07-source-verification.md`).
-- **S5 characterization: PASS** (mechanika linked-worktree i rekonstrukcja tree odtworzone na hoście),
-  ale **masking-only security hypothesis: FAIL** — hipoteza „zamaskowanie `.git` odbiera władzę Git”
-  została obalona (git discovery escapuje do repo-przodka, utworzono ref w realnym repo). Nie jest więc
-  prawdą, że „nic nie obaliło hipotezy”: S5 obalił `masking-only` jako security control. Pozostałe
-  kroki są niedokończone z powodu braku środowiska (BLOCKED/UNKNOWN), nie z powodu FAIL.
-
-## Uncommitted state
-
-Wszystko niezacommitowane (nie commituję bez prośby). `git status --short`:
 ```text
- M docs/spike-results/00…08 + 99-decision.md   (10 plików)
-?? spikes/s5_git_boundary.sh
-?? HANDOFF.md
+docs/spike-results/00-runtime-versions.md   (S0-HOST + sekcja "Etap 0B", pinned versions, Lima config)
+docs/spike-results/01..08 + 99-decision.md  (per-slice evidence + decyzja bramek)
+docs/spike-results/evidence/etap-0b/s0-target-vm.txt     (zsanityzowany transcript, komendy + exit codes)
+docs/spike-results/evidence/etap-0b/lima-hermes-box.yaml (użyty config VM, byte-identyczny z resolved)
+docs/spike-results/evidence/etap-0b/SHA256SUMS           (manifest SHA-256 obu plików)
+spikes/s5_git_boundary.sh                    (throwaway reprodukcja S5)
 ```
-Repo `refs/heads/` = tylko `main` (przypadkowy `attacker` z S5 usunięty i zweryfikowany). Realne
-`~/.hermes` nietknięte (wszystkie operacje Kanban przez izolowany `HERMES_HOME`).
 
-## Exact next task (one slice)
+Poprzednie surowe artefakty w `docs/spike-results/artifacts/` pozostają gitignored (konwencja repo dla
+runtime output); durable evidence to powyższe tracked pliki.
 
-**Nie zaczynać Demo A.** Osobna sesja typu *spike-completion / provisioning* — jeden slice:
+## Commity na `main` (istniejące, tło Etapu 0)
 
-> Zainstaluj i przypnij wersję Lima; utwórz VM **Linux arm64** wg `docs/adr/0003-lima-trust-boundary.md`;
-> zainstaluj Docker Engine **w VM** i uruchom Hermesa **w VM**; ponownie uruchom macierz **S0 wewnątrz
-> VM** i **udowodnij, że repos/state leżą na Linux fs VM, nie na mountcie macOS** (security invariant #1).
+```text
+58e73cd6d0a136e919236779cf3a254f7127c0a5  spike: record partial host runtime evidence
+a48306bd0e9c63eedb6a440746bdea99aa760ee7  docs: adopt host spike contract findings
+d843f8a478312e0ac130bd0074b39f68a3dbef9b  spike: establish pinned Lima target runtime
+```
 
-Acceptance tego slice'u: `limactl` obecny+wersja przypięta; VM arm64 działa; `docker version` w VM
-zwraca serwer; `hermes --version` w VM; repos/state poza VirtFS/9p. Dopiero potem kolejne slice'y:
-S1 (live Desktop/WebSocket) → S2 → S3 (realna egzekucja workera + SIGKILL reclaim; mock/throwaway
-model, bez realnych credentials) → S4 → S5 (mount worktree jako `/workspace`) → S6 → S7 → S8, a na
-końcu re-ewaluacja bramek w `99-decision.md`.
+`origin/main` = `d843f8a478312e0ac130bd0074b39f68a3dbef9b` (nietknięty; ta praca jest na osobnym branchu).
+
+## Zaakceptowane ADR / contracts (bez zmian w tej sesji)
+
+- ADR-0001..0010 oraz **ADR-0011 (Accepted, supersedes ADR-0005)** — materialized Git-free workspaces:
+  worker dostaje materializowany katalog bez `.git` montowany jako `/workspace`, **nie** worktree.
+- Applied wcześniej na `main` (commit `a48306b`): `cli.md` mutation postcondition (`claim` exit 0 nie
+  jest postcondition; structured output + re-query + fail closed) oraz pola ADR-0011 w
+  `effective-policy.md` / `effective-policy.schema.json` (`workspace.kind=materialized-tree`,
+  `repository_ancestor_reachable=false`, `git_metadata=denied`, `git_ceiling_directories=["/workspace"]`,
+  `worker.fresh_per_task=true`, `worker.persist_across_processes=false`).
+- Pozostałe contracty w `docs/contracts/` (executor, service-lifecycle, state-ledger, task-request,
+  review-evidence, backup-recovery, project-config) — niezmienione.
+- Ta sesja (0C) **nie modyfikuje** żadnego ADR-a ani contractu (AGENTS §9). Podział na *Applied
+  decisions* i *Remaining work* jest w [`docs/spike-results/99-decision.md`](docs/spike-results/99-decision.md);
+  pozostałe pozycje czekają na in-VM behavioural re-run i decyzję głowy projektu.
+
+## Otwarte S1–S8 (live nie wykonane — bramki NO-GO)
+
+- **S1** — brak live Desktop/WebSocket; potrzebna strategia mock/throwaway provider (bez realnych creds).
+- **S2** — in-VM gateway/systemd lifecycle: test jeszcze nie zaplanowany/wykonany.
+- **S3 (live)** — realna egzekucja workera + SIGKILL→auto-reclaim + concurrent-claim atomicity: UNKNOWN.
+- **S4** — Docker istnieje w VM, ale isolation/freshness canaries nieuruchomione.
+- **S5 (live)** — materialized Git-free workspace boundary (ADR-0011): materializowany katalog bez
+  `.git` montowany jako `/workspace`, negatywne testy Git w kontenerze i trusted exact-tree
+  reconstruction — nieuruchomione w-VM. (Legacy characterization PASS, masking-only FAIL — powyżej.)
+- **S6 (live)** — diff effective env/mounts (empty forward list) + host-tool enumeration workera: UNKNOWN.
+- **S7** — fresh verifier (druga świeża izolacja) nieuruchomiony.
+- **S8** — kill/reboot reconciliation matrix nieuruchomiona.
+
+## Odchylenia zarejestrowane w evidence (ratyfikowane przez orchestratora poprzez akceptację 0B)
+
+Zebrane w `docs/spike-results/00-runtime-versions.md` (sekcja „Etap 0B → Deviations recorded"):
+
+1. Hermes install method raportuje `unknown` (VM to `git archive` przypiętego commitu, bez `.git`);
+   commit potwierdzony przez sankcjonowany marker `.hermes_build_sha` → `hermes --version` = `91546b83`.
+2. Python w VM 3.12.3 vs host 3.11.15 — oba spełniają `requires-python ">=3.11,<3.14"`.
+3. `stat -f -c '%T %m'` zwraca `ext2/ext3 ?` — GNU `stat` nazywa całą rodzinę ext; `findmnt` jest
+   autorytatywne i pokazuje `ext4` wszędzie.
+4. `/mnt/lima-cidata` (iso9660 na `/dev/vdb`) to read-only cloud-init seed Limy, nie macOS host share.
+
+## Security invariants (AGENTS §5) — stan po Etapie 0B
+
+- #1 repos/state na Linux fs VM — **MET (presence)**: cały stan na natywnym ext4, brak macOS share
+  (dowód: `findmnt`/host-share count = 0 w evidence). Live behaviour dalej do sprawdzenia w S1–S8.
+- #4 worker bez docker.sock — **wsparte ze źródła**; live UNKNOWN (S4 canaries nieuruchomione).
+- #5 worker bez używalnego `.git`/push — kluczowe ustalenie S5; zaadresowane przez ADR-0011 (materialized
+  dir, nie worktree); live weryfikacja `git -C /workspace rev-parse` fails — UNKNOWN.
+- #7 policy obejmuje host tools/MCP/skills/env — **wsparte ze źródła** (S6); live UNKNOWN.
+- #3 świeży kontener per task — źródło pokazuje domyślnie reuse ON → do wyłączenia; live UNKNOWN (S4).
+- #2,#6,#8–#14 — nie ćwiczone; nie deklaruję jako sprawdzone.
+
+## Następny slice (wybiera orchestrator)
+
+**Nie zaczynać Demo A. Nie startować S1 samodzielnie.** Po zaakceptowaniu tego evidence przez
+orchestratora następny slice to:
+
+> **S2 — in-VM gateway/systemd lifecycle characterization.** Bez model credentials.
+> Nie rozpoczynać bez nowego handoffu orchestratora.
+
+Kolejne slice'y (S1, S3 execution, S4, **S5 materialized Git-free workspace boundary**, S6, S7, S8) i
+finalna re-ewaluacja bramek Demo A/B — każdy na osobny handoff, z mock/throwaway modelem tam gdzie
+potrzebna egzekucja, bez realnych credentials.
 
 ## Files to read first
 
 1. `AGENTS.md` (nadrzędny kontrakt)
-2. `docs/spike-results/99-decision.md` (bramki, blockers, następny task)
-3. `docs/plans/01-spike.md` (S0–S8, gate'y)
-4. `docs/07-source-verification.md` (zakaz zgadywania, oficjalne źródła, drift wersji)
-5. `docs/adr/0003-lima-trust-boundary.md`, `0004-native-docker-poc.md`, `0005-control-plane-git.md`, `0007-policy-includes-tools-skills.md`
-6. Evidence szczegółowe: `docs/spike-results/03-kanban-worker.md`, `04-docker-isolation.md`, `05-worktree-git-boundary.md`
-7. `prompts/00-implementer-system.md` (system context dla implementera)
+2. `docs/spike-results/99-decision.md` (bramki, open items, następny task)
+3. `docs/spike-results/00-runtime-versions.md` (Etap 0A baseline + Etap 0B target matrix)
+4. `docs/spike-results/evidence/etap-0b/` (tracked transcript + Lima config + SHA256SUMS)
+5. `docs/plans/01-spike.md` (S0–S8, gate'y)
+6. `docs/adr/0011-materialized-git-free-workspaces.md`, `0003`, `0004`, `0007`
+7. `docs/07-source-verification.md` (zakaz zgadywania, drift wersji 91546b83 vs d9165d7a)
