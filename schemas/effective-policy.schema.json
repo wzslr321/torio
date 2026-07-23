@@ -11,13 +11,14 @@
     "base_commit": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
     "worker": {
       "type": "object", "additionalProperties": false,
-      "required": ["image", "network", "cpu", "memory_mb", "timeout_seconds", "persist_across_processes"],
+      "required": ["image", "network", "cpu", "memory_mb", "timeout_seconds", "fresh_per_task", "persist_across_processes"],
       "properties": {
         "image": {"type": "string", "pattern": "^.+@sha256:[0-9a-f]{64}$"},
         "network": {"enum": ["none", "project-internal", "unrestricted"]},
         "cpu": {"type": "number", "exclusiveMinimum": 0},
         "memory_mb": {"type": "integer", "minimum": 256},
         "timeout_seconds": {"type": "integer", "minimum": 1},
+        "fresh_per_task": {"const": true},
         "persist_across_processes": {"const": false}
       }
     },
@@ -32,10 +33,13 @@
     },
     "workspace": {
       "type": "object", "additionalProperties": false,
-      "required": ["mount", "git_metadata", "extra_mounts"],
+      "required": ["kind", "mount", "git_metadata", "repository_ancestor_reachable", "git_ceiling_directories", "extra_mounts"],
       "properties": {
+        "kind": {"const": "materialized-tree"},
         "mount": {"const": "/workspace"},
         "git_metadata": {"const": "denied"},
+        "repository_ancestor_reachable": {"const": false},
+        "git_ceiling_directories": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "/workspace"}},
         "extra_mounts": {"type": "array", "maxItems": 0}
       }
     },

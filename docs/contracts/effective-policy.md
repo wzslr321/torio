@@ -35,6 +35,37 @@ integration = fast-forward-only
 push = explicit-human-only
 ```
 
+## Workspace (materialized Git-free tree)
+
+Zgodnie z [ADR-0011](../adr/0011-materialized-git-free-workspaces.md) workspace workera nie jest
+Git worktree. Effective policy MUSI zapisać:
+
+```text
+workspace.kind                          = materialized-tree
+workspace.mount                         = /workspace
+workspace.git_metadata                  = denied
+workspace.repository_ancestor_reachable = false
+workspace.git_ceiling_directories       = ["/workspace"]
+workspace.extra_mounts                  = []          (default deny)
+```
+
+`git_metadata = denied` to ta sama wartość kontraktowa co dotychczas (handoff nazywa ją „deny”;
+zachowano `denied`, by nie zmieniać przyjętej wartości). `git_ceiling_directories` jest
+defense-in-depth — podstawową granicą jest brak osiągalnego repo-przodka
+(`repository_ancestor_reachable = false`), nie ceiling.
+
+## Executor freshness
+
+Per-execution knoby wykonawcy (obiekt `worker` w schemacie — handoff nazywa je `executor.*`):
+
+```text
+worker.fresh_per_task            = true
+worker.persist_across_processes  = false
+```
+
+Świeży workload per task jest wymagany (security invariant #3); cross-process container reuse jest
+zabroniony (domyślnie w źródle Hermesa reuse jest ON — musi zostać wymuszony na OFF).
+
 ## Dev Container metadata
 
 Task branch `devcontainer.json` nie jest policy source. PoC używa prebuilt image pinned by digest. Późniejszy adapter może zaakceptować tylko zatwierdzony subset z trusted base/registry i musi odrzucać co najmniej:

@@ -1,6 +1,21 @@
 # Source verification
 
-## Zweryfikowany punkt odniesienia
+## Runtime baseline (Etap 0)
+
+Runtime baseline dla dalszego Etapu 0 jest przypięty do zainstalowanego, faktycznie działającego
+buildu Hermesa (pełny commit):
+
+```text
+repository: https://github.com/NousResearch/hermes-agent
+commit:     91546b8337068891cc0a6b834d89d0d9270fb3ec   (v0.19.0, upstream)
+```
+
+Wcześniejszy `d9165d7a678d4105f42921a7fc1886df3804531b` pozostaje **historycznym fact-checkiem**
+(analiza źródła poniżej), ale **nie jest runtime baseline**. Nie wolno mieszać evidence między tymi
+rewizjami bez jawnego compatibility check (zapisany diff zachowań/kontraktu). Odświeżenie analizy
+źródła do `91546b83` następuje po in-VM re-runie potwierdzającym zachowanie.
+
+## Zweryfikowany punkt odniesienia (historyczny fact-check — commit d9165d7a)
 
 W dniu 2026-07-23 przeanalizowano oficjalne repozytorium Hermes Agent:
 

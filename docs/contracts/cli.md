@@ -151,6 +151,24 @@ Wymagania:
 - `--json` nie wyłącza capability check,
 - nie istnieje `--yes` pozwalające Brainowi obejść admin identity.
 
+## Hermes adapter — mutation postconditions
+
+Adapter `hb → hermes kanban` NIE MOŻE traktować exit code procesu Hermesa jako wystarczającego
+postcondition security-relevant mutacji stanu. Ustalenie ze spike'u: `hermes kanban claim` przy
+konflikcie **wypisuje odmowę, ale kończy się exit `0`** (patrz [spike-results/03-kanban-worker.md](../spike-results/03-kanban-worker.md)).
+
+Reguła (dotyczy `claim` i każdej innej security-relevant mutacji, np. `reclaim`, `complete`):
+
+- exit `0` sam w sobie **nie** dowodzi udanej zmiany stanu,
+- adapter używa structured output (`--json`), jeśli jest dostępny,
+- po mutacji adapter wykonuje **re-query** stanu i potwierdza:
+  - task status,
+  - run ID,
+  - lock owner,
+  - expected execution identity,
+- brak jednoznacznego potwierdzenia oczekiwanego stanu (niejednoznaczny output lub mismatch)
+  oznacza **fail closed** — traktuj mutację jako nieudaną, nie kontynuuj.
+
 ## Idempotency
 
 - `task submit`: dedup po `(project_id, idempotency_key)`.

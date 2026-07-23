@@ -8,6 +8,7 @@
     "cpu": 2,
     "memory_mb": 4096,
     "timeout_seconds": 3600,
+    "fresh_per_task": true,
     "persist_across_processes": false
   },
   "verifier": {
@@ -16,8 +17,11 @@
     "commands": [{"id": "unit-tests", "argv": ["go", "test", "./..."], "timeout_seconds": 900}]
   },
   "workspace": {
+    "kind": "materialized-tree",
     "mount": "/workspace",
     "git_metadata": "denied",
+    "repository_ancestor_reachable": false,
+    "git_ceiling_directories": ["/workspace"],
     "extra_mounts": []
   },
   "host_tools": ["kanban-worker"],

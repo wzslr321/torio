@@ -1,7 +1,12 @@
 # ADR-0005: Worker nie otrzymuje Git authority
 
-- Status: Accepted
+- Status: Superseded
+- Superseded by: [ADR-0011](0011-materialized-git-free-workspaces.md)
 - Date: 2026-07-23
+
+> **Superseded by [ADR-0011](0011-materialized-git-free-workspaces.md) (2026-07-23).** Spike S5
+> obalił „masking-only” jako security control. Intencja (worker bez Git authority) pozostaje;
+> mechanizm zmienia się na materialized Git-free workspace. Poniższa treść zachowana jako historia.
 
 ## Context
 
