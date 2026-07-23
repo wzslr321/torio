@@ -1,7 +1,8 @@
 # Handoff — Etap 0B (runtime) + 0C (evidence durability) + 0D/S2 (gateway lifecycle live)
 
-- Data: 2026-07-24 (live run S2: 2026-07-23)
-- Sesja: live spike **S2** — natywny gateway jako systemd **user** service w VM `hermes-box`.
+- Data: 2026-07-24 (live run S2 + Etap 0E driver-correction re-run: 2026-07-24)
+- Sesja: live spike **S2** — natywny gateway jako systemd **user** service w VM `hermes-box`
+  (+ korekta drivera Etap 0E: raw exit codes, mandatory probes, preflight hard-fail, kill -0, cd).
   Bez kodu produkcyjnego, bez S1 i S3–S8, bez model/messaging credentials, bez workerów.
 - Wykonawca: Claude Code (Opus 4.8) w imieniu wzslr821
 - Adresat: LLM-głowa projektu (orchestrator). `AGENTS.md` pozostaje nadrzędny.
@@ -35,15 +36,19 @@ live evidence (fail closed, AGENTS §9).
 - **S2 (PASS) — native gateway systemd user-service lifecycle (live w VM):** unit
   `hermes-gateway.service` (user scope, `/home/hermes/.config/systemd/user/`), `Restart=always`,
   `WantedBy=default.target`, `HERMES_HOME=/home/hermes/.hermes`, brak `0.0.0.0`. Przebieg: install
-  `--no-start-now --start-on-login` → enabled+inactive+MainPID=0; start → active/running (PID 2202);
-  SIGKILL → nadzorowany restart (PID 2306≠2202); native `restart` → PID 2387; stop → inactive/PID 0
-  + zwolniony dispatcher lock; **VM reboot** → auto-start przez linger (`Linger=yes` przetrwał),
-  PID 2512→884; uninstall → unit usunięty, `~/.hermes` i board DB zachowane. Embedded dispatcher
-  trzyma `~/.hermes/kanban/.dispatcher.lock` (CONTENDED gdy active / FREE gdy stopped). **`hermes
-  gateway status` kończy 0 w każdym stanie** (nawet nie-zainstalowany/zatrzymany) → exit 0 nie jest
-  postcondition (D2). Bez platform/modelu/workera; board `task_count=0`, `integrity_check=ok`
-  przez restart i reboot. Sterownik: [`spikes/s2_gateway_lifecycle.sh`](spikes/s2_gateway_lifecycle.sh);
-  evidence: [`docs/spike-results/evidence/s2-gateway-lifecycle/`](docs/spike-results/evidence/s2-gateway-lifecycle/).
+  `--no-start-now --start-on-login` → enabled+inactive+MainPID=0; start → active/running (PID 2100,
+  `kill -0` żywy); SIGKILL → nadzorowany restart (PID 2204≠2100, `NRestarts≥1`); native `restart` →
+  PID 2285; stop → inactive/PID 0 + zwolniony dispatcher lock; **VM reboot** → auto-start przez linger
+  (`Linger=yes` przetrwał), PID 2415→816; uninstall → unit usunięty, `~/.hermes` i board DB zachowane.
+  Każdy deklarowany PID checkpoint zweryfikowany `kill -0`. Embedded dispatcher trzyma
+  `~/.hermes/kanban/.dispatcher.lock` (CONTENDED gdy active / FREE gdy stopped, probe pollowany).
+  **`hermes gateway status` kończy 0 w każdym stanie** — **realny raw exit** obu wywołań (nie-zainstalowany
+  i zatrzymany) = **0**, łapany natychmiast (poprzednio maskowany przez trailing `echo`) → exit 0 nie
+  jest postcondition (D2). Bez platform/modelu/workera; board `task_count=0` i `integrity_check=ok`
+  w baseline, po restart i po reboot. Preflight **twardo failuje** przy istniejącym unit/procesie
+  (dowiedzione: exit 1 przed jakąkolwiek mutacją). Sterownik:
+  [`spikes/s2_gateway_lifecycle.sh`](spikes/s2_gateway_lifecycle.sh); evidence:
+  [`docs/spike-results/evidence/s2-gateway-lifecycle/`](docs/spike-results/evidence/s2-gateway-lifecycle/).
 - **S5 (trójstopniowa klasyfikacja):**
   - **S5 legacy worktree characterization: PASS** — mechanika linked-worktree i rekonstrukcja
     dokładnego tree (host-side).
