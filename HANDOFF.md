@@ -28,8 +28,15 @@ Demo B:         NO-GO
   Lima v2.2.0 → `hermes-box` (Ubuntu 24.04.4 arm64, vz); Docker Engine 29.6.2 client↔server; Hermes
   v0.19.0 upstream 91546b83; git 2.43.0; Python 3.12.3; cały stan Hermes/HB/Docker na natywnym ext4;
   **brak macOS host share** w VM. To dowodzi *istnienia* runtime, nie zachowania S1–S8.
-- **S5 (PASS host-side):** mechanika linked-worktree i rekonstrukcja dokładnego tree; hipoteza
-  „masking-only” obalona (FAIL) — teraz zaadresowana przez ADR-0011.
+- **S5 (trójstopniowa klasyfikacja):**
+  - **S5 legacy worktree characterization: PASS** — mechanika linked-worktree i rekonstrukcja
+    dokładnego tree (host-side).
+  - **S5 masking-only security hypothesis: FAIL** — samo zamaskowanie `.git` nie odbiera władzy
+    (discovery escapuje do repo-przodka); zaadresowane przez ADR-0011.
+  - **S5 materialized Git-free workspace live proof: UNKNOWN** — nowy mechanizm ADR-0011
+    (materializowany katalog bez `.git`, brak osiągalnego repo-przodka, `GIT_CEILING_DIRECTORIES=`
+    `/workspace`, negatywne `rev-parse`/`update-ref`, trusted exact-tree reconstruction) nie był
+    jeszcze wykonany w-VM. Superseded wariant worktree-mount **nie** będzie uruchamiany.
 - **S3 (PARTIAL):** kontrakt kolejki Kanban bez modelu w izolowanym `HERMES_HOME`:
   create→`ready`, resolve workspace przy claim z lockiem `<host>:<pid>`, heartbeat, reclaim, jedna
   `run`-row na próbę, idempotency-key dedup, workspace kinds `scratch`/`worktree`/`dir`.
@@ -66,10 +73,16 @@ d843f8a478312e0ac130bd0074b39f68a3dbef9b  spike: establish pinned Lima target ru
 
 - ADR-0001..0010 oraz **ADR-0011 (Accepted, supersedes ADR-0005)** — materialized Git-free workspaces:
   worker dostaje materializowany katalog bez `.git` montowany jako `/workspace`, **nie** worktree.
-- Contracts w `docs/contracts/` (cli, effective-policy, executor, service-lifecycle, state-ledger,
-  task-request, review-evidence, backup-recovery, project-config) — niezmienione.
-- Ta sesja **nie modyfikuje** żadnego ADR-a ani contractu (AGENTS §9). Pozostałe rekomendacje
-  contract-update wypisane w `99-decision.md` czekają na decyzję głowy projektu.
+- Applied wcześniej na `main` (commit `a48306b`): `cli.md` mutation postcondition (`claim` exit 0 nie
+  jest postcondition; structured output + re-query + fail closed) oraz pola ADR-0011 w
+  `effective-policy.md` / `effective-policy.schema.json` (`workspace.kind=materialized-tree`,
+  `repository_ancestor_reachable=false`, `git_metadata=denied`, `git_ceiling_directories=["/workspace"]`,
+  `worker.fresh_per_task=true`, `worker.persist_across_processes=false`).
+- Pozostałe contracty w `docs/contracts/` (executor, service-lifecycle, state-ledger, task-request,
+  review-evidence, backup-recovery, project-config) — niezmienione.
+- Ta sesja (0C) **nie modyfikuje** żadnego ADR-a ani contractu (AGENTS §9). Podział na *Applied
+  decisions* i *Remaining work* jest w [`docs/spike-results/99-decision.md`](docs/spike-results/99-decision.md);
+  pozostałe pozycje czekają na in-VM behavioural re-run i decyzję głowy projektu.
 
 ## Otwarte S1–S8 (live nie wykonane — bramki NO-GO)
 
@@ -77,6 +90,9 @@ d843f8a478312e0ac130bd0074b39f68a3dbef9b  spike: establish pinned Lima target ru
 - **S2** — in-VM gateway/systemd lifecycle: test jeszcze nie zaplanowany/wykonany.
 - **S3 (live)** — realna egzekucja workera + SIGKILL→auto-reclaim + concurrent-claim atomicity: UNKNOWN.
 - **S4** — Docker istnieje w VM, ale isolation/freshness canaries nieuruchomione.
+- **S5 (live)** — materialized Git-free workspace boundary (ADR-0011): materializowany katalog bez
+  `.git` montowany jako `/workspace`, negatywne testy Git w kontenerze i trusted exact-tree
+  reconstruction — nieuruchomione w-VM. (Legacy characterization PASS, masking-only FAIL — powyżej.)
 - **S6 (live)** — diff effective env/mounts (empty forward list) + host-tool enumeration workera: UNKNOWN.
 - **S7** — fresh verifier (druga świeża izolacja) nieuruchomiony.
 - **S8** — kill/reboot reconciliation matrix nieuruchomiona.
@@ -111,8 +127,9 @@ orchestratora następny slice to:
 > **S2 — in-VM gateway/systemd lifecycle characterization.** Bez model credentials.
 > Nie rozpoczynać bez nowego handoffu orchestratora.
 
-Kolejne slice'y (S1, S3 execution, S4, S6, S7, S8) i finalna re-ewaluacja bramek Demo A/B — każdy na
-osobny handoff, z mock/throwaway modelem tam gdzie potrzebna egzekucja, bez realnych credentials.
+Kolejne slice'y (S1, S3 execution, S4, **S5 materialized Git-free workspace boundary**, S6, S7, S8) i
+finalna re-ewaluacja bramek Demo A/B — każdy na osobny handoff, z mock/throwaway modelem tam gdzie
+potrzebna egzekucja, bez realnych credentials.
 
 ## Files to read first
 
