@@ -1,8 +1,13 @@
 # Handoff — Etap 0B (runtime) + 0C (evidence durability) + 0D/S2 (gateway lifecycle live)
 
-- Data: 2026-07-24 (live run S2 + Etap 0E driver-correction re-run: 2026-07-24)
-- Sesja: live spike **S2** — natywny gateway jako systemd **user** service w VM `hermes-box`
-  (+ korekta drivera Etap 0E: raw exit codes, mandatory probes, preflight hard-fail, kill -0, cd).
+- Data: 2026-07-24 (live run S2 + Etap 0E driver-correction rev-2: 2026-07-24)
+- Sesja: live spike **S2** — natywny gateway jako systemd **user** service w VM `hermes-box`.
+  Etap 0E rev-2 hardening drivera: read-only preflight PRZED jakąkolwiek mutacją; ownership-safe
+  cleanup (nigdy nie rusza cudzego gatewaya); izolowany `env -i` + rozdzielny disposable
+  `HERMES_HOME`; fail-closed empty-state gate przed install/start; probes 3-stanowe
+  (absent/present/query-error); raw exit codes; kill -0 na każdym PID; boot-id/Lima/DB-identity jako
+  twarde postconditions; runtime socket proof; redakcja stdout; **niezerowy exit przy FAIL/UNKNOWN**;
+  tracked evidence ścieżek porażki (pre-seed conflict + injected failure).
   Bez kodu produkcyjnego, bez S1 i S3–S8, bez model/messaging credentials, bez workerów.
 - Wykonawca: Claude Code (Opus 4.8) w imieniu wzslr821
 - Adresat: LLM-głowa projektu (orchestrator). `AGENTS.md` pozostaje nadrzędny.
@@ -16,10 +21,10 @@
 ```text
 S0-HOST:        PASS
 S0-TARGET-VM:   PASS
-S2:             PASS   (native gateway systemd user-service lifecycle, live w VM)
-Etap 0:         INCOMPLETE
-Demo A:         NO-GO
-Demo B:         NO-GO
+S2:                    PASS   (native gateway systemd user-service lifecycle, live w VM)
+Etap 0:                INCOMPLETE
+Demo A:                NO-GO
+Demo B native Docker:  NO-GO
 ```
 
 **NO-GO reason:** runtime istnieje i S2 jest dowiedzione live, ale S1, S3, S4, S5 (live), S6, S7, S8
@@ -33,21 +38,28 @@ live evidence (fail closed, AGENTS §9).
   Lima v2.2.0 → `hermes-box` (Ubuntu 24.04.4 arm64, vz); Docker Engine 29.6.2 client↔server; Hermes
   v0.19.0 upstream 91546b83; git 2.43.0; Python 3.12.3; cały stan Hermes/HB/Docker na natywnym ext4;
   **brak macOS host share** w VM. To dowodzi *istnienia* runtime, nie zachowania S1–S8.
-- **S2 (PASS) — native gateway systemd user-service lifecycle (live w VM):** unit
-  `hermes-gateway.service` (user scope, `/home/hermes/.config/systemd/user/`), `Restart=always`,
-  `WantedBy=default.target`, `HERMES_HOME=/home/hermes/.hermes`, brak `0.0.0.0`. Przebieg: install
-  `--no-start-now --start-on-login` → enabled+inactive+MainPID=0; start → active/running (PID 2100,
-  `kill -0` żywy); SIGKILL → nadzorowany restart (PID 2204≠2100, `NRestarts≥1`); native `restart` →
-  PID 2285; stop → inactive/PID 0 + zwolniony dispatcher lock; **VM reboot** → auto-start przez linger
-  (`Linger=yes` przetrwał), PID 2415→816; uninstall → unit usunięty, `~/.hermes` i board DB zachowane.
-  Każdy deklarowany PID checkpoint zweryfikowany `kill -0`. Embedded dispatcher trzyma
-  `~/.hermes/kanban/.dispatcher.lock` (CONTENDED gdy active / FREE gdy stopped, probe pollowany).
-  **`hermes gateway status` kończy 0 w każdym stanie** — **realny raw exit** obu wywołań (nie-zainstalowany
-  i zatrzymany) = **0**, łapany natychmiast (poprzednio maskowany przez trailing `echo`) → exit 0 nie
-  jest postcondition (D2). Bez platform/modelu/workera; board `task_count=0` i `integrity_check=ok`
-  w baseline, po restart i po reboot. Preflight **twardo failuje** przy istniejącym unit/procesie
-  (dowiedzione: exit 1 przed jakąkolwiek mutacją). Sterownik:
-  [`spikes/s2_gateway_lifecycle.sh`](spikes/s2_gateway_lifecycle.sh); evidence:
+- **S2 (PASS) — native gateway systemd user-service lifecycle (live w VM):** cały test biegnie w
+  **izolowanym, jednorazowym** `HERMES_HOME=/home/hermes/.hermes-s2-spike` (realne `~/.hermes` nietknięte),
+  pod `env -i` (allowlist). Unit `hermes-gateway.service` (user scope,
+  `/home/hermes/.config/systemd/user/`), `Restart=always`, `WantedBy=default.target`,
+  `HERMES_HOME=/home/hermes/.hermes-s2-spike`, brak `0.0.0.0` (potwierdzone też runtime: proces gatewaya
+  nie posiada żadnego nasłuchującego socketu TCP). Przebieg (PIDy z tego przebiegu):
+  install `--no-start-now --start-on-login` → enabled+inactive+MainPID=0; start → active/running
+  (PID **2289**, `Result=success`, `kill -0` żywy); SIGKILL → nadzorowany restart (PID **2387**≠2289,
+  `NRestarts≥1`); native `restart` → PID **2462**; stop → inactive/PID 0 + zwolniony dispatcher lock;
+  **VM reboot** → auto-start przez linger (`Linger=yes` przetrwał; **boot_id zmieniony** — realny reboot),
+  PID **2590→859**; uninstall → unit usunięty, `HERMES_HOME` + board DB zachowane. Każdy deklarowany PID
+  checkpoint zweryfikowany `kill -0`. Embedded dispatcher trzyma
+  `<HERMES_HOME>/kanban/.dispatcher.lock` (CONTENDED gdy active / FREE gdy stopped, probe pollowany do
+  steady-state). Board DB sprawdzany po **path + (st_dev, st_ino) + schema + integrity + zero counts**
+  (tasks=0, task_runs=0) w baseline, po restart, reboot i uninstall; fail-closed empty-state gate PRZED
+  install (schema + zero tasks/runs, `cron`=0, brak workera). **`hermes gateway status` kończy 0 w każdym
+  stanie** — **realny raw exit** obu wywołań (nie-zainstalowany i zatrzymany) = **0**, łapany natychmiast
+  → exit 0 nie jest postcondition (D2). Bez platform/modelu/workera. Preflight jest **read-only** i
+  **odmawia (exit≠0) PRZED jakąkolwiek mutacją** przy istniejącym unit/procesie — dowiedzione tracked
+  evidence (`s2-preflight-abort.txt`: seed byte/state-identyczny po odmowie). Fail-closed klasyfikacja:
+  driver **kończy niezerowo** przy każdym FAIL/UNKNOWN (dowiedzione `s2-injected-failure.txt`).
+  Sterownik: [`spikes/s2_gateway_lifecycle.sh`](spikes/s2_gateway_lifecycle.sh); evidence:
   [`docs/spike-results/evidence/s2-gateway-lifecycle/`](docs/spike-results/evidence/s2-gateway-lifecycle/).
 - **S5 (trójstopniowa klasyfikacja):**
   - **S5 legacy worktree characterization: PASS** — mechanika linked-worktree i rekonstrukcja
@@ -74,9 +86,11 @@ docs/spike-results/01..08 + 99-decision.md  (per-slice evidence + decyzja bramek
 docs/spike-results/evidence/etap-0b/s0-target-vm.txt     (zsanityzowany transcript, komendy + exit codes)
 docs/spike-results/evidence/etap-0b/lima-hermes-box.yaml (użyty config VM, byte-identyczny z resolved)
 docs/spike-results/evidence/etap-0b/SHA256SUMS           (manifest SHA-256 obu plików)
-docs/spike-results/evidence/s2-gateway-lifecycle/s2-gateway-lifecycle.txt  (S2 transcript, komendy + exit codes)
+docs/spike-results/evidence/s2-gateway-lifecycle/s2-gateway-lifecycle.txt  (S2 clean run: komendy + raw exit codes)
+docs/spike-results/evidence/s2-gateway-lifecycle/s2-preflight-abort.txt    (negatyw: pre-seed conflict → refusal, seed nietknięty)
+docs/spike-results/evidence/s2-gateway-lifecycle/s2-injected-failure.txt   (negatyw: injected FAIL → niezerowy exit)
 docs/spike-results/evidence/s2-gateway-lifecycle/hermes-gateway.service    (wygenerowany unit, verbatim)
-docs/spike-results/evidence/s2-gateway-lifecycle/SHA256SUMS                (manifest SHA-256 obu plików)
+docs/spike-results/evidence/s2-gateway-lifecycle/SHA256SUMS                (manifest SHA-256 czterech plików)
 spikes/s5_git_boundary.sh                    (throwaway reprodukcja S5)
 spikes/s2_gateway_lifecycle.sh               (throwaway reproducible driver S2)
 ```
@@ -92,7 +106,9 @@ a48306bd0e9c63eedb6a440746bdea99aa760ee7  docs: adopt host spike contract findin
 d843f8a478312e0ac130bd0074b39f68a3dbef9b  spike: establish pinned Lima target runtime
 ```
 
-`origin/main` = `d843f8a478312e0ac130bd0074b39f68a3dbef9b` (nietknięty; ta praca jest na osobnym branchu).
+Od tego czasu `origin/main` posunął się do **`bc34acb`** (merge PR #1 — durable evidence Etap 0B/0C;
+commity 58e73cd/a48306b/d843f8a pozostają jego przodkami). Praca S2 jest na osobnym branchu
+`spike/s2-gateway-systemd-lifecycle` (PR #2, niezmergowany).
 
 ## Zaakceptowane ADR / contracts (bez zmian w tej sesji)
 
@@ -105,11 +121,12 @@ d843f8a478312e0ac130bd0074b39f68a3dbef9b  spike: establish pinned Lima target ru
   `worker.fresh_per_task=true`, `worker.persist_across_processes=false`).
 - Pozostałe contracty w `docs/contracts/` (executor, service-lifecycle, state-ledger, task-request,
   review-evidence, backup-recovery, project-config) — niezmienione.
-- Ta sesja (0C) **nie modyfikuje** żadnego ADR-a ani contractu (AGENTS §9). Podział na *Applied
-  decisions* i *Remaining work* jest w [`docs/spike-results/99-decision.md`](docs/spike-results/99-decision.md);
+- Ta sesja (0E, korekta S2) **nie modyfikuje** żadnego ADR-a ani contractu (AGENTS §9) — zmienia
+  wyłącznie driver S2, evidence i statusy dowiedzione przez S2. Podział na *Applied decisions* i
+  *Remaining work* jest w [`docs/spike-results/99-decision.md`](docs/spike-results/99-decision.md);
   pozostałe pozycje czekają na in-VM behavioural re-run i decyzję głowy projektu.
 
-## Otwarte S1–S8 (live nie wykonane — bramki NO-GO)
+## Status slice'ów (S2 = PASS; pozostałe live nie wykonane — bramki NO-GO)
 
 - **S1** — brak live Desktop/WebSocket; potrzebna strategia mock/throwaway provider (bez realnych creds).
 - **S2** — **PASS (rozwiązane)**: in-VM gateway/systemd **user-scope** lifecycle wykonany live (patrz
@@ -145,14 +162,12 @@ Zebrane w `docs/spike-results/00-runtime-versions.md` (sekcja „Etap 0B → Dev
 - #3 świeży kontener per task — źródło pokazuje domyślnie reuse ON → do wyłączenia; live UNKNOWN (S4).
 - #2,#6,#8–#14 — nie ćwiczone; nie deklaruję jako sprawdzone.
 
-## Następny slice (wybiera orchestrator)
+## Exact next task
 
-**Nie zaczynać Demo A. Nie startować żadnego slice'a samodzielnie.** S2 jest dowiedzione;
-**wykonawca nie wybiera następnego slice'a — czeka na jawny handoff orchestratora.**
-
-Kolejne slice'y (S1, S3 execution, S4, **S5 materialized Git-free workspace boundary**, S6, S7, S8),
-opcjonalny S2 **`--system` scope**, oraz finalna re-ewaluacja bramek Demo A/B — każdy na osobny
-handoff, z mock/throwaway modelem tam gdzie potrzebna egzekucja, bez realnych credentials.
+**Dokończyć korektę drivera/evidence S2 w tym samym PR (#2) i przejść orchestrator re-review.**
+Nic więcej. **Nie** rozpoczynać S1, S3–S8, S2 `--system` ani Demo A/B, i **nie** wybierać kolejnego
+slice'a — następny slice zostanie wskazany osobnym, jawnym handoffem orchestratora dopiero po
+zaakceptowaniu tego PR.
 
 ## Files to read first
 
