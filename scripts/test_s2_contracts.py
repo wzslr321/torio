@@ -145,6 +145,27 @@ class S2DriverContracts(unittest.TestCase):
             self.assertIn(required, assertion)
         self.assertNotIn("PROFILE_ROWS =", assertion)
 
+    def test_systemd_no_match_rc_one_is_absence_not_probe_error(self) -> None:
+        proof = function_block(self.driver, "prove_gateway_absent")
+        self.assertIn("if rc >= 2", proof)
+        self.assertNotIn("if rc != 0", proof)
+        self.assertIn('[ "$SYS_RC" -ge 2 ]', self.driver)
+        self.assertIn('[ "$LAST_EC" -ge 2 ]', self.driver)
+        foreign_scan = self.driver[self.driver.index("if manager:") : self.driver.index("if errors:", self.driver.index("if manager:"))]
+        self.assertIn('label == "registration" and r.returncode >= 2', foreign_scan)
+        baseline = function_block(self.harness, "external_absence")
+        self.assertIn("rc is None or rc >= 2", baseline)
+
+    def test_canonical_board_db_is_top_level_under_s2_home(self) -> None:
+        self.assertIn('"$S2_HOME/kanban.db"', self.driver)
+        self.assertNotIn('"$S2_HOME/kanban/kanban.db"', self.driver)
+
+    def test_worker_proc_permission_error_is_skipped_per_pid(self) -> None:
+        assertion = function_block(self.driver, "assert_no_dispatch_state")
+        worker = assertion[assertion.index("worker_pids = []") : assertion.index("# [5]")]
+        self.assertIn("OSError", worker)
+        self.assertIn("except (FileNotFoundError, ProcessLookupError, OSError):\n            continue", worker)
+
     def test_active_foreign_reaches_scanner_with_linger_disabled(self) -> None:
         start = self.harness.index("active-foreign)")
         end = self.harness.index("dangling-unit-link)", start)
@@ -340,15 +361,16 @@ class S2DriverContracts(unittest.TestCase):
         self.assertNotIn("rm -rf", cleanup)
         self.assertNotIn("shutil.rmtree", cleanup)
 
-    def test_registration_probes_require_exact_zero_exit(self) -> None:
-        self.assertNotIn("rc >= 2", self.driver)
-        self.assertNotIn("returncode >= 2", self.driver)
-        self.assertNotIn('"$SYS_RC" -ge 2', self.driver)
-        self.assertNotIn('"$LAST_EC" -ge 2', self.driver)
-        self.assertNotIn("rc >= 2", self.harness)
-        self.assertIn("rc != 0", self.driver)
-        self.assertIn("returncode != 0", self.driver)
-        self.assertIn("rc != 0", self.harness)
+    def test_registration_probes_allow_systemd_no_match_rc_one(self) -> None:
+        """`list-unit-files` distinguishes empty glob (1) from query failure (>=2)."""
+        proof = function_block(self.driver, "prove_gateway_absent")
+        baseline = function_block(self.harness, "external_absence")
+        self.assertIn("if rc >= 2", proof)
+        self.assertIn("rc is None or rc >= 2", baseline)
+        self.assertIn('[ "$SYS_RC" -ge 2 ]', self.driver)
+        self.assertIn('[ "$LAST_EC" -ge 2 ]', self.driver)
+        foreign_scan = self.driver[self.driver.index("if manager:") : self.driver.index("if errors:", self.driver.index("if manager:"))]
+        self.assertIn('label == "registration" and r.returncode >= 2', foreign_scan)
 
     def test_named_install_and_cleanup_interruptions_are_runnable(self) -> None:
         install_points = ("install-begin", "post-install", "pre-start")
@@ -533,6 +555,7 @@ class S2HarnessBehavior(unittest.TestCase):
             self.assertEqual(fixture.read_bytes(), b"foreign fixture\n")
             self.assertIn("sha256", result.stdout + result.stderr)
 
+    @unittest.skipUnless(os.path.exists("/proc/self/stat"), "requires Linux /proc")
     def test_service_identity_mismatch_never_reaches_stop_mutation(self) -> None:
         helper = function_block(HARNESS.read_text(), "stop_owned_foreign_service_verified")
         with tempfile.TemporaryDirectory() as td:
