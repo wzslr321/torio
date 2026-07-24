@@ -419,6 +419,34 @@ class S2DriverContracts(unittest.TestCase):
         self.assertIn("remove_seeded_home_verified", scenario)
         self.assertNotIn("repair_owned_fixture", scenario)
 
+    def test_existing_home_seed_escapes_outer_printf_percent_conversions(self) -> None:
+        scenario = self.harness[
+            self.harness.index("existing-home)") : self.harness.index("active-foreign)")
+        ]
+        self.assertIn('SEEDED_HOME_ID=%%d:%%d:%%d:%%d:%%s', scenario)
+
+    def test_nested_remote_python_scripts_use_distinct_outer_heredoc_delimiters(self) -> None:
+        for name in (
+            "unit_file_identity_snapshot",
+            "unlink_owned_unit_file_verified",
+            "stop_owned_foreign_service_verified",
+        ):
+            block = function_block(self.harness, name)
+            self.assertIn("cat <<'OUTER_SCRIPT'", block)
+            self.assertIn("python3 - <<'PY'", block)
+            self.assertIn("OUTER_SCRIPT", block)
+        self.assertEqual(
+            self.harness.count("cat <<'OUTER_SCRIPT'"),
+            self.harness.count("\nOUTER_SCRIPT\n"),
+        )
+
+    def test_injected_repair_does_not_stop_an_already_stopped_vm(self) -> None:
+        injected = self.harness[self.harness.index("inject-fail|inject-unknown|inject-reboot|install-begin") :]
+        stop = injected.index('limactl stop "$VM"')
+        guard = injected.rfind('[ "$(vm_status)" != "Stopped" ]', 0, stop)
+        self.assertGreaterEqual(guard, 0)
+        self.assertLess(guard, stop)
+
     def test_foreign_service_and_console_snapshots_pin_process_identity(self) -> None:
         active = self.harness[
             self.harness.index("active-foreign)") : self.harness.index("dangling-unit-link)")
