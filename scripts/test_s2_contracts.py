@@ -300,6 +300,17 @@ class S2DriverContracts(unittest.TestCase):
         self.assertLess(stop, verify)
         self.assertLess(verify, clear)
 
+    def test_final_stop_proves_user_bus_absence_before_linger_restore(self) -> None:
+        teardown = self.driver.split('banner "O — teardown', 1)[1].split('banner "O — restore VM run-state', 1)[0]
+        home_remove = teardown.index('remove_owned_home_verified "after-uninstall"')
+        absence_gate = teardown.index("final_stop_prereqs_verified")
+        linger_restore = teardown.index('restore_linger_verified "after-uninstall"')
+        self.assertLess(home_remove, absence_gate)
+        self.assertLess(absence_gate, linger_restore)
+        post_restore = teardown[linger_restore:]
+        self.assertIn('probe_linger', post_restore)
+        self.assertIn('[ "$LINGER_STATE" != "$LINGER_PRE" ]', post_restore)
+
     def test_final_stop_requires_fresh_full_teardown_gate(self) -> None:
         gate = function_block(self.driver, "final_stop_prereqs_verified")
         for token in (
@@ -310,8 +321,6 @@ class S2DriverContracts(unittest.TestCase):
             "UNIT_MUTATION_STARTED",
             "ABSENCE_STATE",
             "ABSENCE_OK",
-            "probe_linger",
-            "LINGER_CHANGED",
             "HOME_OWNED",
             "VM_REBOOTING",
             "VM_TRANSITION_KIND",
