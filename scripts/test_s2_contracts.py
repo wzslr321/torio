@@ -166,15 +166,18 @@ class S2DriverContracts(unittest.TestCase):
         self.assertIn("OSError", worker)
         self.assertIn("except (FileNotFoundError, ProcessLookupError, OSError):\n            continue", worker)
 
-    def test_active_foreign_reaches_scanner_with_linger_disabled(self) -> None:
+    def test_active_foreign_keeps_user_manager_live_until_foreign_teardown(self) -> None:
         start = self.harness.index("active-foreign)")
         end = self.harness.index("dangling-unit-link)", start)
         scenario = self.harness[start:end]
-        disable = scenario.index('disable_owned_linger_verified "$ACTIVE_LINGER_ID"')
         run = scenario.index("run_driver 3")
-        self.assertLess(disable, run)
-        self.assertIn('expect_eq "active-foreign seeded linger baseline"', scenario[:run])
-        self.assertIn('"disabled"', scenario[:run])
+        stop = scenario.index('stop_owned_foreign_service_verified "$ACTIVE_SERVICE_PRE"')
+        disable = scenario.index('disable_owned_linger_verified "$ACTIVE_LINGER_ID"')
+        self.assertIn('expect_eq "active-foreign pre-driver linger"', scenario[:run])
+        self.assertIn('"enabled"', scenario[:run])
+        self.assertLess(stop, disable)
+        self.assertGreater(disable, run)
+        self.assertIn('expect_eq "active-foreign final linger"', scenario[disable:])
 
     def test_foreign_teardown_uses_seed_ledgers_and_fresh_identity_gates(self) -> None:
         active = self.harness[
@@ -237,9 +240,11 @@ class S2DriverContracts(unittest.TestCase):
             self.harness.index("active-foreign)") : self.harness.index("dangling-unit-link)")
         ]
         run = active.index("run_driver 3")
+        stop = active.index('stop_owned_foreign_service_verified "$ACTIVE_SERVICE_PRE"')
+        disable_at = active.index("disable_owned_linger_verified")
         self.assertEqual(active.count("disable_owned_linger_verified"), 1)
-        self.assertLess(active.index("disable_owned_linger_verified"), run)
-        self.assertNotIn("disable_owned_linger_verified", active[run:])
+        self.assertGreater(disable_at, run)
+        self.assertGreater(disable_at, stop)
 
     def test_harness_uses_owned_fixture_not_wildcard_reset(self) -> None:
         self.assertNotIn(".hermes-s2-spike-*", self.harness)
