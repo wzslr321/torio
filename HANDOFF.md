@@ -1,21 +1,25 @@
 # Handoff — Etap 0B (runtime) + 0C (evidence durability) + 0D/S2 (gateway lifecycle live)
 
-- Data: 2026-07-24 (live run S2 + Etap 0E driver-correction rev-3: 2026-07-24)
+- Data: 2026-07-24 (live run S2 + Etap 0F driver-correction rev-4: 2026-07-24)
 - Sesja: live spike **S2** — natywny gateway jako systemd **user** service w VM `hermes-box`.
-  Etap 0E rev-3 hardening drivera (odpowiedź na orchestrator re-review `1d034b7`): read-only preflight
-  PRZED jakąkolwiek mutacją (3-stanowa detekcja unit-file/symlink/rejestracja user+system+loaded/proces;
-  stopniętą VM startuje się tylko na preflight i przywraca przy odmowie); **ownership-safe teardown** —
-  własność zwalniana dopiero PO niezależnym dowodzie nieobecności wszystkich artefaktów, trap uzbrojony
-  do końca; **przywrócenie stanu tymczasowego** (linger + VM run-state) z niezależnym re-query na ścieżce
-  sukcesu i porażki, przed finalnym stop VM (sukces kończy VM `Stopped`, nie przywraca `Running`);
-  izolowany `env -i` + disposable `HERMES_HOME` (realne `~/.hermes` tylko read-only skanowane, nie
-  używane jako runtime state; scan nazw env user-managera przed install/start); fail-closed empty-state
-  gate; raw exit codes + kill -0; boot-id/Lima/DB-identity twardymi postconditions; **cgroup-scoped**
-  socket proof + **invocation-scoped** journal (query-error = FAIL); redakcja host+VM stdout; **niezerowy
-  exit przy FAIL(1)/UNKNOWN(2)**; `DRIVER_EXIT=` zapisany w każdym transkrypcie; tracked evidence ścieżek
-  porażki (pre-seed conflict exit 3 + **mid-run** injected failure exit 1).
+  Etap 0F rev-4 hardening drivera (odpowiedź na orchestrator re-review `0a34e6f`): **twarda bramka VM
+  po stronie hosta** — driver **nigdy nie startuje VM**; nie-`Running` VM = odmowa (exit 3) bez
+  `limactl start`; **unikalny, ownership-safe test-home** `/home/hermes/.hermes-s2-spike-<run_id>`
+  (musi być nieobecny na preflight → odmowa; tworzony `mkdir`, nigdy `rm -rf` stałej ścieżki; flaga
+  własności dopiero po utworzeniu); **autorytatywny 3-stanowy linger** z pliku
+  `/var/lib/systemd/linger/hermes` (nigdy z porażki `loginctl`); **ownership-safe teardown warunkowo
+  domknięty** — `CLEANUP_DONE` dopiero gdy własność zwolniona + nieobecność udowodniona + linger==pre +
+  owned-home usunięty + końcowy stan VM sparsowany (inaczej trap uzbrojony); **własność tranzycji VM**
+  (marker `VM_REBOOTING` w oknie reboot stop→start; trap przywraca Running VM); **sparsowany
+  `assert_no_dispatch_state`** na każdej fazie (DB identity+integrity+tasks/runs=0; puste cron
+  jobs/executions; brak workera; brak modelu/platformy; query-error=FAIL); **fail-closed** socket
+  (pusty/nieczytelny cgroup = ERROR) / journal (invocation-scoped) / scan env user-managera **tylko
+  nazwy, nigdy wartości**; raw exit codes + kill -0; boot-id/Lima twardymi postconditions; redakcja
+  host+VM stdout; **niezerowy exit przy FAIL(1)/UNKNOWN(2)**, odmowa exit 3; `DRIVER_EXIT=` zapisany w
+  każdym transkrypcie; tracked bench negatywów [`spikes/s2_negative_harness.sh`] (stopped-VM,
+  existing-home, active-foreign, inject fail/unknown/reboot-window).
   Bez kodu produkcyjnego, bez S1 i S3–S8, bez model/messaging credentials, bez workerów.
-- Wykonawca: Claude Code (Opus 4.8) w imieniu wzslr821
+- Wykonawca: Claude Code (Opus 4.8) w imieniu wzslr321
 - Adresat: LLM-głowa projektu (orchestrator). `AGENTS.md` pozostaje nadrzędny.
 
 > **Status planu:** Etap 0 **NIE jest ukończony** (INCOMPLETE). Target runtime istnieje
@@ -45,32 +49,38 @@ live evidence (fail closed, AGENTS §9).
   v0.19.0 upstream 91546b83; git 2.43.0; Python 3.12.3; cały stan Hermes/HB/Docker na natywnym ext4;
   **brak macOS host share** w VM. To dowodzi *istnienia* runtime, nie zachowania S1–S8.
 - **S2 (PASS) — native gateway systemd user-service lifecycle (live w VM):** cały test biegnie w
-  **izolowanym, jednorazowym** `HERMES_HOME=/home/hermes/.hermes-s2-spike` pod `env -i` (allowlist);
-  realne `~/.hermes` jest **tylko read-only skanowane, nie wybierane jako runtime state ani modyfikowane**.
-  Unit `hermes-gateway.service` (user scope, `/home/hermes/.config/systemd/user/`), `Restart=always`,
-  `WantedBy=default.target`, `HERMES_HOME=/home/hermes/.hermes-s2-spike`, brak `0.0.0.0` (potwierdzone też
-  runtime: żaden proces w cgroupie serwisu nie ma nasłuchującego socketu TCP; probe klasyfikuje
-  none/loopback/wildcard/external, query-error=FAIL). Przebieg (PIDy z tego przebiegu):
-  install `--no-start-now --start-on-login` → enabled+inactive+MainPID=0; start → active/running
-  (PID **2084**, `Result=success`, `kill -0` żywy); SIGKILL → nadzorowany restart (PID **2189**≠2084,
-  `NRestarts≥1`); native `restart` → PID **2265**; stop → inactive/PID 0 + zwolniony dispatcher lock;
-  **VM reboot** → auto-start przez linger (`Linger=yes` przetrwał; **boot_id `9b28b7dc…→89950508…`** —
-  realny reboot), PID **2392→824**; uninstall (raw-exit 0) → własność zwolniona dopiero PO niezależnym
-  dowodzie nieobecności (unit/symlink/rejestracja user+system/loaded/proces), `HERMES_HOME` + board DB
-  zachowane; następnie linger przywrócony (`not-lingering`, re-query) i VM `Stopped`. Każdy deklarowany
-  PID checkpoint zweryfikowany `kill -0`. Embedded dispatcher trzyma
+  **unikalnym, jednorazowym** `HERMES_HOME=/home/hermes/.hermes-s2-spike-<run_id>` pod `env -i`
+  (allowlist); realne `~/.hermes` jest **tylko read-only skanowane, nie wybierane jako runtime state ani
+  modyfikowane**. Driver **nigdy nie startuje VM** — operator/bench dostarcza `Running` VM; nie-`Running`
+  = odmowa exit 3 (dowód `s2-stopped-vm.txt`: VM zostaje `Stopped`). Unit `hermes-gateway.service` (user
+  scope, `/home/hermes/.config/systemd/user/`), `Restart=always`, `WantedBy=default.target`,
+  `HERMES_HOME=/home/hermes/.hermes-s2-spike-<run_id>`, brak `0.0.0.0` (potwierdzone też runtime: żaden
+  proces w cgroupie serwisu nie ma nasłuchującego socketu TCP; probe klasyfikuje
+  none/loopback/wildcard/external; pusty/nieczytelny cgroup = ERROR; query-error=FAIL). Przebieg (PIDy z
+  tego przebiegu): install `--no-start-now --start-on-login` → enabled+inactive+MainPID=0; start →
+  active/running (PID **4104**, `Result=success`, `kill -0` żywy); SIGKILL → nadzorowany restart (PID
+  **4233**≠4104, `NRestarts≥1`); native `restart` → PID **4334**; stop → inactive/PID 0 + zwolniony
+  dispatcher lock; **VM reboot** → auto-start przez linger (`Linger=enabled` przetrwał wg autorytatywnego
+  probe; **boot_id `5c3d5c7f…→5eb77347…`** — realny reboot), PID **4504→820**; uninstall (raw-exit 0) →
+  własność zwolniona dopiero PO niezależnym dowodzie nieobecności (unit/symlink/rejestracja
+  user+system/loaded/proces); następnie linger przywrócony (autorytatywny probe `disabled`==pre),
+  owned-home usunięty i VM `Stopped`; `CLEANUP_DONE` ustawiony dopiero po zweryfikowaniu wszystkiego.
+  Każdy deklarowany PID checkpoint zweryfikowany `kill -0`. Embedded dispatcher trzyma
   `<HERMES_HOME>/kanban/.dispatcher.lock` (CONTENDED gdy active / FREE gdy stopped, probe pollowany do
-  steady-state). Board DB sprawdzany po **path + (st_dev, st_ino) + schema + integrity + zero counts**
-  (tasks=0, task_runs=0) w baseline, po restart, reboot i uninstall; fail-closed empty-state gate PRZED
-  install (schema + zero tasks/runs, `cron`=0, brak workera). **`hermes gateway status` kończy 0 w każdym
-  stanie** — **realny raw exit** obu wywołań (nie-zainstalowany i zatrzymany) = **0**, łapany natychmiast
-  → exit 0 nie jest postcondition (D2). Bez platform/modelu/workera. Preflight jest **read-only** i
-  **odmawia (exit 3) PRZED jakąkolwiek mutacją** — dowiedzione tracked evidence (`s2-preflight-abort.txt`:
-  `DRIVER_EXIT=3`, seed byte/state-identyczny, linger nietknięty, test-home nieutworzony). Fail-closed
-  klasyfikacja: driver **kończy niezerowo** przy każdym FAIL/UNKNOWN — dowiedzione **mid-run** injected
-  failure przy OWNED+active (`s2-injected-failure.txt`: `DRIVER_EXIT=1` + ownership-safe teardown +
-  niezależny external re-query nieobecności/linger/VM). Sterownik:
-  [`spikes/s2_gateway_lifecycle.sh`](spikes/s2_gateway_lifecycle.sh); evidence:
+  steady-state). **Sparsowany `assert_no_dispatch_state`** na baseline i po active/SIGKILL/restart/stop/
+  reboot/uninstall: board DB po **path + (st_dev, st_ino) + schema + integrity + zero counts** (tasks=0,
+  task_runs=0), puste cron jobs **i** execution-history (`cron/executions.db` + `hermes cron runs`), brak
+  workera, brak modelu/platformy (`.env` not found); query-error=FAIL. **`hermes gateway status` kończy 0
+  w każdym stanie** — **realny raw exit** obu wywołań (nie-zainstalowany i zatrzymany) = **0**, łapany
+  natychmiast → exit 0 nie jest postcondition (D2). Bez platform/modelu/workera. Preflight jest
+  **read-only** i **odmawia (exit 3) PRZED jakąkolwiek mutacją**; dowiedzione bench negatywów:
+  `s2-existing-home.txt` (istniejący test-home → exit 3, seed byte/state-identyczny) i
+  `s2-active-foreign.txt` (AKTYWNY obcy gateway → exit 3, unit sha + ActiveState/MainPID nietknięte).
+  Fail-closed klasyfikacja: `s2-inject-fail-midrun.txt` (`DRIVER_EXIT=1` mid-run OWNED+active +
+  ownership-safe teardown + external re-query nieobecności/linger/VM), `s2-inject-reboot-window.txt`
+  (`DRIVER_EXIT=1` w oknie reboot → trap przywraca Running VM), `s2-inject-unknown.txt`
+  (`DRIVER_EXIT=2`). Sterownik: [`spikes/s2_gateway_lifecycle.sh`](spikes/s2_gateway_lifecycle.sh); bench:
+  [`spikes/s2_negative_harness.sh`](spikes/s2_negative_harness.sh); evidence:
   [`docs/spike-results/evidence/s2-gateway-lifecycle/`](docs/spike-results/evidence/s2-gateway-lifecycle/).
 - **S5 (trójstopniowa klasyfikacja):**
   - **S5 legacy worktree characterization: PASS** — mechanika linked-worktree i rekonstrukcja
@@ -97,11 +107,16 @@ docs/spike-results/01..08 + 99-decision.md  (per-slice evidence + decyzja bramek
 docs/spike-results/evidence/etap-0b/s0-target-vm.txt     (zsanityzowany transcript, komendy + exit codes)
 docs/spike-results/evidence/etap-0b/lima-hermes-box.yaml (użyty config VM, byte-identyczny z resolved)
 docs/spike-results/evidence/etap-0b/SHA256SUMS           (manifest SHA-256 obu plików)
-docs/spike-results/evidence/s2-gateway-lifecycle/s2-gateway-lifecycle.txt  (S2 clean run: komendy + raw exit codes)
-docs/spike-results/evidence/s2-gateway-lifecycle/s2-preflight-abort.txt    (negatyw: pre-seed conflict → refusal, seed nietknięty)
-docs/spike-results/evidence/s2-gateway-lifecycle/s2-injected-failure.txt   (negatyw: mid-run injected FAIL przy OWNED+active → exit 1 + ownership-safe teardown + external re-query)
+docs/spike-results/evidence/s2-gateway-lifecycle/s2-gateway-lifecycle.txt  (S2 clean run: komendy + raw exit codes, DRIVER_EXIT=0)
+docs/spike-results/evidence/s2-gateway-lifecycle/s2-stopped-vm.txt         (negatyw: Stopped VM → hard VM-gate refusal exit 3, VM zostaje Stopped)
+docs/spike-results/evidence/s2-gateway-lifecycle/s2-existing-home.txt      (negatyw: istniejący test-home → refusal exit 3, seed byte/state-identyczny)
+docs/spike-results/evidence/s2-gateway-lifecycle/s2-active-foreign.txt     (negatyw: AKTYWNY obcy gateway → refusal exit 3, unit+MainPID nietknięte)
+docs/spike-results/evidence/s2-gateway-lifecycle/s2-inject-fail-midrun.txt (negatyw: mid-run FAIL przy OWNED+active → exit 1 + ownership-safe teardown + external re-query)
+docs/spike-results/evidence/s2-gateway-lifecycle/s2-inject-reboot-window.txt (negatyw: FAIL w oknie reboot stop→start → exit 1 + przywrócenie Running VM przez trap)
+docs/spike-results/evidence/s2-gateway-lifecycle/s2-inject-unknown.txt     (negatyw: mid-run UNKNOWN → exit 2 + ownership-safe teardown)
 docs/spike-results/evidence/s2-gateway-lifecycle/hermes-gateway.service    (wygenerowany unit, verbatim)
-docs/spike-results/evidence/s2-gateway-lifecycle/SHA256SUMS                (manifest SHA-256 czterech plików)
+docs/spike-results/evidence/s2-gateway-lifecycle/SHA256SUMS                (manifest SHA-256 wszystkich plików evidence)
+spikes/s2_negative_harness.sh                (tracked bench negatywów/injekcji S2)
 spikes/s5_git_boundary.sh                    (throwaway reprodukcja S5)
 spikes/s2_gateway_lifecycle.sh               (throwaway reproducible driver S2)
 ```
