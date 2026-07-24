@@ -65,6 +65,21 @@ Błąd:
 
 Nie ma globalnego `--force` omijającego policy. Komendy mogą mieć wąskie, udokumentowane recovery flags, ale nie mogą omijać approval, base check ani credential boundaries.
 
+### Dostępność per slice (implementacja)
+
+Powyższa lista to docelowy kontrakt. Zaimplementowane globalne flagi zależą od slice'a i nieznane
+flagi są odrzucane (usage, exit 2) — nie są po cichu akceptowane:
+
+- **D1:** `--json`, `--verbose`, `--timeout`. `--config` i `--state-dir` są **D2-pending** i w D1
+  zwracają usage error.
+
+### `--help` a `--json`
+
+`--help`/`-h` jest jedynym, wąskim wyjątkiem od reguły „jeden JSON envelope na stdout w trybie
+`--json`". Help to afordancja dla człowieka: wypisuje tekst usage na stdout i kończy exit 0, także gdy
+podano `--json` (nie emituje envelope). Każde inne wyjście w trybie `--json` MUSI być dokładnie jednym
+envelope.
+
 ## Command surface
 
 ### Informacyjne

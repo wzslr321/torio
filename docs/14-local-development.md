@@ -23,7 +23,7 @@ go version
 go test ./...
 ```
 
-Na obecnym etapie `go test ./...` może nie mieć pakietów — kod produkcyjny zaczyna się dopiero po Etapie 0 GO.
+Kod produkcyjny wystartował po Demo A GO. Pierwszy slice (D1 — CLI skeleton) jest w `cmd/hb/` i `internal/{cli,config,execx,redact}/`; `go test ./...` uruchamia jego pakiety.
 
 ## LLM workflow
 

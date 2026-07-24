@@ -16,17 +16,29 @@ Na czystym Apple Silicon Macu użytkownik może:
 6. zrestartować VM bez utraty Hermes state,
 7. uruchomić `hb doctor` i otrzymać prawdziwe probes.
 
-## D1 — CLI skeleton
+## D1 — CLI skeleton — DONE
 
-Test-first:
+Status: **DONE** (2026-07-24). Production `hb` binary buduje się i przechodzi
+`go test ./...`, `go vet ./...`. Zrealizowane test-first:
 
-- `hb version --json` envelope,
-- exit code mapping,
-- stdout/stderr separation,
-- context timeout,
-- redaction utility.
+- `hb version` (human) i `hb version --json` — envelope zgodny z [`../contracts/cli.md`](../contracts/cli.md),
+- stabilne mapowanie exit codes (tabela z kontraktu, zablokowana testem),
+- ścisłe rozdzielenie stdout (machine/human) i stderr (diagnostyka `log/slog`),
+- context timeout: walidacja `--timeout` względem policy max + realne
+  cancellation/timeout w typed runnerze `internal/execx` (bez `sh -c`),
+  z cleanupem całego drzewa procesów (unix; granica platformy jawna),
+- bounded + redacted retained child output per stream (deterministyczne flagi
+  truncation),
+- central redaction utility (`internal/redact`, TM-12) — poprawnie obsługuje
+  nakładające się literały (longest-first); redakcja egzekwowana też w finalnym
+  rendererze błędów/envelope.
 
-Layout po tym tasku:
+Zaimplementowane globalne flagi w D1: `--json`, `--verbose`, `--timeout`.
+`--config` i `--state-dir` są **D2-pending** i w D1 są odrzucane (usage, exit 2)
+— patrz [`../contracts/cli.md`](../contracts/cli.md) „Dostępność per slice". `--help`
+jest wąskim, udokumentowanym wyjątkiem od reguły `--json` (afordancja dla człowieka).
+
+Zrealizowany layout:
 
 ```text
 cmd/hb/
@@ -36,7 +48,13 @@ internal/execx/
 internal/redact/
 ```
 
-Nie implementuj innych commandów jako empty stubs.
+Inne commandy (`doctor`, `vm`, `serve`, `gateway`, …) NIE są stubowane.
+
+Dispatch komend przez Cobra (przypięte w `go.mod`) — patrz
+[ADR-0012](../adr/0012-cobra-cli-framework.md). `internal/cli` pozostaje jedynym miejscem
+egzekwującym envelope/exit-codes/redakcję, niezależnie od frameworka.
+
+Następny slice: **D2 — Host/VM config** (nierozpoczęty).
 
 ## D2 — Host/VM config
 
