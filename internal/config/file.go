@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"time"
 )
 
@@ -54,25 +53,49 @@ type Runtime struct {
 //   - An absent default config is a valid first run (defaults, ConfigLoaded=false).
 //   - Malformed JSON, an unknown schema version, unknown fields, semantically
 //     invalid values, or secret-shaped material are all rejected.
-//   - On Unix, a group/world-accessible config file or existing state dir is
-//     rejected (owner-only is required).
+//   - On darwin/linux, a symlinked, non-mode-private, non-EUID-owned or
+//     non-regular config file, or such an existing config/state directory, is
+//     rejected (see ADR-0013); outside darwin/linux this is a documented no-op.
 //
 // Load performs no writes and does not create directories.
-func Load(opts Options) (Runtime, error) {
+//
+// Every returned error is redacted at the package boundary: trust/open/read
+// diagnostics interpolate the (possibly caller-controlled) config path, and an
+// explicit --config path may itself carry secret-shaped material. redactErr
+// leaves a non-secret error untouched — preserving its wrapping chain and
+// useful diagnostics — and only flattens a message that would leak a secret
+// shape (see redactErr).
+func Load(opts Options) (rt Runtime, err error) {
+	defer func() { err = redactErr(err) }()
+
 	paths, err := ResolvePaths(opts)
 	if err != nil {
 		return Runtime{}, err
 	}
 
-	rt := Runtime{Paths: paths}
+	rt = Runtime{Paths: paths}
 
-	// Validate the trusted state dir's permissions if it already exists. A
-	// not-yet-created state dir is fine (later slices create it privately).
-	if err := statDirIfExists(paths.StateDir); err != nil {
+	// Validate the trusted state directory if it already exists (non-symlink
+	// directory, mode-private, owned by the effective user). A not-yet-created
+	// state dir is fine (later slices create it privately).
+	if err := statTrustedDirIfExists(paths.StateDir); err != nil {
 		return Runtime{}, err
 	}
 
-	data, err := os.ReadFile(paths.ConfigFile)
+	// For the default (non-explicit) config, ConfigDir is the trusted app
+	// directory holding config + version-lock; validate it if it exists. An
+	// explicit --config is an operator-provided path whose parent mode is not
+	// enforced in D3.0 (ADR-0013 decision 1) — only the file itself is checked.
+	if !paths.explicitConfig {
+		if err := statTrustedDirIfExists(paths.ConfigDir); err != nil {
+			return Runtime{}, err
+		}
+	}
+
+	// Open the config file without following a final-component symlink and
+	// validate type/mode/ownership from the same descriptor before reading, so no
+	// substituted object can be read (no TOCTOU on the final component).
+	cf, err := openTrustedFile(paths.ConfigFile)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) && !paths.explicitConfig {
 			// Absent default config: valid first-run default state.
@@ -83,15 +106,18 @@ func Load(opts Options) (Runtime, error) {
 		}
 		return Runtime{}, fmt.Errorf("read config: %w", err)
 	}
+	defer cf.Close()
 
-	// The config file exists; enforce owner-only permissions before trusting it.
-	if err := statPrivate(paths.ConfigFile); err != nil {
-		return Runtime{}, err
+	data, err := io.ReadAll(cf)
+	if err != nil {
+		return Runtime{}, fmt.Errorf("read config: %w", err)
 	}
 
 	f, err := parseFile(data)
 	if err != nil {
-		return Runtime{}, redactErr(fmt.Errorf("config file %s: %w", paths.ConfigFile, err))
+		// The deferred boundary redact scrubs any secret shape this path or the
+		// parse error could carry; parseFile also redacts internally.
+		return Runtime{}, fmt.Errorf("config file %s: %w", paths.ConfigFile, err)
 	}
 	rt.File = f
 	rt.ConfigLoaded = true
@@ -140,20 +166,4 @@ func parseFile(data []byte) (f File, err error) {
 		f.Timeout = d
 	}
 	return f, nil
-}
-
-// statDirIfExists enforces owner-only permissions on dir when it exists. A
-// missing dir is not an error; a non-directory at the path is.
-func statDirIfExists(dir string) error {
-	fi, err := os.Stat(dir)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("stat state dir: %w", err)
-	}
-	if !fi.IsDir() {
-		return fmt.Errorf("state dir %s is not a directory", dir)
-	}
-	return enforcePrivateMode(dir, fi.Mode())
 }

@@ -52,6 +52,7 @@ Demo B deklaruje T1. Nie wolno komunikować go jako T2/T3.
 | TM-13 | Persistent container przenosi stan | per-task freshness/cross-process off | drugi task nie widzi canary pierwszego |
 | TM-14 | Restart pozostawia nieznany container/worktree | leases + reconcile | doctor wykrywa i klasyfikuje orphan |
 | TM-15 | Złośliwy devcontainer rozszerza uprawnienia | trusted image/spec only | task branch `privileged` ignorowany/odrzucony |
+| TM-16 | Config/version-lock authority spoofowana przez symlink, world-writable lub obcy-UID trusted dir/plik | no-follow open + `Fstat` (typ + mode-private + owned-by-EUID) na tym samym fd; non-symlink zaufany katalog; walidacja katalogu przed zapisem (ADR-0013) | symlink/permissive/obcy-owner config/version-lock/`ConfigDir` odrzucony fail-closed |
 
 ## Granice modelu
 

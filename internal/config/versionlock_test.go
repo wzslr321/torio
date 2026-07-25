@@ -8,6 +8,23 @@ import (
 	"testing"
 )
 
+// privDir returns a freshly created, mode-private (0700) directory owned by the
+// test's effective user — a genuinely trusted directory in which a manifest may
+// live. It exists because t.TempDir() is 0755 (the testing package creates the
+// numbered leaf with 0777&^umask), which the trusted-directory policy correctly
+// rejects; tests that exercise manifest parsing must supply a private parent.
+func privDir(t *testing.T) string {
+	t.Helper()
+	d := filepath.Join(t.TempDir(), "hermes-box")
+	if err := os.MkdirAll(d, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Chmod(d, 0o700); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	return d
+}
+
 func TestVersionLockWriteReadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hermes-box", versionLockFileName)
 	in := VersionLock{
@@ -50,7 +67,7 @@ func TestWriteVersionLockRejectsInvalidBeforeWriting(t *testing.T) {
 }
 
 func TestLoadVersionLockRejectsUnknownField(t *testing.T) {
-	path := filepath.Join(t.TempDir(), versionLockFileName)
+	path := filepath.Join(privDir(t), versionLockFileName)
 	if err := os.WriteFile(path, []byte(`{"schema_version":"1","extra":"x"}`), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -60,7 +77,7 @@ func TestLoadVersionLockRejectsUnknownField(t *testing.T) {
 }
 
 func TestLoadVersionLockRejectsWrongSchemaVersion(t *testing.T) {
-	path := filepath.Join(t.TempDir(), versionLockFileName)
+	path := filepath.Join(privDir(t), versionLockFileName)
 	if err := os.WriteFile(path, []byte(`{"schema_version":"2"}`), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -70,7 +87,7 @@ func TestLoadVersionLockRejectsWrongSchemaVersion(t *testing.T) {
 }
 
 func TestLoadVersionLockRejectsMalformedVersionValue(t *testing.T) {
-	path := filepath.Join(t.TempDir(), versionLockFileName)
+	path := filepath.Join(privDir(t), versionLockFileName)
 	if err := os.WriteFile(path, []byte(`{"schema_version":"1","lima":"has space"}`), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -83,7 +100,7 @@ func TestLoadVersionLockRejectsSecretShapedWithoutLeaking(t *testing.T) {
 	// secretCanary (defined in file_test.go) is matcher-valid; its recognition
 	// by the production redactor is asserted in
 	// TestSecretCanaryIsRecognizedByProductionMatcher.
-	path := filepath.Join(t.TempDir(), versionLockFileName)
+	path := filepath.Join(privDir(t), versionLockFileName)
 	if err := os.WriteFile(path, []byte(`{"schema_version":"1","hermes":"`+secretCanary+`"}`), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -117,7 +134,7 @@ func TestLoadVersionLockDoesNotLeakJSONEscapedSecretInAnyField(t *testing.T) {
 		{"unknown_field_name", `{"schema_version":"1","` + escapedSecretRaw + `":"x"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), versionLockFileName)
+			path := filepath.Join(privDir(t), versionLockFileName)
 			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
 				t.Fatalf("write: %v", err)
 			}
@@ -133,10 +150,8 @@ func TestLoadVersionLockDoesNotLeakJSONEscapedSecretInAnyField(t *testing.T) {
 }
 
 func TestLoadVersionLockRejectsInsecurePermissions(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("permission enforcement is Unix-only")
-	}
-	path := filepath.Join(t.TempDir(), versionLockFileName)
+	requireTrustPolicy(t)
+	path := filepath.Join(privDir(t), versionLockFileName)
 	if err := os.WriteFile(path, []byte(`{"schema_version":"1"}`), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -155,7 +170,7 @@ func TestLoadVersionLockRejectsTrailingBytesAndSecondDocument(t *testing.T) {
 		`{"schema_version":"1"} trailing`,
 		`{"schema_version":"1"}{"schema_version":"1"}`,
 	} {
-		path := filepath.Join(t.TempDir(), versionLockFileName)
+		path := filepath.Join(privDir(t), versionLockFileName)
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatalf("write: %v", err)
 		}
@@ -166,7 +181,7 @@ func TestLoadVersionLockRejectsTrailingBytesAndSecondDocument(t *testing.T) {
 }
 
 func TestLoadVersionLockAllowsAbsentToolPins(t *testing.T) {
-	path := filepath.Join(t.TempDir(), versionLockFileName)
+	path := filepath.Join(privDir(t), versionLockFileName)
 	if err := os.WriteFile(path, []byte(`{"schema_version":"1"}`), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}

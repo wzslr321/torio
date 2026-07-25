@@ -37,6 +37,7 @@
 | SR-013 | Brak cross-task state | TM-13 | task A/B canary |
 | SR-014 | Orphans nie są usuwane na ślepo | TM-14 | mismatched label test |
 | SR-015 | Untrusted devcontainer nie steruje runtime | TM-15 | privileged/mount fixture denied |
+| SR-016 | Config/version-lock authority tylko z zaufanej ścieżki (no-follow, mode-private, owned-by-EUID) | TM-16 | `internal/config` trust tests: symlink/world-writable/obcy-owner odrzucone (ADR-0013) |
 
 ## Release gate
 

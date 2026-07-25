@@ -58,14 +58,3 @@ func writeFilePrivate(path string, data []byte) error {
 	}
 	return nil
 }
-
-// statPrivate stats path and enforces that it carries owner-only permissions on
-// hosts where that is meaningful (see enforcePrivateMode). It fails closed: a
-// group/world-accessible trusted file is rejected rather than trusted.
-func statPrivate(path string) error {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	return enforcePrivateMode(path, fi.Mode())
-}

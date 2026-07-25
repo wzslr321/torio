@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
+	"path/filepath"
 	"regexp"
 )
 
@@ -43,30 +43,59 @@ type versionLockJSON struct {
 	Hermes        string `json:"hermes,omitempty"`
 }
 
-// LoadVersionLock reads and strictly validates the manifest at path. On Unix it
-// requires owner-only permissions. Errors never contain secret-shaped material.
-func LoadVersionLock(path string) (VersionLock, error) {
-	if err := statPrivate(path); err != nil {
+// LoadVersionLock reads and strictly validates the manifest at path. The
+// manifest is authority for D3/D4, so its trusted directory is validated (within
+// the accepted direct-parent boundary) and the file is opened without following
+// a final-component symlink, then checked for regular type, mode-private
+// permissions and effective-user ownership from the same descriptor before it is
+// read. Errors never contain secret-shaped material — every returned error is
+// redacted at the package boundary, since path is caller-controlled and may
+// itself carry a secret shape (redactErr leaves non-secret errors untouched).
+// The policy is enforced on darwin and linux (see ADR-0013 / trust_darwinlinux.go).
+func LoadVersionLock(path string) (_ VersionLock, err error) {
+	defer func() { err = redactErr(err) }()
+
+	if err := statTrustedDirIfExists(filepath.Dir(path)); err != nil {
 		return VersionLock{}, err
 	}
-	data, err := os.ReadFile(path)
+	f, err := openTrustedFile(path)
+	if err != nil {
+		return VersionLock{}, fmt.Errorf("read version-lock: %w", err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return VersionLock{}, fmt.Errorf("read version-lock: %w", err)
 	}
 	m, err := parseVersionLock(data)
 	if err != nil {
-		return VersionLock{}, redactErr(fmt.Errorf("version-lock %s: %w", path, err))
+		return VersionLock{}, fmt.Errorf("version-lock %s: %w", path, err)
 	}
 	return m, nil
 }
 
 // WriteVersionLock validates m and writes it crash-safely with owner-only
 // permissions. An invalid manifest is rejected before any file is created.
-func WriteVersionLock(path string, m VersionLock) error {
+//
+// Within the accepted direct-parent boundary (ADR-0013 constraint 4), the
+// trusted directory is validated before any file is created in it: an existing
+// directory that is a symlink, mode-permissive, or owned by another user must
+// not become authority merely because the final rename is atomic. A
+// not-yet-existing directory is created privately by writeFilePrivate.
+//
+// As with the read paths, every returned error is redacted at the package
+// boundary: validate interpolates the caller-supplied schema_version with %q,
+// and the trusted-directory check interpolates the caller-controlled path — both
+// of which may carry secret-shaped material (redactErr leaves non-secret errors
+// untouched).
+func WriteVersionLock(path string, m VersionLock) (err error) {
+	defer func() { err = redactErr(err) }()
+
 	if err := m.validate(); err != nil {
-		// validate interpolates the caller-supplied schema_version with %q; a
-		// secret-shaped value would otherwise leak through the write path too.
-		return redactErr(fmt.Errorf("version-lock: %w", err))
+		return fmt.Errorf("version-lock: %w", err)
+	}
+	if err := statTrustedDirIfExists(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("version-lock: trusted directory: %w", err)
 	}
 	data, err := json.MarshalIndent(versionLockJSON{
 		SchemaVersion: m.SchemaVersion,

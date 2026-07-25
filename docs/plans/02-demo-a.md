@@ -71,8 +71,9 @@ Cobra tree (`internal/cli`). Kontrakt formatu/lokalizacji: [`../contracts/config
   error go nie ujawnia); dodatkowo finalny renderer redaguje znane kształty,
 - canonical paths + containment — explicit `--config`/`--state-dir` kanonikalizowane; pliki
   lokalizowane wewnątrz zaufanych katalogów przez contained-join (traversal odrzucany strukturalnie),
-- owner-only permissions na hostach Unix (build-tagged; jawny no-op poza Unix) oraz crash-safe zapis
-  (temp → fsync → atomic rename, 0600/0700),
+- egzekwowana granica zaufania ścieżek (no-follow open + `Fstat` z tego samego fd: typ, mode-private,
+  owned-by-EUID) na hostach **darwin/linux** (build-tagged `darwin || linux`; jawny no-op poza nimi,
+  patrz ADR-0013) oraz crash-safe zapis (temp → fsync → atomic rename, 0600/0700),
 - version lock manifest — typowany, schema-versioned, non-secret, ze ścisłą walidacją i round-tripem
   zapis/odczyt; konsumowany przez D3/D4 (patrz kontrakt).
 
@@ -82,7 +83,8 @@ policy, gdy `--timeout` nie podano jawnie). Zachowana dyscyplina D1: exit mappin
 rozdział stdout/stderr, redakcja, `--timeout` policy.
 
 Tests: defaults + XDG overrides, `--config`/`--state-dir` przed/po `version`, absent vs explicit config,
-malformed JSON/schema/unknown/semantic-invalid, canonical+traversal, insecure permissions (Unix),
+malformed JSON/schema/unknown/semantic-invalid, canonical+traversal, trust boundary (darwin/linux:
+symlink/type/mode/owner reject),
 secret-shaped rejection bez wycieku, version-lock parse/validate + crash-safe round trip, niezmieniony
 envelope D1 (drugi decode = `io.EOF`).
 

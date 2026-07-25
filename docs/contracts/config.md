@@ -36,13 +36,47 @@ Reguły:
   contained-join: nazwa musi być czystą nazwą pliku, a wynik nie może opuścić katalogu bazowego.
   Traversal jest odrzucany strukturalnie, nie przez czyszczenie stringów.
 
+## Granica zaufania ścieżek (ADR-0013)
+
+Zanim `config.json`/`version-lock.json` staną się authority, ścieżki są egzekwowane fail-closed.
+Terminologia jest rozdzielona (koniec z „owner-only"):
+
+- **mode-private** — brak dostępu grupy/innych: `perm & 0o077 == 0`.
+- **owned-by-EUID** — właściciel obiektu to efektywny użytkownik procesu: `st_uid == geteuid()`
+  (ścisła równość; jako root oczekiwany jest obiekt root-owned).
+
+Reguły (egzekwowane na **darwin/linux**; poza nimi jawny, udokumentowany no-op — hosty Demo A to
+macOS/Linux arm64):
+
+- Zaufane pliki (`config.json`, `version-lock.json`, także explicit `--config`) są otwierane
+  **no-follow** (`O_NOFOLLOW`): symlink w ostatnim komponencie jest odrzucany. Typ, tryb i własność są
+  weryfikowane przez `Fstat` **na tym samym deskryptorze**, z którego następuje odczyt — brak TOCTOU
+  na ostatnim komponencie (`Lstat`+`ReadFile` jest niedozwolone). Plik musi być zwykły, mode-private
+  (`0600`) i owned-by-EUID.
+- Bezpośredni zaufany katalog (`ConfigDir`, `StateDir`), jeśli istnieje, musi być **nie-symlinkiem**,
+  katalogiem, mode-private i owned-by-EUID. Katalog nieistniejący = poprawny first-run. Walidacja
+  otwiera katalog `O_RDONLY|O_DIRECTORY`, więc zaufany katalog musi być **używalny jako katalog
+  aplikacji** — w praktyce `0700` (`mode-private` sam w sobie dopuszczałby np. `0100` tylko-exec, co
+  jest fail-closed odrzucane przy otwarciu; utwardzenie tego rozróżnienia to ewentualny późniejszy
+  slice, nie ta granica).
+- **Zakres:** walidowany jest wyłącznie bezpośredni katalog aplikacji; łańcuch przodków ponad nim
+  (XDG base / `$HOME`) pozostaje zaufany i poza granicą tego slice (brak pełnego ancestor-walk).
+- **explicit `--config`:** otrzymuje pełne egzekwowanie *pliku* (no-follow, typ, mode-private,
+  owned-by-EUID); tryb jego katalogu nadrzędnego **nie** jest wymagany (operator może wskazać wspólną
+  lokalizację).
+- **Zapis:** `WriteVersionLock` waliduje zaufany katalog **przed** utworzeniem plików — atomowy rename
+  nie „legalizuje" symlinkowanego/permissive/obcego katalogu jako authority.
+- Błędy uprawnień/typu/ścieżki nie ujawniają materiału o kształcie sekretu (redakcja na granicy).
+
 ## Config document — `config.json`
 
 - Lokalizacja domyślna: `<config-dir>/config.json` (lub explicit `--config PATH`).
 - Format: JSON (standardowa biblioteka Go). Dokładnie jeden dokument; trailing data jest błędem.
 - Nieznane pola są odrzucane (`DisallowUnknownFields`) — schemat fail-closed.
-- Własność/uprawnienia: na hostach Unix wymagane owner-only (`0600`); szersze bity są odrzucane.
-  Poza Unix egzekwowanie uprawnień nie jest deklarowane (hosty Demo A: macOS/Linux arm64 = Unix).
+- Własność/uprawnienia/typ: na darwin/linux wymagany zwykły plik, mode-private (`0600`) i
+  owned-by-EUID, otwierany no-follow (patrz „Granica zaufania ścieżek"); szersze bity, symlink, obcy
+  właściciel lub nie-zwykły typ są odrzucane. Poza darwin/linux egzekwowanie nie jest deklarowane
+  (hosty Demo A: macOS/Linux arm64).
 - Brak domyślnego configu to **poprawny first-run** (defaulty). Explicit `--config` wskazujący na
   nieistniejący plik to błąd (exit 2).
 
@@ -65,10 +99,12 @@ Przykład (poprawny):
 ## Version-lock manifest — `version-lock.json`
 
 - Lokalizacja: `<config-dir>/version-lock.json` (kanoniczna, contained w katalogu config).
-- Własność: operator-authored, zaufany metadata pin. Non-secret; owner-only (`0600`) na Unix.
+- Własność: operator-authored, zaufany metadata pin. Non-secret; na darwin/linux zwykły plik,
+  mode-private (`0600`) i owned-by-EUID, otwierany no-follow (patrz „Granica zaufania ścieżek").
 - Format: JSON, dokładnie jeden dokument, nieznane pola odrzucane, `schema_version` = `"1"`.
 - Zapis jest crash-safe (temp → fsync → atomic rename); niepoprawny manifest jest odrzucany
-  **przed** utworzeniem pliku.
+  **przed** utworzeniem pliku, a zaufany katalog jest walidowany **przed** zapisem (atomowy rename nie
+  legalizuje niezaufanego katalogu jako authority).
 
 Pola:
 

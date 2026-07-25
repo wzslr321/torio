@@ -70,27 +70,7 @@ func TestWriteFilePrivateOverwritesAtomically(t *testing.T) {
 	}
 }
 
-func TestEnforcePrivateRejectsGroupOrWorldReadable(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("permission enforcement is Unix-only")
-	}
-	dir := t.TempDir()
-	path := filepath.Join(dir, "loose.json")
-	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if err := statPrivate(path); err == nil {
-		t.Errorf("statPrivate on 0644 file: want error on Unix, got nil")
-	}
-}
-
-func TestStatPrivateAcceptsOwnerOnly(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "tight.json")
-	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if err := statPrivate(path); err != nil {
-		t.Errorf("statPrivate on 0600 file: %v", err)
-	}
-}
+// Note: the trusted-file mode/type/ownership rules that statPrivate used to
+// approximate are now enforced by openTrustedFile (no-follow open + fstat) and
+// unit-tested purely in trust_unit_test.go (verifyTrusted). Integration coverage
+// through the public API lives in trust_test.go.

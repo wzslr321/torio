@@ -10,6 +10,19 @@ import (
 	"time"
 )
 
+// requireTrustPolicy skips a test on hosts where the trusted-authority policy
+// is not claimed. It mirrors the darwin || linux build constraint of the
+// enforcement primitive (trust_darwinlinux.go); on every other host the
+// primitive is a documented no-op (trust_other.go), so a rejection assertion
+// would spuriously fail. Ordinary functional tests stay unconditional; only
+// enforcement assertions gate on this.
+func requireTrustPolicy(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skipf("trusted-authority enforcement is claimed only on darwin/linux, not %s", runtime.GOOS)
+	}
+}
+
 // loadWith resolves+loads config with a temp XDG_CONFIG_HOME so no real
 // user config is touched. It returns the Runtime and any error.
 func loadWith(t *testing.T, opts Options, cfgHome, stateHome string) (Runtime, error) {
@@ -235,9 +248,7 @@ func TestLoadDoesNotLeakJSONEscapedSecretInAnyField(t *testing.T) {
 }
 
 func TestLoadRejectsInsecureConfigPermissions(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("permission enforcement is Unix-only")
-	}
+	requireTrustPolicy(t)
 	cfgHome := t.TempDir()
 	path := writeConfig(t, cfgHome, `{"schema_version":"1"}`)
 	if err := os.Chmod(path, 0o644); err != nil {
@@ -249,9 +260,7 @@ func TestLoadRejectsInsecureConfigPermissions(t *testing.T) {
 }
 
 func TestLoadRejectsInsecureExistingStateDir(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("permission enforcement is Unix-only")
-	}
+	requireTrustPolicy(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
