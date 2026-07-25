@@ -1,0 +1,104 @@
+# Config contract (D2)
+
+Ten dokument opisuje typowaną konfigurację hosta oraz version-lock manifest wprowadzone w D2
+(patrz [`../plans/02-demo-a.md`](../plans/02-demo-a.md) § D2). Implementacja: `internal/config/`.
+Konfiguracja jest **non-secret** (AGENTS §6): materiał o kształcie sekretu jest odrzucany.
+
+## Lokalizacje (XDG)
+
+Ścieżki resolują się deterministycznie z zmiennych XDG, z udokumentowanymi fallbackami:
+
+| Rola | Baza (env) | Fallback | Katalog aplikacji |
+|---|---|---|---|
+| Config | `XDG_CONFIG_HOME` | `$HOME/.config` | `<base>/hermes-box/` |
+| State  | `XDG_STATE_HOME`  | `$HOME/.local/state` | `<base>/hermes-box/` |
+
+Reguły:
+
+- Ustawiony, ale **non-absolutny** `XDG_CONFIG_HOME`/`XDG_STATE_HOME` jest odrzucany fail-closed
+  (nie jest po cichu ignorowany ani "naprawiany").
+- Gdy XDG base jest nieustawiony i nie można ustalić `$HOME`, resolucja kończy się błędem
+  (fail closed) zamiast zgadywać lokalizację.
+- Fallback `$HOME` musi być **absolutny**. Non-absolutny `$HOME` (przy nieustawionym XDG) jest
+  odrzucany fail-closed — nie jest kanonikalizowany względem CWD — z tego samego powodu co
+  non-absolutny XDG base: katalog roboczy nie może wyznaczać domyślnej zaufanej lokalizacji
+  config/state.
+- Flagi `--config PATH` i `--state-dir PATH` nadpisują wartości i są kanonikalizowane
+  (`filepath.Abs` + `Clean`, bez rozwijania symlinków — explicit override to zaufany input).
+- **Lazy resolution / precedence:** każda lokalizacja jest resolowana niezależnie. Explicit
+  override (`--config`/`--state-dir`) całkowicie **omija** odpowiedni XDG base — nieużywana (nawet
+  malformed) zmienna XDG ani `$HOME` nie mogą zablokować w pełni jawnej inwokacji. Konsultowany jest
+  wyłącznie base faktycznie potrzebny (bo jego override jest nieobecny), i każda faktycznie użyta
+  wartość jest nadal ściśle walidowana (patrz reguła absolutności powyżej).
+- Przy explicit `--config`, zaufanym katalogiem config (dla `version-lock.json`) jest katalog
+  nadrzędny wskazanego pliku — manifest leży obok jawnego configu.
+- Pliki lokalizowane **wewnątrz** zaufanego katalogu (`config.json`, `version-lock.json`) używają
+  contained-join: nazwa musi być czystą nazwą pliku, a wynik nie może opuścić katalogu bazowego.
+  Traversal jest odrzucany strukturalnie, nie przez czyszczenie stringów.
+
+## Config document — `config.json`
+
+- Lokalizacja domyślna: `<config-dir>/config.json` (lub explicit `--config PATH`).
+- Format: JSON (standardowa biblioteka Go). Dokładnie jeden dokument; trailing data jest błędem.
+- Nieznane pola są odrzucane (`DisallowUnknownFields`) — schemat fail-closed.
+- Własność/uprawnienia: na hostach Unix wymagane owner-only (`0600`); szersze bity są odrzucane.
+  Poza Unix egzekwowanie uprawnień nie jest deklarowane (hosty Demo A: macOS/Linux arm64 = Unix).
+- Brak domyślnego configu to **poprawny first-run** (defaulty). Explicit `--config` wskazujący na
+  nieistniejący plik to błąd (exit 2).
+
+Pola:
+
+| Pole | Typ | Wymagane | Semantyka |
+|---|---|---|---|
+| `schema_version` | string | tak | Musi być `"1"`. Inna wartość → odrzucone (bez migracji). |
+| `default_timeout` | string (Go duration) | nie | Domyślny timeout operacji; walidowany > 0 i ≤ policy max. Zasila timeout policy, gdy `--timeout` nie podano jawnie (flaga wygrywa). |
+
+Przykład (poprawny):
+
+```json
+{
+  "schema_version": "1",
+  "default_timeout": "45s"
+}
+```
+
+## Version-lock manifest — `version-lock.json`
+
+- Lokalizacja: `<config-dir>/version-lock.json` (kanoniczna, contained w katalogu config).
+- Własność: operator-authored, zaufany metadata pin. Non-secret; owner-only (`0600`) na Unix.
+- Format: JSON, dokładnie jeden dokument, nieznane pola odrzucane, `schema_version` = `"1"`.
+- Zapis jest crash-safe (temp → fsync → atomic rename); niepoprawny manifest jest odrzucany
+  **przed** utworzeniem pliku.
+
+Pola:
+
+| Pole | Typ | Wymagane | Semantyka |
+|---|---|---|---|
+| `schema_version` | string | tak | Musi być `"1"`. |
+| `lima` | string | nie | Przypięta wersja Lima. Pusty = nieprzypięte. |
+| `docker` | string | nie | Przypięta wersja Dockera. |
+| `hermes` | string | nie | Przypięta wersja Hermes CLI. |
+
+Każda ustawiona wartość musi pasować do wzorca `^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$` i nie może mieć
+kształtu sekretu.
+
+**Zakres D2:** manifest ma wyłącznie lifecycle parse/validate/write. D2 **nie** wykonuje runtime
+probingu, nie instaluje niczego i nie zawiera adapterów Lima/Docker/Hermes.
+
+**Konsumenci (przyszłe slice'y):**
+
+- **D3 — Lima adapter:** feature/version probe używa przypiętej wersji `lima`.
+- **D4 — Deterministic bootstrap:** instalacja przypiętych zależności (`docker`, `hermes`, `lima`).
+
+## Exit / błędy
+
+Błędy resolucji i walidacji konfiguracji mapują się na usage/schema error (exit `2`) zgodnie z
+[`cli.md`](cli.md). Komunikaty błędów nie ujawniają materiału o kształcie sekretu — gwarancja jest
+egzekwowana na granicy pakietu `internal/config` (redakcja każdego zwracanego błędu), więc obowiązuje
+także dla bezpośrednich wywołań API, nie tylko przez finalny renderer CLI. Skan surowych bajtów
+odrzuca sekrety wcześnie, ale sam nie wystarcza: wartość o kształcie sekretu zapisana w formie
+JSON-escaped (np. z literą `h` w prefiksie zapisaną jako escape `\uXXXX`) nie ma w surowych bajtach
+dosłownego prefiksu, więc dekoder mógłby ją odtworzyć i wstawić do błędu — przez interpolację `%q`
+zdekodowanej wartości albo przez nazwę nieznanego pola zwróconą z `DisallowUnknownFields`. Redakcja
+na granicy zamyka tę ścieżkę; finalny renderer redaguje znane kształty dodatkowo, jako defense in
+depth.

@@ -72,6 +72,11 @@ flagi są odrzucane (usage, exit 2) — nie są po cichu akceptowane:
 
 - **D1:** `--json`, `--verbose`, `--timeout`. `--config` i `--state-dir` są **D2-pending** i w D1
   zwracają usage error.
+- **D2:** dochodzą `--config PATH` i `--state-dir PATH` jako realne globalne (persistent) flagi,
+  działające przed i po subkomendzie. Resolują się do typowanej konfiguracji D2 (patrz
+  [`config.md`](config.md)) używanej przez wykonanie komendy — nie są tylko parsowane. Błąd
+  resolucji/walidacji konfiguracji jest usage/schema error (exit 2). Nieznana flaga nadal jest
+  odrzucana (exit 2).
 
 ### `--help` a `--json`
 

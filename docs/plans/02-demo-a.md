@@ -56,15 +56,37 @@ egzekwującym envelope/exit-codes/redakcję, niezależnie od frameworka.
 
 Następny slice: **D2 — Host/VM config** (nierozpoczęty).
 
-## D2 — Host/VM config
+## D2 — Host/VM config — DONE
 
-- typed config i default XDG paths,
-- schema/semantic validation,
-- no secrets in config,
-- canonical paths,
-- version lock manifest.
+Status: **DONE** (2026-07-24). Zrealizowane test-first w `internal/config/` i wpięte w
+Cobra tree (`internal/cli`). Kontrakt formatu/lokalizacji: [`../contracts/config.md`](../contracts/config.md).
 
-Tests: invalid/unknown fields, traversal, insecure permissions i redaction.
+- typed config i default XDG paths — `XDG_CONFIG_HOME`/`XDG_STATE_HOME` z udokumentowanymi
+  fallbackami `$HOME/.config` i `$HOME/.local/state`; non-absolutny XDG base odrzucany fail-closed,
+- jeden format konfiguracji (`config.json`, JSON ze standardowej biblioteki) z polem
+  `schema_version` (const `"1"`); brak nowej zależności,
+- schema/semantic validation — nieznane pola odrzucane (`DisallowUnknownFields`), `default_timeout`
+  walidowany względem policy max; malformed/unknown/invalid = fail closed,
+- no secrets in config — materiał o kształcie sekretu odrzucany bez wycieku (ani human, ani JSON
+  error go nie ujawnia); dodatkowo finalny renderer redaguje znane kształty,
+- canonical paths + containment — explicit `--config`/`--state-dir` kanonikalizowane; pliki
+  lokalizowane wewnątrz zaufanych katalogów przez contained-join (traversal odrzucany strukturalnie),
+- owner-only permissions na hostach Unix (build-tagged; jawny no-op poza Unix) oraz crash-safe zapis
+  (temp → fsync → atomic rename, 0600/0700),
+- version lock manifest — typowany, schema-versioned, non-secret, ze ścisłą walidacją i round-tripem
+  zapis/odczyt; konsumowany przez D3/D4 (patrz kontrakt).
+
+Wpięcie CLI: `--config PATH` i `--state-dir PATH` to realne persistent flagi (przed i po subkomendzie),
+resolujące się do typowanej konfiguracji używanej przez wykonanie (`default_timeout` zasila timeout
+policy, gdy `--timeout` nie podano jawnie). Zachowana dyscyplina D1: exit mapping, jeden JSON envelope,
+rozdział stdout/stderr, redakcja, `--timeout` policy.
+
+Tests: defaults + XDG overrides, `--config`/`--state-dir` przed/po `version`, absent vs explicit config,
+malformed JSON/schema/unknown/semantic-invalid, canonical+traversal, insecure permissions (Unix),
+secret-shaped rejection bez wycieku, version-lock parse/validate + crash-safe round trip, niezmieniony
+envelope D1 (drugi decode = `io.EOF`).
+
+Następny slice: **D3 — Lima adapter** (nierozpoczęty). D3–D8/Demo B pozostają nierozpoczęte.
 
 ## D3 — Lima adapter
 

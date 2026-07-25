@@ -8,16 +8,14 @@ import (
 	"testing"
 )
 
-// TestD2PendingGlobalsAreNotUsableInD1 keeps the D1 CLI contract truthful:
-// --config and --state-dir are documented globals but are introduced in D2.
-// In D1 they must be rejected as unknown flags, not silently accepted.
-func TestD2PendingGlobalsAreNotUsableInD1(t *testing.T) {
-	for _, flag := range []string{"--config", "--state-dir"} {
-		var stdout, stderr bytes.Buffer
-		code := Run(context.Background(), []string{"version", flag, "/tmp/x"}, &stdout, &stderr, testBuild())
-		if code != int(ExitUsage) {
-			t.Errorf("%s: exit = %d, want %d (D2-pending flag must be rejected in D1)", flag, code, int(ExitUsage))
-		}
+// TestUnknownGlobalFlagStillRejected keeps the fail-closed flag contract: a
+// genuinely unknown persistent flag remains a usage error even after D2 adds
+// --config/--state-dir. (Those two are now real globals; see config_test.go.)
+func TestUnknownGlobalFlagStillRejected(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"version", "--not-a-flag", "/tmp/x"}, &stdout, &stderr, testBuild())
+	if code != int(ExitUsage) {
+		t.Errorf("unknown flag: exit = %d, want %d", code, int(ExitUsage))
 	}
 }
 
