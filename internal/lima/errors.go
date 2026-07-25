@@ -30,9 +30,21 @@ const (
 	KindCancelled ErrorKind = "cancelled"
 	// KindNotFound means the target VM instance does not exist yet.
 	KindNotFound ErrorKind = "not_found"
+	// KindNotRunning means the instance exists but is not Running when an
+	// operation (bootstrap) requires a verified Running precondition. Distinct
+	// from KindAmbiguousState (Broken/Unknown): a Stopped instance is a
+	// well-understood, non-ambiguous state that simply fails the precondition.
+	KindNotRunning ErrorKind = "not_running"
 	// KindAmbiguousState means the instance exists but is in a state
 	// (Broken/Unknown) that must not be silently mutated.
 	KindAmbiguousState ErrorKind = "ambiguous_state"
+	// KindVerificationFailed means the adapter reached the guest but a proven
+	// postcondition was false — an architecture/version/mount/filesystem drift,
+	// a required guest reconcile step that could not be established, or an
+	// unverifiable state. It fails closed (docs/contracts/cli.md exit class 6,
+	// "verification failed"), distinct from KindPostconditionFailed which is a
+	// lifecycle mutation (start/stop) whose re-queried state did not confirm.
+	KindVerificationFailed ErrorKind = "verification_failed"
 	// KindPostconditionFailed means a mutating command (start) exited zero,
 	// but re-querying the instance did not confirm the expected resulting
 	// state. A clean exit code alone is never sufficient proof of a

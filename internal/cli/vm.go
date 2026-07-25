@@ -51,6 +51,8 @@ func newVMCmd(a *app) *cobra.Command {
 	}
 	vm.AddCommand(newVMStatusCmd(a))
 	vm.AddCommand(newVMStartCmd(a))
+	vm.AddCommand(newVMStopCmd(a))
+	vm.AddCommand(newVMBootstrapCmd(a))
 	vm.AddCommand(newVMSSHCmd(a))
 	return vm
 }
@@ -90,6 +92,65 @@ func newVMStartCmd(a *app) *cobra.Command {
 	}
 }
 
+func newVMStopCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "stop",
+		Short: "Stop the Hermes Box VM",
+		Long: "Gracefully stop the Hermes Box VM. Idempotent: an already-stopped VM " +
+			"succeeds without acting. Stop never removes the VM or its data, and never " +
+			"trusts a clean exit — it re-queries and requires a Stopped post-state.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx, cancel := a.opContext(cmd)
+			defer cancel()
+			// The adapter owns idempotency and the Stopped postcondition; a nil
+			// error means the instance is confirmed stopped.
+			if err := a.newLima().Stop(ctx); err != nil {
+				return mapLimaError("vm.stop", err)
+			}
+			return a.emitVMState("vm.stop", lima.StateStopped)
+		},
+	}
+}
+
+func newVMBootstrapCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "bootstrap",
+		Short: "Reconcile and verify the existing Hermes Box target for Remote Second Brain V1",
+		Long: "Reconcile and verify the already-created Hermes Box VM so an operator has a " +
+			"usable Remote Second Brain V1 path: a stable non-interactive `hermes` command " +
+			"and Docker reachable by the intended non-root guest user (" + lima.HermesUser + ").\n\n" +
+			"It operates only on the existing target after a verified Running precondition, " +
+			"through the typed Lima boundary. It is idempotent and narrow: it may ensure the " +
+			"hermes docker-group membership and the `hermes` PATH shim, but never recreates or " +
+			"re-images the VM, installs a model/provider, accepts secrets, or creates services. " +
+			"It verifies (not merely trusts) architecture, the hermes command, Docker reach, git, " +
+			"the persistent KB/workspace paths on native Linux, and the absence of a broad host " +
+			"mount — failing closed with remediation on any drift.\n\n" +
+			"Bootstrap issues several bounded guest probes; run it with an ample --timeout " +
+			"(e.g. --timeout 5m).\n\n" +
+			"After a successful run, reach the remote Hermes instance yourself (operator-controlled), " +
+			"e.g.:  hb vm ssh -- sudo -u " + lima.HermesUser + " -- hermes --version",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx, cancel := a.opContext(cmd)
+			defer cancel()
+			// V1 runs unpinned: the observed hermes/docker versions are reported so
+			// drift is visible. A later slice can thread version-lock pins through
+			// BootstrapOptions for enforcement.
+			rep, err := a.newLima().Bootstrap(ctx, lima.BootstrapOptions{})
+			if err != nil {
+				ce := mapLimaError("vm.bootstrap", err)
+				// Surface the checks recorded up to the failure (already bounded and
+				// redacted) so the operator sees exactly which postcondition failed.
+				ce.Details = bootstrapReportDetails(rep)
+				return ce
+			}
+			return a.emitVMBootstrap(rep)
+		},
+	}
+}
+
 func newVMSSHCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "ssh -- COMMAND...",
@@ -119,6 +180,82 @@ func (a *app) emitVMState(command string, state lima.State) error {
 		return writeJSON(a.stdout, successEnvelope(command, data, nil))
 	}
 	_, err := fmt.Fprintf(a.stdout, "%s: %s\n", lima.InstanceName, state)
+	return err
+}
+
+// vmBootstrapData is the `data` object for a successful `vm bootstrap`. It
+// carries the proven checks plus the persistent Hermes locations the operator
+// needs for the connection handoff — no secrets, no raw output.
+type vmBootstrapData struct {
+	Instance      string        `json:"instance"`
+	Checks        []vmCheckData `json:"checks"`
+	GuestUser     string        `json:"guest_user"`
+	HermesHome    string        `json:"hermes_home"`
+	KBPath        string        `json:"kb_path"`
+	WorkspacePath string        `json:"workspace_path"`
+}
+
+// vmCheckData is one bootstrap check in the envelope. Detail is a short derived
+// value (a parsed version, an fstype), never a raw output blob.
+type vmCheckData struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
+}
+
+func bootstrapData(rep lima.BootstrapReport) vmBootstrapData {
+	checks := make([]vmCheckData, 0, len(rep.Checks))
+	for _, c := range rep.Checks {
+		checks = append(checks, vmCheckData{Name: c.Name, OK: c.OK, Detail: c.Detail})
+	}
+	return vmBootstrapData{
+		Instance:      rep.Instance,
+		Checks:        checks,
+		GuestUser:     lima.HermesUser,
+		HermesHome:    lima.HermesHome,
+		KBPath:        lima.HermesKBPath,
+		WorkspacePath: lima.HermesWorkspacePath,
+	}
+}
+
+// bootstrapReportDetails renders the checks recorded before a failure as error
+// details, so a failing bootstrap still tells the operator which postcondition
+// was not met. Values pass through the final redactor in fail().
+func bootstrapReportDetails(rep lima.BootstrapReport) map[string]any {
+	if len(rep.Checks) == 0 {
+		return nil
+	}
+	checks := make([]map[string]any, 0, len(rep.Checks))
+	for _, c := range rep.Checks {
+		checks = append(checks, map[string]any{"name": c.Name, "ok": c.OK, "detail": c.Detail})
+	}
+	return map[string]any{"instance": rep.Instance, "checks": checks}
+}
+
+// emitVMBootstrap renders a successful bootstrap. JSON mode emits exactly one
+// success envelope; human mode prints one line per proven check plus the
+// operator connection handoff (the persistent KB location and the stable command
+// path). The post-bootstrap action to reach Hermes stays operator-controlled.
+func (a *app) emitVMBootstrap(rep lima.BootstrapReport) error {
+	if a.jsonOut {
+		return writeJSON(a.stdout, successEnvelope("vm.bootstrap", bootstrapData(rep), nil))
+	}
+	for _, c := range rep.Checks {
+		mark := "ok"
+		if !c.OK {
+			mark = "FAIL"
+		}
+		if _, err := fmt.Fprintf(a.stdout, "[%s] %s: %s\n", mark, c.Name, c.Detail); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintf(a.stdout,
+		"\nRemote Second Brain V1 path ready on %s.\n"+
+			"Persistent Hermes home: %s\n"+
+			"Persistent KB:          %s\n"+
+			"Persistent workspace:   %s\n"+
+			"Reach Hermes (operator-controlled): hb vm ssh -- sudo -u %s -- hermes --version\n",
+		rep.Instance, lima.HermesHome, lima.HermesKBPath, lima.HermesWorkspacePath, lima.HermesUser)
 	return err
 }
 
@@ -189,8 +326,10 @@ func mapLimaError(command string, err error) *CLIError {
 	}
 	code := strings.ToUpper(string(lerr.Kind))
 	switch lerr.Kind {
-	case lima.KindNotFound, lima.KindAmbiguousState, lima.KindPostconditionFailed:
+	case lima.KindNotFound, lima.KindNotRunning, lima.KindAmbiguousState, lima.KindPostconditionFailed:
 		return &CLIError{Exit: ExitPrecondition, Code: code, Command: command, Message: lerr.Error()}
+	case lima.KindVerificationFailed:
+		return &CLIError{Exit: ExitVerification, Code: code, Command: command, Message: lerr.Error()}
 	case lima.KindBinaryUnavailable, lima.KindCommandFailed, lima.KindMalformedOutput,
 		lima.KindVersionMismatch, lima.KindTimeout, lima.KindCancelled:
 		return &CLIError{Exit: ExitExternal, Code: code, Command: command, Message: lerr.Error()}

@@ -90,7 +90,7 @@ envelope D1 (drugi decode = `io.EOF`).
 
 Następny slice: **D3 — Lima adapter** (nierozpoczęty). D3–D8/Demo B pozostają nierozpoczęte.
 
-## D3 — Lima adapter — V1 adapter (status/start/ssh) pending review; Init/Stop deferred
+## D3 — Lima adapter — V1 adapter (status/start/ssh) pending review; Stop done (D3.1); Init deferred
 
 Status: **D3-V1 `internal/lima` adapter (probe/status/start/ssh) — pending review** (2026-07-25).
 **To NIE jest zamknięcie D3 milestone.** V1 to świadomie najmniejsza użyteczna ścieżka adaptera:
@@ -127,19 +127,51 @@ Zakres V1 (zaimplementowany):
 **Odłożone do kolejnych slice'ów (świadomie, poza V1):**
 
 - `init` (create z zaufanego, embedded template + kontrola zgodności istniejącej instancji: brak host
-  mountów, `ssh.loadDotSSHPubKeys == false`, dokładny image) oraz `stop` — usunięte z V1, wrócą jako
-  osobny slice; sanityzowane pola `mounts`/`ssh` w evidence są zachowane pod ten przyszły slice,
+  mountów, `ssh.loadDotSSHPubKeys == false`, dokładny image) — usunięte z V1, wróci jako osobny slice;
+  sanityzowane pola `mounts`/`ssh` w evidence są zachowane pod ten przyszły slice,
+- ~~`stop`~~ — **DONE, pending review** (2026-07-25): patrz D3.1 niżej,
 - ~~**CLI wiring**~~ — **DONE, pending review** (2026-07-25): `hb vm status`, `hb vm start`,
   `hb vm ssh -- COMMAND...` wpięte w `internal/cli` przez unexported seam (`app.newLima`), z
   mapowaniem `lima.ErrorKind` → exit code (not_found/ambiguous/postcondition→3; binary/command/
   malformed/version/timeout/cancel→8; remote non-zero → 8) i JSON envelope dla stanu VM.
 
-Poza zakresem (świadomie, dalej): D4 deterministic bootstrap, instalacja Docker/Hermes/Git, cloud-init
-bootstrap scripts, `hb doctor`, gateway, serve lifecycle, Hermes adapter, Docker adapter, host mounts,
-credentials/provider config.
+Poza zakresem D3-V1 (świadomie): pełny D4 deterministic bootstrap (instalacja przypiętych
+Docker/Hermes/Git, cloud-init bootstrap scripts), `hb doctor`, gateway, serve lifecycle, Hermes adapter,
+Docker adapter, host mounts, credentials/provider config.
 
-Następny slice: przywrócenie `init`/`stop` (adapter + CLI), a dopiero po nich D4 — Deterministic
-bootstrap. CLI wiring `status`/`start`/`ssh` jest już zrobione (pending review).
+## D3.1 — Lifecycle `stop` + `hb vm bootstrap` (existing target) — pending review
+
+Status: **`internal/lima.Stop`, `internal/lima.Bootstrap` oraz `hb vm stop` / `hb vm bootstrap` —
+pending review** (2026-07-25). Cel: **kontrolowany Remote Second Brain V1 path gotowy do użytku przez
+operatora na istniejącej VM `hermes-box`; formalne Demo A pozostaje pending.** To nie jest zamknięcie
+S1–S8 ani formalne Demo A.
+
+- `Stop` (`limactl stop <instance> --tty=false`): mirror `Start` — idempotentny sukces gdy już
+  `Stopped`; brak instancji → `not_found`; `Broken`/`Unknown` → `ambiguous_state` bez mutacji; po `stop`
+  z exit 0 re-query wymaga `Stopped`, inaczej `postcondition_failed`. Nigdy `--force`, nigdy nie usuwa
+  danych. Wpięte jako `hb vm stop` (exit 3 dla preconditions, 8 dla external).
+- `Bootstrap` reconciliuje i weryfikuje **istniejący** target po zweryfikowanym `Running`, przez ten sam
+  typed limactl/execx boundary (fixed argv, bez `sh -c`, bez sklejanych stringów, bounded/redacted
+  output). Przewidziana tożsamość gościa to dedykowany non-root użytkownik `hermes` (posiada trwałe
+  KB/profil pod `/home/hermes`, jest w grupie `docker` — evidence: `etap-0b/s0-target-vm.txt`). Ponieważ
+  `limactl shell` loguje jako użytkownik Lima, stabilna ścieżka dociera do `hermes` jawnie przez
+  `sudo -u hermes -- hermes …`; goła nazwa `hermes` rozwiązuje się przez stały symlink na secure_path.
+  - Reconcile (idempotentny, wąski): membership `hermes` w grupie `docker` (additive `usermod -aG`);
+    symlink `/usr/local/bin/hermes` → przypięty launcher, tworzony dopiero po potwierdzeniu, że launcher
+    istnieje (brakujący launcher = drift, nie dangling shim).
+  - Verify (read-only, fail-closed): `uname -m == aarch64`; `hermes --version` przez stabilną ścieżkę;
+    osiągalność serwera Docker dla `hermes`; `git --version`; wymagane ścieżki KB/workspace
+    (`/home/hermes/.hermes`, `/home/hermes/projects`) jako katalogi na natywnym ext4; brak host-share
+    mountu. Drift/nieweryfikowalny stan → `verification_failed` (exit 6) z remediacją. Nowe
+    `ErrorKind`: `not_running` (→3), `verification_failed` (→6).
+  - `hb vm bootstrap` emituje jeden envelope z listą udowodnionych checków i trwałymi lokalizacjami
+    (home/KB/workspace) jako handoff; dotarcie do Hermesa pozostaje operator-controlled. V1 działa
+    unpinned (obserwowane wersje raportowane, by drift był widoczny); enforcement pinu w kolejnym slice.
+
+Operator runbook (start → bootstrap/verify → connect): [../runbooks/remote-second-brain-v1.md](../runbooks/remote-second-brain-v1.md).
+
+Następny slice: przywrócenie `init` (adapter + CLI), a dopiero po nim pełny D4 — Deterministic bootstrap
+(instalacja przypiętych dependencies).
 
 ## D4 — Deterministic bootstrap
 

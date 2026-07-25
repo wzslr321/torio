@@ -1,0 +1,432 @@
+package lima
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"hermes-box.local/hb/internal/execx"
+)
+
+// Bootstrap reconciles and verifies the already-created Hermes Box target so an
+// operator has a usable Remote Second Brain V1 path: a stable non-interactive
+// `hermes` command and Docker reachable by the intended non-root guest identity.
+//
+// It is deliberately narrow. It operates ONLY on the existing InstanceName after
+// a verified Running precondition, through the same typed limactl/execx boundary
+// as the rest of the adapter (fixed argv, no `sh -c`, no concatenated command
+// strings, bounded+redacted output). It never creates, recreates, deletes, or
+// re-images the VM; never installs a model/provider; never accepts secrets; and
+// never creates gateway/serve services.
+//
+// The intended guest identity is the dedicated non-root `hermes` service user
+// (uid distinct from the Lima login user): it owns the persistent KB/profile
+// under /home/hermes and is a member of the docker group (verified evidence in
+// docs/spike-results/evidence/etap-0b/s0-target-vm.txt). `limactl shell` logs in
+// as the Lima user, so the documented stable path reaches hermes explicitly via
+// `sudo -u hermes -- hermes …`; the bare `hermes` name resolves through a fixed
+// symlink on sudo's secure_path.
+//
+// Reconcile is idempotent and limited to the narrowly declared PATH/group/shim
+// setup:
+//   - ensure the `hermes` user is in the docker group (additive `usermod -aG`);
+//   - ensure /usr/local/bin/hermes is a symlink to the pinned launcher, but only
+//     after confirming the launcher exists (a missing launcher is reported as
+//     drift, never papered over with a dangling shim).
+//
+// Verification proves (never merely trusts an exit code) every postcondition and
+// fails closed on any mismatch or unverifiable state:
+//   - uname -m == aarch64;
+//   - `hermes --version` works through the documented stable command path;
+//   - the Docker server is reachable by the hermes identity;
+//   - git --version works;
+//   - each required Hermes KB/workspace path is a directory on native ext4;
+//   - no macOS host-share mount (9p/virtiofs/fuse/nfs/cifs) is present.
+//
+// A rerun is success only when all postconditions are proven. A drift
+// (architecture/version/image/mount) is reported, not repaired.
+func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (BootstrapReport, error) {
+	rep := BootstrapReport{Instance: InstanceName}
+
+	// Precondition: the target must exist and be Running. Not-found, Stopped and
+	// ambiguous states each fail closed with their own kind so the CLI can map
+	// them precisely (missing/stopped/ambiguous are all preconditions).
+	rec, err := a.currentInstance(ctx, bootstrapOp)
+	if err != nil {
+		return rep, err
+	}
+	if rec == nil {
+		return rep, &Error{Op: bootstrapOp, Kind: KindNotFound, Err: fmt.Errorf("instance %q does not exist; run init first", InstanceName)}
+	}
+	st, ok := mapLimaStatus(rec.Status)
+	if !ok {
+		return rep, &Error{Op: bootstrapOp, Kind: KindMalformedOutput, Err: fmt.Errorf("unrecognized lima status %q", rec.Status)}
+	}
+	switch st {
+	case StateRunning:
+		// proceed
+	case StateStopped:
+		return rep, &Error{Op: bootstrapOp, Kind: KindNotRunning, Err: fmt.Errorf("instance %q is stopped; run `hb vm start` first", InstanceName)}
+	default:
+		return rep, &Error{Op: bootstrapOp, Kind: KindAmbiguousState, Err: fmt.Errorf("instance %q is in ambiguous state %q", InstanceName, rec.Status)}
+	}
+
+	// --- Reconcile (idempotent, narrow) ---
+	if err := a.reconcileDockerGroup(ctx, &rep); err != nil {
+		return rep, err
+	}
+	if err := a.reconcileHermesShim(ctx, &rep); err != nil {
+		return rep, err
+	}
+
+	// --- Verify (read-only, fail closed) ---
+	if err := a.verifyArch(ctx, &rep); err != nil {
+		return rep, err
+	}
+	if err := a.verifyHermes(ctx, &rep, opts.HermesVersion); err != nil {
+		return rep, err
+	}
+	if err := a.verifyDocker(ctx, &rep); err != nil {
+		return rep, err
+	}
+	if err := a.verifyGit(ctx, &rep); err != nil {
+		return rep, err
+	}
+	if err := a.verifyPaths(ctx, &rep); err != nil {
+		return rep, err
+	}
+	if err := a.verifyNoHostMounts(ctx, &rep); err != nil {
+		return rep, err
+	}
+
+	return rep, nil
+}
+
+const bootstrapOp = "bootstrap"
+
+// The intended guest identity and the persistent Hermes locations. These are
+// exported so the CLI can surface the Remote Second Brain V1 connection handoff
+// (the persistent home/KB) without duplicating string literals.
+const (
+	// HermesUser is the dedicated non-root guest identity that owns the
+	// persistent KB/profile and is a member of the docker group.
+	HermesUser = "hermes"
+	// HermesHome is the persistent Hermes home on the VM's Linux filesystem.
+	HermesHome = "/home/hermes"
+	// HermesKBPath is the persistent Hermes profile / knowledge base directory.
+	HermesKBPath = "/home/hermes/.hermes"
+	// HermesWorkspacePath is the persistent workspace directory.
+	HermesWorkspacePath = "/home/hermes/projects"
+)
+
+// The fixed, repository-controlled reconcile targets. These are constants (not
+// caller input) so the guest changes are a small, auditable, fixed set — never a
+// general remote-script transport.
+const (
+	dockerGroup    = "docker"
+	requiredArch   = "aarch64"
+	hermesTarget   = "/home/hermes/hermes-agent/venv/bin/hermes" // pinned launcher (owned by hermes)
+	hermesShimPath = "/usr/local/bin/hermes"                     // on sudo secure_path
+)
+
+// bootstrapRequiredPaths are the persistent Hermes KB/profile and workspace
+// directories that must resolve on the VM's native Linux filesystem, never a
+// macOS host share (ADR-0003). Owned by the hermes user under its 0750 home, so
+// they are inspected via sudo.
+var bootstrapRequiredPaths = []string{
+	HermesKBPath,
+	HermesWorkspacePath,
+}
+
+// hostShareFSTypes is the findmnt -t filter for macOS host-share filesystems. A
+// broad host mount over the guest is an ADR-0003 violation and fails closed.
+const hostShareFSTypes = "9p,virtiofs,fuse,fuse.virtiofs,nfs,cifs"
+
+// nativeFSTypes are the accepted on-VM block-backed filesystem types for the
+// required paths. ext4 is the verified target (etap-0b); the near neighbours are
+// admitted so a benign reformat is not a false drift, while every host-share
+// type is still rejected.
+var nativeFSTypes = map[string]bool{"ext4": true, "ext3": true, "ext2": true, "xfs": true, "btrfs": true}
+
+// BootstrapOptions carries the (optional) pins the caller wants enforced. The
+// adapter does not import internal/config; the CLI passes pinned values through.
+type BootstrapOptions struct {
+	// HermesVersion, if non-empty, is the pinned Hermes version the observed
+	// `hermes --version` must contain; a mismatch is reported as drift. Empty is
+	// unpinned: the observed version is reported but not enforced.
+	HermesVersion string
+}
+
+// CheckResult is one bootstrap postcondition or reconcile outcome. Detail is a
+// short, already-redacted, derived value (a parsed version, an fstype, a
+// reconcile note) — never a raw output blob.
+type CheckResult struct {
+	Name   string
+	OK     bool
+	Detail string
+}
+
+// BootstrapReport is the structured outcome. On success every check is OK; on
+// failure it carries the checks recorded up to (and including) the failing one,
+// so the CLI can surface a precise, redacted diagnostic in error.details.
+type BootstrapReport struct {
+	Instance string
+	Checks   []CheckResult
+}
+
+func (r *BootstrapReport) record(name string, ok bool, detail string) {
+	r.Checks = append(r.Checks, CheckResult{Name: name, OK: ok, Detail: boundDetail(detail)})
+}
+
+// verifyFailed records a failed check and returns the fail-closed adapter error
+// with an actionable, redacted remediation message.
+func (a *Adapter) verifyFailed(rep *BootstrapReport, name, detail, remediation string) *Error {
+	rep.record(name, false, detail)
+	return &Error{Op: bootstrapOp, Kind: KindVerificationFailed, Err: fmt.Errorf("%s: %s (%s)", name, detail, remediation)}
+}
+
+// guestProbe runs a fixed guest argv through the typed SSH boundary and returns
+// a usable, non-truncated result. A transport failure (binary/timeout/cancel) is
+// returned as the adapter's already-classified error. Truncated output is
+// untrustworthy and fails closed as a verification failure.
+func (a *Adapter) guestProbe(ctx context.Context, rep *BootstrapReport, name string, argv ...string) (execx.Result, error) {
+	res, err := a.SSH(ctx, argv)
+	if err != nil {
+		return execx.Result{}, err // already a classified *lima.Error (timeout/cancel/binary)
+	}
+	if res.StdoutTruncated || res.StderrTruncated {
+		return execx.Result{}, a.verifyFailed(rep, name, "guest output was truncated", "re-run with a smaller probe or inspect the guest manually")
+	}
+	return res, nil
+}
+
+func (a *Adapter) reconcileDockerGroup(ctx context.Context, rep *BootstrapReport) error {
+	const name = "docker_group"
+	res, err := a.guestProbe(ctx, rep, name, "id", "-nG", HermesUser)
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 {
+		return a.verifyFailed(rep, name, "cannot read hermes group membership", "confirm the hermes user exists on the guest")
+	}
+	if hasGroup(string(res.Stdout), dockerGroup) {
+		rep.record(name, true, "already a member")
+		return nil
+	}
+	add, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "usermod", "-aG", dockerGroup, HermesUser)
+	if err != nil {
+		return err
+	}
+	if add.ExitCode != 0 {
+		return a.verifyFailed(rep, name, "usermod -aG docker hermes failed", "grant the hermes user docker group membership on the guest")
+	}
+	rep.record(name, true, "added to docker group")
+	return nil
+}
+
+func (a *Adapter) reconcileHermesShim(ctx context.Context, rep *BootstrapReport) error {
+	const name = "hermes_shim"
+	// Never create a dangling shim: confirm the pinned launcher exists first. A
+	// missing launcher is drift, not something to repair.
+	present, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "test", "-x", hermesTarget)
+	if err != nil {
+		return err
+	}
+	if present.ExitCode != 0 {
+		return a.verifyFailed(rep, name, "pinned hermes launcher not found at "+hermesTarget, "the hermes install drifted; re-provision the agent before bootstrap")
+	}
+	link, err := a.guestProbe(ctx, rep, name, "readlink", hermesShimPath)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(string(link.Stdout)) == hermesTarget {
+		rep.record(name, true, "shim already correct")
+		return nil
+	}
+	ln, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "ln", "-sfn", hermesTarget, hermesShimPath)
+	if err != nil {
+		return err
+	}
+	if ln.ExitCode != 0 {
+		return a.verifyFailed(rep, name, "could not install the hermes shim", "check write access to "+hermesShimPath)
+	}
+	rep.record(name, true, "shim installed")
+	return nil
+}
+
+func (a *Adapter) verifyArch(ctx context.Context, rep *BootstrapReport) error {
+	const name = "arch"
+	res, err := a.guestProbe(ctx, rep, name, "uname", "-m")
+	if err != nil {
+		return err
+	}
+	arch := strings.TrimSpace(string(res.Stdout))
+	if res.ExitCode != 0 || arch != requiredArch {
+		return a.verifyFailed(rep, name, fmt.Sprintf("arch %q, want %q", arch, requiredArch), "the target VM must be Linux arm64")
+	}
+	rep.record(name, true, arch)
+	return nil
+}
+
+func (a *Adapter) verifyHermes(ctx context.Context, rep *BootstrapReport, pinned string) error {
+	const name = "hermes_version"
+	// The documented stable command path: as the hermes user, via the bare
+	// `hermes` name resolved by the shim on sudo's secure_path.
+	res, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "-u", HermesUser, "--", "hermes", "--version")
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 {
+		return a.verifyFailed(rep, name, "`hermes --version` exited non-zero", "confirm the hermes shim and install on the guest")
+	}
+	version, okv := parseHermesVersion(string(res.Stdout))
+	if !okv {
+		return a.verifyFailed(rep, name, "`hermes --version` produced no recognizable version", "a clean exit is not proof; inspect the hermes install")
+	}
+	if pinned != "" && version != pinned {
+		return a.verifyFailed(rep, name, fmt.Sprintf("hermes version %q, pinned %q", version, pinned), "version drift: reconcile the pinned hermes install, do not paper over")
+	}
+	rep.record(name, true, version)
+	return nil
+}
+
+func (a *Adapter) verifyDocker(ctx context.Context, rep *BootstrapReport) error {
+	const name = "docker_server"
+	// `docker version --format {{.Server.Version}}` returns non-zero if the
+	// server is unreachable, so a zero exit with a non-empty server version
+	// proves the daemon is reachable by the hermes identity — not merely that a
+	// client binary exists.
+	res, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "-u", HermesUser, "--", "docker", "version", "--format", "{{.Server.Version}}")
+	if err != nil {
+		return err
+	}
+	server := strings.TrimSpace(string(res.Stdout))
+	if res.ExitCode != 0 || server == "" {
+		return a.verifyFailed(rep, name, "docker server not reachable by the hermes identity", "ensure the docker daemon is running and hermes is in the docker group")
+	}
+	rep.record(name, true, server)
+	return nil
+}
+
+func (a *Adapter) verifyGit(ctx context.Context, rep *BootstrapReport) error {
+	const name = "git"
+	res, err := a.guestProbe(ctx, rep, name, "git", "--version")
+	if err != nil {
+		return err
+	}
+	out := strings.TrimSpace(string(res.Stdout))
+	if res.ExitCode != 0 || !strings.HasPrefix(out, "git version ") {
+		return a.verifyFailed(rep, name, "`git --version` did not report a version", "install git on the guest")
+	}
+	rep.record(name, true, strings.TrimPrefix(out, "git version "))
+	return nil
+}
+
+func (a *Adapter) verifyPaths(ctx context.Context, rep *BootstrapReport) error {
+	for _, p := range bootstrapRequiredPaths {
+		name := "path:" + p
+		st, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%F", p)
+		if err != nil {
+			return err
+		}
+		if st.ExitCode != 0 || strings.TrimSpace(string(st.Stdout)) != "directory" {
+			return a.verifyFailed(rep, name, "not a directory", "create the persistent Hermes directory on the guest")
+		}
+		fm, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "findmnt", "-n", "-o", "FSTYPE,SOURCE", "-T", p)
+		if err != nil {
+			return err
+		}
+		fields := strings.Fields(string(fm.Stdout))
+		if fm.ExitCode != 0 || len(fields) < 1 {
+			return a.verifyFailed(rep, name, "could not resolve the backing filesystem", "verify the path exists on the guest")
+		}
+		fstype := fields[0]
+		if !nativeFSTypes[fstype] {
+			return a.verifyFailed(rep, name, "backed by non-native filesystem "+fstype, "Hermes state must live on the VM's Linux filesystem, not a host share (ADR-0003)")
+		}
+		rep.record(name, true, strings.Join(fields, " "))
+	}
+	return nil
+}
+
+func (a *Adapter) verifyNoHostMounts(ctx context.Context, rep *BootstrapReport) error {
+	const name = "no_host_mounts"
+	// findmnt has an exact, evidence-backed PASS contract: it exits 1 with empty
+	// output only when nothing matches the host-share filter. That is the ONLY
+	// result we accept as "no broad host mount". A matched line (exit 0, non-empty)
+	// is a host mount and fails closed. Every other shape is unreliable and must
+	// also fail closed rather than be read as PASS — e.g. exit 127 when findmnt is
+	// missing, an unexpected exit 0 with empty output, or any other query failure.
+	// Empty stdout alone is NOT proof of "no host share"; only exit 1 + empty is.
+	res, err := a.guestProbe(ctx, rep, name, "findmnt", "-rn", "-t", hostShareFSTypes, "-o", "TARGET,FSTYPE")
+	if err != nil {
+		return err
+	}
+	out := strings.TrimSpace(string(res.Stdout))
+	switch {
+	case res.ExitCode == 1 && out == "":
+		// Documented PASS shape: no host-share mount matched.
+		rep.record(name, true, "none")
+		return nil
+	case res.ExitCode == 0 && out != "":
+		// findmnt matched at least one host-share mount over the guest.
+		return a.verifyFailed(rep, name, "a macOS host-share mount is present", "remove the broad host mount; only a narrow transfer folder is allowed (ADR-0003)")
+	default:
+		// Anything else is not the evidence-backed PASS shape and cannot prove the
+		// absence of a host mount: exit 127 (findmnt missing / exec failure), an
+		// unexpected exit 0 with empty output, exit 1 with stray output, or any
+		// other nonzero query failure. Fail closed.
+		return a.verifyFailed(rep, name, fmt.Sprintf("could not reliably determine host-share mounts (exit %d)", res.ExitCode), "confirm findmnt is present on the guest and re-run bootstrap")
+	}
+}
+
+// hasGroup reports whether a space-separated `id -nG` group list contains group.
+func hasGroup(groups, group string) bool {
+	for _, g := range strings.Fields(groups) {
+		if g == group {
+			return true
+		}
+	}
+	return false
+}
+
+// parseHermesVersion extracts the semver-ish version from `hermes --version`
+// output, whose first line is verified to look like
+// "Hermes Agent v0.19.0 (2026.7.20) · upstream …". A recognizable version is
+// required: a clean exit with unrecognized output is not proof.
+func parseHermesVersion(out string) (string, bool) {
+	line := strings.TrimSpace(firstLine(out))
+	const marker = "Hermes Agent v"
+	i := strings.Index(line, marker)
+	if i < 0 {
+		return "", false
+	}
+	rest := line[i+len(marker):]
+	end := strings.IndexAny(rest, " \t(")
+	if end >= 0 {
+		rest = rest[:end]
+	}
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		return "", false
+	}
+	return rest, true
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
+// boundDetail caps a derived detail string so a report value can never carry an
+// unbounded blob into the JSON envelope.
+func boundDetail(s string) string {
+	const max = 200
+	s = strings.TrimSpace(s)
+	if len(s) > max {
+		return s[:max] + "…"
+	}
+	return s
+}

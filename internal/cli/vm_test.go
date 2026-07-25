@@ -308,6 +308,197 @@ func TestVMSSHJSONRemoteNonZeroHasConcreteCommand(t *testing.T) {
 	}
 }
 
+// --- vm stop ---
+
+func TestVMStopSuccessHumanAndJSON(t *testing.T) {
+	// Human: Running → stop → Stopped.
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: listJSON("hermes-box", "Running")},
+		{res: execx.Result{ExitCode: 0}},
+		{res: listJSON("hermes-box", "Stopped")},
+	}}
+	code, stdout, stderr := runVMWithFake(t, []string{"vm", "stop"}, fake)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	if strings.TrimSpace(stdout) != "hermes-box: stopped" {
+		t.Errorf("stdout = %q, want %q", stdout, "hermes-box: stopped\n")
+	}
+
+	// JSON: same three-step script.
+	fake = &fakeLimaRunner{script: []scriptedResp{
+		{res: listJSON("hermes-box", "Running")},
+		{res: execx.Result{ExitCode: 0}},
+		{res: listJSON("hermes-box", "Stopped")},
+	}}
+	code, stdout, _ = runVMWithFake(t, []string{"vm", "stop", "--json"}, fake)
+	if code != int(ExitOK) {
+		t.Fatalf("json exit = %d, want 0", code)
+	}
+	env := decodeOneEnvelope(t, stdout)
+	if env["ok"] != true || env["command"] != "vm.stop" {
+		t.Errorf("unexpected envelope: %v", env)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data["name"] != "hermes-box" || data["state"] != "stopped" {
+		t.Errorf("data = %v, want name=hermes-box state=stopped", data)
+	}
+}
+
+func TestVMStopAlreadyStoppedIsIdempotent(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{{res: listJSON("hermes-box", "Stopped")}}}
+	code, stdout, _ := runVMWithFake(t, []string{"vm", "stop"}, fake)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0 (idempotent stopped)", code)
+	}
+	if strings.TrimSpace(stdout) != "hermes-box: stopped" {
+		t.Errorf("stdout = %q, want stopped", stdout)
+	}
+	if len(fake.calls) != 1 {
+		t.Errorf("callCount = %d, want 1 (no `limactl stop` when already stopped)", len(fake.calls))
+	}
+}
+
+func TestVMStopNotFoundIsPrecondition(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{{res: listJSON("other", "Running")}}}
+	code, _, _ := runVMWithFake(t, []string{"vm", "stop"}, fake)
+	if code != int(ExitPrecondition) {
+		t.Fatalf("exit = %d, want %d (precondition)", code, int(ExitPrecondition))
+	}
+}
+
+func TestVMStopBinaryUnavailableIsExternal(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{{err: errors.New("exec: \"limactl\": not found")}}}
+	code, _, _ := runVMWithFake(t, []string{"vm", "stop"}, fake)
+	if code != int(ExitExternal) {
+		t.Fatalf("exit = %d, want %d (external)", code, int(ExitExternal))
+	}
+}
+
+func TestVMStopJSONErrorHasConcreteCommand(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{{res: listJSON("other", "Running")}}}
+	code, stdout, _ := runVMWithFake(t, []string{"vm", "stop", "--json"}, fake)
+	if code != int(ExitPrecondition) {
+		t.Fatalf("exit = %d, want %d", code, int(ExitPrecondition))
+	}
+	env := decodeOneEnvelope(t, stdout)
+	if env["ok"] != false || env["command"] != "vm.stop" {
+		t.Errorf("envelope = %v, want ok=false command=vm.stop", env)
+	}
+}
+
+// --- vm bootstrap ---
+
+// bootstrapHappyResp is the ordered CLI-runner script for a fully-reconciled,
+// fully-verified target (mirrors internal/lima's bootstrapHappyScript).
+func bootstrapHappyResp() []scriptedResp {
+	out := func(s string) execx.Result { return execx.Result{ExitCode: 0, Stdout: []byte(s)} }
+	return []scriptedResp{
+		{res: listJSON("hermes-box", "Running")},                  // list precondition
+		{res: out("hermes docker\n")},                             // id -nG hermes
+		{res: execx.Result{ExitCode: 0}},                          // test -x target
+		{res: out("/home/hermes/hermes-agent/venv/bin/hermes\n")}, // readlink shim (correct)
+		{res: out("aarch64\n")},                                   // uname -m
+		{res: out("Hermes Agent v0.19.0 (2026.7.20)\n")},          // hermes --version
+		{res: out("29.6.2\n")},                                    // docker server version
+		{res: out("git version 2.43.0\n")},                        // git --version
+		{res: out("directory\n")},                                 // stat path0
+		{res: out("ext4 /dev/vda1\n")},                            // findmnt path0
+		{res: out("directory\n")},                                 // stat path1
+		{res: out("ext4 /dev/vda1\n")},                            // findmnt path1
+		{res: execx.Result{ExitCode: 1}},                          // findmnt host-shares (none)
+	}
+}
+
+func TestVMBootstrapSuccessJSON(t *testing.T) {
+	fake := &fakeLimaRunner{script: bootstrapHappyResp()}
+	code, stdout, stderr := runVMWithFake(t, []string{"vm", "bootstrap", "--json", "--timeout", "5m"}, fake)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	env := decodeOneEnvelope(t, stdout)
+	if env["ok"] != true || env["command"] != "vm.bootstrap" {
+		t.Fatalf("unexpected envelope: %v", env)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data["instance"] != "hermes-box" {
+		t.Errorf("instance = %v, want hermes-box", data["instance"])
+	}
+	if data["kb_path"] != "/home/hermes/.hermes" {
+		t.Errorf("kb_path = %v, want /home/hermes/.hermes", data["kb_path"])
+	}
+	checks, _ := data["checks"].([]any)
+	if len(checks) == 0 {
+		t.Fatalf("checks empty; want the full verified set")
+	}
+	for _, c := range checks {
+		m, _ := c.(map[string]any)
+		if m["ok"] != true {
+			t.Errorf("check %v not ok", m["name"])
+		}
+	}
+}
+
+func TestVMBootstrapSuccessHumanHasHandoff(t *testing.T) {
+	fake := &fakeLimaRunner{script: bootstrapHappyResp()}
+	code, stdout, stderr := runVMWithFake(t, []string{"vm", "bootstrap", "--timeout", "5m"}, fake)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	// The handoff must identify the persistent KB location for the operator.
+	if !strings.Contains(stdout, "/home/hermes/.hermes") {
+		t.Errorf("human output must surface the persistent KB path; got %q", stdout)
+	}
+}
+
+func TestVMBootstrapNotRunningIsPrecondition(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{{res: listJSON("hermes-box", "Stopped")}}}
+	code, stdout, _ := runVMWithFake(t, []string{"vm", "bootstrap", "--json"}, fake)
+	if code != int(ExitPrecondition) {
+		t.Fatalf("exit = %d, want %d (precondition)", code, int(ExitPrecondition))
+	}
+	env := decodeOneEnvelope(t, stdout)
+	if env["ok"] != false || env["command"] != "vm.bootstrap" {
+		t.Errorf("envelope = %v, want ok=false command=vm.bootstrap", env)
+	}
+}
+
+func TestVMBootstrapVerificationFailureIsExit6(t *testing.T) {
+	// Arch mismatch → verification failure → exit 6, with the failing check
+	// surfaced in the redacted error details.
+	s := bootstrapHappyResp()
+	s[4] = scriptedResp{res: execx.Result{ExitCode: 0, Stdout: []byte("x86_64\n")}}
+	fake := &fakeLimaRunner{script: s}
+	code, stdout, _ := runVMWithFake(t, []string{"vm", "bootstrap", "--json", "--timeout", "5m"}, fake)
+	if code != int(ExitVerification) {
+		t.Fatalf("exit = %d, want %d (verification)", code, int(ExitVerification))
+	}
+	env := decodeOneEnvelope(t, stdout)
+	if env["ok"] != false || env["command"] != "vm.bootstrap" {
+		t.Errorf("envelope = %v, want ok=false command=vm.bootstrap", env)
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj["code"] != "VERIFICATION_FAILED" {
+		t.Errorf("error.code = %v, want VERIFICATION_FAILED", errObj["code"])
+	}
+}
+
+func TestVMBootstrapHumanErrorNoStdoutContamination(t *testing.T) {
+	s := bootstrapHappyResp()
+	s[4] = scriptedResp{res: execx.Result{ExitCode: 0, Stdout: []byte("x86_64\n")}}
+	fake := &fakeLimaRunner{script: s}
+	code, stdout, stderr := runVMWithFake(t, []string{"vm", "bootstrap", "--timeout", "5m"}, fake)
+	if code != int(ExitVerification) {
+		t.Fatalf("exit = %d, want %d", code, int(ExitVerification))
+	}
+	if stdout != "" {
+		t.Errorf("human error mode: stdout must be empty, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "arch") {
+		t.Errorf("stderr should carry the failing check diagnostic, got %q", stderr)
+	}
+}
+
 // --- vm parent / unknown subcommands ---
 
 func TestVMNoSubcommandIsUsage(t *testing.T) {

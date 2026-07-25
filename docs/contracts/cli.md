@@ -104,6 +104,7 @@ hb reconcile [--dry-run] [--json]
 hb vm init [--template PATH]
 hb vm start
 hb vm stop
+hb vm bootstrap
 hb vm status
 hb vm ssh [-- COMMAND...]
 hb vm logs
@@ -111,7 +112,10 @@ hb vm logs
 
 - `init` jest idempotentne dla zgodnego template digestu.
 - Zmiana niebezpiecznego template field wymaga jawnego recreate planu.
-- `stop` nie usuwa VM ani danych.
+- `stop` nie usuwa VM ani danych. Jest idempotentne (już `Stopped` → exit 0) i nie ufa czystemu exit code: po `limactl stop` re-query wymaga stanu `Stopped`, inaczej fail-closed (exit 3). Nigdy nie używa `--force`.
+- `bootstrap` reconciliuje i weryfikuje **istniejący** target dla Remote Second Brain V1: stabilną, nieinteraktywną komendę `hermes` oraz dostęp do Dockera dla przewidzianego non-root użytkownika gościa (`hermes`). Działa wyłącznie na istniejącym targetcie po zweryfikowanym warunku `Running`, przez typed Lima/execx boundary (fixed argv, bez `sh -c`, bez sklejanych stringów, bounded/redacted output). Jest idempotentne i wąskie: może zapewnić membership `hermes` w grupie `docker` oraz symlink PATH `/usr/local/bin/hermes`, ale **nie** recreatuje/re-image'uje VM, nie instaluje modelu/providera, nie przyjmuje sekretów i nie tworzy usług gateway/serve.
+- `bootstrap` **weryfikuje** (nie ufa samemu exit code): `uname -m == aarch64`; `hermes --version` przez tę samą, dokumentowaną stabilną ścieżkę; osiągalność serwera Docker dla tożsamości `hermes`; `git --version`; że wymagane ścieżki Hermes KB/workspace są katalogami na natywnym Linux filesystem (nie host share); oraz brak szerokiego host mountu macOS. Każdy nieznany/nieweryfikowalny stan lub drift (architektura/wersja/mount) jest raportowany i fail-closed (exit 6), nie papering over. Rerun jest sukcesem tylko gdy wszystkie postconditions są udowodnione.
+- `bootstrap` wykonuje kilka bounded guest probes; uruchamiaj z odpowiednio dużym `--timeout` (np. `--timeout 5m`). Akcja dotarcia do zdalnego Hermesa po bootstrapie pozostaje operator-controlled (np. `hb vm ssh -- sudo -u hermes -- hermes --version`).
 
 ### Backend i gateway
 
