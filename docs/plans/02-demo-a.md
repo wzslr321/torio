@@ -90,18 +90,55 @@ envelope D1 (drugi decode = `io.EOF`).
 
 Następny slice: **D3 — Lima adapter** (nierozpoczęty). D3–D8/Demo B pozostają nierozpoczęte.
 
-## D3 — Lima adapter
+## D3 — Lima adapter — V1 adapter (status/start/ssh) pending review; Init/Stop deferred
 
-Typed adapter:
+Status: **D3-V1 `internal/lima` adapter (probe/status/start/ssh) — pending review** (2026-07-25).
+**To NIE jest zamknięcie D3 milestone.** V1 to świadomie najmniejsza użyteczna ścieżka adaptera:
+tworzenie instancji (`init`, z zaufanego template) oraz `stop` są **odłożone do późniejszego
+slice'a** i nie ma ich w kodzie. Bez CLI wiring operator nie ma jeszcze żadnego sposobu wywołania
+adaptera z `hb`. Zrealizowane test-first w `internal/lima/`, wyłącznie przez `execx.Runner`
+(typed argv, brak `sh -c`). Discovery oparte o realny, zainstalowany `limactl 2.2.0`; sanityzowane,
+read-only evidence w `docs/spike-results/evidence/etap-0d-lima-adapter/` (żadna komenda mutująca nie
+została uruchomiona).
 
-- feature/version probe,
-- init/start/stop/status/ssh,
-- argument arrays, no `sh -c`,
-- idempotency,
-- timeout/cancellation,
-- fake process runner tests.
+Zakres V1 (zaimplementowany):
 
-Provisioning template generowany wyłącznie z trusted embedded/template files.
+- feature/version probe (`limactl --version`): parsuje `limactl version <semver>` — walidowana
+  gramatyka semver (`MAJOR.MINOR.PATCH` + opcjonalny pre-release/build), nie dowolny `\S+`; sprawdza
+  opcjonalny pin `VersionLock.Lima` (przekazywany przez wywołującego jako zwykły parametr — adapter
+  nie importuje `internal/config`); rozdziela binary-missing / non-zero exit / malformed output /
+  version mismatch / timeout / cancellation,
+- status (`limactl list --json --tty=false`): streaming NDJSON decode (realny output to jeden obiekt
+  JSON na linię, nie tablica), mapowanie `Running/Stopped/Broken/Unknown` na własny `State`; każdy
+  nierozpoznany string statusu jest fail-closed (malformed output); **odmawia parsowania obciętego
+  outputu** (`execx` `StdoutTruncated`) i **odrzuca rekordy z pustym `name`/`status`** zamiast
+  interpretować je jako „brak VM",
+- start (`limactl start <instance> --tty=false`): idempotentny sukces tylko gdy świeżo odpytany stan
+  już jest `Running`; brak instancji lub stan niejednoznaczny (`Broken`/`Unknown`) to fail-closed błąd
+  bez mutacji; po `start` z exit 0 adapter re-odpytuje status i wymaga dokładnie `Running`, inaczej
+  fail-closed `postcondition_failed` — czysty exit code sam w sobie nie wystarcza,
+- ssh (`limactl shell --tty=false <instance> -- COMMAND...`): każdy token komendy to osobny element
+  argv z jawnym separatorem `--`, więc token wyglądający jak flaga nie może zostać
+  zreinterpretowany; czysty non-zero exit zdalnej komendy nie jest błędem adaptera (ten sam kontrakt
+  co `execx`),
+- każda metoda przyjmuje `context.Context` wywołującego i przekazuje go bez zmian (bez wewnętrznego
+  `context.Background()`); fake-runner testy pokrywają timeout/cancellation.
+
+**Odłożone do kolejnych slice'ów (świadomie, poza V1):**
+
+- `init` (create z zaufanego, embedded template + kontrola zgodności istniejącej instancji: brak host
+  mountów, `ssh.loadDotSSHPubKeys == false`, dokładny image) oraz `stop` — usunięte z V1, wrócą jako
+  osobny slice; sanityzowane pola `mounts`/`ssh` w evidence są zachowane pod ten przyszły slice,
+- **CLI wiring** — pierwszy user-facing PR po tym wąskim adapterze: `hb vm status`, `hb vm start`,
+  `hb vm ssh -- COMMAND...`. Wymaga własnej tabeli mapowania `lima.ErrorKind` → exit code i kształtu
+  JSON envelope dla stanu VM; to osobny, testowalny slice na poziomie `internal/cli`.
+
+Poza zakresem (świadomie, dalej): D4 deterministic bootstrap, instalacja Docker/Hermes/Git, cloud-init
+bootstrap scripts, `hb doctor`, gateway, serve lifecycle, Hermes adapter, Docker adapter, host mounts,
+credentials/provider config.
+
+Następny slice: **D3 CLI wiring** (`hb vm status`, następnie `start`, `ssh`) — nierozpoczęte; potem
+przywrócenie `init`/`stop` i dopiero po nich D4 — Deterministic bootstrap.
 
 ## D4 — Deterministic bootstrap
 
