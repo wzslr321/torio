@@ -44,6 +44,11 @@ type CLIError struct {
 	Code    string
 	Message string
 	Details map[string]any
+	// Command, when non-empty, is the concrete envelope command name for this
+	// error (e.g. "vm.status"), so a failing command's error envelope matches
+	// its success envelope. Empty falls back to the first-non-flag arg, which
+	// is all an early parse/usage error (before dispatch) can know.
+	Command string
 }
 
 func (e *CLIError) Error() string { return e.Message }

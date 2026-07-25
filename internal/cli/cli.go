@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"hermes-box.local/hb/internal/config"
+	"hermes-box.local/hb/internal/lima"
 )
 
 // app holds the per-invocation wiring shared across the command tree.
@@ -36,6 +37,11 @@ type app struct {
 	// runtime is the resolved D2 configuration (paths + config document). It is
 	// populated by PersistentPreRunE and consumed by command execution.
 	runtime config.Runtime
+
+	// newLima builds the Lima adapter for a command run. It is the unexported
+	// test seam: production defaults to a real execx-backed adapter, tests
+	// inject one wired to a fake runner. It never touches a real VM in tests.
+	newLima func() *lima.Adapter
 }
 
 // Run builds the command tree, executes it, and returns the process exit code.
@@ -44,6 +50,17 @@ type app struct {
 // JSON mode, rendered as a single error envelope on stdout.
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer, build BuildInfo) int {
 	a := &app{stdout: stdout, stderr: stderr, build: build}
+	return runWithApp(ctx, a, args)
+}
+
+// runWithApp builds and executes the command tree for a preconfigured app. Run
+// is the production wrapper; tests call this directly to inject a fake Lima
+// adapter via a.newLima before dispatch. Any unset seam defaults to production
+// wiring so the two paths stay identical everywhere else.
+func runWithApp(ctx context.Context, a *app, args []string) int {
+	if a.newLima == nil {
+		a.newLima = defaultNewLima
+	}
 	root := newRootCmd(a)
 	root.SetArgs(args)
 
@@ -59,7 +76,13 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, build Bui
 		// secrets, so no registered literals exist yet; known-shape redaction in
 		// fail still applies. Later slices pass a populated redactor here.
 		jsonOut := a.jsonOut || wantsJSON(args)
-		return fail(stdout, stderr, firstNonFlag(args), jsonOut, cerr, nil)
+		// A categorized error knows its concrete command (e.g. "vm.status");
+		// only early parse/usage errors fall back to scanning args.
+		command := cerr.Command
+		if command == "" {
+			command = firstNonFlag(args)
+		}
+		return fail(a.stdout, a.stderr, command, jsonOut, cerr, nil)
 	}
 	return int(ExitOK)
 }
@@ -128,6 +151,7 @@ func newRootCmd(a *app) *cobra.Command {
 	root.PersistentFlags().StringVar(&a.stateDir, "state-dir", "", "override the state directory (test/diagnostic)")
 
 	root.AddCommand(newVersionCmd(a))
+	root.AddCommand(newVMCmd(a))
 	return root
 }
 

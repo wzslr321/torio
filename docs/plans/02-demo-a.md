@@ -129,16 +129,17 @@ Zakres V1 (zaimplementowany):
 - `init` (create z zaufanego, embedded template + kontrola zgodności istniejącej instancji: brak host
   mountów, `ssh.loadDotSSHPubKeys == false`, dokładny image) oraz `stop` — usunięte z V1, wrócą jako
   osobny slice; sanityzowane pola `mounts`/`ssh` w evidence są zachowane pod ten przyszły slice,
-- **CLI wiring** — pierwszy user-facing PR po tym wąskim adapterze: `hb vm status`, `hb vm start`,
-  `hb vm ssh -- COMMAND...`. Wymaga własnej tabeli mapowania `lima.ErrorKind` → exit code i kształtu
-  JSON envelope dla stanu VM; to osobny, testowalny slice na poziomie `internal/cli`.
+- ~~**CLI wiring**~~ — **DONE, pending review** (2026-07-25): `hb vm status`, `hb vm start`,
+  `hb vm ssh -- COMMAND...` wpięte w `internal/cli` przez unexported seam (`app.newLima`), z
+  mapowaniem `lima.ErrorKind` → exit code (not_found/ambiguous/postcondition→3; binary/command/
+  malformed/version/timeout/cancel→8; remote non-zero → 8) i JSON envelope dla stanu VM.
 
 Poza zakresem (świadomie, dalej): D4 deterministic bootstrap, instalacja Docker/Hermes/Git, cloud-init
 bootstrap scripts, `hb doctor`, gateway, serve lifecycle, Hermes adapter, Docker adapter, host mounts,
 credentials/provider config.
 
-Następny slice: **D3 CLI wiring** (`hb vm status`, następnie `start`, `ssh`) — nierozpoczęte; potem
-przywrócenie `init`/`stop` i dopiero po nich D4 — Deterministic bootstrap.
+Następny slice: przywrócenie `init`/`stop` (adapter + CLI), a dopiero po nich D4 — Deterministic
+bootstrap. CLI wiring `status`/`start`/`ssh` jest już zrobione (pending review).
 
 ## D4 — Deterministic bootstrap
 
