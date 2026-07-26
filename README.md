@@ -1,98 +1,98 @@
-# Hermes Box
+# Torio
 
-> Reprodukowalne i kontrolowane środowisko dla Hermes Agent na Macach Apple Silicon.
+Project website: [torio.dev](https://torio.dev)
 
-**Status:** pakiet projektowy gotowy do implementacji. Kod produkcyjny nie został jeszcze rozpoczęty. Pierwszym etapem jest obowiązkowy spike weryfikujący aktualne zachowanie Hermesa, Lima, Git worktrees i Docker backendu.
+> Torio is a thin, trusted control plane for running an AI second brain and a
+> single controlled coding workspace on a Linux VM on Apple Silicon Macs.
 
-## Cel
+**Status: Torio V0.** The delivered product is deliberately narrow and fully
+operator-controlled. Everything below describes what exists today; anything not
+listed here is not part of V0.
 
-Hermes Box łączy cztery role bez budowania drugiego frameworka agentowego:
+## What Torio V0 is today
 
-1. **Hermes Brain** — rozmowa, pamięć, planowanie i zgłaszanie pracy.
-2. **Hermes Kanban** — trwała kolejka, dispatcher, retries, heartbeats i procesy workerów.
-3. **Hermes Box Control Plane** — admission, policy, izolacja wykonania, Git, verification, approval, integration i push.
-4. **Człowiek** — jedyna władza zatwierdzająca, integrująca i wypychająca zmiany.
+Torio V0 delivers two things on the **existing** `hermes-box` Lima VM:
 
-Najważniejszy invariant:
+1. **Remote Second Brain V1 (controlled dogfood).** A persistent Hermes backend
+   runs as a user systemd service inside the VM, bound to guest loopback only. It
+   is reached from the Mac exclusively through an **operator-established SSH
+   tunnel** — Torio itself opens no tunnel and starts no chat.
 
-> Brain planuje i zgłasza. Hermes dispatchuje. Hermes Box egzekwuje granice. Worker produkuje kandydat. Człowiek zatwierdza dokładnie ten artefakt, który zostaje zintegrowany.
+2. **Code V0 — exactly one hardcoded workspace.** Torio prepares a single,
+   credential-neutral guest-side clone of one fixed repository at
+   `/home/hermes/projects/REDACTED-PROJECT` and registers it as a Hermes
+   project. The operator then inspects/edits it, runs one documented
+   non-destructive check, reviews `git diff` / `git status`, and **decides
+   manually** whether to commit or push.
 
-## Zacznij tutaj
+The operator-controlled code loop is: **edit/inspect → run one documented safe
+check → inspect diff/status → manual commit/push decision.** Commit and push are
+human-only and out of scope for Torio.
 
-Czytaj w tej kolejności:
+## Scope and limitations (what V0 is *not*)
 
-1. [`AGENTS.md`](AGENTS.md) — normatywne zasady dla LLM-a i developera.
-2. [`docs/01-product-brief.md`](docs/01-product-brief.md) — problem, użytkownik i sukces.
-3. [`docs/02-scope.md`](docs/02-scope.md) — zakres oraz zakazy.
-4. [`docs/03-architecture.md`](docs/03-architecture.md) — architektura i przepływy.
-5. [`docs/04-threat-model.md`](docs/04-threat-model.md) — model zagrożeń.
-6. [`docs/05-responsibilities.md`](docs/05-responsibilities.md) — granice odpowiedzialności.
-7. [`docs/contracts/`](docs/contracts/) — CLI, konfiguracja, policy, state i evidence.
-8. [`docs/adr/`](docs/adr/) — zatwierdzone decyzje architektoniczne.
-9. [`docs/plans/00-roadmap.md`](docs/plans/00-roadmap.md) — kolejność etapów.
-10. [`prompts/`](prompts/) — samodzielne prompty do pracy z LLM-em.
+Torio V0 is intentionally not:
 
-## Lokalny start z LLM-em
+- **not** a worker/agent platform (no dispatcher, queue, or autonomous workers);
+- **not** multi-project — exactly one hardcoded workspace;
+- **not** an isolated per-task sandbox;
+- **not** Git automation — no automated commit, push, merge, or release;
+- **not** a demonstrated Hermes Desktop coding chat — driving an actual Desktop
+  session is a manual human step, not something V0 performs or proves.
 
-```bash
-# Po rozpakowaniu paczki
-cd hermes-box
-python3 scripts/validate_artifacts.py
+## Prerequisites (high level)
 
-# Następnie uruchom wybranego agenta w katalogu repo.
-# AGENTS.md zostanie automatycznie wykryty przez Hermes/Codex/Claude Code.
-```
+- A macOS host on Apple Silicon with `limactl` on `PATH`.
+- The `hermes-box` Lima VM **already created** — Torio never creates,
+  re-images, or destroys it.
+- The `hb` binary built from this repository: `go build -o hb ./cmd/hb`.
+- For Code V0 only: repo-scoped **read** access to the private remote must
+  already exist on the guest. Provisioning that access is a **human-only
+  prerequisite outside Torio** (see the note below).
 
-Pierwszy prompt:
+## Getting started
 
-```text
-Przeczytaj AGENTS.md oraz prompts/01-spike.md. Nie implementuj Demo A ani Demo B.
-Zrealizuj wyłącznie spike zgodnie z docs/plans/01-spike.md, zapisując rzeczywiste
-wyniki w docs/spike-results/. Nie zgaduj zachowania Hermesa.
-```
+Torio's canonical operational documentation is the two runbooks. They contain
+the exact, ordered commands; this README does not duplicate them.
 
-## Etapy
+1. Build the CLI: `go build -o hb ./cmd/hb`.
+2. Bring up the Remote Second Brain and connect over the operator tunnel:
+   [`docs/runbooks/remote-second-brain-v1.md`](docs/runbooks/remote-second-brain-v1.md).
+3. Prepare and drive the single Code V0 workspace:
+   [`docs/runbooks/code-v0-REDACTED-PROJECT.md`](docs/runbooks/code-v0-REDACTED-PROJECT.md).
 
-| Etap | Wynik | Automatyczne coding tasks |
-|---|---|---:|
-| 0. Spike | Zweryfikowane kontrakty runtime | Nie |
-| 1. Demo A | Desktop ↔ Lima ↔ Hermes Brain | Nie |
-| 2. Demo B | Jeden bezpieczny coding worker | Tak, jeden projekt |
-| 3. Hardening | Silniejsza separacja procesów i executorów | Tak |
-| 4. Company-ready | Multi-project, backup, audit, policy governance | Tak |
-
-## Zasady bezpieczeństwa PoC
-
-- Lima jest granicą między agentem a macOS.
-- Profile Hermesa **nie są sandboxem**.
-- Workload container jest świeży per task.
-- Worker nie dostaje Docker socketa, Git metadata, push credentials ani pamięci Braina.
-- `network none` obejmuje kontener; host-side web/MCP/messaging tools są osobno zabronione.
-- Załadowane skills są częścią policy, ponieważ mogą forwardować env i credential files.
-- Worker jest zatrzymywany przed snapshotem.
-- Exact snapshot jest weryfikowany w świeżym verifier containerze.
-- Approval wiąże base commit, review commit/tree, policy hash i verification evidence.
-- Integracja PoC jest wyłącznie fast-forward i odmawia po zmianie target base.
-- Push jest osobną operacją wymagającą człowieka.
-
-## Stos
-
-- Host: macOS na Apple Silicon.
-- VM: Lima 2.x, Linux arm64.
-- Runtime: Hermes Agent, wersja przypięta po spike'u.
-- Kontenery: Docker Engine w VM; natywny Docker backend Hermesa w Demo B.
-- Control plane: Go 1.26.x, pojedynczy binarny `hb`.
-- State: SQLite jako policy/evidence ledger; Hermes Kanban pozostaje task engine.
-- Git: thin trusted adapter i content-addressed review artifacts.
-
-## Walidacja pakietu
+Optionally, validate the documentation pack for internal consistency:
 
 ```bash
 python3 scripts/validate_artifacts.py
 ```
 
-Walidator sprawdza schematy JSON, przykłady, linki względne, placeholdery sekretów i obecność obowiązkowych dokumentów.
+## Private-repository read access is a human-only prerequisite
 
-## Źródła
+Torio never sets up, configures, stores, or reads credentials, and never causes a
+credential prompt. Read access to the private Code V0 remote must be established
+by a **human, directly on the guest, outside Torio**. The Code V0 runbook's
+**noninteractive credential preflight is the gate**: if it passes, read access
+exists and the workspace step proceeds; if it fails, stop at the human
+prerequisite. The secret and the method by which it is provisioned never enter
+this repository, its evidence, or any PR/comment.
 
-Stan Hermesa został zweryfikowany 2026-07-23 względem oficjalnego repozytorium przy commitcie `d9165d7a678d4105f42921a7fc1886df3804531b`. Przed implementacją należy powtórzyć weryfikację zgodnie z [`docs/07-source-verification.md`](docs/07-source-verification.md).
+## Canonical documentation surface
+
+The active operational surface of Torio V0 is only:
+
+- this `README.md`;
+- [`docs/runbooks/remote-second-brain-v1.md`](docs/runbooks/remote-second-brain-v1.md);
+- [`docs/runbooks/code-v0-REDACTED-PROJECT.md`](docs/runbooks/code-v0-REDACTED-PROJECT.md).
+
+Normative engineering rules for contributors and agents live in
+[`AGENTS.md`](AGENTS.md).
+
+## Legacy architecture
+
+An earlier, broader exploration (Demo A / Demo B, worker/control-plane,
+registry, verifier, and evidence-pipeline plans) predates V0 and is **superseded**.
+It is retained for historical context only and is **not** the current
+implementation plan. See [`docs/legacy-architecture.md`](docs/legacy-architecture.md)
+for what that material is and where it lives. Do not use it as an onboarding or
+task path.

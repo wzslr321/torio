@@ -2,6 +2,35 @@
 
 Ten plik jest nadrzędnym kontraktem pracy w repozytorium Hermes Box. Jeśli inny dokument lub prompt jest sprzeczny z tym plikiem, zatrzymaj pracę i zgłoś konflikt. Nie rozwiązuj konfliktu przez zgadywanie.
 
+## Status Torio V0 (aktualny — nadrzędny wobec sekcji „platformowych” poniżej)
+
+**Aktualnie dostarczonym produktem jest Torio V0 — wąski i w pełni operatorski.**
+Zakres i sposób działania produktu definiują **wyłącznie** [`README.md`](README.md)
+oraz dwa runbooki:
+[`docs/runbooks/remote-second-brain-v1.md`](docs/runbooks/remote-second-brain-v1.md)
+i [`docs/runbooks/code-v0-REDACTED-PROJECT.md`](docs/runbooks/code-v0-REDACTED-PROJECT.md).
+
+- Opisane niżej w tym pliku **platformowe** obowiązki i inwarianty Hermes Box —
+  w szczególności sekcje **4–5** (project registry, admission control, per-task
+  isolation, fresh verifier, approval/integration/push oraz worker/container/
+  worktree invariants) — a także `docs/plans/`, `docs/contracts/`, `docs/adr/`,
+  `prompts/` i `docs/spike-results/`, opisują **superseded / pre-V0** eksplorację.
+  Są zachowane **wyłącznie jako kontekst historyczny** (patrz
+  [`docs/legacy-architecture.md`](docs/legacy-architecture.md)) i **NIE MOGĄ być
+  implementowane ani traktowane jako następny task** w Torio V0.
+- Dyscyplina inżynierska i bezpieczeństwa z sekcji **6–10** (TDD, jeden wąski
+  behavior slice na raz, `scripts/validate_artifacts.py`, typed adaptery i
+  timeouty, redakcja sekretów jako `[REDACTED]`, wymóg evidence, brak sekretów w
+  output/logach) **pozostaje w mocy** — o ile nie wymaga zarchiwizowanej platformy
+  workerów/registry/verifiera.
+- **Rozstrzygnięcie precedensu (nadpisuje akapit powyżej dla zadań Torio V0):**
+  gdy sekcje platformowe tego pliku, plany, kontrakty, ADR-y, prompty lub spike
+  material są sprzeczne z `README.md` lub runbookami, autorytetem dla zakresu i
+  działania produktu są `README.md` i runbooki. Ta rozbieżność jest **oczekiwana**
+  i **nie jest** konfliktem wymagającym zatrzymania pracy — legacy ustępuje V0.
+  Zakaz cichej zmiany ADR-ów (sekcja 9) dotyczy nowych decyzji projektowych, nie
+  tej klasyfikacji archiwalnej.
+
 ## 1. Misja
 
 Budujemy cienki trusted control plane nad Hermes Agent, Lima, Dockerem i Git. Nie budujemy nowego frameworka agentowego, task queue ani ogólnego worktree managera.

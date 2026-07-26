@@ -1,5 +1,13 @@
 # Handoff — Demo A / D1 (CLI skeleton)
 
+> **ARCHIVAL NOTICE (superseded — historical only).** This handoff belongs to the
+> pre-V0 Demo A exploration and is **not** a live next-task instruction. The
+> current product is **Torio V0**; its only active documentation is
+> [`README.md`](README.md) and the two runbooks under
+> [`docs/runbooks/`](docs/runbooks/). Do not act on the "Exact next task" or
+> gate-status sections below — see [`docs/legacy-architecture.md`](docs/legacy-architecture.md).
+> The historical content below is preserved unchanged as evidence.
+
 - Data: 2026-07-24
 - Sesja: pierwszy pionowy slice Demo A — **D1 (CLI skeleton)**. Bez D2–D8, bez Demo B.
 - Wykonawca: Claude Code (Opus 4.8) w imieniu wzslr321
