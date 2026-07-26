@@ -18,6 +18,7 @@ import (
 
 	"hermes-box.local/hb/internal/config"
 	"hermes-box.local/hb/internal/lima"
+	"hermes-box.local/hb/internal/serve"
 )
 
 // app holds the per-invocation wiring shared across the command tree.
@@ -42,6 +43,11 @@ type app struct {
 	// test seam: production defaults to a real execx-backed adapter, tests
 	// inject one wired to a fake runner. It never touches a real VM in tests.
 	newLima func() *lima.Adapter
+
+	// newServe builds the serve-lifecycle adapter for a command run. Same test
+	// seam pattern as newLima: production wires it over the real Lima adapter,
+	// tests inject one backed by a fake guest.
+	newServe func() *serve.Adapter
 }
 
 // Run builds the command tree, executes it, and returns the process exit code.
@@ -60,6 +66,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, build Bui
 func runWithApp(ctx context.Context, a *app, args []string) int {
 	if a.newLima == nil {
 		a.newLima = defaultNewLima
+	}
+	if a.newServe == nil {
+		a.newServe = func() *serve.Adapter { return serve.New(a.newLima()) }
 	}
 	root := newRootCmd(a)
 	root.SetArgs(args)
@@ -152,6 +161,7 @@ func newRootCmd(a *app) *cobra.Command {
 
 	root.AddCommand(newVersionCmd(a))
 	root.AddCommand(newVMCmd(a))
+	root.AddCommand(newServeCmd(a))
 	return root
 }
 

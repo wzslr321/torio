@@ -57,6 +57,12 @@ func (f *fakeRunner) callArgs(i int) []string {
 	return f.calls[i].cmd.Args
 }
 
+func (f *fakeRunner) callStdin(i int) []byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls[i].cmd.Stdin
+}
+
 func (f *fakeRunner) callCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()

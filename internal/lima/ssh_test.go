@@ -62,6 +62,44 @@ func TestSSHArgumentsPreservedAsSeparateElements(t *testing.T) {
 	}
 }
 
+func TestSSHInputExactArgvAndStdin(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{{result: exitResult(0, "", "")}}}
+	a := New(fr)
+
+	payload := []byte("[Unit]\nDescription=x\n")
+	res, err := a.SSHInput(context.Background(), payload, []string{"tee", "/tmp/x"})
+	if err != nil {
+		t.Fatalf("SSHInput: unexpected error: %v", err)
+	}
+	if res.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0", res.ExitCode)
+	}
+	got := fr.callArgs(0)
+	want := []string{"shell", "--tty=false", InstanceName, "--", "tee", "/tmp/x"}
+	if !equalArgs(got, want) {
+		t.Fatalf("argv = %v, want %v", got, want)
+	}
+	if string(fr.callStdin(0)) != string(payload) {
+		t.Fatalf("stdin = %q, want %q", fr.callStdin(0), payload)
+	}
+}
+
+func TestSSHInputBinaryUnavailable(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{
+		{result: execx.Result{ExitCode: -1}, err: errors.New("run limactl: executable file not found in $PATH")},
+	}}
+	a := New(fr)
+
+	_, err := a.SSHInput(context.Background(), []byte("x"), []string{"tee", "/tmp/x"})
+	var lerr *Error
+	if !errors.As(err, &lerr) {
+		t.Fatalf("error is not *lima.Error: %v", err)
+	}
+	if lerr.Kind != KindBinaryUnavailable {
+		t.Fatalf("Kind = %v, want %v", lerr.Kind, KindBinaryUnavailable)
+	}
+}
+
 func TestSSHNonZeroExitIsNotAdapterError(t *testing.T) {
 	// A remote command's own non-zero exit is not an execution failure of
 	// the adapter: the caller reads Result.ExitCode, same contract as execx.

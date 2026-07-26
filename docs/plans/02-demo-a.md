@@ -185,17 +185,44 @@ Acceptance na świeżej VM:
 - transfer mount narrow,
 - żaden token w image/template/logu.
 
-## D5 — Serve lifecycle
+## D5 — Serve lifecycle — persistent loopback Desktop backend (V1) — pending review
 
-Na podstawie spike'a:
+Status: **`internal/serve` + `hb serve install|start|stop|restart|status|logs` — pending review**
+(2026-07-26). Cel: **persistentny, loopback-only Hermes Desktop backend na istniejącej VM `hermes-box`,
+osiągalny z Maca przez operator-controlled SSH tunnel.** To NIE jest formalne Demo A ani żaden claim o
+model conversation, credential migration czy gateway.
 
-- generate/install custom user unit,
-- loopback bind,
-- endpoint readiness,
-- logs/status/restart,
-- feature-detected compatibility.
+Zrealizowane (test-first tam, gdzie behavior; live discovery przed renderowaniem unitu):
 
-Tests: render golden file, wrong CLI surface, port occupied, process active but endpoint dead.
+- **Feature-detected surface** — read-only live discovery `hermes serve --help` (Hermes v0.19.0): loopback
+  defaults `--host 127.0.0.1 --port 9119`, `--skip-build`, endpoint `GET /api/status → 200`. Ustalono też,
+  że `hermes serve --stop/--status` są niewiarygodne (naiwne dopasowanie procesów) → zarządzanie przez
+  systemd, nie przez nie.
+- **Generate/install custom user unit** — deterministyczny render (golden file) z pinowanym loopback bindem,
+  `HERMES_HOME=/home/hermes/.hermes`, `Restart=always`; `internal/serve` przez typed guest boundary
+  (fixed argv, bez `sh -c`, stdin-fed `tee` do zapisu unitu — nowe `execx.Command.Stdin`). Zapewnia
+  `linger`. Walidacja `systemd-analyze --user verify` **przed aktywacją**; zapis atomowy
+  (staging → verify → rename); idempotentne (`changed:false` przy re-run).
+- **Loopback bind** — bind pinowany w unicie i we wszystkich probach; nigdy `0.0.0.0` (locked golden +
+  invariant test).
+- **Endpoint readiness** — `start`/`restart`/`status` dowodzą stanu systemd **oraz** `GET /api/status == 200`
+  przez loopback; aktywny proces z martwym endpointem to fail-closed (exit 6). `start`/`restart` re-query
+  postcondition; `stop` idempotentne z re-query.
+- **logs/status/restart** — `logs` bounded/redagowane, unit-scoped (`journalctl --user -u`); `status`
+  exit 0 tylko gdy ready.
+
+Tests: render golden file; invalid unit rejected przed aktywacją (wrong CLI surface → `systemd-analyze`
+fail, exit 6); process active but endpoint dead (fail-closed exit 6, jednostkowo i live przez SIGSTOP);
+idempotencja install/start/stop; linger ensure; transport/timeout classification; CLI envelope + exit-code
+mapping. Live V1 proof (real install→start→status, host SSH tunnel + host curl, negative case, stop/restart,
+final Running): `docs/spike-results/evidence/d5-serve-liveproof-*`.
+
+Operator runbook (start VM → bootstrap → serve install/start/status → tunnel → Desktop):
+[../runbooks/remote-second-brain-v1.md](../runbooks/remote-second-brain-v1.md).
+
+Świadomie poza D5 (human confirmation / późniejsze slice'y): faktyczny Desktop chat/provider credentials,
+KB/second-brain migration, non-loopback bind, arbitrary bind host/port, `hb gateway`, doctor, vm init,
+workers, formalne Demo A/S1–S8.
 
 ## D6 — Gateway wrapper
 

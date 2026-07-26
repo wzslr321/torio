@@ -126,9 +126,31 @@ hb gateway install
 hb gateway start|stop|restart|status|logs
 ```
 
-- `serve install` zarządza własną user service wyłącznie po feature detection.
+- `serve install` zarządza własną **user** service (custom systemd unit dla użytkownika `hermes`)
+  wyłącznie po feature detection (`hermes serve --help`). W D5 (V1) generuje deterministyczny unit
+  `hermes-serve.service` z pinowanym loopback bindem (`--host 127.0.0.1 --port 9119`), `HERMES_HOME=/home/hermes/.hermes`
+  i `Restart=always`, waliduje go `systemd-analyze --user verify` **przed aktywacją**, po czym
+  `daemon-reload` + `enable`. Zapewnia `linger` dla `hermes`, by usługa `Restart=always` działała bez
+  interaktywnej sesji i po reboot. Jest idempotentne (re-run bez zmiany = `changed:false`), nie przyjmuje
+  sekretów i **nie startuje** backendu. Zapis unitu jest atomowy (staging → verify → rename); niepoprawny
+  unit nigdy nie jest aktywowany. Kilka bounded guest probes — używaj większego `--timeout` (np. `--timeout 2m`).
+- `serve start`/`restart` startują backend i **weryfikują** readiness: re-query stanu systemd (`is-active == active`)
+  **oraz** rzeczywistą odpowiedź `GET /api/status == 200` przez loopback. Aktywny proces z martwym endpointem
+  to porażka (exit 6). Idempotentne. `serve stop` jest graceful i idempotentne (re-query wymaga stanu
+  nie-active), nie usuwa unitu/profilu/state.
+- `serve status` udowadnia **oba**: stan user-systemd i faktyczną gotowość endpointu przez loopback.
+  Exit 0 tylko gdy `active` i `/api/status == 200`; brak instalacji lub inactive → exit 3; aktywny z martwym
+  endpointem → exit 6. Nie modyfikuje systemu.
+- `serve logs [--lines N]` zwraca bounded, redagowane wpisy journala **tylko** dla unitu
+  (`journalctl --user -u hermes-serve.service -n N --no-pager`) — scope'owane do unitu i
+  redagowane przez execx, więc nie ujawnia własnej konfiguracji hb (profil/KB/provider). Nie jest
+  to jednak absolutna gwarancja: własny stdout/stderr backendu Hermes może teoretycznie zawierać
+  tekst pochodny od danych użytkownika. Traktuj to jako runtime-only ograniczenie ekspozycji, nie
+  formalną gwarancję prywatności.
 - `gateway install` deleguje do natywnego `hermes gateway install` i nie zgaduje nazwy unitu.
-- `serve` binduje loopback w VM w Demo A.
+- `serve` binduje loopback w VM w Demo A. Dotarcie z Maca to operator-controlled SSH tunnel do gościa
+  `127.0.0.1:9119` (patrz [runbook](../runbooks/remote-second-brain-v1.md)); `hb` nie dodaje własnej
+  funkcji tunelu. `serve` to **backend Desktopu**, a nie `hb gateway` (messaging).
 
 ### Projects
 

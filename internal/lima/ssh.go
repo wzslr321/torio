@@ -26,3 +26,23 @@ func (a *Adapter) SSH(ctx context.Context, command []string) (execx.Result, erro
 	}
 	return res, nil
 }
+
+// SSHInput is SSH with a fed standard input: stdin is delivered verbatim to the
+// remote command (then closed). It is the no-shell primitive for writing a
+// generated file onto the guest via a filter like `tee FILE` — the payload
+// travels as stdin bytes, never as an argv element or a shell heredoc. The argv
+// contract is identical to SSH (each token a separate element after a literal
+// "--"), and a clean non-zero remote exit is the caller's to interpret.
+func (a *Adapter) SSHInput(ctx context.Context, stdin []byte, command []string) (execx.Result, error) {
+	const op = "ssh"
+
+	args := make([]string, 0, len(command)+4)
+	args = append(args, "shell", "--tty=false", InstanceName, "--")
+	args = append(args, command...)
+
+	res, err := a.Runner.Run(ctx, execx.Command{Name: a.bin(), Args: args, Stdin: stdin})
+	if err != nil {
+		return execx.Result{}, classifyRunErr(op, err)
+	}
+	return res, nil
+}

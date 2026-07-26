@@ -114,3 +114,37 @@ func TestRunRejectsEmptyName(t *testing.T) {
 		t.Errorf("expected error for empty command name")
 	}
 }
+
+// TestRunFeedsStdin proves Command.Stdin is delivered verbatim to the child's
+// standard input — the primitive needed to write a generated file onto a host
+// (e.g. `tee UNITFILE`) without a shell or a temp file on our side.
+func TestRunFeedsStdin(t *testing.T) {
+	r := &ExecRunner{}
+	const payload = "line-one\nline-two\n"
+	res, err := r.Run(context.Background(), Command{Name: "cat", Stdin: []byte(payload)})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if res.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0", res.ExitCode)
+	}
+	if got := string(res.Stdout); got != payload {
+		t.Errorf("stdout = %q, want the fed stdin %q", got, payload)
+	}
+}
+
+// TestRunNilStdinInheritsNothing proves a Command with no Stdin does not hang:
+// the child sees an immediate EOF, not a wait on the parent's stdin.
+func TestRunNilStdinInheritsNothing(t *testing.T) {
+	r := &ExecRunner{}
+	res, err := r.Run(context.Background(), Command{Name: "cat"})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if res.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0", res.ExitCode)
+	}
+	if len(res.Stdout) != 0 {
+		t.Errorf("stdout = %q, want empty", res.Stdout)
+	}
+}

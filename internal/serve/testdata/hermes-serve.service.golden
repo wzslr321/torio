@@ -1,0 +1,13 @@
+[Unit]
+Description=Hermes Box loopback backend (hb serve)
+
+[Service]
+Type=simple
+WorkingDirectory=/home/hermes/hermes-agent
+Environment=HERMES_HOME=/home/hermes/.hermes
+ExecStart=/usr/local/bin/hermes serve --skip-build --host 127.0.0.1 --port 9119
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

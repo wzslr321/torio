@@ -38,6 +38,11 @@ type Command struct {
 	Dir string
 	// Env, if non-nil, replaces the process environment (nil inherits).
 	Env []string
+	// Stdin, if non-nil, is fed verbatim to the child's standard input and then
+	// closed (the child sees EOF). It is the no-shell primitive for writing a
+	// generated file onto a host via a filter like `tee FILE`. Nil leaves stdin
+	// empty (immediate EOF), never wired to the parent's stdin.
+	Stdin []byte
 	// Timeout, if > 0, bounds this command independently of the caller's ctx.
 	Timeout time.Duration
 }
@@ -98,6 +103,12 @@ func (r *ExecRunner) Run(ctx context.Context, cmd Command) (Result, error) {
 	}
 	if cmd.Env != nil {
 		c.Env = cmd.Env
+	}
+	if cmd.Stdin != nil {
+		// A bytes.Reader delivers the payload and then EOF, so a filter like
+		// `tee` writes exactly these bytes and exits. We never wire the parent's
+		// os.Stdin to the child.
+		c.Stdin = bytes.NewReader(cmd.Stdin)
 	}
 
 	// Put the child in its own process group and, on cancellation, kill the

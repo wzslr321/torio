@@ -74,6 +74,55 @@ From here, use the persistent KB under `/home/hermes/.hermes` and the workspace
 under `/home/hermes/projects`. Desktop/SSH access to the running Hermes instance
 remains a manual operator step.
 
+## 4. Persistent Desktop backend (D5 — loopback-only)
+
+Bring up a persistent Hermes backend as a custom user systemd service on the VM,
+bound to guest loopback only, using the existing `/home/hermes/.hermes` profile.
+
+```text
+hb serve install --timeout 2m
+hb serve start   --timeout 2m
+hb serve status
+```
+
+- `install` ensures user linger, renders the unit (loopback bind, `HERMES_HOME`,
+  `Restart=always`), validates it with `systemd-analyze` **before** activation,
+  then reloads and enables it for boot. Idempotent; accepts no secrets; does not
+  start the backend.
+- `start` starts it and fails closed unless the systemd state is active **and**
+  `GET /api/status` answers 200 through loopback. `status` proves the same and
+  exits non-zero when not ready (3 = not installed / inactive, 6 = active but the
+  endpoint is dead). `stop`/`restart` mirror the lifecycle. `logs [--lines N]`
+  shows bounded, redacted, unit-scoped journal entries only.
+
+The backend binds `127.0.0.1:9119` inside the VM (never a public address).
+
+## 5. Reach the backend from the Mac (operator-controlled SSH tunnel)
+
+`hb` deliberately adds no tunnel feature. Derive the tunnel from the supported
+live Lima SSH config and forward a host loopback port to the guest backend:
+
+```text
+# supported form: ssh -F ~/.lima/hermes-box/ssh.config lima-hermes-box
+ssh -F ~/.lima/hermes-box/ssh.config -L 19119:127.0.0.1:9119 -N -f \
+    -o ExitOnForwardFailure=yes lima-hermes-box
+
+# verify from the Mac:
+curl -s -m 5 -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19119/api/status   # -> 200
+```
+
+Tear the tunnel down when done (`kill` the `ssh` process holding the forward).
+`overall:degraded` in `/api/status` is expected when the messaging gateway is
+stopped — the serve backend/dashboard component is still `ok`.
+
+### Configure Hermes Desktop against the local tunnel (human confirmation step)
+
+In Hermes Desktop, point the Remote Gateway / backend URL at the **local tunnel
+endpoint** (`http://127.0.0.1:19119`, i.e. the host side of the SSH tunnel to the
+guest `127.0.0.1:9119`). An actual Desktop chat, provider/OAuth credentials, model
+selection, and any second-brain/KB data migration are **manual human confirmation
+steps — not accomplished by this runbook and not proof of Demo A.**
+
 ## Stop (part of the lifecycle proof)
 
 ```text
