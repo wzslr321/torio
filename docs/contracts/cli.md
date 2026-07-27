@@ -142,7 +142,7 @@ torio vm logs
   | `HermesWorkspacePath` | `/home/hermes/projects` | współdzielony workspace projektów |
 
   `bootstrap` weryfikuje profil i brain **niezależnie**; żadna z tych ścieżek nie jest aliasem drugiej.
-- `bootstrap` wykonuje kilka bounded guest probes; uruchamiaj z odpowiednio dużym `--timeout` (np. `--timeout 5m`). Akcja dotarcia do zdalnego Hermesa po bootstrapie pozostaje operator-controlled (np. `torio vm ssh -- sudo -u hermes -- hermes --version`).
+- `bootstrap` wykonuje kilka bounded guest probes i może instalować Hermesa ze źródeł; uruchamiaj go z największym timeoutem, na jaki pozwala policy: `--timeout 10m` (`config.MaxTimeout`). Akcja dotarcia do zdalnego Hermesa po bootstrapie pozostaje operator-controlled (np. `torio vm ssh -- sudo -u hermes -- hermes --version`).
 
 ### Backend i gateway
 
