@@ -15,6 +15,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -26,6 +27,12 @@ import (
 type fakeCall struct {
 	argv  []string
 	stdin []byte
+}
+
+type fakeCopy struct {
+	direction string
+	host      string
+	guest     string
 }
 
 type fakeGuest struct {
@@ -65,6 +72,19 @@ type fakeGuest struct {
 	truncateOn      string
 	transportErr    error
 	calls           []fakeCall
+	copies          []fakeCopy
+	copyToErr       error
+	copyFromErr     error
+	copyFromHook    func(string) error
+	importFiles     int
+	exportFiles     map[string]string
+	exportHardlink  bool
+	privateExists   map[string]bool
+	pristineTree    bool
+	exchangedEmpty  bool
+	cancel          context.CancelFunc
+	cancelOn        string
+	failExchangeAt  int
 }
 
 func readyFake() *fakeGuest {
@@ -77,6 +97,7 @@ func readyFake() *fakeGuest {
 		mode:         "750",
 		fstype:       "ext4",
 		totalBytes:   4096,
+		importFiles:  2,
 		failContains: map[string]int{},
 	}
 }
@@ -88,6 +109,7 @@ func initializedFake() *fakeGuest {
 	f.gitRepo = true
 	f.registered = true
 	f.markdownCount = 3
+	f.pristineTree = true
 	return f
 }
 
@@ -133,12 +155,36 @@ func (f *fakeGuest) SSHInput(ctx context.Context, stdin []byte, command []string
 	return f.route(ctx, stdin, command)
 }
 
-func (f *fakeGuest) route(_ context.Context, stdin []byte, argv []string) (execx.Result, error) {
+func (f *fakeGuest) CopyToGuest(_ context.Context, hostSourceDir, guestDestinationDir string) error {
+	f.copies = append(f.copies, fakeCopy{direction: "to_guest", host: hostSourceDir, guest: guestDestinationDir})
+	return f.copyToErr
+}
+
+func (f *fakeGuest) CopyFromGuest(_ context.Context, guestSourceDir, hostDestinationDir string) error {
+	f.copies = append(f.copies, fakeCopy{direction: "from_guest", host: hostDestinationDir, guest: guestSourceDir})
+	if f.copyFromErr != nil {
+		return f.copyFromErr
+	}
+	if f.copyFromHook != nil {
+		return f.copyFromHook(hostDestinationDir)
+	}
+	return nil
+}
+
+func (f *fakeGuest) route(ctx context.Context, stdin []byte, argv []string) (execx.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return execx.Result{ExitCode: -1}, err
+	}
 	f.calls = append(f.calls, fakeCall{argv: append([]string(nil), argv...), stdin: append([]byte(nil), stdin...)})
 	if f.transportErr != nil {
 		return execx.Result{ExitCode: -1}, f.transportErr
 	}
 	joined := strings.Join(argv, " ")
+	if f.cancelOn != "" && strings.Contains(joined, f.cancelOn) {
+		f.cancelOn = ""
+		f.cancel()
+		return execx.Result{ExitCode: -1}, ctx.Err()
+	}
 	for needle, code := range f.failContains {
 		if strings.Contains(joined, needle) {
 			return execx.Result{ExitCode: code, Stderr: []byte("synthetic failure")}, nil
@@ -186,6 +232,96 @@ func (f *fakeGuest) route(_ context.Context, stdin []byte, argv []string) (execx
 		return okResult(""), nil
 	case strings.Contains(joined, "test -d "+lockPath):
 		if f.lockHeld {
+			return okResult(""), nil
+		}
+		return exitResult(1, "", ""), nil
+		// Private Brain import staging and candidate routes.
+	case strings.Contains(joined, "rm -rf -- "+exportStagingPath):
+		return okResult(""), nil
+	case strings.Contains(joined, "cp -a -- "+Path+"/. "+exportPayloadPath+"/"):
+		return okResult(""), nil
+	case strings.Contains(joined, "rm -rf -- "+exportPayloadPath+"/.git"):
+		return okResult(""), nil
+	case strings.Contains(joined, "find "+exportPayloadPath+" -type l"),
+		strings.Contains(joined, "find "+exportPayloadPath+" ! -type d ! -type f"):
+		return okResult(""), nil
+	case strings.Contains(joined, "find "+Path+" -path "+Path+"/.git -prune -o -type l"),
+		strings.Contains(joined, "find "+Path+" -path "+Path+"/.git -prune -o ! -type d ! -type f"):
+		return okResult(""), nil
+	case strings.Contains(joined, "-type f -links +1"):
+		if f.exportHardlink {
+			return okResult("."), nil
+		}
+		return okResult(""), nil
+	case strings.Contains(joined, "-printf %s\t%P\\0"):
+		prefix := exportPayloadPath
+		if strings.Contains(joined, "find "+Path+" ") {
+			prefix = Path
+		}
+		return okResult(f.exportSizes(prefix)), nil
+	case strings.Contains(joined, "-exec sha256sum -z -- {} +"):
+		prefix := exportPayloadPath
+		if strings.Contains(joined, "find "+Path+" ") {
+			prefix = Path
+		}
+		return okResult(f.exportChecksums(prefix)), nil
+	case strings.Contains(joined, "rm -rf -- "+importStagingPath):
+		return okResult(""), nil
+	case strings.Contains(joined, "dd of="+importManifestPath):
+		return okResult(""), nil
+	case strings.Contains(joined, "find "+importPayloadPath+" -type l"):
+		return okResult(""), nil
+	case strings.Contains(joined, "find "+importPayloadPath+" ! -type d ! -type f"):
+		return okResult(""), nil
+	case strings.Contains(joined, "find "+importPayloadPath+" -type f"):
+		return okResult(strings.Repeat(".", f.importFiles)), nil
+	case strings.Contains(joined, "sha256sum --quiet --strict -c "+importManifestPath):
+		return okResult(""), nil
+	case strings.Contains(joined, "mv -T "+importPayloadPath+" "+importCandidatePath):
+		return okResult(""), nil
+	case strings.Contains(joined, "cp -a -- "+Path+"/. "+importCandidatePath+"/"):
+		return okResult(""), nil
+	case strings.Contains(joined, "cp -a --update=none-fail -- "+importPayloadPath+"/. "+importCandidatePath+"/"):
+		return okResult(""), nil
+	case strings.Contains(joined, "cp -a -- "+importPayloadPath+"/. "+importCandidatePath+"/"):
+		return okResult(""), nil
+	case strings.Contains(joined, "python3 -c ") && strings.Contains(joined, "renameat2"):
+		if f.failExchangeAt > 0 && f.count("renameat2") == f.failExchangeAt {
+			return exitResult(1, "", "synthetic exchange failure"), nil
+		}
+		if f.empty {
+			f.empty = false
+			f.scaffold = true
+			f.gitRepo = true
+			f.exchangedEmpty = true
+		} else if f.exchangedEmpty {
+			f.empty = true
+			f.scaffold = false
+			f.gitRepo = false
+			f.exchangedEmpty = false
+		}
+		return okResult(""), nil
+	case strings.Contains(joined, "test -f "+importCandidatePath+"/"):
+		return exitResult(1, "", ""), nil
+	case strings.Contains(joined, "tee "+importCandidatePath+"/"):
+		return okResult(""), nil
+	case strings.Contains(joined, "git -C "+importCandidatePath+" rev-parse --verify HEAD"):
+		return okResult("0123456789abcdef\n"), nil
+	case strings.Contains(joined, "git -C "+importCandidatePath+" remote"):
+		return okResult(""), nil
+	case strings.Contains(joined, "git -C "+importCandidatePath+" init"),
+		strings.Contains(joined, "git -C "+importCandidatePath+" add -A"),
+		strings.Contains(joined, "git -C "+importCandidatePath+" -c user.name="):
+		return okResult(""), nil
+	case strings.Contains(joined, "mv -T "+importCandidatePath+" "+Path):
+		f.pathExists = true
+		f.empty = false
+		f.scaffold = true
+		f.gitRepo = true
+		return okResult(""), nil
+	case strings.Contains(joined, "test -e "+Path+"/"):
+		privatePath := argv[len(argv)-1]
+		if f.privateExists[privatePath] {
 			return okResult(""), nil
 		}
 		return exitResult(1, "", ""), nil
@@ -275,6 +411,21 @@ func (f *fakeGuest) route(_ context.Context, stdin []byte, argv []string) (execx
 			return okResult(""), nil
 		}
 		return exitResult(1, "", ""), nil
+	case strings.Contains(joined, "git -C "+Path+" rev-list --count HEAD"):
+		return okResult("1\n"), nil
+	case strings.Contains(joined, "git -C "+Path+" ls-tree -r --name-only HEAD"):
+		if f.pristineTree {
+			return okResult("AGENTS.md\nREADME.md\ntodo.md\n"), nil
+		}
+		return okResult("AGENTS.md\nREADME.md\nprivate.md\ntodo.md\n"), nil
+	case strings.Contains(joined, "sha256sum -- "+Path+"/"):
+		name := strings.TrimPrefix(argv[len(argv)-1], Path+"/")
+		payload, err := scaffoldFS.ReadFile("templates/" + name)
+		if err != nil {
+			return exitResult(1, "", "not a scaffold file"), nil
+		}
+		sum := sha256.Sum256(payload)
+		return okResult(hex.EncodeToString(sum[:]) + "  " + Path + "/" + name + "\n"), nil
 	case strings.Contains(joined, "git -C "+Path+" rev-parse --verify HEAD"):
 		if f.gitRepo {
 			return okResult("0123456789abcdef\n"), nil
@@ -428,6 +579,33 @@ func (f *fakeGuest) setCounts(markdown, attachments int, bytes int64) {
 	f.totalBytes = bytes
 }
 
+func (f *fakeGuest) exportSizes(_ string) string {
+	names := make([]string, 0, len(f.exportFiles))
+	for name := range f.exportFiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var out strings.Builder
+	for _, name := range names {
+		fmt.Fprintf(&out, "%d\t%s\x00", len(f.exportFiles[name]), name)
+	}
+	return out.String()
+}
+
+func (f *fakeGuest) exportChecksums(prefix string) string {
+	names := make([]string, 0, len(f.exportFiles))
+	for name := range f.exportFiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var out strings.Builder
+	for _, name := range names {
+		sum := sha256.Sum256([]byte(f.exportFiles[name]))
+		fmt.Fprintf(&out, "%s  %s/%s\x00", hex.EncodeToString(sum[:]), prefix, name)
+	}
+	return out.String()
+}
+
 var _ Guest = (*fakeGuest)(nil)
 
 type blockingGuest struct {
@@ -456,6 +634,14 @@ func (g *blockingGuest) SSHInput(ctx context.Context, stdin []byte, command []st
 	g.routeMu.Lock()
 	defer g.routeMu.Unlock()
 	return g.base.SSHInput(ctx, stdin, command)
+}
+
+func (g *blockingGuest) CopyToGuest(ctx context.Context, hostSourceDir, guestDestinationDir string) error {
+	return g.base.CopyToGuest(ctx, hostSourceDir, guestDestinationDir)
+}
+
+func (g *blockingGuest) CopyFromGuest(ctx context.Context, guestSourceDir, hostDestinationDir string) error {
+	return g.base.CopyFromGuest(ctx, guestSourceDir, hostDestinationDir)
 }
 
 func (g *blockingGuest) block(command []string) {
