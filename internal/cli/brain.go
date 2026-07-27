@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/wzslr321/torio/internal/brain"
+	"github.com/wzslr321/torio/internal/lima"
 )
 
 type brainService interface {
@@ -57,7 +58,11 @@ func newBrainInitCmd(a *app) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := a.opContext(cmd)
 			defer cancel()
-			report, err := a.newBrain().Init(ctx)
+			service, err := a.brainService("brain.init")
+			if err != nil {
+				return err
+			}
+			report, err := service.Init(ctx)
 			if err != nil {
 				cliErr := mapBrainError("brain.init", err)
 				cliErr.Details = brainStatusDetails(report.Status)
@@ -80,7 +85,11 @@ func newBrainStatusCmd(a *app) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := a.opContext(cmd)
 			defer cancel()
-			report, err := a.newBrain().Status(ctx)
+			service, err := a.brainService("brain.status")
+			if err != nil {
+				return err
+			}
+			report, err := service.Status(ctx)
 			if err != nil {
 				cliErr := mapBrainError("brain.status", err)
 				cliErr.Details = brainStatusDetails(report)
@@ -89,6 +98,20 @@ func newBrainStatusCmd(a *app) *cobra.Command {
 			return a.emitBrainStatus("brain.status", report, nil)
 		},
 	}
+}
+
+func (a *app) brainService(command string) (brainService, error) {
+	operatorUser, err := a.lookupOperatorUser()
+	if err != nil {
+		return nil, &CLIError{
+			Exit:    ExitExternal,
+			Code:    "OPERATOR_LOOKUP_FAILED",
+			Command: command,
+			Message: err.Error(),
+		}
+	}
+	adapter := a.newLima()
+	return a.newBrain(adapter, lima.BootstrapOptions{OperatorUser: operatorUser}), nil
 }
 
 type brainStatusData struct {

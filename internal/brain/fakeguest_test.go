@@ -14,6 +14,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
@@ -39,6 +40,11 @@ type fakeGuest struct {
 	registered      bool
 	wrongProject    bool
 	showMissing     bool
+	projectShow     string
+	bootstrapErr    error
+	lockHeld        bool
+	lockStale       bool
+	lockToken       string
 	markdownCount   int
 	attachmentCount int
 	totalBytes      int64
@@ -79,6 +85,16 @@ func (f *fakeGuest) Status(context.Context) (lima.Status, error) {
 	return lima.Status{State: f.state}, nil
 }
 
+func (f *fakeGuest) Bootstrap(context.Context, lima.BootstrapOptions) (lima.BootstrapReport, error) {
+	if f.bootstrapErr != nil {
+		return lima.BootstrapReport{}, f.bootstrapErr
+	}
+	if f.state != lima.StateRunning {
+		return lima.BootstrapReport{}, &lima.Error{Op: "bootstrap", Kind: lima.KindNotRunning}
+	}
+	return lima.BootstrapReport{Instance: lima.InstanceName}, nil
+}
+
 func (f *fakeGuest) SSH(ctx context.Context, command []string) (execx.Result, error) {
 	return f.route(ctx, nil, command)
 }
@@ -103,6 +119,46 @@ func (f *fakeGuest) route(_ context.Context, stdin []byte, argv []string) (execx
 	}
 
 	switch {
+	case strings.Contains(joined, "sudo -n -- true"):
+		return okResult(""), nil
+	case strings.Contains(joined, "mkdir -m 0700 "+lockPath):
+		if f.lockHeld {
+			return exitResult(1, "", "exists"), nil
+		}
+		f.lockHeld = true
+		return okResult(""), nil
+	case strings.Contains(joined, "tee "+lockPath+"/token"):
+		f.lockToken = strings.TrimSpace(string(stdin))
+		return okResult(""), nil
+	case strings.Contains(joined, "stat -c %U:%G %a "+lockPath):
+		return okResult("hermes:hermes 700\n"), nil
+	case strings.Contains(joined, "find "+lockPath+" -maxdepth 0 -mmin +"+staleLockAge):
+		if f.lockStale {
+			return okResult(lockPath + "\n"), nil
+		}
+		return okResult(""), nil
+	case strings.Contains(joined, "cat "+lockPath+"/token"):
+		return okResult(f.lockToken + "\n"), nil
+	case strings.Contains(joined, "mv -T "+lockPath+" "):
+		f.lockHeld = false
+		f.lockToken = ""
+		f.lockStale = false
+		return okResult(""), nil
+	case strings.Contains(joined, "rm -rf -- "+lockPath+".stale-"):
+		return okResult(""), nil
+	case strings.Contains(joined, "rm -f -- "+lockPath+"/token"):
+		f.lockToken = ""
+		return okResult(""), nil
+	case strings.Contains(joined, "rmdir "+lockPath):
+		f.lockHeld = false
+		return okResult(""), nil
+	case strings.Contains(joined, "touch "+lockPath):
+		return okResult(""), nil
+	case strings.Contains(joined, "test -d "+lockPath):
+		if f.lockHeld {
+			return okResult(""), nil
+		}
+		return exitResult(1, "", ""), nil
 	case strings.Contains(joined, "test -L "+Path):
 		return exitResult(1, "", ""), nil
 	case strings.Contains(joined, "test -d "+Path):
@@ -158,12 +214,14 @@ func (f *fakeGuest) route(_ context.Context, stdin []byte, argv []string) (execx
 		return okResult(fmt.Sprintf("%d\t%s\n", f.totalBytes, Path)), nil
 	case strings.Contains(joined, "hermes project show "+ProjectSlug):
 		switch {
+		case f.projectShow != "":
+			return okResult(f.projectShow), nil
 		case f.showMissing:
 			return exitResult(1, "", "not found"), nil
 		case f.wrongProject:
-			return okResult("name: Other\npath: /home/hermes/other\n"), nil
+			return okResult("name: Other\nprimary: /home/hermes/other\n"), nil
 		case f.registered:
-			return okResult("name: Second Brain\npath: " + Path + "\n"), nil
+			return okResult("name: Second Brain\nprimary: " + Path + "\n"), nil
 		default:
 			return exitResult(1, "", "not found"), nil
 		}
@@ -174,6 +232,7 @@ func (f *fakeGuest) route(_ context.Context, stdin []byte, argv []string) (execx
 		return okResult(""), nil
 	case strings.Contains(joined, "hermes project create"):
 		f.registered = true
+		f.showMissing = false
 		return okResult("created\n"), nil
 	case strings.Contains(joined, "tee "+stagingPath+"/"):
 		return okResult(""), nil
@@ -250,3 +309,48 @@ func (f *fakeGuest) setCounts(markdown, attachments int, bytes int64) {
 }
 
 var _ Guest = (*fakeGuest)(nil)
+
+type blockingGuest struct {
+	base     *fakeGuest
+	blockOn  string
+	blocked  chan struct{}
+	unblock  chan struct{}
+	blockMu  sync.Mutex
+	didBlock bool
+	routeMu  sync.Mutex
+}
+
+func (g *blockingGuest) Bootstrap(ctx context.Context, opts lima.BootstrapOptions) (lima.BootstrapReport, error) {
+	return g.base.Bootstrap(ctx, opts)
+}
+
+func (g *blockingGuest) SSH(ctx context.Context, command []string) (execx.Result, error) {
+	g.block(command)
+	g.routeMu.Lock()
+	defer g.routeMu.Unlock()
+	return g.base.SSH(ctx, command)
+}
+
+func (g *blockingGuest) SSHInput(ctx context.Context, stdin []byte, command []string) (execx.Result, error) {
+	g.block(command)
+	g.routeMu.Lock()
+	defer g.routeMu.Unlock()
+	return g.base.SSHInput(ctx, stdin, command)
+}
+
+func (g *blockingGuest) block(command []string) {
+	if !strings.Contains(strings.Join(command, " "), g.blockOn) {
+		return
+	}
+	g.blockMu.Lock()
+	if g.didBlock {
+		g.blockMu.Unlock()
+		return
+	}
+	g.didBlock = true
+	g.blockMu.Unlock()
+	close(g.blocked)
+	<-g.unblock
+}
+
+var _ Guest = (*blockingGuest)(nil)

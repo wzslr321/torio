@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/wzslr321/torio/internal/brain"
+	"github.com/wzslr321/torio/internal/lima"
 )
 
 type fakeBrainService struct {
@@ -65,7 +66,7 @@ func runBrainCLI(t *testing.T, args []string, service brainService) (int, string
 		stdout:   &stdout,
 		stderr:   &stderr,
 		build:    testBuild(),
-		newBrain: func() brainService { return service },
+		newBrain: func(*lima.Adapter, lima.BootstrapOptions) brainService { return service },
 	}
 	code := runWithApp(context.Background(), a, args)
 	return code, stdout.String(), stderr.String()
@@ -75,6 +76,39 @@ func TestBrainNoSubcommandIsUsage(t *testing.T) {
 	code, _, _ := runBrainCLI(t, []string{"brain"}, &fakeBrainService{})
 	if code != int(ExitUsage) {
 		t.Fatalf("exit = %d, want %d", code, ExitUsage)
+	}
+}
+
+func TestBrainCommandsWireLimaAdapterAndOperatorToBootstrapGate(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	var stdout, stderr bytes.Buffer
+	wantAdapter := &lima.Adapter{}
+	service := &fakeBrainService{statusReport: initializedBrainReport()}
+	var gotAdapter *lima.Adapter
+	var gotOpts lima.BootstrapOptions
+	a := &app{
+		stdout:             &stdout,
+		stderr:             &stderr,
+		build:              testBuild(),
+		newLima:            func() *lima.Adapter { return wantAdapter },
+		lookupOperatorUser: func() (string, error) { return "testop", nil },
+		newBrain: func(adapter *lima.Adapter, opts lima.BootstrapOptions) brainService {
+			gotAdapter = adapter
+			gotOpts = opts
+			return service
+		},
+	}
+
+	code := runWithApp(context.Background(), a, []string{"brain", "status", "--json"})
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if gotAdapter != wantAdapter {
+		t.Fatalf("Brain manager adapter = %p, want %p", gotAdapter, wantAdapter)
+	}
+	if gotOpts.OperatorUser != "testop" {
+		t.Fatalf("bootstrap operator = %q, want testop", gotOpts.OperatorUser)
 	}
 }
 

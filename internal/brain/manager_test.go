@@ -43,8 +43,8 @@ func TestInitFreshBrainUsesStagingCommitAndRegistersProject(t *testing.T) {
 	if g.saw(" sh ") || g.saw("sh -c") || g.saw("--use") {
 		t.Errorf("init used a forbidden shell or --use: %v", g.calls)
 	}
-	if len(g.payloads()) != 3 {
-		t.Fatalf("scaffold payload count = %d, want 3", len(g.payloads()))
+	if len(g.payloads()) != 4 {
+		t.Fatalf("guest payload count = %d, want lock token plus 3 scaffold files", len(g.payloads()))
 	}
 }
 
@@ -79,7 +79,7 @@ func TestInitCreatesMissingCanonicalDirectoryBeforeScaffolding(t *testing.T) {
 	}
 }
 
-func TestInitUsesMatchingProjectListWithoutDuplicateCreate(t *testing.T) {
+func TestInitDoesNotTrustProjectListWhenShowIsMissing(t *testing.T) {
 	g := initializedFake()
 	g.showMissing = true
 
@@ -90,8 +90,8 @@ func TestInitUsesMatchingProjectListWithoutDuplicateCreate(t *testing.T) {
 	if report.Created {
 		t.Fatalf("report.Created = true, want idempotent verification")
 	}
-	if !g.saw("hermes project list") || g.saw("hermes project create") {
-		t.Fatalf("matching primary path was not reused: %v", g.calls)
+	if !g.saw("hermes project list") || !g.saw("hermes project create") {
+		t.Fatalf("missing show result trusted ambiguous list output: %v", g.calls)
 	}
 }
 
@@ -101,7 +101,7 @@ func TestInitRefusesNonemptyUnmanagedDirectory(t *testing.T) {
 
 	_, err := New(g).Init(context.Background())
 	assertKind(t, err, KindConflict)
-	if g.saw("tee ") || g.saw("git -C "+stagingPath) || g.saw("hermes project create") {
+	if g.saw("tee "+stagingPath) || g.saw("git -C "+stagingPath) || g.saw("hermes project create") {
 		t.Fatalf("conflicting init mutated guest: %v", g.calls)
 	}
 }
@@ -112,7 +112,7 @@ func TestInitRefusesPartialScaffold(t *testing.T) {
 
 	_, err := New(g).Init(context.Background())
 	assertKind(t, err, KindConflict)
-	if g.saw("tee ") || g.saw("mv -T "+stagingPath) {
+	if g.saw("tee "+stagingPath) || g.saw("mv -T "+stagingPath) {
 		t.Fatalf("partial scaffold was overwritten: %v", g.calls)
 	}
 }
@@ -222,6 +222,63 @@ func TestStatusRequiresRunningVM(t *testing.T) {
 	}
 }
 
+func TestStatusRequiresBootstrapVerificationBeforeGuestWork(t *testing.T) {
+	g := initializedFake()
+	g.bootstrapErr = &lima.Error{
+		Op:   "bootstrap",
+		Kind: lima.KindVerificationFailed,
+		Err:  errors.New("host mount present"),
+	}
+
+	_, err := New(g).Status(context.Background())
+	assertKind(t, err, KindPrecondition)
+	if len(g.calls) != 0 {
+		t.Fatalf("status reached unverified guest: %v", g.calls)
+	}
+}
+
+func TestInitRequiresBootstrapVerificationBeforeGuestWrites(t *testing.T) {
+	g := readyFake()
+	g.bootstrapErr = &lima.Error{
+		Op:   "bootstrap",
+		Kind: lima.KindVerificationFailed,
+		Err:  errors.New("brain path ownership drift"),
+	}
+
+	_, err := New(g).Init(context.Background())
+	assertKind(t, err, KindPrecondition)
+	if len(g.calls) != 0 {
+		t.Fatalf("init wrote to unverified guest: %v", g.calls)
+	}
+}
+
+func TestStatusFailsClosedWhenPasswordlessSudoPreflightFails(t *testing.T) {
+	g := readyFake()
+	g.pathExists = false
+	g.setFailure("sudo -n -- true", 1)
+
+	report, err := New(g).Status(context.Background())
+	assertKind(t, err, KindGuestCommand)
+	if report.State == StateUninitialized {
+		t.Fatalf("sudo failure was misreported as uninitialized: %#v", report)
+	}
+	if g.saw("test -d "+Path) || g.saw("test -L "+Path) {
+		t.Fatalf("status interpreted path absence after failed sudo preflight: %v", g.calls)
+	}
+}
+
+func TestStatusFailsClosedWhenRootPathProbeHasUnexpectedExit(t *testing.T) {
+	g := readyFake()
+	g.pathExists = false
+	g.setFailure("test -d "+Path, 2)
+
+	report, err := New(g).Status(context.Background())
+	assertKind(t, err, KindGuestCommand)
+	if report.State == StateUninitialized {
+		t.Fatalf("path probe failure was misreported as uninitialized: %#v", report)
+	}
+}
+
 func TestInitRejectsWrongExistingProjectWithoutCreatingDuplicate(t *testing.T) {
 	g := initializedFake()
 	g.registered = false
@@ -231,6 +288,74 @@ func TestInitRejectsWrongExistingProjectWithoutCreatingDuplicate(t *testing.T) {
 	assertKind(t, err, KindRegistration)
 	if g.saw("hermes project create") {
 		t.Fatalf("init duplicated a conflicting slug: %v", g.calls)
+	}
+}
+
+func TestStatusRejectsBrainPresentOnlyAsNonPrimaryProjectFolder(t *testing.T) {
+	g := initializedFake()
+	g.projectShow = "name: Second Brain\nprimary: /home/hermes/other\nfolders:\n  - " + Path + "\n"
+
+	report, err := New(g).Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if report.ProjectRegistered {
+		t.Fatalf("secondary folder was accepted as primary registration: %#v", report)
+	}
+	if !report.ProjectConflict || report.State != StateDrift {
+		t.Fatalf("secondary-only path did not fail closed as drift: %#v", report)
+	}
+}
+
+func TestInitRefusesConcurrentGuestLockBeforeStagingWork(t *testing.T) {
+	g := readyFake()
+	g.lockHeld = true
+
+	_, err := New(g).Init(context.Background())
+	assertKind(t, err, KindConflict)
+	if g.saw("rm -rf -- "+stagingPath) || g.saw("tee "+stagingPath) || g.saw("mv -T "+stagingPath) {
+		t.Fatalf("contending init touched shared staging: %v", g.calls)
+	}
+}
+
+func TestInitGuestLockPreventsVerifyThenPromoteInterleaving(t *testing.T) {
+	g := &blockingGuest{
+		base:    readyFake(),
+		blockOn: "hermes project show " + ProjectSlug,
+		blocked: make(chan struct{}),
+		unblock: make(chan struct{}),
+	}
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := New(g).Init(context.Background())
+		firstDone <- err
+	}()
+	<-g.blocked
+
+	_, secondErr := New(g).Init(context.Background())
+	close(g.unblock)
+	firstErr := <-firstDone
+
+	assertKind(t, secondErr, KindConflict)
+	if firstErr != nil {
+		t.Fatalf("lock holder Init() error = %v", firstErr)
+	}
+}
+
+func TestInitRecoversOwnedStaleGuestLock(t *testing.T) {
+	g := readyFake()
+	g.lockHeld = true
+	g.lockStale = true
+
+	report, err := New(g).Init(context.Background())
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if !report.Created {
+		t.Fatalf("report.Created = false, want recovered fresh init")
+	}
+	if !g.saw("mv -T " + lockPath) {
+		t.Fatalf("stale lock was not atomically quarantined: %v", g.calls)
 	}
 }
 

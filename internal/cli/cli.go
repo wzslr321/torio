@@ -52,7 +52,7 @@ type app struct {
 
 	// newBrain builds the private Brain manager. Tests inject a service fake;
 	// production wires the manager over the same typed Lima guest boundary.
-	newBrain func() brainService
+	newBrain func(*lima.Adapter, lima.BootstrapOptions) brainService
 
 	// lookupOperatorUser resolves the Lima login identity for `vm init`.
 	// Production uses the current OS user; tests inject a fixed name.
@@ -80,7 +80,9 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 		a.newServe = func() *serve.Adapter { return serve.New(a.newLima()) }
 	}
 	if a.newBrain == nil {
-		a.newBrain = func() brainService { return brain.New(a.newLima()) }
+		a.newBrain = func(adapter *lima.Adapter, opts lima.BootstrapOptions) brainService {
+			return brain.New(adapter, opts)
+		}
 	}
 	if a.lookupOperatorUser == nil {
 		a.lookupOperatorUser = defaultLookupOperatorUser

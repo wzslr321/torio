@@ -25,7 +25,9 @@ const (
 	// ProjectName is the human-facing Hermes Project name.
 	ProjectName = "Second Brain"
 
-	stagingPath = lima.HermesHome + "/.torio-brain-staging"
+	stagingPath  = lima.HermesHome + "/.torio-brain-staging"
+	lockPath     = lima.HermesHome + "/.torio-brain-init.lock"
+	staleLockAge = "10"
 )
 
 var canonicalDirectories = []string{
