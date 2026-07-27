@@ -24,6 +24,8 @@ import (
 type brainService interface {
 	Init(context.Context) (brain.InitReport, error)
 	Status(context.Context) (brain.StatusReport, error)
+	Import(context.Context, brain.ImportOptions) (brain.TransferReport, error)
+	Export(context.Context, brain.ExportOptions) (brain.TransferReport, error)
 }
 
 func newBrainCmd(a *app) *cobra.Command {
@@ -43,6 +45,80 @@ func newBrainCmd(a *app) *cobra.Command {
 	}
 	cmd.AddCommand(newBrainInitCmd(a))
 	cmd.AddCommand(newBrainStatusCmd(a))
+	cmd.AddCommand(newBrainImportCmd(a))
+	cmd.AddCommand(newBrainExportCmd(a))
+	return cmd
+}
+
+func newBrainImportCmd(a *app) *cobra.Command {
+	var dryRun bool
+	var into string
+	cmd := &cobra.Command{
+		Use:   "import <host-directory>",
+		Short: "Import a filtered Markdown vault into the Brain",
+		Long: "Preflight and import allowlisted Markdown, Canvas, and local attachment files " +
+			"through private host and guest staging. Credential-shaped files, repository " +
+			"metadata, links, hardlinks, special files, and executables are refused or skipped. " +
+			"Existing data is never overwritten except for the exact pristine Torio scaffold. " +
+			"Use --into with a new contained subdirectory to avoid collisions. Output contains " +
+			"only aggregate counts and a manifest digest, never note names or content.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := a.opContext(cmd)
+			defer cancel()
+			service, err := a.brainService("brain.import")
+			if err != nil {
+				return err
+			}
+			report, err := service.Import(ctx, brain.ImportOptions{
+				Source: args[0],
+				Into:   into,
+				DryRun: dryRun,
+			})
+			if err != nil {
+				cliErr := mapBrainError("brain.import", err)
+				cliErr.Details = brainTransferDetails(report)
+				return cliErr
+			}
+			return a.emitBrainTransfer("brain.import", report)
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preflight and report without transferring or changing Brain data")
+	cmd.Flags().StringVar(&into, "into", "", "import as one new relative subtree below the Brain")
+	return cmd
+}
+
+func newBrainExportCmd(a *app) *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "export <new-host-directory>",
+		Short: "Export a verified working-tree copy of the Brain",
+		Long: "Export the current Brain working tree through private staging, verify it against " +
+			"a SHA-256 manifest, and atomically create a new host directory. Torio V1 does not " +
+			"export Git history: .git is excluded and no repository bundle is created. The " +
+			"destination must not already exist. Output contains only aggregate counts and a " +
+			"manifest digest, never note names or content.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := a.opContext(cmd)
+			defer cancel()
+			service, err := a.brainService("brain.export")
+			if err != nil {
+				return err
+			}
+			report, err := service.Export(ctx, brain.ExportOptions{
+				Destination: args[0],
+				DryRun:      dryRun,
+			})
+			if err != nil {
+				cliErr := mapBrainError("brain.export", err)
+				cliErr.Details = brainTransferDetails(report)
+				return cliErr
+			}
+			return a.emitBrainTransfer("brain.export", report)
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "verify and report without transferring or creating the destination")
 	return cmd
 }
 
@@ -145,6 +221,18 @@ type brainInitData struct {
 	brainStatusData
 }
 
+type brainTransferData struct {
+	DryRun         bool           `json:"dry_run"`
+	Files          int            `json:"files"`
+	Markdown       int            `json:"markdown_files"`
+	Attachments    int            `json:"attachment_files"`
+	Bytes          int64          `json:"total_bytes"`
+	ManifestSHA256 string         `json:"manifest_sha256"`
+	Conflicts      int            `json:"conflicts"`
+	Skipped        map[string]int `json:"skipped"`
+	FinalPath      string         `json:"final_path"`
+}
+
 func brainData(report brain.StatusReport) brainStatusData {
 	issues := append([]string(nil), report.Issues...)
 	if issues == nil {
@@ -187,6 +275,61 @@ func (a *app) emitBrainInit(report brain.InitReport) error {
 		return err
 	}
 	return a.emitBrainStatus("brain.init", report.Status, brainSkillNotes(report.Status.SkillState, report.SkillUpdated))
+}
+
+func transferData(report brain.TransferReport) brainTransferData {
+	skipped := report.Skipped
+	if skipped == nil {
+		skipped = map[string]int{}
+	}
+	return brainTransferData{
+		DryRun:         report.DryRun,
+		Files:          report.Files,
+		Markdown:       report.Markdown,
+		Attachments:    report.Attachments,
+		Bytes:          report.Bytes,
+		ManifestSHA256: report.ManifestSHA256,
+		Conflicts:      report.Conflicts,
+		Skipped:        skipped,
+		FinalPath:      report.FinalPath,
+	}
+}
+
+func brainTransferDetails(report brain.TransferReport) map[string]any {
+	data := transferData(report)
+	return map[string]any{
+		"dry_run":          data.DryRun,
+		"files":            data.Files,
+		"markdown_files":   data.Markdown,
+		"attachment_files": data.Attachments,
+		"total_bytes":      data.Bytes,
+		"manifest_sha256":  data.ManifestSHA256,
+		"conflicts":        data.Conflicts,
+		"skipped":          data.Skipped,
+		"final_path":       data.FinalPath,
+	}
+}
+
+func (a *app) emitBrainTransfer(command string, report brain.TransferReport) error {
+	if a.jsonOut {
+		return writeJSON(a.stdout, successEnvelope(command, transferData(report), nil))
+	}
+	action := "completed"
+	if report.DryRun {
+		action = "dry-run"
+	}
+	_, err := fmt.Fprintf(a.stdout,
+		"Brain transfer %s.\n"+
+			"  final path:   %s\n"+
+			"  files:        %d\n"+
+			"  markdown:     %d\n"+
+			"  attachments:  %d\n"+
+			"  total bytes:  %d\n"+
+			"  conflicts:    %d\n"+
+			"  manifest:     %s\n",
+		action, report.FinalPath, report.Files, report.Markdown, report.Attachments,
+		report.Bytes, report.Conflicts, report.ManifestSHA256)
+	return err
 }
 
 // brainSkillNotes states what Torio actually verified. It checked a file on the
