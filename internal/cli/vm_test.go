@@ -45,13 +45,109 @@ func runVMWithFake(t *testing.T, args []string, fake execx.Runner) (int, string,
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var stdout, stderr bytes.Buffer
 	a := &app{
-		stdout:  &stdout,
-		stderr:  &stderr,
-		build:   testBuild(),
-		newLima: func() *lima.Adapter { return lima.New(fake) },
+		stdout:             &stdout,
+		stderr:             &stderr,
+		build:              testBuild(),
+		newLima:            func() *lima.Adapter { return lima.New(fake) },
+		lookupOperatorUser: func() (string, error) { return "testop", nil },
 	}
 	code := runWithApp(context.Background(), a, args)
 	return code, stdout.String(), stderr.String()
+}
+
+func listCompatibleJSON(name, status string) execx.Result {
+	body := `{"name":"` + name + `","status":"` + status + `","config":{"vmType":"vz","arch":"aarch64","images":[{"location":"` + lima.PromotedImageURL + `","digest":"` + lima.PromotedImageDigest + `"}],"mounts":[],"ssh":{"forwardAgent":false}}}`
+	return execx.Result{ExitCode: 0, Stdout: []byte(body + "\n")}
+}
+
+func listIncompatibleMountsJSON(name, status string) execx.Result {
+	body := `{"name":"` + name + `","status":"` + status + `","config":{"vmType":"vz","arch":"aarch64","images":[{"location":"` + lima.PromotedImageURL + `","digest":"` + lima.PromotedImageDigest + `"}],"mounts":[{"location":"/Users/me"}],"ssh":{"forwardAgent":false}}}`
+	return execx.Result{ExitCode: 0, Stdout: []byte(body + "\n")}
+}
+
+// --- vm init ---
+
+func TestVMInitCreatesHuman(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: execx.Result{ExitCode: 0, Stdout: nil}}, // list: absent
+		{res: execx.Result{ExitCode: 0}},               // create
+	}}
+	code, stdout, stderr := runVMWithFake(t, []string{"vm", "init"}, fake)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "created") || !strings.Contains(stdout, "torio vm start") {
+		t.Fatalf("stdout = %q, want created + next step", stdout)
+	}
+	if len(fake.calls) != 2 {
+		t.Fatalf("calls = %d, want 2", len(fake.calls))
+	}
+	create := fake.calls[1]
+	if len(create) < 5 || create[1] != "create" || create[2] != "--name=torio" || create[3] != "--tty=false" {
+		t.Fatalf("create argv = %v", create)
+	}
+}
+
+func TestVMInitJSONCreated(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: execx.Result{ExitCode: 0, Stdout: nil}},
+		{res: execx.Result{ExitCode: 0}},
+	}}
+	code, stdout, _ := runVMWithFake(t, []string{"--json", "vm", "init"}, fake)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	env := decodeOneEnvelope(t, stdout)
+	if env["ok"] != true || env["command"] != "vm.init" {
+		t.Fatalf("envelope = %v", env)
+	}
+	data := env["data"].(map[string]any)
+	if data["created"] != true || data["unchanged"] != false {
+		t.Fatalf("data = %v", data)
+	}
+	if data["image_digest"] != lima.PromotedImageDigest {
+		t.Fatalf("digest = %v", data["image_digest"])
+	}
+	if data["next_step"] != "torio vm start" {
+		t.Fatalf("next_step = %v", data["next_step"])
+	}
+}
+
+func TestVMInitIdempotentCompatible(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: listCompatibleJSON("torio", "Stopped")},
+	}}
+	code, stdout, stderr := runVMWithFake(t, []string{"vm", "init"}, fake)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d; stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "unchanged") {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if len(fake.calls) != 1 {
+		t.Fatalf("must not create when compatible; calls=%d", len(fake.calls))
+	}
+}
+
+func TestVMInitIncompatibleFailsClosed(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: listIncompatibleMountsJSON("torio", "Stopped")},
+	}}
+	code, _, _ := runVMWithFake(t, []string{"vm", "init"}, fake)
+	if code != int(ExitVerification) {
+		t.Fatalf("exit = %d, want %d", code, int(ExitVerification))
+	}
+	if len(fake.calls) != 1 {
+		t.Fatalf("must not recreate; calls=%d", len(fake.calls))
+	}
+}
+
+func TestVMInitRejectsUnknownFlag(t *testing.T) {
+	fake := &fakeLimaRunner{}
+	code, _, _ := runVMWithFake(t, []string{"vm", "init", "--force"}, fake)
+	if code != int(ExitUsage) {
+		t.Fatalf("exit = %d, want usage", code)
+	}
 }
 
 // decodeOneEnvelope asserts stdout is exactly one JSON envelope and returns it.

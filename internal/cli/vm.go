@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os/user"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -16,6 +17,18 @@ import (
 // well-known secret shapes; later slices may pass a config-derived redactor.
 func defaultNewLima() *lima.Adapter {
 	return lima.New(&execx.ExecRunner{})
+}
+
+func defaultLookupOperatorUser() (string, error) {
+	u, err := user.Current()
+	if err != nil {
+		return "", fmt.Errorf("resolve current user for Lima login identity: %w", err)
+	}
+	name := strings.TrimSpace(u.Username)
+	if name == "" {
+		return "", fmt.Errorf("current user has empty username")
+	}
+	return name, nil
 }
 
 // vmStateData is the minimal `data` object shared by `vm status` and `vm start`.
@@ -49,12 +62,88 @@ func newVMCmd(a *app) *cobra.Command {
 			return usageError(fmt.Sprintf("unknown vm subcommand %q", args[0]))
 		},
 	}
+	vm.AddCommand(newVMInitCmd(a))
 	vm.AddCommand(newVMStatusCmd(a))
 	vm.AddCommand(newVMStartCmd(a))
 	vm.AddCommand(newVMStopCmd(a))
 	vm.AddCommand(newVMBootstrapCmd(a))
 	vm.AddCommand(newVMSSHCmd(a))
 	return vm
+}
+
+func newVMInitCmd(a *app) *cobra.Command {
+	var cpus int
+	var memory string
+	var disk string
+	cmd := &cobra.Command{
+		Use:   "init",
+		Short: "Create or verify the Torio VM from the trusted template",
+		Long: "Create the Torio Lima VM from the embedded Gate-0 template, or succeed " +
+			"idempotently when an existing instance already matches the trusted pins " +
+			"(image digest, empty mounts, no persistent SSH agent forwarding). " +
+			"Incompatible existing instances fail closed — there is no --force and Torio " +
+			"never recreates or deletes them.\n\n" +
+			"Defaults: 4 CPUs, 8GiB memory, 60GiB disk. Next step after success: torio vm start.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx, cancel := a.opContext(cmd)
+			defer cancel()
+			opUser, err := a.lookupOperatorUser()
+			if err != nil {
+				return &CLIError{
+					Exit:    ExitExternal,
+					Code:    "OPERATOR_LOOKUP_FAILED",
+					Command: "vm.init",
+					Message: err.Error(),
+				}
+			}
+			res, err := a.newLima().Init(ctx, lima.InitOptions{
+				CPUs:         cpus,
+				Memory:       memory,
+				Disk:         disk,
+				OperatorUser: opUser,
+			})
+			if err != nil {
+				return mapLimaError("vm.init", err)
+			}
+			return a.emitVMInit(res)
+		},
+	}
+	cmd.Flags().IntVar(&cpus, "cpus", 0, "vCPU count (default 4)")
+	cmd.Flags().StringVar(&memory, "memory", "", "memory size, e.g. 8GiB (default 8GiB)")
+	cmd.Flags().StringVar(&disk, "disk", "", "disk size, e.g. 60GiB (default 60GiB)")
+	return cmd
+}
+
+// vmInitData is the `data` object for a successful `vm init`.
+type vmInitData struct {
+	Name          string `json:"name"`
+	Created       bool   `json:"created"`
+	Unchanged     bool   `json:"unchanged"`
+	ImageLocation string `json:"image_location"`
+	ImageDigest   string `json:"image_digest"`
+	NextStep      string `json:"next_step"`
+}
+
+func (a *app) emitVMInit(res lima.InitResult) error {
+	const next = "torio vm start"
+	if a.jsonOut {
+		data := vmInitData{
+			Name:          lima.InstanceName,
+			Created:       res.Created,
+			Unchanged:     !res.Created,
+			ImageLocation: res.ImageLocation,
+			ImageDigest:   res.ImageDigest,
+			NextStep:      next,
+		}
+		return writeJSON(a.stdout, successEnvelope("vm.init", data, nil))
+	}
+	if res.Created {
+		_, err := fmt.Fprintf(a.stdout, "%s: created\nnext: %s\n", lima.InstanceName, next)
+		return err
+	}
+	_, err := fmt.Fprintf(a.stdout, "%s: unchanged (compatible existing instance)\nnext: %s\n", lima.InstanceName, next)
+	return err
 }
 
 func newVMStatusCmd(a *app) *cobra.Command {
