@@ -51,6 +51,10 @@ const (
 	// state-changing operation (see docs/contracts/cli.md's Hermes-adapter
 	// mutation-postcondition rule, applied here to limactl).
 	KindPostconditionFailed ErrorKind = "postcondition_failed"
+	// KindIncompatible means InstanceName already exists but its trusted pins
+	// (image digest/URL, empty mounts, forwardAgent=false, vz/aarch64) do not
+	// match the embedded V1 template. Init fails closed — no recreate/reset/delete.
+	KindIncompatible ErrorKind = "incompatible"
 )
 
 // Error is a categorized adapter failure. Its message and wrapped Err are

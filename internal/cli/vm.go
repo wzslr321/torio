@@ -328,7 +328,7 @@ func mapLimaError(command string, err error) *CLIError {
 	switch lerr.Kind {
 	case lima.KindNotFound, lima.KindNotRunning, lima.KindAmbiguousState, lima.KindPostconditionFailed:
 		return &CLIError{Exit: ExitPrecondition, Code: code, Command: command, Message: lerr.Error()}
-	case lima.KindVerificationFailed:
+	case lima.KindVerificationFailed, lima.KindIncompatible:
 		return &CLIError{Exit: ExitVerification, Code: code, Command: command, Message: lerr.Error()}
 	case lima.KindBinaryUnavailable, lima.KindCommandFailed, lima.KindMalformedOutput,
 		lima.KindVersionMismatch, lima.KindTimeout, lima.KindCancelled:

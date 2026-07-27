@@ -1,9 +1,7 @@
-// Package lima is the typed, testable adapter over `limactl` (ADR-0003). The
-// V1 surface is the smallest usable slice: feature/version probe, status,
-// start, and ssh for the single Torio target VM. Instance creation
-// (init, from a trusted template) and stop are deliberately deferred to a
-// later slice and are not implemented here. Every external call is an
-// execx.Command argument array — never a shell string — run through the
+// Package lima is the typed, testable adapter over `limactl` (ADR-0003 / ADR-0015).
+// The V1 surface covers probe, status, init (trusted embedded template), start,
+// stop, bootstrap, and ssh for the single Torio target VM. Every external call
+// is an execx.Command argument array — never a shell string — run through the
 // injected execx.Runner, so the whole surface is testable with a fake runner
 // and never touches a real VM in unit tests. This package renders no CLI
 // output and makes no exit-code decisions; that is internal/cli's

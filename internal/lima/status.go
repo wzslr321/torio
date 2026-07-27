@@ -14,9 +14,29 @@ import (
 // Unknown fields are ignored (this is external tool output the adapter
 // consumes, not an authority document it produces — contrast with
 // internal/config's DisallowUnknownFields on its own on-disk documents).
+// Config is optional for status/start/stop; Init requires it when verifying
+// an existing instance against Gate 0 pins.
 type instanceRecord struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
+	Name   string          `json:"name"`
+	Status string          `json:"status"`
+	Config *instanceConfig `json:"config"`
+}
+
+// instanceConfig is the nested limactl list config subset used by Init
+// compatibility checks (image pin, mounts, forwardAgent, vmType, arch).
+type instanceConfig struct {
+	VMType string `json:"vmType"`
+	Arch   string `json:"arch"`
+	Images []struct {
+		Location string `json:"location"`
+		Digest   string `json:"digest"`
+	} `json:"images"`
+	Mounts []struct {
+		Location string `json:"location"`
+	} `json:"mounts"`
+	SSH struct {
+		ForwardAgent bool `json:"forwardAgent"`
+	} `json:"ssh"`
 }
 
 // State is the adapter's own instance-state enum, mapped from limactl's
