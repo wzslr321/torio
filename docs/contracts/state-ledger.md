@@ -56,7 +56,7 @@ FAILED         terminal infrastructure/policy failure
 
 ## Reconciliation
 
-Po restarcie `hb reconcile` porównuje:
+Po restarcie `torio reconcile` porównuje:
 
 - ledger leases,
 - Docker labels/state,
