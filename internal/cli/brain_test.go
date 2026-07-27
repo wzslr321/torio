@@ -251,3 +251,83 @@ func TestMapBrainErrorExitCodes(t *testing.T) {
 		}
 	}
 }
+
+// Hermes keys its skill prompt cache on directories and toolsets, not on the
+// file manifest, so a freshly written SKILL.md is invisible to every session
+// already running. `brain init` must say that instead of implying the skill is
+// live everywhere.
+func TestBrainInitReportsRetrievalSkillActivation(t *testing.T) {
+	status := initializedBrainReport()
+	status.SkillState = brain.SkillInstalled
+	service := &fakeBrainService{initReport: brain.InitReport{
+		Created:      true,
+		SkillUpdated: true,
+		Status:       status,
+	}}
+
+	code, stdout, stderr := runBrainCLI(t, []string{"brain", "init"}, service)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, brain.SkillFilePath) {
+		t.Errorf("human init output does not name the installed skill path: %q", stdout)
+	}
+	if !strings.Contains(stdout, "new session") {
+		t.Errorf("human init output does not require a new session: %q", stdout)
+	}
+	if strings.Contains(stdout, "Task 13") {
+		t.Errorf("human init output still defers the skill to Task 13: %q", stdout)
+	}
+
+	code, stdout, stderr = runBrainCLI(t, []string{"brain", "init", "--json"}, service)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	env := decodeOneEnvelope(t, stdout)
+	data, _ := env["data"].(map[string]any)
+	if data["retrieval_skill"] != "installed" || data["retrieval_skill_updated"] != true {
+		t.Fatalf("skill data = %#v", data)
+	}
+}
+
+// An unchanged payload must not tell the operator to restart anything, and a
+// drifted one must point at the command that repairs it.
+func TestBrainStatusReportsRetrievalSkillHonestly(t *testing.T) {
+	cases := []struct {
+		name      string
+		state     brain.SkillState
+		wantHuman string
+	}{
+		{"installed", brain.SkillInstalled, "cannot tell"},
+		{"not installed", brain.SkillNotInstalled, "torio brain init"},
+		{"drift", brain.SkillDrift, "torio brain init"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status := initializedBrainReport()
+			status.SkillState = tc.state
+			service := &fakeBrainService{statusReport: status}
+
+			code, stdout, stderr := runBrainCLI(t, []string{"brain", "status"}, service)
+			if code != int(ExitOK) {
+				t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+			}
+			if !strings.Contains(stdout, string(tc.state)) {
+				t.Errorf("human status omits skill state %q: %q", tc.state, stdout)
+			}
+			if !strings.Contains(stdout, tc.wantHuman) {
+				t.Errorf("human status omits %q: %q", tc.wantHuman, stdout)
+			}
+
+			code, stdout, stderr = runBrainCLI(t, []string{"brain", "status", "--json"}, service)
+			if code != int(ExitOK) {
+				t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+			}
+			env := decodeOneEnvelope(t, stdout)
+			data, _ := env["data"].(map[string]any)
+			if data["retrieval_skill"] != string(tc.state) {
+				t.Fatalf("retrieval_skill = %#v, want %q", data["retrieval_skill"], tc.state)
+			}
+		})
+	}
+}

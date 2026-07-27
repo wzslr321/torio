@@ -12,9 +12,12 @@ package brain
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"sync"
+	"testing"
 
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
@@ -49,6 +52,15 @@ type fakeGuest struct {
 	markdownCount   int
 	attachmentCount int
 	totalBytes      int64
+	skillDirMode    string
+	skillDirSymlink bool
+	skillSymlink    bool
+	skillPresent    bool
+	skillDigest     string
+	skillOwner      string
+	skillGroup      string
+	skillMode       string
+	skillStaged     []byte
 	failContains    map[string]int
 	truncateOn      string
 	transportErr    error
@@ -76,6 +88,23 @@ func initializedFake() *fakeGuest {
 	f.gitRepo = true
 	f.registered = true
 	f.markdownCount = 3
+	return f
+}
+
+// withInstalledSkill puts the current embedded payload on the fake guest with
+// the ownership and mode a real install produces.
+func (f *fakeGuest) withInstalledSkill(t *testing.T) *fakeGuest {
+	t.Helper()
+	_, digest, err := retrievalSkill()
+	if err != nil {
+		t.Fatalf("retrievalSkill() error = %v", err)
+	}
+	f.skillDirMode = "750"
+	f.skillPresent = true
+	f.skillDigest = digest
+	f.skillOwner = lima.HermesUser
+	f.skillGroup = lima.HermesUser
+	f.skillMode = "640"
 	return f
 }
 
@@ -160,6 +189,64 @@ func (f *fakeGuest) route(_ context.Context, stdin []byte, argv []string) (execx
 			return okResult(""), nil
 		}
 		return exitResult(1, "", ""), nil
+	// Retrieval skill routes. SkillFilePath has SkillPath as a prefix, so the
+	// file probes must be matched first.
+	case strings.Contains(joined, "test -L "+SkillFilePath):
+		if f.skillSymlink {
+			return okResult(""), nil
+		}
+		return exitResult(1, "", ""), nil
+	case strings.Contains(joined, "test -f "+SkillFilePath):
+		if f.skillPresent {
+			return okResult(""), nil
+		}
+		return exitResult(1, "", ""), nil
+	case strings.Contains(joined, "stat -c %U:%G %a "+SkillFilePath):
+		if !f.skillPresent {
+			return exitResult(1, "", "no such file or directory"), nil
+		}
+		return okResult(f.skillOwner + ":" + f.skillGroup + " " + f.skillMode + "\n"), nil
+	case strings.Contains(joined, "sha256sum -- "+SkillFilePath):
+		if !f.skillPresent {
+			return exitResult(1, "", "no such file or directory"), nil
+		}
+		return okResult(f.skillDigest + "  " + SkillFilePath + "\n"), nil
+	case strings.Contains(joined, "test -L "+SkillPath):
+		if f.skillDirSymlink {
+			return okResult(""), nil
+		}
+		return exitResult(1, "", ""), nil
+	case strings.Contains(joined, "test -d "+SkillPath):
+		if f.skillDirMode != "" {
+			return okResult(""), nil
+		}
+		return exitResult(1, "", ""), nil
+	case strings.Contains(joined, "stat -c %U:%G %a "+SkillPath):
+		if f.skillDirMode == "" {
+			return exitResult(1, "", "no such file or directory"), nil
+		}
+		return okResult(lima.HermesUser + ":" + lima.HermesUser + " " + f.skillDirMode + "\n"), nil
+	case strings.Contains(joined, "install -d -o hermes -g hermes -m 0750 "+SkillPath):
+		f.skillDirMode = "750"
+		return okResult(""), nil
+	case strings.Contains(joined, "tee "+skillStagingPath):
+		f.skillStaged = append([]byte(nil), stdin...)
+		return okResult(""), nil
+	case strings.Contains(joined, "chmod 0640 "+skillStagingPath):
+		return okResult(""), nil
+	case strings.Contains(joined, "mv -T "+skillStagingPath+" "+SkillFilePath):
+		sum := sha256.Sum256(f.skillStaged)
+		f.skillPresent = true
+		f.skillSymlink = false
+		f.skillDigest = hex.EncodeToString(sum[:])
+		f.skillOwner = lima.HermesUser
+		f.skillGroup = lima.HermesUser
+		f.skillMode = "640"
+		f.skillStaged = nil
+		return okResult(""), nil
+	case strings.Contains(joined, "rm -f -- "+skillStagingPath):
+		f.skillStaged = nil
+		return okResult(""), nil
 	case strings.Contains(joined, "test -L "+Path):
 		return exitResult(1, "", ""), nil
 	case strings.Contains(joined, "test -d "+Path):
@@ -300,6 +387,15 @@ func (f *fakeGuest) saw(fragment string) bool {
 		}
 	}
 	return false
+}
+
+func (f *fakeGuest) firstIndex(fragment string) int {
+	for i, call := range f.calls {
+		if strings.Contains(strings.Join(call.argv, " "), fragment) {
+			return i
+		}
+	}
+	return -1
 }
 
 func (f *fakeGuest) count(fragment string) int {
