@@ -11,6 +11,10 @@
 > mimo kolejności z `AGENTS.md` §3, bo ADR-0015 jawnie supersedes zakres tej platformy
 > (patrz [`legacy-architecture.md`](../legacy-architecture.md)). Superseded treść jest
 > zachowana celowo jako kontekst historyczny; nie implementuj jej.
+>
+> Ten dokument jest **normatywny**, nie archiwalny: rozjazd z dostarczonym zachowaniem jest
+> defektem do naprawy, a nie zapisem do zachowania — patrz
+> [ADR-0016](../adr/0016-normative-documents-are-corrected-not-archived.md).
 
 ## Binary i output
 
