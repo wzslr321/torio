@@ -16,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/wzslr321/torio/internal/brain"
 	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/lima"
 	"github.com/wzslr321/torio/internal/serve"
@@ -49,6 +50,10 @@ type app struct {
 	// tests inject one backed by a fake guest.
 	newServe func() *serve.Adapter
 
+	// newBrain builds the private Brain manager. Tests inject a service fake;
+	// production wires the manager over the same typed Lima guest boundary.
+	newBrain func() brainService
+
 	// lookupOperatorUser resolves the Lima login identity for `vm init`.
 	// Production uses the current OS user; tests inject a fixed name.
 	lookupOperatorUser func() (string, error)
@@ -73,6 +78,9 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 	}
 	if a.newServe == nil {
 		a.newServe = func() *serve.Adapter { return serve.New(a.newLima()) }
+	}
+	if a.newBrain == nil {
+		a.newBrain = func() brainService { return brain.New(a.newLima()) }
 	}
 	if a.lookupOperatorUser == nil {
 		a.lookupOperatorUser = defaultLookupOperatorUser
@@ -169,6 +177,7 @@ func newRootCmd(a *app) *cobra.Command {
 	root.AddCommand(newVersionCmd(a))
 	root.AddCommand(newVMCmd(a))
 	root.AddCommand(newServeCmd(a))
+	root.AddCommand(newBrainCmd(a))
 	return root
 }
 
