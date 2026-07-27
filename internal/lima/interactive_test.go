@@ -1,0 +1,281 @@
+package lima
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// operatorShellHost prepares the two host preconditions of an operator
+// session — a canonical Lima ssh config for the target instance and a running
+// SSH agent — and returns the fake HOME they live under.
+func operatorShellHost(t *testing.T) string {
+	t.Helper()
+
+	home := t.TempDir()
+	cfgDir := filepath.Join(home, ".lima", InstanceName)
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatalf("creating lima config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "ssh.config"), []byte("Host lima-"+InstanceName+"\n"), 0o600); err != nil {
+		t.Fatalf("writing lima ssh config: %v", err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("SSH_AUTH_SOCK", filepath.Join(home, "agent.sock"))
+	return home
+}
+
+// TestOperatorShellSpecBuildsThePromotedArgv pins the exact argv proven by the
+// promoted Gate-0 spike (docs/spike-results/v1-operator-shell-20260727T132420Z):
+// -F first, then the -o overrides, then -A. The remote side is a fixed guest
+// helper plus the project path — two argv elements, never a command string.
+func TestOperatorShellSpecBuildsThePromotedArgv(t *testing.T) {
+	home := operatorShellHost(t)
+
+	spec, err := OperatorShellSpec("/home/hermes/projects/demo")
+	if err != nil {
+		t.Fatalf("OperatorShellSpec: unexpected error: %v", err)
+	}
+
+	if spec.Name != "ssh" {
+		t.Errorf("Name = %q, want %q", spec.Name, "ssh")
+	}
+	want := []string{
+		"-F", filepath.Join(home, ".lima", InstanceName, "ssh.config"),
+		"-o", "ControlMaster=no",
+		"-o", "ControlPath=none",
+		"-o", "ForwardAgent=yes",
+		"-A",
+		"-t",
+		"lima-" + InstanceName,
+		OperatorShellHelper,
+		"/home/hermes/projects/demo",
+	}
+	if !equalArgs(spec.Args, want) {
+		t.Fatalf("argv = %v, want %v", spec.Args, want)
+	}
+}
+
+// TestOperatorShellSpecPutsOverridesAfterTheConfigFlag pins the ordering rule
+// the spike had to discover: -F first, every -o after it. Lima's generated
+// ssh.config enables ControlMaster/ControlPersist, so an override placed before
+// -F loses, a stale multiplexing socket is reused, and agent forwarding is
+// silently poisoned (FINDINGS "Regression: stale ControlMaster mux does not
+// poison -A agent").
+func TestOperatorShellSpecPutsOverridesAfterTheConfigFlag(t *testing.T) {
+	operatorShellHost(t)
+
+	spec, err := OperatorShellSpec(HermesWorkspacePath + "/demo")
+	if err != nil {
+		t.Fatalf("OperatorShellSpec: unexpected error: %v", err)
+	}
+
+	configAt := -1
+	for i, arg := range spec.Args {
+		switch {
+		case arg == "-F" && configAt < 0:
+			configAt = i
+		case arg == "-o":
+			if configAt < 0 {
+				t.Fatalf("argv has an -o override at %d before -F: %v", i, spec.Args)
+			}
+		}
+	}
+	if configAt < 0 {
+		t.Fatalf("argv does not pass -F at all: %v", spec.Args)
+	}
+	for _, override := range []string{"ControlMaster=no", "ControlPath=none", "ForwardAgent=yes"} {
+		if !containsArg(spec.Args, override) {
+			t.Errorf("argv is missing the %q override: %v", override, spec.Args)
+		}
+	}
+	if !containsArg(spec.Args, "-A") {
+		t.Errorf("argv does not forward the agent: %v", spec.Args)
+	}
+}
+
+// TestOperatorShellSpecNeverBackgroundsTheSession pins the other half of the
+// spike's ssh findings: -n is required only for a backgrounded session, and it
+// redirects stdin from /dev/null. This session is the operator's foreground
+// terminal, so -n (and its relatives) must never appear.
+func TestOperatorShellSpecNeverBackgroundsTheSession(t *testing.T) {
+	operatorShellHost(t)
+
+	spec, err := OperatorShellSpec(HermesWorkspacePath + "/demo")
+	if err != nil {
+		t.Fatalf("OperatorShellSpec: unexpected error: %v", err)
+	}
+	for _, forbidden := range []string{"-n", "-N", "-f"} {
+		if containsArg(spec.Args, forbidden) {
+			t.Errorf("argv detaches the session with %q: %v", forbidden, spec.Args)
+		}
+	}
+	if !containsArg(spec.Args, "-t") {
+		t.Errorf("argv does not force a TTY for the remote helper: %v", spec.Args)
+	}
+}
+
+// TestOperatorShellSpecInheritsTheOperatorEnvironment proves Torio does not
+// compose an environment for the session. A nil Env is what carries the
+// operator's SSH_AUTH_SOCK, TERM and locale into ssh; building one here would
+// mean copying credential-bearing values through Torio.
+func TestOperatorShellSpecInheritsTheOperatorEnvironment(t *testing.T) {
+	operatorShellHost(t)
+
+	spec, err := OperatorShellSpec(HermesWorkspacePath + "/demo")
+	if err != nil {
+		t.Fatalf("OperatorShellSpec: unexpected error: %v", err)
+	}
+	if spec.Env != nil {
+		t.Errorf("Env = %v, want nil so the session inherits the operator's environment", spec.Env)
+	}
+}
+
+// TestOperatorShellSpecNeverBuildsARemoteCommandString proves the remote side
+// is two argv elements — the fixed helper and the validated project path — and
+// that no element is a concatenated command. There is no `sh -c`, no quoting,
+// and nothing for a caller to inject a command into.
+func TestOperatorShellSpecNeverBuildsARemoteCommandString(t *testing.T) {
+	operatorShellHost(t)
+
+	path := HermesWorkspacePath + "/demo"
+	spec, err := OperatorShellSpec(path)
+	if err != nil {
+		t.Fatalf("OperatorShellSpec: unexpected error: %v", err)
+	}
+
+	remote := spec.Args[len(spec.Args)-2:]
+	if remote[0] != OperatorShellHelper || remote[1] != path {
+		t.Errorf("remote argv = %v, want [%q %q]", remote, OperatorShellHelper, path)
+	}
+	for i, arg := range spec.Args {
+		if strings.ContainsAny(arg, " \t\n;&|$`'\"") {
+			t.Errorf("argv[%d] = %q looks like a command string, not a single token", i, arg)
+		}
+	}
+}
+
+// TestOperatorShellSpecRequiresARunningSSHAgent proves the session is refused
+// when the host has no agent to forward. Without it -A forwards nothing: the
+// operator would land in the project with no write capability and only find
+// out when the push fails (ADR-0015 — write capability comes from the macOS
+// agent, and only for the duration of the session).
+func TestOperatorShellSpecRequiresARunningSSHAgent(t *testing.T) {
+	operatorShellHost(t)
+	t.Setenv("SSH_AUTH_SOCK", "")
+
+	_, err := OperatorShellSpec("/home/hermes/projects/demo")
+	if err == nil {
+		t.Fatalf("OperatorShellSpec = nil error, want a refusal when no agent is running")
+	}
+	var lerr *Error
+	if !errors.As(err, &lerr) {
+		t.Fatalf("error = %v, want a *lima.Error", err)
+	}
+	if lerr.Op != operatorShellOp {
+		t.Errorf("Op = %q, want %q", lerr.Op, operatorShellOp)
+	}
+	if lerr.Kind != KindNotFound {
+		t.Errorf("Kind = %q, want %q", lerr.Kind, KindNotFound)
+	}
+	if !strings.Contains(lerr.Error(), "SSH_AUTH_SOCK") {
+		t.Errorf("error = %q, want it to name the missing precondition", lerr.Error())
+	}
+}
+
+// TestOperatorShellSpecRequiresTheCanonicalSSHConfig proves a missing instance
+// ssh config is refused up front and named. Without it ssh would fall back to
+// the operator's own ~/.ssh/config and resolve "lima-torio" against whatever
+// that file happens to say — the session must be built against Lima's own
+// generated config or not at all.
+func TestOperatorShellSpecRequiresTheCanonicalSSHConfig(t *testing.T) {
+	home := operatorShellHost(t)
+	cfg := filepath.Join(home, ".lima", InstanceName, "ssh.config")
+	if err := os.Remove(cfg); err != nil {
+		t.Fatalf("removing the lima ssh config: %v", err)
+	}
+
+	_, err := OperatorShellSpec("/home/hermes/projects/demo")
+	if err == nil {
+		t.Fatalf("OperatorShellSpec = nil error, want a refusal when the instance ssh config is missing")
+	}
+	var lerr *Error
+	if !errors.As(err, &lerr) {
+		t.Fatalf("error = %v, want a *lima.Error", err)
+	}
+	if lerr.Kind != KindNotFound {
+		t.Errorf("Kind = %q, want %q", lerr.Kind, KindNotFound)
+	}
+	if !strings.Contains(lerr.Error(), cfg) {
+		t.Errorf("error = %q, want it to name the expected config path %q", lerr.Error(), cfg)
+	}
+}
+
+// TestOperatorShellSpecRejectsInvalidProjectPaths proves the only caller-shaped
+// input is constrained to exactly one project directory directly under the
+// guest workspace, with a strict identifier. The remote side hands this value
+// to the guest helper, so a traversal, a flag-shaped name, whitespace or a
+// shell metacharacter must never get that far — and neither must a path
+// pointing anywhere outside /home/hermes/projects.
+func TestOperatorShellSpecRejectsInvalidProjectPaths(t *testing.T) {
+	operatorShellHost(t)
+
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"empty", ""},
+		{"relative", "demo"},
+		{"outside the workspace", "/etc/passwd"},
+		{"the workspace root itself", HermesWorkspacePath},
+		{"trailing slash", HermesWorkspacePath + "/demo/"},
+		{"nested below a project", HermesWorkspacePath + "/demo/src"},
+		{"parent traversal", HermesWorkspacePath + "/../.ssh"},
+		{"dot segment", HermesWorkspacePath + "/./demo"},
+		{"flag-shaped id", HermesWorkspacePath + "/-oProxyCommand=touch /tmp/pwned"},
+		{"space in id", HermesWorkspacePath + "/de mo"},
+		{"shell metacharacters", HermesWorkspacePath + "/demo;rm -rf /"},
+		{"command substitution", HermesWorkspacePath + "/demo$(id)"},
+		{"newline", HermesWorkspacePath + "/demo\ntouch /tmp/pwned"},
+		{"quote", HermesWorkspacePath + "/de'mo"},
+		{"overlong id", HermesWorkspacePath + "/" + strings.Repeat("a", 65)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec, err := OperatorShellSpec(tc.path)
+			if err == nil {
+				t.Fatalf("OperatorShellSpec(%q) = %v, nil error; want a refusal", tc.path, spec.Args)
+			}
+			var lerr *Error
+			if !errors.As(err, &lerr) {
+				t.Fatalf("error = %v, want a *lima.Error", err)
+			}
+			if lerr.Kind != KindVerificationFailed {
+				t.Errorf("Kind = %q, want %q", lerr.Kind, KindVerificationFailed)
+			}
+			if len(spec.Args) != 0 || spec.Name != "" {
+				t.Errorf("a rejected path still produced a command: %s %v", spec.Name, spec.Args)
+			}
+		})
+	}
+}
+
+// TestOperatorShellSpecAcceptsWellFormedProjectIDs is the positive control for
+// the identifier rule: ordinary repository names must keep working.
+func TestOperatorShellSpecAcceptsWellFormedProjectIDs(t *testing.T) {
+	operatorShellHost(t)
+
+	for _, id := range []string{"demo", "torio-box", "a.b_c-1", "A1", strings.Repeat("a", 64)} {
+		path := HermesWorkspacePath + "/" + id
+		spec, err := OperatorShellSpec(path)
+		if err != nil {
+			t.Errorf("OperatorShellSpec(%q) = %v, want it accepted", path, err)
+			continue
+		}
+		if got := spec.Args[len(spec.Args)-1]; got != path {
+			t.Errorf("last argv element = %q, want the project path %q", got, path)
+		}
+	}
+}
