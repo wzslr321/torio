@@ -7,30 +7,64 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 )
 
-// ConfigSchemaVersion is the only accepted config document schema version. A
-// document declaring any other value is rejected rather than migrated.
-const ConfigSchemaVersion = "1"
+const (
+	// ConfigSchemaVersionV1 is the settings-only document: no project registry.
+	// It is still read, and normalizes to an empty registry.
+	ConfigSchemaVersionV1 = "1"
+	// ConfigSchemaVersionV2 adds the non-secret project registry (ADR-0015).
+	ConfigSchemaVersionV2 = "2"
+	// ConfigSchemaVersion is the version this binary writes. Reads accept V1 and
+	// V2; every write emits V2, so the first mutation upgrades the document. A
+	// document declaring any other version is rejected rather than migrated —
+	// which is also why a binary that predates V2 refuses a V2 document instead
+	// of misreading it as settings-only.
+	ConfigSchemaVersion = ConfigSchemaVersionV2
+)
 
 // File is the validated, typed content of the on-disk config document. It holds
-// only non-secret operator intent. Fields are deliberately minimal in D2; later
-// slices extend the schema behind the same version gate.
+// only non-secret operator intent: runtime settings plus the active project
+// registry. A project's workspace path is deliberately absent — it is derived
+// from the project ID, never stored (ADR-0015).
 type File struct {
-	// SchemaVersion is the document schema version; always ConfigSchemaVersion
-	// once validated.
+	// SchemaVersion is the document schema version; ConfigSchemaVersionV1 or
+	// ConfigSchemaVersionV2 once validated.
 	SchemaVersion string
 	// Timeout is the parsed default operation timeout, or 0 when the document
 	// omits default_timeout. When set it is bounded by policy (see Validate).
 	Timeout time.Duration
+	// Projects is the attached project registry. It is empty for a V1 document
+	// and for a V2 document without projects.
+	Projects []Project
 }
 
-// fileJSON is the wire form of File. Unknown fields are rejected by the decoder
-// (DisallowUnknownFields), so the schema fails closed.
-type fileJSON struct {
+// fileJSONV1 is the V1 wire form: settings only. It is the exact struct a
+// pre-registry binary decodes into, so a V2 document (which carries the unknown
+// "projects" field and an unsupported schema_version) fails closed against it.
+type fileJSONV1 struct {
 	SchemaVersion  string `json:"schema_version"`
 	DefaultTimeout string `json:"default_timeout"`
+}
+
+// fileJSONV2 is the V2 wire form of File. Unknown fields are rejected by the
+// decoder (DisallowUnknownFields) at every level, so the schema fails closed —
+// including a project object that tries to smuggle in a workspace path.
+type fileJSONV2 struct {
+	SchemaVersion  string        `json:"schema_version"`
+	DefaultTimeout string        `json:"default_timeout,omitempty"`
+	Projects       []projectJSON `json:"projects"`
+}
+
+// projectJSON is the wire form of Project.
+type projectJSON struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+	Remote      string `json:"remote"`
 }
 
 // Runtime is the resolved configuration for one invocation: the canonical
@@ -124,10 +158,133 @@ func Load(opts Options) (rt Runtime, err error) {
 	return rt, nil
 }
 
-// parseFile decodes and strictly validates a config document. The returned
-// error never contains the raw document bytes or secret-shaped material: the
-// raw pre-scan rejects unescaped secrets early, and redactErr on every return
-// path scrubs any secret a JSON-escaped value or decoder message could reveal.
+// WriteFile validates f and persists it crash-safely with owner-only
+// permissions, then reads it back and validates it again.
+//
+// Every write emits the current schema version, so the first mutation of a V1
+// document upgrades it to V2 — a document is never rewritten under a version
+// that cannot express its registry. A File that does not declare the current
+// version is rejected rather than silently upgraded; the mutation helpers
+// (WithProject, WithoutProject) set it.
+//
+// The registry is sorted by ID before marshalling, so the same set of projects
+// always produces the same bytes regardless of the order they were added in.
+//
+// The document is validated before any file is created, and — as in
+// WriteVersionLock — the trusted directory is validated before the write: an
+// atomic rename must not be what turns a symlinked, mode-permissive or
+// foreign-owned directory into config authority. After the rename the file is
+// re-read through the same trusted path the loader uses and compared against
+// the intended document, so a write that landed as something else is reported
+// instead of trusted.
+//
+// Every returned error is redacted at the package boundary (redactErr leaves a
+// non-secret error untouched).
+func WriteFile(path string, f File) (err error) {
+	defer func() { err = redactErr(err) }()
+
+	if f.SchemaVersion != ConfigSchemaVersion {
+		return fmt.Errorf("config: writes always use schema_version %q, got %q", ConfigSchemaVersion, f.SchemaVersion)
+	}
+	out := f
+	out.Projects = slices.Clone(f.Projects)
+	slices.SortFunc(out.Projects, func(a, b Project) int { return strings.Compare(a.ID, b.ID) })
+	if err := out.Validate(); err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+
+	wire := fileJSONV2{SchemaVersion: out.SchemaVersion, Projects: []projectJSON{}}
+	if out.Timeout != 0 {
+		wire.DefaultTimeout = out.Timeout.String()
+	}
+	for _, p := range out.Projects {
+		wire.Projects = append(wire.Projects, projectJSON{ID: p.ID, DisplayName: p.DisplayName, Remote: p.Remote})
+	}
+	data, err := json.MarshalIndent(wire, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	data = append(data, '\n')
+
+	if err := statTrustedDirIfExists(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("config: trusted directory: %w", err)
+	}
+	if err := writeFilePrivate(path, data); err != nil {
+		return err
+	}
+	return verifyPersisted(path, out)
+}
+
+// verifyPersisted re-reads the document at path through the trusted read path
+// and checks it parses, validates, and is the document want describes. It is
+// the post-write half of WriteFile: validating in memory proves what we meant
+// to write, not what a concurrent writer or a failing filesystem left behind.
+//
+// A mismatch is reported, not repaired: the rename already happened, so the
+// operator — not a silent retry — decides what the file should contain.
+func verifyPersisted(path string, want File) error {
+	f, err := openTrustedFile(path)
+	if err != nil {
+		return fmt.Errorf("config: read back written config: %w", err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return fmt.Errorf("config: read back written config: %w", err)
+	}
+	got, err := parseFile(data)
+	if err != nil {
+		return fmt.Errorf("config: written config did not validate on read back: %w", err)
+	}
+	if got.SchemaVersion != want.SchemaVersion || got.Timeout != want.Timeout ||
+		!slices.Equal(got.Projects, want.Projects) {
+		// Neither document is echoed: both may carry operator-controlled text.
+		return errors.New("config: written config does not match the document that was persisted")
+	}
+	return nil
+}
+
+// Validate enforces the semantic rules of an in-memory document, independently
+// of how it was obtained: parsed from disk, or built by a caller that is about
+// to persist it. It fails closed — an unsupported schema version, an
+// out-of-policy timeout, or an invalid registry is rejected, never coerced.
+//
+// The error is redacted at the boundary because it interpolates document values
+// (redactErr leaves a non-secret error untouched).
+func (f File) Validate() (err error) {
+	defer func() { err = redactErr(err) }()
+
+	switch f.SchemaVersion {
+	case ConfigSchemaVersionV1:
+		// V1 has no registry. Carrying projects under it would mean a document
+		// this binary could write but a V1 reader would silently ignore.
+		if len(f.Projects) > 0 {
+			return fmt.Errorf("schema_version %q cannot carry projects (want %q)",
+				ConfigSchemaVersionV1, ConfigSchemaVersionV2)
+		}
+	case ConfigSchemaVersionV2:
+	default:
+		return fmt.Errorf("schema_version %q is not supported (want %q or %q)",
+			f.SchemaVersion, ConfigSchemaVersionV1, ConfigSchemaVersionV2)
+	}
+
+	if f.Timeout != 0 {
+		if err := (Settings{Timeout: f.Timeout}).Validate(); err != nil {
+			return fmt.Errorf("default_timeout invalid: %w", err)
+		}
+	}
+	return validateProjects(f.Projects)
+}
+
+// parseFile decodes and strictly validates a config document. The declared
+// schema version selects the wire form, so each version is decoded by the exact
+// struct that defines it: a V1 document carrying "projects" is an unknown field
+// and fails closed, and no V2 field can be silently accepted under V1.
+//
+// The returned error never contains the raw document bytes or secret-shaped
+// material: the raw pre-scan rejects unescaped secrets early, and redactErr on
+// every return path scrubs any secret a JSON-escaped value or decoder message
+// could reveal.
 func parseFile(data []byte) (f File, err error) {
 	defer func() { err = redactErr(err) }()
 	// Reject secret-shaped material anywhere in the document before echoing any
@@ -136,34 +293,87 @@ func parseFile(data []byte) (f File, err error) {
 		return File{}, errors.New("contains secret-shaped material; config must be non-secret")
 	}
 
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	var raw fileJSON
-	if err := dec.Decode(&raw); err != nil {
-		return File{}, fmt.Errorf("invalid JSON or unknown field: %w", err)
+	// Probe the declared version first. The probe is deliberately non-strict
+	// about other fields — the version-specific decode below is the one that
+	// enforces the schema — but it still rejects malformed JSON and trailing
+	// data (json.Unmarshal accepts exactly one document).
+	var probe struct {
+		SchemaVersion string `json:"schema_version"`
 	}
-	// Exactly one JSON document is allowed. Decoder.More() only tests for a next
-	// element within the current array/object, so a trailing closing delimiter
-	// can slip past it; a second Decode that must return io.EOF is the reliable
-	// end-of-input check (trailing whitespace is skipped and still yields EOF).
-	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
-		return File{}, errors.New("unexpected trailing data after JSON document")
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return File{}, fmt.Errorf("invalid JSON: %w", err)
 	}
 
-	if raw.SchemaVersion != ConfigSchemaVersion {
-		return File{}, fmt.Errorf("schema_version %q is not supported (want %q)", raw.SchemaVersion, ConfigSchemaVersion)
+	switch probe.SchemaVersion {
+	case ConfigSchemaVersionV1:
+		var raw fileJSONV1
+		if err := decodeStrict(data, &raw); err != nil {
+			return File{}, err
+		}
+		// V1 knows nothing about projects; it normalizes to an empty registry.
+		f = File{SchemaVersion: ConfigSchemaVersionV1}
+		if err := f.setTimeout(raw.DefaultTimeout); err != nil {
+			return File{}, err
+		}
+	case ConfigSchemaVersionV2:
+		var raw fileJSONV2
+		if err := decodeStrict(data, &raw); err != nil {
+			return File{}, err
+		}
+		f = File{SchemaVersion: ConfigSchemaVersionV2}
+		if err := f.setTimeout(raw.DefaultTimeout); err != nil {
+			return File{}, err
+		}
+		for _, rp := range raw.Projects {
+			f.Projects = append(f.Projects, Project{ID: rp.ID, DisplayName: rp.DisplayName, Remote: rp.Remote})
+		}
+	default:
+		return File{}, fmt.Errorf("schema_version %q is not supported (want %q or %q)",
+			probe.SchemaVersion, ConfigSchemaVersionV1, ConfigSchemaVersionV2)
 	}
 
-	f = File{SchemaVersion: raw.SchemaVersion}
-	if raw.DefaultTimeout != "" {
-		d, derr := time.ParseDuration(raw.DefaultTimeout)
-		if derr != nil {
-			return File{}, fmt.Errorf("default_timeout is not a valid duration")
-		}
-		if verr := (Settings{Timeout: d}).Validate(); verr != nil {
-			return File{}, fmt.Errorf("default_timeout invalid: %w", verr)
-		}
-		f.Timeout = d
+	if err := f.Validate(); err != nil {
+		return File{}, err
 	}
 	return f, nil
+}
+
+// setTimeout parses and policy-checks the wire default_timeout. An empty value
+// leaves Timeout unset (0).
+func (f *File) setTimeout(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		// The rejected value is not echoed: it is caller-controlled text.
+		return errors.New("default_timeout is not a valid duration")
+	}
+	// An explicitly written value is policy-checked here rather than in
+	// Validate: in memory a zero Timeout means "unset", so "0s" on the wire
+	// would otherwise be silently downgraded to the default instead of rejected.
+	if err := (Settings{Timeout: d}).Validate(); err != nil {
+		return fmt.Errorf("default_timeout invalid: %w", err)
+	}
+	f.Timeout = d
+	return nil
+}
+
+// decodeStrict decodes exactly one JSON document from data into v, rejecting
+// unknown fields at every level.
+//
+// Decoder.More() only tests for a next element within the current array/object,
+// so a trailing closing delimiter can slip past it; a second Decode that must
+// return io.EOF is the reliable end-of-input check (trailing whitespace is
+// skipped and still yields EOF).
+func decodeStrict(data []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return fmt.Errorf("invalid JSON or unknown field: %w", err)
+	}
+	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
+		return errors.New("unexpected trailing data after JSON document")
+	}
+	return nil
 }

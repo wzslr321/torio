@@ -2,6 +2,8 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -90,6 +92,96 @@ func TestLoadValidConfigParsesFields(t *testing.T) {
 	}
 }
 
+// TestLoadV2ConfigParsesProjectRegistry locks the V2 document: the registry is
+// read into typed projects and carries only non-secret identity/remote — no
+// workspace path, which is derived from the ID by the projects layer.
+func TestLoadV2ConfigParsesProjectRegistry(t *testing.T) {
+	cfgHome := t.TempDir()
+	writeConfig(t, cfgHome, `{"schema_version":"2","default_timeout":"45s","projects":[`+
+		`{"id":"my-project","display_name":"My Project","remote":"git@github.com:owner/my-project.git"}]}`)
+	rt, err := loadWith(t, Options{}, cfgHome, t.TempDir())
+	if err != nil {
+		t.Fatalf("Load V2: %v", err)
+	}
+	if rt.File.SchemaVersion != ConfigSchemaVersionV2 {
+		t.Errorf("SchemaVersion = %q, want %q", rt.File.SchemaVersion, ConfigSchemaVersionV2)
+	}
+	if rt.File.Timeout != 45*time.Second {
+		t.Errorf("Timeout = %v, want 45s", rt.File.Timeout)
+	}
+	want := []Project{{ID: "my-project", DisplayName: "My Project", Remote: "git@github.com:owner/my-project.git"}}
+	if len(rt.File.Projects) != len(want) {
+		t.Fatalf("Projects = %+v, want %+v", rt.File.Projects, want)
+	}
+	if rt.File.Projects[0] != want[0] {
+		t.Errorf("Projects[0] = %+v, want %+v", rt.File.Projects[0], want[0])
+	}
+}
+
+// TestLoadV1ConfigNormalizesToEmptyProjectRegistry locks the read-compatibility
+// half of the V2 rollout: a settings-only document from a pre-registry binary
+// still loads, and normalizes to an empty registry rather than to an error.
+func TestLoadV1ConfigNormalizesToEmptyProjectRegistry(t *testing.T) {
+	cfgHome := t.TempDir()
+	writeConfig(t, cfgHome, `{"schema_version":"1","default_timeout":"45s"}`)
+	rt, err := loadWith(t, Options{}, cfgHome, t.TempDir())
+	if err != nil {
+		t.Fatalf("Load V1: %v", err)
+	}
+	if rt.File.SchemaVersion != ConfigSchemaVersionV1 {
+		t.Errorf("SchemaVersion = %q, want %q", rt.File.SchemaVersion, ConfigSchemaVersionV1)
+	}
+	if len(rt.File.Projects) != 0 {
+		t.Errorf("Projects = %+v, want empty for a V1 document", rt.File.Projects)
+	}
+}
+
+// TestLoadRejectsProjectsInV1Document proves the version gate is not cosmetic:
+// a registry smuggled into a document that declares V1 is an unknown field for
+// that schema and fails closed, so no reader can disagree about what V1 means.
+func TestLoadRejectsProjectsInV1Document(t *testing.T) {
+	cfgHome := t.TempDir()
+	writeConfig(t, cfgHome, `{"schema_version":"1","projects":[`+
+		`{"id":"my-project","display_name":"My Project","remote":"https://github.com/owner/my-project.git"}]}`)
+	if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
+		t.Fatalf("projects under schema_version 1 must be rejected (fail closed)")
+	}
+}
+
+// TestLoadRejectsWorkspacePathInProject locks the invariant that gives the ID
+// its meaning: the workspace path is derived, never stored, so a document that
+// tries to pin a project to an arbitrary guest path is not a config Torio can
+// read at all.
+func TestLoadRejectsWorkspacePathInProject(t *testing.T) {
+	cfgHome := t.TempDir()
+	writeConfig(t, cfgHome, `{"schema_version":"2","projects":[{"id":"my-project",`+
+		`"display_name":"My Project","remote":"https://github.com/owner/my-project.git",`+
+		`"path":"/home/hermes/projects/my-project"}]}`)
+	if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
+		t.Fatalf("a project carrying a workspace path must be rejected (fail closed)")
+	}
+}
+
+// TestLoadRejectsInvalidProjectInV2Document proves registry validation is part
+// of loading, not only of writing: a hand-edited document cannot smuggle in an
+// entry the write path would have refused.
+func TestLoadRejectsInvalidProjectInV2Document(t *testing.T) {
+	for _, projects := range []string{
+		`[{"id":"My-Project","display_name":"My Project","remote":"https://github.com/owner/repo.git"}]`,
+		`[{"id":"my-project","display_name":"","remote":"https://github.com/owner/repo.git"}]`,
+		`[{"id":"my-project","display_name":"My Project","remote":"/srv/git/repo.git"}]`,
+		`[{"id":"my-project","display_name":"My Project","remote":"https://u:p@github.com/owner/repo.git"}]`,
+		`[{"id":"a","display_name":"A","remote":"https://github.com/owner/a.git"},` +
+			`{"id":"a","display_name":"A again","remote":"https://github.com/owner/b.git"}]`,
+	} {
+		cfgHome := t.TempDir()
+		writeConfig(t, cfgHome, `{"schema_version":"2","projects":`+projects+`}`)
+		if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
+			t.Errorf("invalid registry %s must be rejected on load", projects)
+		}
+	}
+}
+
 func TestLoadRejectsMalformedJSON(t *testing.T) {
 	cfgHome := t.TempDir()
 	writeConfig(t, cfgHome, `{not json`)
@@ -99,10 +191,16 @@ func TestLoadRejectsMalformedJSON(t *testing.T) {
 }
 
 func TestLoadRejectsWrongSchemaVersion(t *testing.T) {
-	cfgHome := t.TempDir()
-	writeConfig(t, cfgHome, `{"schema_version":"2"}`)
-	if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
-		t.Fatalf("unknown schema_version must be rejected")
+	for _, body := range []string{
+		`{"schema_version":"3"}`,
+		`{"schema_version":"0"}`,
+		`{"schema_version":"v2"}`,
+	} {
+		cfgHome := t.TempDir()
+		writeConfig(t, cfgHome, body)
+		if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
+			t.Errorf("unknown schema_version in %q must be rejected", body)
+		}
 	}
 }
 
@@ -244,6 +342,187 @@ func TestLoadDoesNotLeakJSONEscapedSecretInAnyField(t *testing.T) {
 				t.Errorf("config API error leaked JSON-escaped secret via %s: %q", tc.name, err.Error())
 			}
 		})
+	}
+}
+
+// TestWriteFileWritesSortedV2Document locks the on-disk form: schema V2, the
+// registry sorted by ID, and owner-only permissions. Sorting is what makes a
+// write deterministic — the same registry always produces the same bytes,
+// regardless of the order entries were added in.
+func TestWriteFileWritesSortedV2Document(t *testing.T) {
+	path := filepath.Join(t.TempDir(), appDir, configFileName)
+	f := File{SchemaVersion: ConfigSchemaVersion, Timeout: 45 * time.Second, Projects: []Project{
+		{ID: "zeta", DisplayName: "Zeta", Remote: "https://github.com/owner/zeta.git"},
+		{ID: "alpha", DisplayName: "Alpha", Remote: "git@github.com:owner/alpha.git"},
+	}}
+	if err := WriteFile(path, f); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	var raw fileJSONV2
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("written document is not valid JSON: %v", err)
+	}
+	if raw.SchemaVersion != ConfigSchemaVersionV2 {
+		t.Errorf("written schema_version = %q, want %q", raw.SchemaVersion, ConfigSchemaVersionV2)
+	}
+	if raw.DefaultTimeout != "45s" {
+		t.Errorf("written default_timeout = %q, want %q", raw.DefaultTimeout, "45s")
+	}
+	if len(raw.Projects) != 2 || raw.Projects[0].ID != "alpha" || raw.Projects[1].ID != "zeta" {
+		t.Errorf("written projects = %+v, want sorted by id", raw.Projects)
+	}
+	if runtime.GOOS != "windows" {
+		fi, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat: %v", err)
+		}
+		if perm := fi.Mode().Perm(); perm&0o077 != 0 {
+			t.Errorf("config perm = %o, want owner-only", perm)
+		}
+	}
+}
+
+// TestWriteFileRoundTripsThroughLoad closes the loop: what the writer emits is
+// exactly what the loader accepts, so a mutation cannot produce a document the
+// next invocation refuses.
+func TestWriteFileRoundTripsThroughLoad(t *testing.T) {
+	cfgHome := t.TempDir()
+	path := filepath.Join(cfgHome, appDir, configFileName)
+	want := []Project{
+		{ID: "alpha", DisplayName: "Alpha", Remote: "git@github.com:owner/alpha.git"},
+		{ID: "zeta", DisplayName: "Zeta", Remote: "https://github.com/owner/zeta.git"},
+	}
+	if err := WriteFile(path, File{SchemaVersion: ConfigSchemaVersion, Projects: want}); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	rt, err := loadWith(t, Options{}, cfgHome, t.TempDir())
+	if err != nil {
+		t.Fatalf("Load after WriteFile: %v", err)
+	}
+	if len(rt.File.Projects) != len(want) {
+		t.Fatalf("Projects = %+v, want %+v", rt.File.Projects, want)
+	}
+	for i, p := range want {
+		if rt.File.Projects[i] != p {
+			t.Errorf("Projects[%d] = %+v, want %+v", i, rt.File.Projects[i], p)
+		}
+	}
+}
+
+// TestWriteFileRejectsInvalidDocumentBeforeCreatingFile keeps an invalid
+// registry from ever reaching the disk — an atomic rename must not be what
+// legitimizes a document nothing validated.
+func TestWriteFileRejectsInvalidDocumentBeforeCreatingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), appDir, configFileName)
+	bad := File{SchemaVersion: ConfigSchemaVersion, Projects: []Project{
+		{ID: "ok", DisplayName: "Ok", Remote: "https://user:pass@github.com/owner/repo.git"},
+	}}
+	if err := WriteFile(path, bad); err == nil {
+		t.Fatalf("invalid document must be rejected")
+	}
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("rejected document must leave no file behind, stat err = %v", err)
+	}
+}
+
+// TestWriteFileRequiresCurrentSchemaVersion pins the one-way migration: writes
+// always emit V2, so no path can silently re-emit a V1 document and drop the
+// registry it was asked to persist.
+func TestWriteFileRequiresCurrentSchemaVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), appDir, configFileName)
+	for _, version := range []string{"", ConfigSchemaVersionV1, "3"} {
+		if err := WriteFile(path, File{SchemaVersion: version}); err == nil {
+			t.Errorf("WriteFile with schema_version %q must be rejected", version)
+		}
+	}
+}
+
+// TestWriteFileRejectsUntrustedConfigDir mirrors WriteVersionLock: an existing
+// permissive directory must not become config authority just because the final
+// rename is atomic.
+func TestWriteFileRejectsUntrustedConfigDir(t *testing.T) {
+	requireTrustPolicy(t)
+	dir := filepath.Join(t.TempDir(), "torio")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(dir, "config.json")
+	if err := WriteFile(path, File{SchemaVersion: ConfigSchemaVersion}); err == nil {
+		t.Fatalf("group/world-accessible config dir must be rejected")
+	}
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("rejected write must leave no file behind, stat err = %v", err)
+	}
+}
+
+// TestVerifyPersistedRejectsMismatchedDocument covers the post-write read-back:
+// the bytes that landed on disk are parsed and validated again, and a document
+// that is not the one we meant to persist is reported instead of trusted.
+func TestVerifyPersistedRejectsMismatchedDocument(t *testing.T) {
+	path := filepath.Join(t.TempDir(), appDir, configFileName)
+	onDisk := File{SchemaVersion: ConfigSchemaVersion, Projects: []Project{
+		{ID: "alpha", DisplayName: "Alpha", Remote: "https://github.com/owner/alpha.git"},
+	}}
+	if err := WriteFile(path, onDisk); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if err := verifyPersisted(path, onDisk); err != nil {
+		t.Fatalf("matching document must verify: %v", err)
+	}
+	other := File{SchemaVersion: ConfigSchemaVersion, Projects: []Project{
+		{ID: "zeta", DisplayName: "Zeta", Remote: "https://github.com/owner/zeta.git"},
+	}}
+	if err := verifyPersisted(path, other); err == nil {
+		t.Fatalf("document that differs from the intended one must be reported")
+	}
+}
+
+// TestV2DocumentIsRejectedByAV1OnlyReader is the forward-compatibility promise:
+// a binary that predates the registry must refuse a document this binary writes
+// rather than read it as settings-only and silently drop the projects. It
+// replicates that reader — the exact V1 wire struct, decoded strictly, behind
+// the exact V1 version gate — and feeds it real writer output.
+func TestV2DocumentIsRejectedByAV1OnlyReader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), appDir, configFileName)
+	if err := WriteFile(path, File{SchemaVersion: ConfigSchemaVersion, Projects: []Project{
+		{ID: "alpha", DisplayName: "Alpha", Remote: "https://github.com/owner/alpha.git"},
+	}}); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	var raw fileJSONV1
+	decodeErr := decodeStrict(data, &raw)
+	if decodeErr == nil && raw.SchemaVersion == ConfigSchemaVersionV1 {
+		t.Fatalf("a V1-only reader accepted a V2 document")
+	}
+	// It must fail on the registry itself, not only on the version gate: even a
+	// reader that was lax about the version cannot mistake the document.
+	if decodeErr == nil {
+		t.Errorf("V1 strict decode accepted the V2 wire form; only the version gate rejected it")
+	}
+}
+
+func TestWriteFileDoesNotLeakSecretShapedRemote(t *testing.T) {
+	path := filepath.Join(t.TempDir(), appDir, configFileName)
+	err := WriteFile(path, File{SchemaVersion: ConfigSchemaVersion, Projects: []Project{
+		{ID: "alpha", DisplayName: "Alpha", Remote: "https://" + secretCanary + "@github.com/owner/alpha.git"},
+	}})
+	if err == nil {
+		t.Fatalf("secret-shaped remote must be rejected")
+	}
+	if strings.Contains(err.Error(), secretCanary) {
+		t.Errorf("error leaked the secret-shaped remote: %q", err.Error())
 	}
 }
 

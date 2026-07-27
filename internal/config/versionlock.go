@@ -1,7 +1,6 @@
 package config
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -118,16 +117,9 @@ func parseVersionLock(data []byte) (m VersionLock, err error) {
 	if containsSecretShape(string(data)) {
 		return VersionLock{}, errors.New("contains secret-shaped material; version-lock must be non-secret")
 	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
 	var raw versionLockJSON
-	if err := dec.Decode(&raw); err != nil {
-		return VersionLock{}, fmt.Errorf("invalid JSON or unknown field: %w", err)
-	}
-	// Exactly one JSON document; see parseFile for why a second Decode requiring
-	// io.EOF is used instead of Decoder.More().
-	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
-		return VersionLock{}, errors.New("unexpected trailing data after JSON document")
+	if err := decodeStrict(data, &raw); err != nil {
+		return VersionLock{}, err
 	}
 	m = VersionLock{
 		SchemaVersion: raw.SchemaVersion,

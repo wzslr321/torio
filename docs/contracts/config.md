@@ -84,17 +84,85 @@ Pola:
 
 | Pole | Typ | Wymagane | Semantyka |
 |---|---|---|---|
-| `schema_version` | string | tak | Musi być `"1"`. Inna wartość → odrzucone (bez migracji). |
+| `schema_version` | string | tak | `"1"` albo `"2"`. Inna wartość → odrzucone (bez migracji). |
 | `default_timeout` | string (Go duration) | nie | Domyślny timeout operacji; walidowany > 0 i ≤ policy max. Zasila timeout policy, gdy `--timeout` nie podano jawnie (flaga wygrywa). |
+| `projects` | array | nie (tylko V2) | Aktywny project registry — patrz niżej. Pod `"1"` jest **nieznanym polem** i jest odrzucane. |
 
-Przykład (poprawny):
+Przykład (poprawny V2):
 
 ```json
 {
-  "schema_version": "1",
-  "default_timeout": "45s"
+  "schema_version": "2",
+  "default_timeout": "45s",
+  "projects": [
+    {
+      "id": "my-project",
+      "display_name": "My Project",
+      "remote": "git@github.com:owner/my-project.git"
+    }
+  ]
 }
 ```
+
+## Project registry — schema V2
+
+Registry jest **niesekretnym** źródłem prawdy o podpiętych projektach
+([ADR-0015](../adr/0015-torio-v1-onboarding-projects-and-operator-push.md)).
+Legacy [`project-config.md`](project-config.md) i `schemas/project.schema.json` **nie** obowiązują.
+
+**Workspace path nie jest polem.** Jest wyprowadzany z `id` (`/home/hermes/projects/<id>`) przez
+warstwę projektów, więc config nie może wskazać projektu na dowolną ścieżkę w guest. Obiekt projektu
+z polem `path` jest odrzucany jak każde nieznane pole.
+
+| Pole | Typ | Wymagane | Reguła |
+|---|---|---|---|
+| `id` | string | tak | Lowercase slug ASCII: litery, cyfry i wewnętrzne `-`; ≤ 64 bajty; unikalny w dokumencie. Ten sam charset wyprowadza workspace path, więc nic w nim nie może traversować ani zmienić katalogu. |
+| `display_name` | string | tak | Niepusty, ≤ 64 bajty, poprawny UTF-8, bez control characters i bez leading/trailing whitespace. |
+| `remote` | string | tak | Wspierana forma transportu (niżej); ≤ 512 bajtów. |
+
+Wspierane formy `remote`:
+
+- `https://host[:port]/path` — **bez userinfo w ogóle**, bo to jedyne miejsce, w którym siedzi token
+  albo hasło HTTPS;
+- `ssh://[user@]host[:port]/path` — username jest niesekretnym elementem transportu i jest
+  dozwolony, hasło nigdy;
+- `[user@]host:path` — forma scp-like ze **względną** ścieżką (absolutna sprawiłaby, że lokalne
+  `C:/repo` wygląda jak remote).
+
+Odrzucane fail-closed: query i fragment (mogą nieść token), percent-encoding (ukrywa powyższe),
+control characters i whitespace, wiodący `-` (Git przeczytałby remote jako flagę), lokalna ścieżka
+i `file://`, `http://`, `git://`, oraz materiał o kształcie sekretu w dowolnym polu.
+
+Reguły całego registry:
+
+- **Unikalne `id`** — egzekwowane zawsze, także przy odczycie.
+- **Duplikat `remote`** — odrzucany domyślnie **przy dodawaniu** (`AddOptions.AllowDuplicateRemote`
+  to jawna decyzja operatora). Walidacja dokumentu go nie odrzuca: raz podjęta jawna decyzja nie może
+  uczynić configu nieczytelnym.
+- **Bounded** — maksymalnie 64 projekty; config jest czytany przy każdej inwokacji.
+- Registry jest walidowany **przy odczycie i przy zapisie**, więc ręcznie wyedytowany dokument nie
+  przemyci wpisu, którego write path by nie przyjął.
+
+## Kompatybilność V1 ↔ V2
+
+- Czytane są oba dokumenty. V1 normalizuje się do **pustego** registry, nie do błędu.
+- Każdy zapis emituje V2: pierwsza mutacja (dodanie/usunięcie projektu) podnosi wersję dokumentu.
+  `File` deklarujący inną wersję jest przy zapisie odrzucany, nie podnoszony po cichu.
+- Starsza binarka **jawnie odrzuca** V2 — i przez version gate (`"2"` nie jest wspierane), i przez
+  `DisallowUnknownFields` na polu `projects`. Nie może przeczytać V2 jako settings-only i po cichu
+  zgubić registry.
+
+## Zapis configu
+
+- Zapis idzie tą samą crash-safe ścieżką co version-lock: private temp → `fsync` → atomic rename,
+  `0600`, katalog `0700`.
+- Dokument jest walidowany **przed** utworzeniem pliku, a zaufany katalog **przed** zapisem — atomowy
+  rename nie legalizuje symlinkowanego/permissive/obcego katalogu jako authority.
+- Projekty są sortowane po `id`, więc ten sam registry daje ten sam plik niezależnie od kolejności
+  dodawania.
+- Po rename plik jest **odczytany ponownie** tą samą zaufaną ścieżką co loader, sparsowany,
+  zwalidowany i porównany z dokumentem, który miał zostać zapisany. Rozjazd jest raportowany, nie
+  naprawiany po cichu — rename już się wydarzył, więc decyzję podejmuje operator.
 
 ## Version-lock manifest — `version-lock.json`
 
