@@ -488,14 +488,27 @@ func (m *Manager) projectStatus(ctx context.Context, op string) (registered, con
 	if err != nil {
 		return false, false, err
 	}
+	// Hand-verified against a real Hermes v0.19.0 guest: `hermes project show`
+	// exits 0 for an unknown slug too, writing only a diagnostic to stderr,
+	// because upstream `hermes_cli/main.py` calls `args.func(args)` and discards
+	// the return value, making every `return 1` in `projects_cmd.py` dead code.
+	// Existence must therefore be read from stdout, never from the exit code.
 	if show.ExitCode == 0 {
-		if pathMentioned(string(show.Stdout), Path) {
+		switch {
+		case strings.TrimSpace(string(show.Stdout)) == "":
+			// No project block was printed: the slug is free, not conflicting.
+			return false, false, nil
+		case pathMentioned(string(show.Stdout), Path):
 			return true, false, nil
+		default:
+			// A project block exists but its primary path is not ours.
+			return false, true, nil
 		}
-		return false, true, nil
 	}
-	// A successful list proves the Hermes Project CLI is available, but list
-	// output is never used for path matching: it can include secondary folders.
+	// A non-zero exit no longer means "no such project"; it means the Hermes CLI
+	// itself is broken or missing (e.g. 127, or argparse's 2). A successful list
+	// proves the Hermes Project CLI is available, but list output is never used
+	// for path matching: it carries slugs and names, not primary paths.
 	list, err := m.run(ctx, op, userExec("hermes", "project", "list"))
 	if err != nil {
 		return false, false, err

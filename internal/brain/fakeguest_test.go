@@ -40,6 +40,7 @@ type fakeGuest struct {
 	registered      bool
 	wrongProject    bool
 	showMissing     bool
+	showBrokenCLI   bool
 	projectShow     string
 	bootstrapErr    error
 	lockHeld        bool
@@ -212,27 +213,39 @@ func (f *fakeGuest) route(_ context.Context, stdin []byte, argv []string) (execx
 		return okResult(strings.Repeat(".", f.markdownCount)), nil
 	case strings.Contains(joined, "du -sb -- "+Path):
 		return okResult(fmt.Sprintf("%d\t%s\n", f.totalBytes, Path)), nil
+	// The `hermes project` fakes below encode a contract hand-verified against a
+	// real Hermes v0.19.0 guest, not an assumed one. Two properties matter and
+	// must not be "simplified":
+	//   1. `show <unknown-slug>` exits 0 with EMPTY stdout and a stderr
+	//      diagnostic. Upstream `hermes_cli/main.py` calls `args.func(args)` and
+	//      discards the result, so every `return 1` in `projects_cmd.py` is dead
+	//      code. A non-zero exit therefore means a broken/missing CLI
+	//      (`showBrokenCLI`), never "no such project".
+	//   2. `list` output carries slugs and names, never any path.
 	case strings.Contains(joined, "hermes project show "+ProjectSlug):
 		switch {
 		case f.projectShow != "":
 			return okResult(f.projectShow), nil
+		case f.showBrokenCLI:
+			return exitResult(2, "", "usage: hermes project show"), nil
 		case f.showMissing:
-			return exitResult(1, "", "not found"), nil
+			return exitResult(0, "", "project: no such project: "+ProjectSlug), nil
 		case f.wrongProject:
-			return okResult("name: Other\nprimary: /home/hermes/other\n"), nil
+			return okResult(projectShowOutput("/home/hermes/other")), nil
 		case f.registered:
-			return okResult("name: Second Brain\nprimary: " + Path + "\n"), nil
+			return okResult(projectShowOutput(Path)), nil
 		default:
-			return exitResult(1, "", "not found"), nil
+			return exitResult(0, "", "project: no such project: "+ProjectSlug), nil
 		}
 	case strings.Contains(joined, "hermes project list"):
 		if f.registered {
-			return okResult("Second Brain\t" + Path + "\n"), nil
+			return okResult(fmt.Sprintf("* %-24s %s  [1 folder(s)]\n", ProjectSlug, ProjectName)), nil
 		}
 		return okResult(""), nil
 	case strings.Contains(joined, "hermes project create"):
 		f.registered = true
 		f.showMissing = false
+		f.showBrokenCLI = false
 		return okResult("created\n"), nil
 	case strings.Contains(joined, "tee "+stagingPath+"/"):
 		return okResult(""), nil
@@ -267,6 +280,17 @@ func okResult(stdout string) execx.Result {
 
 func exitResult(code int, stdout, stderr string) execx.Result {
 	return execx.Result{ExitCode: code, Stdout: []byte(stdout), Stderr: []byte(stderr)}
+}
+
+// projectShowOutput reproduces the block a real `hermes project show <slug>`
+// prints for an existing project: a slug/id header, padded fields, and the
+// folder list whose first entry repeats the primary path.
+func projectShowOutput(primary string) string {
+	return ProjectSlug + "  [p_75fa0ebf]\n" +
+		"  name:    " + ProjectName + "\n" +
+		"  primary: " + primary + "\n" +
+		"  folders:\n" +
+		"    * " + primary + "\n"
 }
 
 func (f *fakeGuest) saw(fragment string) bool {

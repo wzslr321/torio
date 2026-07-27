@@ -155,6 +155,47 @@ func TestBrainStatusJSONEnvelopeIncludesOnlyAggregates(t *testing.T) {
 	}
 }
 
+// The human output distinguishes registered / not_registered / conflict, so the
+// JSON envelope must too: a machine consumer cannot act on a slug conflict if it
+// is indistinguishable from an unregistered project.
+func TestBrainStatusJSONDistinguishesSlugConflictFromNotRegistered(t *testing.T) {
+	cases := []struct {
+		name           string
+		mutate         func(*brain.StatusReport)
+		wantRegistered bool
+		wantConflict   bool
+	}{
+		{"registered", func(*brain.StatusReport) {}, true, false},
+		{"not registered", func(r *brain.StatusReport) {
+			r.ProjectRegistered = false
+		}, false, false},
+		{"slug conflict", func(r *brain.StatusReport) {
+			r.ProjectRegistered = false
+			r.ProjectConflict = true
+			r.State = brain.StateDrift
+			r.Issues = []string{"project_slug_conflict"}
+		}, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status := initializedBrainReport()
+			tc.mutate(&status)
+			service := &fakeBrainService{statusReport: status}
+
+			code, stdout, stderr := runBrainCLI(t, []string{"brain", "status", "--json"}, service)
+			if code != int(ExitOK) {
+				t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+			}
+			env := decodeOneEnvelope(t, stdout)
+			data, _ := env["data"].(map[string]any)
+			if data["project_registered"] != tc.wantRegistered || data["project_conflict"] != tc.wantConflict {
+				t.Fatalf("project data = %#v, want registered=%t conflict=%t",
+					data, tc.wantRegistered, tc.wantConflict)
+			}
+		})
+	}
+}
+
 func TestBrainStatusHumanReportsDriftWithoutNoteNames(t *testing.T) {
 	status := initializedBrainReport()
 	status.State = brain.StateDrift
