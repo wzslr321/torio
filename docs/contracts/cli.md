@@ -1,8 +1,24 @@
 # CLI contract
 
+> **STATUS (częściowo superseded — czytaj razem z ADR-0015).** Ten kontrakt powstał dla
+> platformy **pre-V0** i opisuje command surface, którego dostarczona binarka nie ma:
+> `doctor`, `status`, `reconcile`, `vm logs`, `gateway`, `project`, `task` i `admin` **nie
+> istnieją** w CLI. Zaimplementowane są `version`, `vm` (`init`, `status`, `start`, `stop`,
+> `bootstrap`, `ssh`), `serve` i `brain`. Normatywne i aktualne pozostają: nazwa binarki, JSON envelope,
+> tabela exit codes, reguła „jeden envelope na stdout" oraz opisane niżej postconditions
+> `vm bootstrap` i `serve`. Tam, gdzie ten dokument jest sprzeczny z
+> [ADR-0015](../adr/0015-torio-v1-onboarding-projects-and-operator-push.md), **wygrywa ADR** —
+> mimo kolejności z `AGENTS.md` §3, bo ADR-0015 jawnie supersedes zakres tej platformy
+> (patrz [`legacy-architecture.md`](../legacy-architecture.md)). Superseded treść jest
+> zachowana celowo jako kontekst historyczny; nie implementuj jej.
+>
+> Ten dokument jest **normatywny**, nie archiwalny: rozjazd z dostarczonym zachowaniem jest
+> defektem do naprawy, a nie zapisem do zachowania — patrz
+> [ADR-0016](../adr/0016-normative-documents-are-corrected-not-archived.md).
+
 ## Binary i output
 
-Binary nazywa się `hb`. Domyślnie wypisuje czytelny output na stdout i diagnostykę na stderr. `--json` zwraca dokładnie jeden JSON document na stdout i nie miesza z nim logów.
+Binary nazywa się `torio` (zmiana nazwy: [ADR-0014](../adr/0014-rename-to-torio.md)). Domyślnie wypisuje czytelny output na stdout i diagnostykę na stderr. `--json` zwraca dokładnie jeden JSON document na stdout i nie miesza z nim logów.
 
 ### JSON envelope
 
@@ -90,10 +106,10 @@ envelope.
 ### Informacyjne
 
 ```text
-hb version [--json]
-hb doctor [--json]
-hb status [--json]
-hb reconcile [--dry-run] [--json]
+torio version [--json]
+torio doctor [--json]
+torio status [--json]
+torio reconcile [--dry-run] [--json]
 ```
 
 `doctor` wykonuje rzeczywiste proby: binary/version, service state, socket/port bind, Git, Docker, Lima, Hermes CLI surface, state migrations i permissions.
@@ -101,29 +117,40 @@ hb reconcile [--dry-run] [--json]
 ### VM
 
 ```text
-hb vm init [--template PATH]
-hb vm start
-hb vm stop
-hb vm bootstrap
-hb vm status
-hb vm ssh [-- COMMAND...]
-hb vm logs
+torio vm init [--template PATH]
+torio vm start
+torio vm stop
+torio vm bootstrap
+torio vm status
+torio vm ssh [-- COMMAND...]
+torio vm logs
 ```
 
 - `init` jest idempotentne dla zgodnego template digestu.
 - Zmiana niebezpiecznego template field wymaga jawnego recreate planu.
 - `stop` nie usuwa VM ani danych. Jest idempotentne (już `Stopped` → exit 0) i nie ufa czystemu exit code: po `limactl stop` re-query wymaga stanu `Stopped`, inaczej fail-closed (exit 3). Nigdy nie używa `--force`.
-- `bootstrap` reconciliuje i weryfikuje **istniejący** target dla Remote Second Brain V1: stabilną, nieinteraktywną komendę `hermes` oraz dostęp do Dockera dla przewidzianego non-root użytkownika gościa (`hermes`). Działa wyłącznie na istniejącym targetcie po zweryfikowanym warunku `Running`, przez typed Lima/execx boundary (fixed argv, bez `sh -c`, bez sklejanych stringów, bounded/redacted output). Jest idempotentne i wąskie: może zapewnić membership `hermes` w grupie `docker` oraz symlink PATH `/usr/local/bin/hermes`, ale **nie** recreatuje/re-image'uje VM, nie instaluje modelu/providera, nie przyjmuje sekretów i nie tworzy usług gateway/serve.
-- `bootstrap` **weryfikuje** (nie ufa samemu exit code): `uname -m == aarch64`; `hermes --version` przez tę samą, dokumentowaną stabilną ścieżkę; osiągalność serwera Docker dla tożsamości `hermes`; `git --version`; że wymagane ścieżki Hermes KB/workspace są katalogami na natywnym Linux filesystem (nie host share); oraz brak szerokiego host mountu macOS. Każdy nieznany/nieweryfikowalny stan lub drift (architektura/wersja/mount) jest raportowany i fail-closed (exit 6), nie papering over. Rerun jest sukcesem tylko gdy wszystkie postconditions są udowodnione.
-- `bootstrap` wykonuje kilka bounded guest probes; uruchamiaj z odpowiednio dużym `--timeout` (np. `--timeout 5m`). Akcja dotarcia do zdalnego Hermesa po bootstrapie pozostaje operator-controlled (np. `hb vm ssh -- sudo -u hermes -- hermes --version`).
+- `bootstrap` reconciliuje i weryfikuje target dla Remote Second Brain V1: stabilną, nieinteraktywną komendę `hermes` oraz układ trwałych katalogów gościa na natywnym Linux filesystem. Działa wyłącznie na istniejącym targetcie po zweryfikowanym warunku `Running`, przez typed Lima/execx boundary (fixed argv, bez `sh -c`, bez sklejanych stringów, bounded/redacted output). Jest idempotentne i wąskie: może doinstalować pinowany launcher Hermes Agent oraz symlink PATH `/usr/local/bin/hermes`, ale **nie** recreatuje/re-image'uje VM, nie instaluje modelu/providera, nie przyjmuje sekretów i nie tworzy usług gateway/serve.
+- **Docker: `hermes` NIE MOŻE należeć do grupy `docker`.** Członkostwo w `docker` jest równoważne rootowi na gościu, więc rootful Docker dla tożsamości serwisowej `hermes` jest zakazany przez [ADR-0015](../adr/0015-torio-v1-onboarding-projects-and-operator-push.md). `bootstrap` **weryfikuje brak** tego członkostwa (`verifyHermesNotInDocker`) i fail-closed, gdy je znajdzie; template provisioningu usuwa `hermes` z `docker`, jeśli grupa istnieje. W V1 Docker Engine nie jest w ogóle instalowany, a `bootstrap` **nie** sprawdza osiągalności serwera Docker. Przyszły container runtime wymaga rootless, hermes-owned rozwiązania za osobnym ADR-em.
+- `bootstrap` **weryfikuje** (nie ufa samemu exit code): istnienie użytkownika `hermes`; istnienie grupy `torio-projects` oraz członkostwo w niej `hermes` i operatora (login identity Limy); **brak** członkostwa `hermes` w grupie `docker`; `uname -m == aarch64`; `hermes --version` przez tę samą, dokumentowaną stabilną ścieżkę; `git --version`; że każda wymagana ścieżka jest katalogiem o oczekiwanym owner/group/mode na natywnym Linux filesystem (nie host share); oraz brak szerokiego host mountu macOS. Każdy nieznany/nieweryfikowalny stan lub drift (architektura/wersja/ownership/mount) jest raportowany i fail-closed (exit 6), nie papering over. Rerun jest sukcesem tylko gdy wszystkie postconditions są udowodnione.
+- Wymagane ścieżki i ich role są rozłączne (ADR-0015; stałe w `internal/lima/bootstrap.go`) — `/home/hermes/.hermes` **nie jest** Knowledge Base:
+
+  | Stała | Ścieżka | Rola |
+  |---|---|---|
+  | `HermesHome` | `/home/hermes` | home tożsamości serwisowej |
+  | `HermesProfilePath` | `/home/hermes/.hermes` | profil i stan aplikacyjny Hermesa (`$HERMES_HOME`) |
+  | `HermesBrainPath` | `/home/hermes/brain` | vault Second Brain |
+  | `HermesWorkspacePath` | `/home/hermes/projects` | współdzielony workspace projektów |
+
+  `bootstrap` weryfikuje profil i brain **niezależnie**; żadna z tych ścieżek nie jest aliasem drugiej.
+- `bootstrap` wykonuje kilka bounded guest probes; uruchamiaj z odpowiednio dużym `--timeout` (np. `--timeout 5m`). Akcja dotarcia do zdalnego Hermesa po bootstrapie pozostaje operator-controlled (np. `torio vm ssh -- sudo -u hermes -- hermes --version`).
 
 ### Backend i gateway
 
 ```text
-hb serve install
-hb serve start|stop|restart|status|logs
-hb gateway install
-hb gateway start|stop|restart|status|logs
+torio serve install
+torio serve start|stop|restart|status|logs
+torio gateway install
+torio gateway start|stop|restart|status|logs
 ```
 
 - `serve install` zarządza własną **user** service (custom systemd unit dla użytkownika `hermes`)
@@ -143,23 +170,23 @@ hb gateway start|stop|restart|status|logs
   endpointem → exit 6. Nie modyfikuje systemu.
 - `serve logs [--lines N]` zwraca bounded, redagowane wpisy journala **tylko** dla unitu
   (`journalctl --user -u hermes-serve.service -n N --no-pager`) — scope'owane do unitu i
-  redagowane przez execx, więc nie ujawnia własnej konfiguracji hb (profil/KB/provider). Nie jest
+  redagowane przez execx, więc nie ujawnia własnej konfiguracji `torio` (profil/brain/provider). Nie jest
   to jednak absolutna gwarancja: własny stdout/stderr backendu Hermes może teoretycznie zawierać
   tekst pochodny od danych użytkownika. Traktuj to jako runtime-only ograniczenie ekspozycji, nie
   formalną gwarancję prywatności.
 - `gateway install` deleguje do natywnego `hermes gateway install` i nie zgaduje nazwy unitu.
 - `serve` binduje loopback w VM w Demo A. Dotarcie z Maca to operator-controlled SSH tunnel do gościa
-  `127.0.0.1:9119` (patrz [runbook](../runbooks/remote-second-brain-v1.md)); `hb` nie dodaje własnej
-  funkcji tunelu. `serve` to **backend Desktopu**, a nie `hb gateway` (messaging).
+  `127.0.0.1:9119` (patrz [runbook](../runbooks/remote-second-brain-v1.md)); `torio` nie dodaje własnej
+  funkcji tunelu. `serve` to **backend Desktopu**, a nie `torio gateway` (messaging).
 
 ### Projects
 
 ```text
-hb project add --file PROJECT.yaml
-hb project list
-hb project show PROJECT_ID
-hb project validate PROJECT_ID
-hb project remove PROJECT_ID
+torio project add --file PROJECT.yaml
+torio project list
+torio project show PROJECT_ID
+torio project validate PROJECT_ID
+torio project remove PROJECT_ID
 ```
 
 `remove` usuwa wpis registry, nie repo. Odmawia, jeśli istnieje aktywne execution lub niezamknięty candidate.
@@ -167,25 +194,25 @@ hb project remove PROJECT_ID
 ### Task submit i observation
 
 ```text
-hb task submit --project PROJECT_ID --file REQUEST.json [--idempotency-key KEY]
-hb task status TASK_ID
-hb task events TASK_ID
-hb task logs TASK_ID [--execution EXECUTION_ID]
-hb task review TASK_ID
-hb task discard TASK_ID
+torio task submit --project PROJECT_ID --file REQUEST.json [--idempotency-key KEY]
+torio task status TASK_ID
+torio task events TASK_ID
+torio task logs TASK_ID [--execution EXECUTION_ID]
+torio task review TASK_ID
+torio task discard TASK_ID
 ```
 
-`submit` jest jedyną capability dostępną narrow API Braina. Brain nie dostaje ogólnego lokalnego `hb` terminala.
+`submit` jest jedyną capability dostępną narrow API Braina. Brain nie dostaje ogólnego lokalnego `torio` terminala.
 
 `review` nie zatwierdza. Pokazuje exact candidate, policy i verification evidence.
 
 ### Human-only admin
 
 ```text
-hb admin approve TASK_ID --candidate REVIEW_COMMIT
-hb admin revoke TASK_ID --candidate REVIEW_COMMIT --reason TEXT
-hb admin integrate TASK_ID --candidate REVIEW_COMMIT
-hb admin push TASK_ID --candidate REVIEW_COMMIT --remote REMOTE
+torio admin approve TASK_ID --candidate REVIEW_COMMIT
+torio admin revoke TASK_ID --candidate REVIEW_COMMIT --reason TEXT
+torio admin integrate TASK_ID --candidate REVIEW_COMMIT
+torio admin push TASK_ID --candidate REVIEW_COMMIT --remote REMOTE
 ```
 
 Wymagania:
@@ -199,7 +226,7 @@ Wymagania:
 
 ## Hermes adapter — mutation postconditions
 
-Adapter `hb → hermes kanban` NIE MOŻE traktować exit code procesu Hermesa jako wystarczającego
+Adapter `torio → hermes kanban` NIE MOŻE traktować exit code procesu Hermesa jako wystarczającego
 postcondition security-relevant mutacji stanu. Ustalenie ze spike'u: `hermes kanban claim` przy
 konflikcie **wypisuje odmowę, ale kończy się exit `0`** (patrz [spike-results/03-kanban-worker.md](../spike-results/03-kanban-worker.md)).
 

@@ -4,7 +4,7 @@
 
 - `hermes serve` — backend Desktop/remote; custom user service Hermes Box.
 - `hermes gateway` — messaging adapters i Kanban dispatcher; native gateway service.
-- `hb` — początkowo CLI; daemon/socket tylko gdy wymaga tego admission/admin separation.
+- `torio` — początkowo CLI; daemon/socket tylko gdy wymaga tego admission/admin separation.
 - Docker Engine — VM service.
 
 ## Bind
@@ -20,7 +20,7 @@ Nie używać `0.0.0.0` bez osobnego ADR-u, auth i realnej potrzeby.
 
 ## Feature detection
 
-`hb serve install` najpierw wykonuje:
+`torio serve install` najpierw wykonuje:
 
 ```text
 hermes serve --help
@@ -55,7 +55,7 @@ Service jest ready dopiero gdy:
 - gateway status jest osobno raportowany (D5 backend nie zależy od gateway; `overall:degraded` przy
   zatrzymanym gateway jest oczekiwane i nie unieważnia readiness backendu).
 
-PID/service active bez endpointu nie oznacza ready — `hb serve status` traktuje taki stan jako porażkę
+PID/service active bez endpointu nie oznacza ready — `torio serve status` traktuje taki stan jako porażkę
 weryfikacji (exit 6).
 
 ## Restart
@@ -63,4 +63,4 @@ weryfikacji (exit 6).
 - Service restart nie usuwa sessions/state.
 - VM reboot uruchamia potrzebne services dopiero po network/filesystem readiness.
 - Gateway unit jest zarządzany natywnymi komendami Hermesa.
-- `hb doctor` nie modyfikuje systemu bez explicit repair command.
+- `torio doctor` nie modyfikuje systemu bez explicit repair command.
