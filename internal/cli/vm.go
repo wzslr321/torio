@@ -220,8 +220,8 @@ func newVMBootstrapCmd(a *app) *cobra.Command {
 			"persistent profile/brain/workspace paths with correct ownership and modes on native " +
 			"Linux, and the absence of a broad host mount — failing closed with remediation on " +
 			"any drift.\n\n" +
-			"Bootstrap issues several bounded guest probes; run it with an ample --timeout " +
-			"(e.g. --timeout 15m — Hermes install can be slow).\n\n" +
+			"Bootstrap issues several bounded guest probes and can install Hermes from source, " +
+			"so give it the largest timeout the policy allows: --timeout 10m.\n\n" +
 			"After a successful run, reach the remote Hermes instance yourself (operator-controlled), " +
 			"e.g.:  torio vm ssh -- sudo -u " + lima.HermesUser + " -- hermes --version",
 		Args: cobra.NoArgs,
