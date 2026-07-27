@@ -52,8 +52,10 @@ func newBrainInitCmd(a *app) *cobra.Command {
 		Short: "Create or verify the private Git-versioned Brain",
 		Long: "Create the canonical Markdown scaffold atomically through private guest staging, " +
 			"make its initial local Git commit, and register the separate Second Brain Hermes " +
-			"Project. Idempotent for matching managed state; refuses non-empty unmanaged data. " +
-			"Does not install the retrieval skill, configure a remote, or push.",
+			"Project. Once the Brain verifies, install or refresh the global torio-brain " +
+			"retrieval skill so every project can search it; sessions already open must be " +
+			"restarted to see it. Idempotent for matching managed state; refuses non-empty " +
+			"unmanaged data. Does not configure a remote or push.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := a.opContext(cmd)
@@ -95,7 +97,7 @@ func newBrainStatusCmd(a *app) *cobra.Command {
 				cliErr.Details = brainStatusDetails(report)
 				return cliErr
 			}
-			return a.emitBrainStatus("brain.status", report, nil)
+			return a.emitBrainStatus("brain.status", report, brainSkillNotes(report.SkillState, false))
 		},
 	}
 }
@@ -136,6 +138,10 @@ type brainStatusData struct {
 
 type brainInitData struct {
 	Created bool `json:"created"`
+	// SkillUpdated distinguishes "the payload was written now" from "it was
+	// already current", which is the only signal a caller has for deciding
+	// whether running Hermes sessions are stale.
+	SkillUpdated bool `json:"retrieval_skill_updated"`
 	brainStatusData
 }
 
@@ -169,6 +175,7 @@ func (a *app) emitBrainInit(report brain.InitReport) error {
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("brain.init", brainInitData{
 			Created:         report.Created,
+			SkillUpdated:    report.SkillUpdated,
 			brainStatusData: brainData(report.Status),
 		}, nil))
 	}
@@ -179,7 +186,35 @@ func (a *app) emitBrainInit(report brain.InitReport) error {
 	if _, err := fmt.Fprintf(a.stdout, "Second Brain %s at %s.\n", action, report.Status.Path); err != nil {
 		return err
 	}
-	return a.emitBrainStatus("brain.init", report.Status, []string{"Retrieval skill remains not installed until Task 13."})
+	return a.emitBrainStatus("brain.init", report.Status, brainSkillNotes(report.Status.SkillState, report.SkillUpdated))
+}
+
+// brainSkillNotes states what Torio actually verified. It checked a file on the
+// guest; it has no way to inspect a running Hermes backend, which caches the
+// skill prompt per process and does not rebuild it when a file appears.
+func brainSkillNotes(state brain.SkillState, updated bool) []string {
+	switch {
+	case state == brain.SkillInstalled && updated:
+		return []string{
+			"Retrieval skill written to " + brain.SkillFilePath + ".",
+			"Hermes caches the skill prompt per backend process: start a new session to use it.",
+		}
+	case state == brain.SkillInstalled:
+		return []string{
+			"Retrieval skill already current at " + brain.SkillFilePath + ".",
+			"Torio verified the file only; it cannot tell whether a running session has loaded it.",
+		}
+	case state == brain.SkillDrift:
+		return []string{
+			"Retrieval skill at " + brain.SkillFilePath + " does not match the payload Torio ships.",
+			"Run 'torio brain init' to reinstall it, then start a new session.",
+		}
+	default:
+		return []string{
+			"Retrieval skill is not installed; the Brain is not searchable from other projects.",
+			"Run 'torio brain init' to install it.",
+		}
+	}
 }
 
 func (a *app) emitBrainStatus(command string, report brain.StatusReport, extra []string) error {

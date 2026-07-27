@@ -87,7 +87,7 @@ func (m *Manager) Init(ctx context.Context) (report InitReport, retErr error) {
 	switch status.State {
 	case StateInitialized:
 		report.Status = status
-		return report, nil
+		return report, m.activateRetrieval(ctx, op, &report)
 	case StateDrift:
 		// A fully promoted, secure scaffold with only missing/conflicting Hermes
 		// registration is safe to resume. Every other drift is a no-adopt
@@ -105,7 +105,7 @@ func (m *Manager) Init(ctx context.Context) (report InitReport, retErr error) {
 			if final.State != StateInitialized {
 				return report, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("managed Brain remains in drift after project registration")}
 			}
-			return report, nil
+			return report, m.activateRetrieval(ctx, op, &report)
 		}
 		return report, &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("canonical Brain directory is non-empty or has unsafe drift; refusing to adopt or overwrite it")}
 	case StateUninitialized:
@@ -192,7 +192,151 @@ func (m *Manager) Init(ctx context.Context) (report InitReport, retErr error) {
 	if final.State != StateInitialized {
 		return report, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("promoted Brain did not satisfy initialized postconditions")}
 	}
-	return report, nil
+	return report, m.activateRetrieval(ctx, op, &report)
+}
+
+// activateRetrieval installs or refreshes the global torio-brain skill. It runs
+// only from a success path of Init, once the Brain satisfies every initialized
+// postcondition: a skill that points every session at a partial or unverified
+// vault is worse than no skill at all.
+func (m *Manager) activateRetrieval(ctx context.Context, op string, report *InitReport) error {
+	if report.Status.State != StateInitialized {
+		return &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("refusing to install the retrieval skill for a Brain that is not fully initialized")}
+	}
+	updated, err := m.installSkill(ctx, op)
+	if err != nil {
+		return err
+	}
+	report.SkillUpdated = updated
+	report.Status.SkillState = SkillInstalled
+	return nil
+}
+
+// installSkill makes $HERMES_HOME/skills/torio-brain/SKILL.md match the embedded
+// payload. It is content-addressed: an already-current, correctly owned payload
+// is left untouched so a rerun is a no-op, and any other state is rewritten
+// atomically from a staging file outside the skill discovery root.
+func (m *Manager) installSkill(ctx context.Context, op string) (updated bool, retErr error) {
+	payload, digest, err := retrievalSkill()
+	if err != nil {
+		return false, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("embedded retrieval skill unavailable")}
+	}
+	probe, err := m.probeSkill(ctx, op, digest)
+	if err != nil {
+		return false, err
+	}
+	if probe.symlink {
+		return false, &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("retrieval skill path is a symlink; refusing to write through it")}
+	}
+	if probe.state == SkillInstalled {
+		return false, nil
+	}
+
+	defer func() {
+		if retErr != nil {
+			_, _ = m.run(ctx, op, rootExec("rm", "-f", "--", skillStagingPath))
+		}
+	}()
+	if err := m.mustRun(ctx, op, KindGuestCommand, "create retrieval skill directory",
+		rootExec("install", "-d", "-o", lima.HermesUser, "-g", lima.HermesUser, "-m", "0750", SkillPath)); err != nil {
+		return false, err
+	}
+	if err := m.mustRunInput(ctx, op, KindGuestCommand, "write retrieval skill payload", payload,
+		userExec("tee", skillStagingPath)); err != nil {
+		return false, err
+	}
+	if err := m.mustRun(ctx, op, KindGuestCommand, "set retrieval skill permissions",
+		rootExec("chmod", "0640", skillStagingPath)); err != nil {
+		return false, err
+	}
+	if err := m.mustRun(ctx, op, KindGuestCommand, "promote retrieval skill payload",
+		rootExec("mv", "-T", skillStagingPath, SkillFilePath)); err != nil {
+		return false, err
+	}
+
+	installed, err := m.probeSkill(ctx, op, digest)
+	if err != nil {
+		return false, err
+	}
+	if installed.state != SkillInstalled {
+		return false, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("retrieval skill did not match its expected payload after installation")}
+	}
+	return true, nil
+}
+
+// skillProbe is the bounded on-disk view of the retrieval skill. It carries a
+// digest comparison result, never the payload and never Brain content.
+type skillProbe struct {
+	state   SkillState
+	symlink bool
+}
+
+func (m *Manager) probeSkill(ctx context.Context, op, digest string) (skillProbe, error) {
+	for _, path := range []string{SkillFilePath, SkillPath} {
+		link, err := m.testPath(ctx, op, "-L", path)
+		if err != nil {
+			return skillProbe{}, err
+		}
+		if link {
+			return skillProbe{state: SkillDrift, symlink: true}, nil
+		}
+	}
+	dir, err := m.testPath(ctx, op, "-d", SkillPath)
+	if err != nil {
+		return skillProbe{}, err
+	}
+	if !dir {
+		return skillProbe{state: SkillNotInstalled}, nil
+	}
+	file, err := m.testPath(ctx, op, "-f", SkillFilePath)
+	if err != nil {
+		return skillProbe{}, err
+	}
+	if !file {
+		return skillProbe{state: SkillNotInstalled}, nil
+	}
+	secure, err := m.skillOwnershipSecure(ctx, op)
+	if err != nil {
+		return skillProbe{}, err
+	}
+	sum, err := m.run(ctx, op, userExec("sha256sum", "--", SkillFilePath))
+	if err != nil {
+		return skillProbe{}, err
+	}
+	if sum.ExitCode != 0 {
+		return skillProbe{}, commandError(op, KindVerification, "digest retrieval skill payload", sum.ExitCode)
+	}
+	fields := strings.Fields(string(sum.Stdout))
+	if len(fields) == 0 {
+		return skillProbe{}, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("could not parse retrieval skill digest")}
+	}
+	if !secure || fields[0] != digest {
+		return skillProbe{state: SkillDrift}, nil
+	}
+	return skillProbe{state: SkillInstalled}, nil
+}
+
+func (m *Manager) skillOwnershipSecure(ctx context.Context, op string) (bool, error) {
+	for _, spec := range []struct {
+		path string
+		mode string
+	}{
+		{SkillPath, "750"},
+		{SkillFilePath, "640"},
+	} {
+		meta, err := m.run(ctx, op, rootExec("stat", "-c", "%U:%G %a", spec.path))
+		if err != nil {
+			return false, err
+		}
+		if meta.ExitCode != 0 {
+			return false, nil
+		}
+		owner, group, mode := parseOwnershipMode(string(meta.Stdout))
+		if owner != lima.HermesUser || group != lima.HermesUser || (mode != spec.mode && mode != "0"+spec.mode) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // Status inspects the Brain without returning any note path or content.
@@ -230,6 +374,24 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 	}
 	report.ProjectRegistered = registered
 	report.ProjectConflict = projectConflict
+
+	// The skill lives under the Hermes profile, not under the Brain, so probe it
+	// before the vault: an uninitialized or drifted Brain returns early below and
+	// must still report honest skill state. Skill drift is deliberately kept out
+	// of the Brain's own State — it is drift `brain init` repairs, and folding it
+	// in would make Init refuse to run the very repair it needs to perform.
+	_, digest, err := retrievalSkill()
+	if err != nil {
+		return report, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("embedded retrieval skill unavailable")}
+	}
+	skill, err := m.probeSkill(ctx, op, digest)
+	if err != nil {
+		return report, err
+	}
+	report.SkillState = skill.state
+	if skill.state == SkillDrift {
+		report.Issues = append(report.Issues, "retrieval_skill_drift")
+	}
 
 	link, err := m.testRootPath(ctx, op, "-L", Path)
 	if err != nil {
