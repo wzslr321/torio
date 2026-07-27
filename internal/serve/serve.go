@@ -1,5 +1,5 @@
 // Package serve is the typed, testable lifecycle for the Hermes backend
-// (`hermes serve`) as a custom user systemd service on the Hermes Box guest.
+// (`hermes serve`) as a custom user systemd service on the Torio guest.
 //
 // The backend is the JSON-RPC/WebSocket gateway Hermes Desktop and remote
 // clients connect to. Demo A binds it to guest loopback only (127.0.0.1); the
@@ -29,11 +29,11 @@ import (
 	"strconv"
 	"strings"
 
-	"hermes-box.local/hb/internal/execx"
-	"hermes-box.local/hb/internal/lima"
+	"github.com/wzslr321/torio/internal/execx"
+	"github.com/wzslr321/torio/internal/lima"
 )
 
-// Guest runs a fixed argv inside the Hermes Box VM and returns the bounded,
+// Guest runs a fixed argv inside the Torio VM and returns the bounded,
 // redacted result. *lima.Adapter satisfies it (SSH / SSHInput over
 // `limactl shell`), so serve is testable against a fake without a real VM.
 type Guest interface {
@@ -59,7 +59,7 @@ func New(guest Guest) *Adapter { return &Adapter{Guest: guest} }
 // never caller input — so the generated unit and every probe target a single,
 // auditable loopback endpoint and can never be widened to a public bind.
 const (
-	// UnitName is the custom user unit Hermes Box owns for the backend.
+	// UnitName is the custom user unit Torio owns for the backend.
 	UnitName = "hermes-serve.service"
 	// unitDir is the hermes user's systemd unit directory.
 	unitDir = lima.HermesHome + "/.config/systemd/user"

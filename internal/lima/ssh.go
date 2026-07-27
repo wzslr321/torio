@@ -3,7 +3,7 @@ package lima
 import (
 	"context"
 
-	"hermes-box.local/hb/internal/execx"
+	"github.com/wzslr321/torio/internal/execx"
 )
 
 // SSH runs command inside InstanceName via `limactl shell`. Each element of

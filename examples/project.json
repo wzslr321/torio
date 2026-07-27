@@ -3,7 +3,7 @@
   "project_id": "example-service",
   "display_name": "Example Service",
   "repo": {
-    "local_path": "/home/hb-projects/example-service",
+    "local_path": "/home/torio-projects/example-service",
     "default_branch": "main",
     "remote": "origin"
   },

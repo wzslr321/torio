@@ -37,7 +37,7 @@ const (
 	StateUnknownLima State = "unknown"
 )
 
-// Status is the structured status of the Hermes Box target VM.
+// Status is the structured status of the Torio target VM.
 type Status struct {
 	State State
 	// RawStatus is the verbatim limactl status string ("" for StateNotFound).

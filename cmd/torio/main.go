@@ -1,4 +1,4 @@
-// Command hb is the Hermes Box control-plane CLI. This binary wires process
+// Command torio is the Torio control-plane CLI. This binary wires process
 // I/O, a signal-aware context, and build metadata into the cli package, which
 // owns flag parsing, dispatch, the JSON envelope, and exit-code mapping.
 package main
@@ -11,7 +11,7 @@ import (
 	"runtime/debug"
 	"syscall"
 
-	"hermes-box.local/hb/internal/cli"
+	"github.com/wzslr321/torio/internal/cli"
 )
 
 // Build metadata. These are overridable at link time, e.g.

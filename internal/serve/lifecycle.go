@@ -11,7 +11,7 @@ import (
 var endpointRetryDelay = 500 * time.Millisecond
 
 // Start starts the backend service and proves readiness. It requires the unit to
-// be installed (run `hb serve install` first), starts it via the user manager,
+// be installed (run `torio serve install` first), starts it via the user manager,
 // then fails closed unless BOTH postconditions hold: the re-queried systemd
 // state is active AND the loopback /api/status endpoint answers 200. An active
 // process with a dead endpoint is a failure (docs/contracts/service-lifecycle.md).
@@ -42,7 +42,7 @@ func (a *Adapter) activate(ctx context.Context, op, verb string) (StatusReport, 
 		return rep, e
 	}
 	if !inst {
-		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: errf("unit %q is not installed; run `hb serve install` first", UnitName)}
+		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: errf("unit %q is not installed; run `torio serve install` first", UnitName)}
 	}
 	rep.Installed = true
 	if en, e := a.enabledState(ctx, op, rt); e != nil {

@@ -2,7 +2,7 @@
 
 ## Zakres PoC
 
-Hermes Box PoC chroni przede wszystkim przed:
+Torio PoC chroni przede wszystkim przed:
 
 - błędnymi lub prompt-injected tool calls workera,
 - kodem projektu wykonywanym w task containerze,

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hermes-box.local/schemas/review-evidence.schema.json",
-  "title": "Hermes Box review evidence",
+  "$id": "https://torio.dev/schemas/review-evidence.schema.json",
+  "title": "Torio review evidence",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "project_id", "task_id", "execution_id", "created_at", "base_commit", "review_commit", "review_tree", "review_diff_sha256", "effective_policy_sha256", "worker_image", "verifier_image", "target_ref", "verification"],

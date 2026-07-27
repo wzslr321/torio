@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"hermes-box.local/hb/internal/execx"
-	"hermes-box.local/hb/internal/lima"
+	"github.com/wzslr321/torio/internal/execx"
+	"github.com/wzslr321/torio/internal/lima"
 )
 
 // fakeGuest is a deterministic, local Guest test double. It never reaches a real

@@ -41,7 +41,7 @@ func TestLoadRejectsSymlinkedConfigDir(t *testing.T) {
 	realDir := filepath.Join(t.TempDir(), "real")
 	mustMkdir(t, realDir, 0o700)
 	mustWrite(t, filepath.Join(realDir, configFileName), `{"schema_version":"1"}`, 0o600)
-	// ConfigDir (<cfgHome>/hermes-box) is a symlink to realDir.
+	// ConfigDir (<cfgHome>/torio) is a symlink to realDir.
 	mustSymlink(t, realDir, filepath.Join(cfgHome, appDir))
 
 	if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
@@ -177,7 +177,7 @@ func TestWriteVersionLockRejectsSymlinkedTrustedDir(t *testing.T) {
 // WriteVersionLock into a world-writable existing trusted directory must be
 // rejected.
 func TestWriteVersionLockRejectsWorldWritableTrustedDir(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "hermes-box")
+	dir := filepath.Join(t.TempDir(), "torio")
 	mustMkdir(t, dir, 0o700)
 	if err := os.Chmod(dir, 0o777); err != nil {
 		t.Fatalf("chmod: %v", err)

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"hermes-box.local/hb/internal/execx"
+	"github.com/wzslr321/torio/internal/execx"
 )
 
 type ctxKey struct{}

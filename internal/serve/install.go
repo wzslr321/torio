@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"hermes-box.local/hb/internal/lima"
+	"github.com/wzslr321/torio/internal/lima"
 )
 
 // InstallReport is the structured outcome of Install: what was ensured so the

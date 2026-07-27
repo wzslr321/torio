@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"hermes-box.local/hb/internal/execx"
+	"github.com/wzslr321/torio/internal/execx"
 )
 
-// Bootstrap reconciles and verifies the already-created Hermes Box target so an
+// Bootstrap reconciles and verifies the already-created Torio target so an
 // operator has a usable Remote Second Brain V1 path: a stable non-interactive
 // `hermes` command and Docker reachable by the intended non-root guest identity.
 //
@@ -66,7 +66,7 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 	case StateRunning:
 		// proceed
 	case StateStopped:
-		return rep, &Error{Op: bootstrapOp, Kind: KindNotRunning, Err: fmt.Errorf("instance %q is stopped; run `hb vm start` first", InstanceName)}
+		return rep, &Error{Op: bootstrapOp, Kind: KindNotRunning, Err: fmt.Errorf("instance %q is stopped; run `torio vm start` first", InstanceName)}
 	default:
 		return rep, &Error{Op: bootstrapOp, Kind: KindAmbiguousState, Err: fmt.Errorf("instance %q is in ambiguous state %q", InstanceName, rec.Status)}
 	}

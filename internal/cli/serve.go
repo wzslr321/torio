@@ -7,24 +7,24 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hermes-box.local/hb/internal/serve"
+	"github.com/wzslr321/torio/internal/serve"
 )
 
-// newServeCmd builds the `hb serve` parent and its lifecycle subcommands for the
-// loopback-only Hermes backend (Demo A D5). Like `hb vm`, the parent takes no
+// newServeCmd builds the `torio serve` parent and its lifecycle subcommands for the
+// loopback-only Hermes backend (Demo A D5). Like `torio vm`, the parent takes no
 // action itself: an absent/unknown subcommand is a usage error.
 func newServeCmd(a *app) *cobra.Command {
 	s := &cobra.Command{
 		Use:   "serve",
 		Short: "Manage the loopback-only Hermes Desktop backend",
 		Long: "Install and control the Hermes backend (`hermes serve`) as a custom user " +
-			"systemd service on the Hermes Box VM. It binds guest loopback only " +
+			"systemd service on the Torio VM. It binds guest loopback only " +
 			"(127.0.0.1:9119) using the existing /home/hermes/.hermes profile; the Mac " +
 			"reaches it through an operator-controlled SSH tunnel (docs/contracts/service-lifecycle.md). " +
-			"This is the Desktop backend, NOT `hb gateway` (messaging).",
+			"This is the Desktop backend, NOT `torio gateway` (messaging).",
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				return usageError("no subcommand given; run 'hb serve --help'")
+				return usageError("no subcommand given; run 'torio serve --help'")
 			}
 			return usageError(fmt.Sprintf("unknown serve subcommand %q", args[0]))
 		},
@@ -45,7 +45,7 @@ func newServeInstallCmd(a *app) *cobra.Command {
 		Long: "Ensure user linger, render the custom user unit (loopback bind, HERMES_HOME " +
 			"profile pin, Restart=always), validate it with systemd-analyze BEFORE activation, " +
 			"then reload and enable it for boot. Idempotent; accepts no secrets; does not start " +
-			"the backend (use `hb serve start`). Runs several bounded guest probes — use an ample " +
+			"the backend (use `torio serve start`). Runs several bounded guest probes — use an ample " +
 			"--timeout (e.g. --timeout 2m).",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -254,7 +254,7 @@ func (a *app) emitServeInstall(rep serve.InstallReport) error {
 			"  linger enabled: %t\n"+
 			"  validated:      %t\n"+
 			"  enabled (boot): %t\n"+
-			"Next: hb serve start\n",
+			"Next: torio serve start\n",
 		serve.UnitName, state, rep.UnitPath, rep.LingerEnabled, rep.Validated, rep.Enabled)
 	return err
 }

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"hermes-box.local/hb/internal/execx"
+	"github.com/wzslr321/torio/internal/execx"
 )
 
 // wrapErr mirrors how execx wraps a context error: fmt.Errorf(...: %w...), so

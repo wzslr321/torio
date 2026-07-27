@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"hermes-box.local/hb/internal/execx"
-	"hermes-box.local/hb/internal/lima"
+	"github.com/wzslr321/torio/internal/execx"
+	"github.com/wzslr321/torio/internal/lima"
 )
 
 // ErrorKind classifies a serve-lifecycle failure so internal/cli can map it onto

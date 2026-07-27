@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"hermes-box.local/hb/internal/redact"
+	"github.com/wzslr321/torio/internal/redact"
 )
 
 // ExecRunner must satisfy the Runner interface.
@@ -94,7 +94,7 @@ func TestRunRedactsSecretsInDiagnostics(t *testing.T) {
 	// A binary that does not exist forces a start error whose wrapper includes
 	// the (redacted) command description.
 	_, err := r.Run(context.Background(), Command{
-		Name: "hb-nonexistent-binary-xyz",
+		Name: "torio-nonexistent-binary-xyz",
 		Args: []string{"--token", secret},
 	})
 	if err == nil {

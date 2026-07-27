@@ -9,7 +9,7 @@ import (
 
 func TestWriteFilePrivateCreatesOwnerOnlyFileAndDir(t *testing.T) {
 	base := t.TempDir()
-	dir := filepath.Join(base, "hermes-box")
+	dir := filepath.Join(base, "torio")
 	path := filepath.Join(dir, "config.json")
 	data := []byte(`{"schema_version":"1"}`)
 

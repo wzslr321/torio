@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Portable validation for the Hermes Box design/implementation pack.
+"""Portable validation for the Torio design/implementation pack.
 
 Uses only Python's standard library so it can run before Go or project dependencies
 are installed. It validates the JSON Schema subset used by this repository,
@@ -189,6 +189,11 @@ def validate_links() -> list[str]:
         # Runtime worktrees/state are ignored by git and must not affect design validation.
         if any(part in {".worktrees", "state", "artifacts"} for part in path.parts):
             continue
+        # Site page sources render to site/*.html; their links are resolved
+        # against the built site, not the repository tree. scripts/check_site_links.py
+        # validates them in the generated output instead.
+        if path.parent == ROOT / "docs" / "content" / "pages":
+            continue
         text = path.read_text(encoding="utf-8")
         for target in MARKDOWN_LINK.findall(text):
             target = target.strip().split()[0].strip("<>\"'")
@@ -246,7 +251,7 @@ def main() -> int:
             print(f"- {error}", file=sys.stderr)
         return 1
 
-    print("\nHermes Box artifact pack is internally consistent.")
+    print("\nTorio artifact pack is internally consistent.")
     return 0
 
 

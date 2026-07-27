@@ -10,8 +10,8 @@ import (
 
 const (
 	// appDir is the per-application subdirectory under the XDG base dirs. All
-	// Hermes Box config and state live under it so nothing pollutes the base.
-	appDir = "hermes-box"
+	// Torio config and state live under it so nothing pollutes the base.
+	appDir = "torio"
 	// configFileName is the default config document within the config dir.
 	configFileName = "config.json"
 	// versionLockFileName is the version-lock manifest within the config dir.

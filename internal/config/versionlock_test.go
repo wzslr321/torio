@@ -15,7 +15,7 @@ import (
 // rejects; tests that exercise manifest parsing must supply a private parent.
 func privDir(t *testing.T) string {
 	t.Helper()
-	d := filepath.Join(t.TempDir(), "hermes-box")
+	d := filepath.Join(t.TempDir(), "torio")
 	if err := os.MkdirAll(d, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -26,7 +26,7 @@ func privDir(t *testing.T) string {
 }
 
 func TestVersionLockWriteReadRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "hermes-box", versionLockFileName)
+	path := filepath.Join(t.TempDir(), "torio", versionLockFileName)
 	in := VersionLock{
 		SchemaVersion: VersionLockSchemaVersion,
 		Lima:          "1.0.1",
@@ -56,7 +56,7 @@ func TestVersionLockWriteReadRoundTrip(t *testing.T) {
 }
 
 func TestWriteVersionLockRejectsInvalidBeforeWriting(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "hermes-box", versionLockFileName)
+	path := filepath.Join(t.TempDir(), "torio", versionLockFileName)
 	bad := VersionLock{SchemaVersion: "9", Lima: "1.0.0"}
 	if err := WriteVersionLock(path, bad); err == nil {
 		t.Fatalf("WriteVersionLock must reject invalid manifest")

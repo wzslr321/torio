@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hermes-box.local/schemas/effective-policy.schema.json",
-  "title": "Hermes Box effective execution policy",
+  "$id": "https://torio.dev/schemas/effective-policy.schema.json",
+  "title": "Torio effective execution policy",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "project_id", "base_commit", "worker", "verifier", "workspace", "host_tools", "secrets", "integration"],

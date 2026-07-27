@@ -1,12 +1,12 @@
 {
   "schema_version": "1",
-  "vm_name": "hermes-box",
+  "vm_name": "torio",
   "backend": {
     "host": "127.0.0.1",
     "port": 9119
   },
   "paths": {
-    "projects_root": "/home/hb-projects",
+    "projects_root": "/home/torio-projects",
     "transfer_mount": "/mnt/hermes-transfer"
   },
   "secrets": "[REDACTED: credentials are provisioned outside this file]"

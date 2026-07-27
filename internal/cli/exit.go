@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"hermes-box.local/hb/internal/redact"
+	"github.com/wzslr321/torio/internal/redact"
 )
 
 // ExitCode is the stable process exit-code mapping defined in
@@ -86,11 +86,11 @@ func fail(stdout, stderr io.Writer, command string, jsonOut bool, err *CLIError,
 		// A write failure here cannot be reported through stdout without
 		// corrupting the envelope; surface it on stderr and keep the exit code.
 		if werr := writeJSON(stdout, env); werr != nil {
-			fmt.Fprintf(stderr, "hb: failed to write error envelope: %v\n", werr)
+			fmt.Fprintf(stderr, "torio: failed to write error envelope: %v\n", werr)
 		}
 		return int(err.Exit)
 	}
-	fmt.Fprintf(stderr, "hb: %s\n", msg)
+	fmt.Fprintf(stderr, "torio: %s\n", msg)
 	return int(err.Exit)
 }
 

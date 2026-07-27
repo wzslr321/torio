@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"hermes-box.local/hb/internal/redact"
+	"github.com/wzslr321/torio/internal/redact"
 )
 
 // TestHelperProcess is not a real test: when re-executed with HB_HELPER_MODE

@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"hermes-box.local/hb/internal/redact"
+	"github.com/wzslr321/torio/internal/redact"
 )
 
-// runVersionWithXDG runs `hb <args>` with isolated XDG dirs so no real user
+// runVersionWithXDG runs `torio <args>` with isolated XDG dirs so no real user
 // config is touched, and returns exit code + captured streams.
 func runVersionWithXDG(t *testing.T, args []string, cfgHome, stateHome string) (int, string, string) {
 	t.Helper()
@@ -27,7 +27,7 @@ func runVersionWithXDG(t *testing.T, args []string, cfgHome, stateHome string) (
 
 func writeCLIConfig(t *testing.T, cfgHome, body string) {
 	t.Helper()
-	dir := filepath.Join(cfgHome, "hermes-box")
+	dir := filepath.Join(cfgHome, "torio")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestConfigAndStateDirGlobalsAcceptedBeforeAndAfterCommand(t *testing.T) {
 
 // TestConfigDefaultTimeoutIsConsumed proves the config file is genuinely used
 // by command execution (not merely parsed): a valid-but-tiny default_timeout
-// bounds the operation, so the (already-expired) context makes `hb version`
+// bounds the operation, so the (already-expired) context makes `torio version`
 // abort. If config were ignored, the default 30s policy would let it succeed.
 func TestConfigDefaultTimeoutIsConsumed(t *testing.T) {
 	cfgHome := t.TempDir()
@@ -224,7 +224,7 @@ func TestInsecureConfigPermissionsIsUsageError(t *testing.T) {
 	}
 	cfgHome := t.TempDir()
 	writeCLIConfig(t, cfgHome, `{"schema_version":"1"}`)
-	if err := os.Chmod(filepath.Join(cfgHome, "hermes-box", "config.json"), 0o644); err != nil {
+	if err := os.Chmod(filepath.Join(cfgHome, "torio", "config.json"), 0o644); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}
 	code, _, _ := runVersionWithXDG(t, []string{"version"}, cfgHome, t.TempDir())
@@ -234,7 +234,7 @@ func TestInsecureConfigPermissionsIsUsageError(t *testing.T) {
 }
 
 // TestVersionJSONEnvelopeUnchangedWithConfig locks the D1 envelope discipline:
-// even with config resolution active, `hb version --json` emits exactly one
+// even with config resolution active, `torio version --json` emits exactly one
 // envelope (second decode is io.EOF).
 func TestVersionJSONEnvelopeUnchangedWithConfig(t *testing.T) {
 	code, stdout, _ := runVersionWithXDG(t, []string{"version", "--json"}, t.TempDir(), t.TempDir())

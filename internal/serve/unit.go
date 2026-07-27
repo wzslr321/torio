@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"hermes-box.local/hb/internal/lima"
+	"github.com/wzslr321/torio/internal/lima"
 )
 
 // renderUnit produces the exact bytes of the custom user systemd unit for the
@@ -24,7 +24,7 @@ func renderUnit() []byte {
 	execStart := hermesShim + " serve --skip-build --host " + BindHost + " --port " + strconv.Itoa(BindPort)
 	var b strings.Builder
 	b.WriteString("[Unit]\n")
-	b.WriteString("Description=Hermes Box loopback backend (hb serve)\n")
+	b.WriteString("Description=Torio loopback backend (torio serve)\n")
 	b.WriteString("\n")
 	b.WriteString("[Service]\n")
 	b.WriteString("Type=simple\n")

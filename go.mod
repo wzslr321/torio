@@ -1,4 +1,4 @@
-module hermes-box.local/hb
+module github.com/wzslr321/torio
 
 go 1.26.0
 

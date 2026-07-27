@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"hermes-box.local/hb/internal/redact"
+	"github.com/wzslr321/torio/internal/redact"
 )
 
 // knownShapeCanary is a fake token matching a well-known secret shape (OpenAI).

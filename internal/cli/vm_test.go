@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"hermes-box.local/hb/internal/execx"
-	"hermes-box.local/hb/internal/lima"
+	"github.com/wzslr321/torio/internal/execx"
+	"github.com/wzslr321/torio/internal/lima"
 )
 
 // scriptedResp is one canned (Result, error) pair for the fake runner.
@@ -37,7 +37,7 @@ func (f *fakeLimaRunner) Run(_ context.Context, cmd execx.Command) (execx.Result
 	return execx.Result{}, nil
 }
 
-// runVMWithFake runs `hb <args>` with isolated XDG dirs and the given fake
+// runVMWithFake runs `torio <args>` with isolated XDG dirs and the given fake
 // runner wired behind the Lima adapter seam, returning exit code + streams.
 func runVMWithFake(t *testing.T, args []string, fake execx.Runner) (int, string, string) {
 	t.Helper()
@@ -75,18 +75,18 @@ func listJSON(name, status string) execx.Result {
 // --- vm status ---
 
 func TestVMStatusHuman(t *testing.T) {
-	fake := &fakeLimaRunner{script: []scriptedResp{{res: listJSON("hermes-box", "Stopped")}}}
+	fake := &fakeLimaRunner{script: []scriptedResp{{res: listJSON("torio", "Stopped")}}}
 	code, stdout, stderr := runVMWithFake(t, []string{"vm", "status"}, fake)
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
 	}
-	if strings.TrimSpace(stdout) != "hermes-box: stopped" {
-		t.Errorf("stdout = %q, want %q", stdout, "hermes-box: stopped\n")
+	if strings.TrimSpace(stdout) != "torio: stopped" {
+		t.Errorf("stdout = %q, want %q", stdout, "torio: stopped\n")
 	}
 }
 
 func TestVMStatusJSONSingleEnvelope(t *testing.T) {
-	fake := &fakeLimaRunner{script: []scriptedResp{{res: listJSON("hermes-box", "Running")}}}
+	fake := &fakeLimaRunner{script: []scriptedResp{{res: listJSON("torio", "Running")}}}
 	code, stdout, _ := runVMWithFake(t, []string{"vm", "status", "--json"}, fake)
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0", code)
@@ -96,8 +96,8 @@ func TestVMStatusJSONSingleEnvelope(t *testing.T) {
 		t.Errorf("unexpected envelope: %v", env)
 	}
 	data, _ := env["data"].(map[string]any)
-	if data["name"] != "hermes-box" || data["state"] != "running" {
-		t.Errorf("data = %v, want name=hermes-box state=running", data)
+	if data["name"] != "torio" || data["state"] != "running" {
+		t.Errorf("data = %v, want name=torio state=running", data)
 	}
 }
 
@@ -118,23 +118,23 @@ func TestVMStatusLimaErrorIsExternal(t *testing.T) {
 func TestVMStartSuccessHumanAndJSON(t *testing.T) {
 	// Human: Stopped → start → Running.
 	fake := &fakeLimaRunner{script: []scriptedResp{
-		{res: listJSON("hermes-box", "Stopped")},
+		{res: listJSON("torio", "Stopped")},
 		{res: execx.Result{ExitCode: 0}},
-		{res: listJSON("hermes-box", "Running")},
+		{res: listJSON("torio", "Running")},
 	}}
 	code, stdout, stderr := runVMWithFake(t, []string{"vm", "start"}, fake)
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
 	}
-	if strings.TrimSpace(stdout) != "hermes-box: running" {
-		t.Errorf("stdout = %q, want %q", stdout, "hermes-box: running\n")
+	if strings.TrimSpace(stdout) != "torio: running" {
+		t.Errorf("stdout = %q, want %q", stdout, "torio: running\n")
 	}
 
 	// JSON: same three-step script.
 	fake = &fakeLimaRunner{script: []scriptedResp{
-		{res: listJSON("hermes-box", "Stopped")},
+		{res: listJSON("torio", "Stopped")},
 		{res: execx.Result{ExitCode: 0}},
-		{res: listJSON("hermes-box", "Running")},
+		{res: listJSON("torio", "Running")},
 	}}
 	code, stdout, _ = runVMWithFake(t, []string{"vm", "start", "--json"}, fake)
 	if code != int(ExitOK) {
@@ -145,8 +145,8 @@ func TestVMStartSuccessHumanAndJSON(t *testing.T) {
 		t.Errorf("unexpected envelope: %v", env)
 	}
 	data, _ := env["data"].(map[string]any)
-	if data["name"] != "hermes-box" || data["state"] != "running" {
-		t.Errorf("data = %v, want name=hermes-box state=running", data)
+	if data["name"] != "torio" || data["state"] != "running" {
+		t.Errorf("data = %v, want name=torio state=running", data)
 	}
 }
 
@@ -175,7 +175,7 @@ func TestVMSSHPassesExactTokenArray(t *testing.T) {
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
 	}
-	want := []string{"limactl", "shell", "--tty=false", "hermes-box", "--", "uname", "-a"}
+	want := []string{"limactl", "shell", "--tty=false", "torio", "--", "uname", "-a"}
 	if len(fake.calls) != 1 || !reflect.DeepEqual(fake.calls[0], want) {
 		t.Fatalf("argv = %v, want %v", fake.calls, want)
 	}
@@ -313,23 +313,23 @@ func TestVMSSHJSONRemoteNonZeroHasConcreteCommand(t *testing.T) {
 func TestVMStopSuccessHumanAndJSON(t *testing.T) {
 	// Human: Running → stop → Stopped.
 	fake := &fakeLimaRunner{script: []scriptedResp{
-		{res: listJSON("hermes-box", "Running")},
+		{res: listJSON("torio", "Running")},
 		{res: execx.Result{ExitCode: 0}},
-		{res: listJSON("hermes-box", "Stopped")},
+		{res: listJSON("torio", "Stopped")},
 	}}
 	code, stdout, stderr := runVMWithFake(t, []string{"vm", "stop"}, fake)
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
 	}
-	if strings.TrimSpace(stdout) != "hermes-box: stopped" {
-		t.Errorf("stdout = %q, want %q", stdout, "hermes-box: stopped\n")
+	if strings.TrimSpace(stdout) != "torio: stopped" {
+		t.Errorf("stdout = %q, want %q", stdout, "torio: stopped\n")
 	}
 
 	// JSON: same three-step script.
 	fake = &fakeLimaRunner{script: []scriptedResp{
-		{res: listJSON("hermes-box", "Running")},
+		{res: listJSON("torio", "Running")},
 		{res: execx.Result{ExitCode: 0}},
-		{res: listJSON("hermes-box", "Stopped")},
+		{res: listJSON("torio", "Stopped")},
 	}}
 	code, stdout, _ = runVMWithFake(t, []string{"vm", "stop", "--json"}, fake)
 	if code != int(ExitOK) {
@@ -340,18 +340,18 @@ func TestVMStopSuccessHumanAndJSON(t *testing.T) {
 		t.Errorf("unexpected envelope: %v", env)
 	}
 	data, _ := env["data"].(map[string]any)
-	if data["name"] != "hermes-box" || data["state"] != "stopped" {
-		t.Errorf("data = %v, want name=hermes-box state=stopped", data)
+	if data["name"] != "torio" || data["state"] != "stopped" {
+		t.Errorf("data = %v, want name=torio state=stopped", data)
 	}
 }
 
 func TestVMStopAlreadyStoppedIsIdempotent(t *testing.T) {
-	fake := &fakeLimaRunner{script: []scriptedResp{{res: listJSON("hermes-box", "Stopped")}}}
+	fake := &fakeLimaRunner{script: []scriptedResp{{res: listJSON("torio", "Stopped")}}}
 	code, stdout, _ := runVMWithFake(t, []string{"vm", "stop"}, fake)
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0 (idempotent stopped)", code)
 	}
-	if strings.TrimSpace(stdout) != "hermes-box: stopped" {
+	if strings.TrimSpace(stdout) != "torio: stopped" {
 		t.Errorf("stdout = %q, want stopped", stdout)
 	}
 	if len(fake.calls) != 1 {
@@ -394,7 +394,7 @@ func TestVMStopJSONErrorHasConcreteCommand(t *testing.T) {
 func bootstrapHappyResp() []scriptedResp {
 	out := func(s string) execx.Result { return execx.Result{ExitCode: 0, Stdout: []byte(s)} }
 	return []scriptedResp{
-		{res: listJSON("hermes-box", "Running")},                  // list precondition
+		{res: listJSON("torio", "Running")},                  // list precondition
 		{res: out("hermes docker\n")},                             // id -nG hermes
 		{res: execx.Result{ExitCode: 0}},                          // test -x target
 		{res: out("/home/hermes/hermes-agent/venv/bin/hermes\n")}, // readlink shim (correct)
@@ -421,8 +421,8 @@ func TestVMBootstrapSuccessJSON(t *testing.T) {
 		t.Fatalf("unexpected envelope: %v", env)
 	}
 	data, _ := env["data"].(map[string]any)
-	if data["instance"] != "hermes-box" {
-		t.Errorf("instance = %v, want hermes-box", data["instance"])
+	if data["instance"] != "torio" {
+		t.Errorf("instance = %v, want torio", data["instance"])
 	}
 	if data["kb_path"] != "/home/hermes/.hermes" {
 		t.Errorf("kb_path = %v, want /home/hermes/.hermes", data["kb_path"])
@@ -452,7 +452,7 @@ func TestVMBootstrapSuccessHumanHasHandoff(t *testing.T) {
 }
 
 func TestVMBootstrapNotRunningIsPrecondition(t *testing.T) {
-	fake := &fakeLimaRunner{script: []scriptedResp{{res: listJSON("hermes-box", "Stopped")}}}
+	fake := &fakeLimaRunner{script: []scriptedResp{{res: listJSON("torio", "Stopped")}}}
 	code, stdout, _ := runVMWithFake(t, []string{"vm", "bootstrap", "--json"}, fake)
 	if code != int(ExitPrecondition) {
 		t.Fatalf("exit = %d, want %d (precondition)", code, int(ExitPrecondition))

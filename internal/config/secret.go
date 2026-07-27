@@ -3,7 +3,7 @@ package config
 import (
 	"errors"
 
-	"hermes-box.local/hb/internal/redact"
+	"github.com/wzslr321/torio/internal/redact"
 )
 
 // containsSecretShape reports whether s carries material matching a well-known

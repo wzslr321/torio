@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hermes-box.local/hb/internal/execx"
-	"hermes-box.local/hb/internal/lima"
+	"github.com/wzslr321/torio/internal/execx"
+	"github.com/wzslr321/torio/internal/lima"
 )
 
 // defaultNewLima builds the production Lima adapter over a real execx runner.
@@ -35,16 +35,16 @@ type vmSSHData struct {
 	StderrTruncated bool   `json:"stderr_truncated"`
 }
 
-// newVMCmd builds the `hb vm` parent and its V1 subcommands. The parent takes
+// newVMCmd builds the `torio vm` parent and its V1 subcommands. The parent takes
 // no action itself: invoked with no (or an unknown) subcommand it returns a
 // usage error, mirroring the root command's fail-closed dispatch.
 func newVMCmd(a *app) *cobra.Command {
 	vm := &cobra.Command{
 		Use:   "vm",
-		Short: "Control the Hermes Box VM",
+		Short: "Control the Torio VM",
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				return usageError("no subcommand given; run 'hb vm --help'")
+				return usageError("no subcommand given; run 'torio vm --help'")
 			}
 			return usageError(fmt.Sprintf("unknown vm subcommand %q", args[0]))
 		},
@@ -60,7 +60,7 @@ func newVMCmd(a *app) *cobra.Command {
 func newVMStatusCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
-		Short: "Report the Hermes Box VM state",
+		Short: "Report the Torio VM state",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := a.opContext(cmd)
@@ -77,7 +77,7 @@ func newVMStatusCmd(a *app) *cobra.Command {
 func newVMStartCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "start",
-		Short: "Start the Hermes Box VM",
+		Short: "Start the Torio VM",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := a.opContext(cmd)
@@ -95,8 +95,8 @@ func newVMStartCmd(a *app) *cobra.Command {
 func newVMStopCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
-		Short: "Stop the Hermes Box VM",
-		Long: "Gracefully stop the Hermes Box VM. Idempotent: an already-stopped VM " +
+		Short: "Stop the Torio VM",
+		Long: "Gracefully stop the Torio VM. Idempotent: an already-stopped VM " +
 			"succeeds without acting. Stop never removes the VM or its data, and never " +
 			"trusts a clean exit — it re-queries and requires a Stopped post-state.",
 		Args: cobra.NoArgs,
@@ -116,8 +116,8 @@ func newVMStopCmd(a *app) *cobra.Command {
 func newVMBootstrapCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "bootstrap",
-		Short: "Reconcile and verify the existing Hermes Box target for Remote Second Brain V1",
-		Long: "Reconcile and verify the already-created Hermes Box VM so an operator has a " +
+		Short: "Reconcile and verify the existing Torio target for Remote Second Brain V1",
+		Long: "Reconcile and verify the already-created Torio VM so an operator has a " +
 			"usable Remote Second Brain V1 path: a stable non-interactive `hermes` command " +
 			"and Docker reachable by the intended non-root guest user (" + lima.HermesUser + ").\n\n" +
 			"It operates only on the existing target after a verified Running precondition, " +
@@ -130,7 +130,7 @@ func newVMBootstrapCmd(a *app) *cobra.Command {
 			"Bootstrap issues several bounded guest probes; run it with an ample --timeout " +
 			"(e.g. --timeout 5m).\n\n" +
 			"After a successful run, reach the remote Hermes instance yourself (operator-controlled), " +
-			"e.g.:  hb vm ssh -- sudo -u " + lima.HermesUser + " -- hermes --version",
+			"e.g.:  torio vm ssh -- sudo -u " + lima.HermesUser + " -- hermes --version",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := a.opContext(cmd)
@@ -154,7 +154,7 @@ func newVMBootstrapCmd(a *app) *cobra.Command {
 func newVMSSHCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "ssh -- COMMAND...",
-		Short: "Run a command inside the Hermes Box VM",
+		Short: "Run a command inside the Torio VM",
 		// At least one token is required: V1 does not open an interactive
 		// shell. Missing tokens is a Cobra arg error → usage (exit 2).
 		Args: cobra.MinimumNArgs(1),
@@ -254,7 +254,7 @@ func (a *app) emitVMBootstrap(rep lima.BootstrapReport) error {
 			"Persistent Hermes home: %s\n"+
 			"Persistent KB:          %s\n"+
 			"Persistent workspace:   %s\n"+
-			"Reach Hermes (operator-controlled): hb vm ssh -- sudo -u %s -- hermes --version\n",
+			"Reach Hermes (operator-controlled): torio vm ssh -- sudo -u %s -- hermes --version\n",
 		rep.Instance, lima.HermesHome, lima.HermesKBPath, lima.HermesWorkspacePath, lima.HermesUser)
 	return err
 }
@@ -295,7 +295,7 @@ func sshData(res execx.Result) vmSSHData {
 
 // sshCommandFailed classifies a non-zero remote exit. A remote command exiting
 // non-zero is mapped to the same external-command-failure class (exit 8) as
-// limactl itself exiting non-zero (lima.KindCommandFailed): hb treats any
+// limactl itself exiting non-zero (lima.KindCommandFailed): torio treats any
 // non-zero exit under the Lima adapter uniformly and never reports success. The
 // exact remote exit code and (bounded, redacted) output stay in error.details.
 func sshCommandFailed(res execx.Result) *CLIError {

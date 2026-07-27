@@ -1,4 +1,5 @@
 # Build
+/torio
 /bin/
 /dist/
 *.test
@@ -7,7 +8,7 @@ __pycache__/
 *.py[cod]
 
 # Runtime/state
-.hermes-box/
+.torio/
 *.db
 *.db-shm
 *.db-wal

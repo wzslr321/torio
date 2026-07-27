@@ -1,6 +1,6 @@
 // Package lima is the typed, testable adapter over `limactl` (ADR-0003). The
 // V1 surface is the smallest usable slice: feature/version probe, status,
-// start, and ssh for the single Hermes Box target VM. Instance creation
+// start, and ssh for the single Torio target VM. Instance creation
 // (init, from a trusted template) and stop are deliberately deferred to a
 // later slice and are not implemented here. Every external call is an
 // execx.Command argument array — never a shell string — run through the
@@ -13,13 +13,13 @@ package lima
 import (
 	"context"
 
-	"hermes-box.local/hb/internal/execx"
+	"github.com/wzslr321/torio/internal/execx"
 )
 
-// InstanceName is the single Lima VM instance Hermes Box manages. ADR-0003
-// places exactly one Linux arm64 VM as the trust boundary for Demo A; hb
+// InstanceName is the single Lima VM instance Torio manages. ADR-0003
+// places exactly one Linux arm64 VM as the trust boundary for Demo A; torio
 // does not manage multiple named instances.
-const InstanceName = "hermes-box"
+const InstanceName = "torio"
 
 // bin is the default limactl executable name, resolved via PATH.
 const bin = "limactl"

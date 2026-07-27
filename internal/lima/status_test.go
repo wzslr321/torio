@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"hermes-box.local/hb/internal/execx"
+	"github.com/wzslr321/torio/internal/execx"
 )
 
 const listArgvExpected = "list --json --tty=false"

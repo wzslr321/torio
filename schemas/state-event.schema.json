@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hermes-box.local/schemas/state-event.schema.json",
-  "title": "Hermes Box append-only ledger event",
+  "$id": "https://torio.dev/schemas/state-event.schema.json",
+  "title": "Torio append-only ledger event",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "event_id", "event_type", "occurred_at", "actor", "task_id", "payload"],

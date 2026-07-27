@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"hermes-box.local/hb/internal/execx"
-	"hermes-box.local/hb/internal/serve"
+	"github.com/wzslr321/torio/internal/execx"
+	"github.com/wzslr321/torio/internal/serve"
 )
 
 // fakeServeGuest is a local serve.Guest double for the cli package. It routes on

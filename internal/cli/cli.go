@@ -1,4 +1,4 @@
-// Package cli implements the `hb` command-line surface: command dispatch via
+// Package cli implements the `torio` command-line surface: command dispatch via
 // Cobra, the stable JSON envelope, exit-code mapping, and strict separation of
 // machine output (stdout) from diagnostics (stderr). Cobra owns the command
 // tree, per-command flags, and help; this package owns the envelope/exit-code
@@ -16,9 +16,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hermes-box.local/hb/internal/config"
-	"hermes-box.local/hb/internal/lima"
-	"hermes-box.local/hb/internal/serve"
+	"github.com/wzslr321/torio/internal/config"
+	"github.com/wzslr321/torio/internal/lima"
+	"github.com/wzslr321/torio/internal/serve"
 )
 
 // app holds the per-invocation wiring shared across the command tree.
@@ -96,18 +96,18 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 	return int(ExitOK)
 }
 
-// newRootCmd constructs the `hb` root command and its subcommands.
+// newRootCmd constructs the `torio` root command and its subcommands.
 func newRootCmd(a *app) *cobra.Command {
 	root := &cobra.Command{
-		Use:           "hb",
-		Short:         "Hermes Box control-plane CLI",
+		Use:           "torio",
+		Short:         "Torio control-plane CLI",
 		SilenceErrors: true, // this package renders errors; Cobra must not
 		SilenceUsage:  true,
 		// The root is runnable so unknown input reaches RunE and we control the
 		// message, rather than Cobra's default handling.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				return usageError("no command given; run 'hb --help'")
+				return usageError("no command given; run 'torio --help'")
 			}
 			return usageError(fmt.Sprintf("unknown command %q", args[0]))
 		},

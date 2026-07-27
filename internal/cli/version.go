@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newVersionCmd builds `hb version`. It takes no positional arguments and
+// newVersionCmd builds `torio version`. It takes no positional arguments and
 // honors the bounded operation context and --json.
 func newVersionCmd(a *app) *cobra.Command {
 	return &cobra.Command{
@@ -26,7 +26,7 @@ func newVersionCmd(a *app) *cobra.Command {
 	}
 }
 
-// BuildInfo carries build/runtime metadata for `hb version`. cmd/hb populates
+// BuildInfo carries build/runtime metadata for `torio version`. cmd/torio populates
 // Version/Commit/BuildDate via -ldflags and the runtime fields from the Go
 // runtime; tests inject deterministic values.
 type BuildInfo struct {
@@ -70,7 +70,7 @@ func runVersion(ctx context.Context, stdout io.Writer, jsonOut bool, build Build
 	if jsonOut {
 		return writeJSON(stdout, successEnvelope("version", build.data(), nil))
 	}
-	if _, err := fmt.Fprintf(stdout, "hb %s (commit %s, built %s)\n", build.Version, build.Commit, build.BuildDate); err != nil {
+	if _, err := fmt.Fprintf(stdout, "torio %s (commit %s, built %s)\n", build.Version, build.Commit, build.BuildDate); err != nil {
 		return err
 	}
 	_, err := fmt.Fprintf(stdout, "%s %s/%s\n", build.GoVersion, build.OS, build.Arch)

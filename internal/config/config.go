@@ -1,4 +1,4 @@
-// Package config holds the typed runtime settings that bound an `hb`
+// Package config holds the typed runtime settings that bound an `torio`
 // invocation. In D1 this is limited to the operation timeout policy; the XDG
 // on-disk configuration and version-lock manifest are a later slice (D2).
 package config

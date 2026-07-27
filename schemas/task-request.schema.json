@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hermes-box.local/schemas/task-request.schema.json",
-  "title": "Hermes Box task request",
+  "$id": "https://torio.dev/schemas/task-request.schema.json",
+  "title": "Torio task request",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "project_id", "title", "specification", "acceptance_criteria"],

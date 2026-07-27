@@ -60,7 +60,7 @@ func TestStringRedactsKnownSecretShapes(t *testing.T) {
 }
 
 func TestStringLeavesNonSecretsUnchanged(t *testing.T) {
-	in := "hb version 1.2.3 (commit abcdef0) go1.26.5 darwin/arm64"
+	in := "torio version 1.2.3 (commit abcdef0) go1.26.5 darwin/arm64"
 	if out := String(in); out != in {
 		t.Errorf("non-secret text was altered: %q -> %q", in, out)
 	}

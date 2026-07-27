@@ -1,6 +1,6 @@
 # AGENTS.md — instrukcje normatywne dla implementerów i LLM-ów
 
-Ten plik jest nadrzędnym kontraktem pracy w repozytorium Hermes Box. Jeśli inny dokument lub prompt jest sprzeczny z tym plikiem, zatrzymaj pracę i zgłoś konflikt. Nie rozwiązuj konfliktu przez zgadywanie.
+Ten plik jest nadrzędnym kontraktem pracy w repozytorium Torio. Jeśli inny dokument lub prompt jest sprzeczny z tym plikiem, zatrzymaj pracę i zgłoś konflikt. Nie rozwiązuj konfliktu przez zgadywanie.
 
 ## Status Torio V0 (aktualny — nadrzędny wobec sekcji „platformowych” poniżej)
 
@@ -10,7 +10,12 @@ oraz dwa runbooki:
 [`docs/runbooks/remote-second-brain-v1.md`](docs/runbooks/remote-second-brain-v1.md)
 i [`docs/runbooks/code-v0-REDACTED-PROJECT.md`](docs/runbooks/code-v0-REDACTED-PROJECT.md).
 
-- Opisane niżej w tym pliku **platformowe** obowiązki i inwarianty Hermes Box —
+> Oba runbooki oraz strony w `site/` są **generowane** przez
+> `scripts/build_docs.py` ze źródeł w `docs/content/` i współdzielą sekcje, więc
+> nie mogą się rozjechać. Nie edytuj plików wygenerowanych — zmień źródło i
+> uruchom `make docs`. `make validate` zawodzi, gdy output odbiega od źródła.
+
+- Opisane niżej w tym pliku **platformowe** obowiązki i inwarianty Torio —
   w szczególności sekcje **4–5** (project registry, admission control, per-task
   isolation, fresh verifier, approval/integration/push oraz worker/container/
   worktree invariants) — a także `docs/plans/`, `docs/contracts/`, `docs/adr/`,
@@ -66,7 +71,7 @@ Aktualna dokumentacja i kod Hermes Agent są źródłem prawdy o Hermesie. Nie u
 - dispatch, claims, retries i heartbeats,
 - procesów workerów i task events.
 
-### Hermes Box jest ownerem
+### Torio jest ownerem
 
 - Lima lifecycle i provisioning,
 - project registry i admission control,
@@ -78,7 +83,7 @@ Aktualna dokumentacja i kod Hermes Agent są źródłem prawdy o Hermesie. Nie u
 - review evidence,
 - approval, integration i push.
 
-### Hermes Box NIE MOŻE implementować
+### Torio NIE MOŻE implementować
 
 - alternatywnego agent loop,
 - drugiego Kanbana,
@@ -115,7 +120,7 @@ Każda implementacja MUSI zachować:
 - Wszystkie zewnętrzne komendy mają typed adapter, timeout, capture exit code i redacted logs.
 - Nie importuj prywatnych modułów Pythona Hermesa. Używaj zweryfikowanego CLI/API/plugin contract.
 - Nie zapisuj do `~/.hermes/kanban.db` bezpośrednio.
-- SQLite Hermes Box jest policy/evidence ledgerem, nie queue.
+- SQLite Torio jest policy/evidence ledgerem, nie queue.
 - Mutujące operacje muszą być idempotentne albo wymagać idempotency key.
 - Każdy zapis state i artefaktu musi być crash-safe: temp file → fsync → atomic rename albo transakcja SQLite.
 - Maszynowy output CLI jest stabilnym JSON envelope; ludzkie logi trafiają na stderr.

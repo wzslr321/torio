@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"hermes-box.local/hb/internal/execx"
+	"github.com/wzslr321/torio/internal/execx"
 )
 
 // StatusReport is the structured readiness of the backend. It proves both the
@@ -188,9 +188,9 @@ func (a *Adapter) Status(ctx context.Context) (StatusReport, error) {
 
 	switch {
 	case !rep.Installed:
-		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: errf("unit %q is not installed; run `hb serve install`", UnitName)}
+		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: errf("unit %q is not installed; run `torio serve install`", UnitName)}
 	case !rep.Active:
-		return rep, &Error{Op: op, Kind: KindInactive, Err: errf("service is %q, not active; run `hb serve start`", act)}
+		return rep, &Error{Op: op, Kind: KindInactive, Err: errf("service is %q, not active; run `torio serve start`", act)}
 	case !rep.EndpointReady:
 		return rep, &Error{Op: op, Kind: KindEndpointUnready, Err: endpointUnreadyErr(code, version)}
 	}

@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"hermes-box.local/hb/internal/redact"
+	"github.com/wzslr321/torio/internal/redact"
 )
 
 // DefaultMaxOutputPerStream bounds retained stdout/stderr per command when
