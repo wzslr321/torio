@@ -8,6 +8,7 @@ import (
 	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
+	"github.com/wzslr321/torio/internal/serve"
 )
 
 // The fixtures below describe one project. They are the values every test
@@ -22,7 +23,28 @@ const (
 	// the output a real Git failure would carry, so a test can prove no error,
 	// report or note ever repeats it.
 	testSecret = "not-a-real-token-0000"
+	// testAgentSocket is a plausible SSH_AUTH_SOCK value. It is a path, not a
+	// secret: the socket only grants anything to a process that can open it.
+	testAgentSocket = "/private/tmp/com.apple.launchd.0000/Listeners"
 )
+
+// fakeAgent is the host SSH agent double. It reports a socket and an identity
+// count, which is all this package is allowed to learn about an agent.
+type fakeAgent struct {
+	socket     string
+	identities int
+	err        error
+	calls      int
+}
+
+func (f *fakeAgent) Socket() string { return f.socket }
+
+func (f *fakeAgent) Identities(context.Context) (int, error) {
+	f.calls++
+	return f.identities, f.err
+}
+
+var _ SSHAgent = (*fakeAgent)(nil)
 
 // remoteFailureStderr is the shape Git actually fails with when a remote cannot
 // be read: a diagnostic that quotes the URL, credential and all.
@@ -90,6 +112,12 @@ type fakeGuest struct {
 	// useSilent models `hermes project use` exiting 0 without confirming.
 	useSilent bool
 
+	// hermesUID is what `id -u hermes` prints, and serviceEnvironment is the
+	// `Environment=` property of the backend user unit. Together they are the
+	// post-session read-only look at the persistent service environment.
+	hermesUID          string
+	serviceEnvironment string
+
 	// Per-user global safe.directory entries.
 	safeDirs map[string][]string
 
@@ -102,13 +130,15 @@ type fakeGuest struct {
 // and an empty Hermes project registry: the shape `Add` clones into.
 func readyFake() *fakeGuest {
 	return &fakeGuest{
-		remote:         testRemote,
-		remoteReadable: true,
-		owner:          lima.HermesUser,
-		group:          sharedGroup,
-		mode:           "2775",
-		safeDirs:       map[string][]string{},
-		failContains:   map[string]int{},
+		remote:             testRemote,
+		remoteReadable:     true,
+		owner:              lima.HermesUser,
+		group:              sharedGroup,
+		mode:               "2775",
+		safeDirs:           map[string][]string{},
+		failContains:       map[string]int{},
+		hermesUID:          "1001",
+		serviceEnvironment: "HERMES_HOME=" + lima.HermesProfilePath,
 	}
 }
 
@@ -238,6 +268,12 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 		user := userOf(joined)
 		f.safeDirs[user] = append(f.safeDirs[user], testPath)
 		return okResult(""), nil
+
+	// --- persistent backend environment (read-only) ---
+	case strings.Contains(joined, "id -u "+lima.HermesUser):
+		return okResult(f.hermesUID + "\n"), nil
+	case strings.Contains(joined, "systemctl --user show "+serve.UnitName):
+		return okResult("Environment=" + f.serviceEnvironment + "\n"), nil
 
 	// --- hermes project ---
 	case strings.Contains(joined, "hermes project show "):

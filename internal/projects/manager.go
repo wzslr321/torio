@@ -5,12 +5,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
+	"github.com/wzslr321/torio/internal/serve"
 )
 
 // Guest is the narrow, typed VM boundary used by the project manager. Every
@@ -23,11 +27,26 @@ type Guest interface {
 
 var _ Guest = (*lima.Adapter)(nil)
 
+// SSHAgent is the operator's host SSH agent, as narrowly as this package is
+// allowed to see it: where the socket is, and how many identities it holds.
+//
+// The narrowness is the contract. An operator shell forwards this agent, so a
+// preflight has to know it can sign something — and knowing that must never
+// require holding a key, a public key, or a fingerprint. Implementations MUST
+// derive the count without retaining, returning or logging any of them.
+type SSHAgent interface {
+	// Socket returns SSH_AUTH_SOCK, empty when the operator has no agent.
+	Socket() string
+	// Identities returns how many identities the agent currently holds.
+	Identities(ctx context.Context) (int, error)
+}
+
 // Manager owns attaching, verifying and forgetting guest projects.
 type Manager struct {
 	guest         Guest
 	registry      Registry
 	bootstrapOpts lima.BootstrapOptions
+	agent         SSHAgent
 }
 
 // New builds a Manager over a guest and a config registry. The bootstrap
@@ -38,7 +57,12 @@ func New(guest Guest, registry Registry, opts ...lima.BootstrapOptions) *Manager
 	if len(opts) > 0 {
 		bootstrapOpts = opts[0]
 	}
-	return &Manager{guest: guest, registry: registry, bootstrapOpts: bootstrapOpts}
+	return &Manager{
+		guest:         guest,
+		registry:      registry,
+		bootstrapOpts: bootstrapOpts,
+		agent:         hostSSHAgent{runner: &execx.ExecRunner{}},
+	}
 }
 
 // Add attaches a repository: it clones the exact remote into the derived
@@ -315,15 +339,75 @@ func (m *Manager) Remove(ctx context.Context, id string) (RemoveReport, error) {
 	return report, nil
 }
 
-// ShellSpec returns the data an interactive operator session needs: the
-// validated project identity, the derived guest path, the shared group, the two
-// identities and the checks the caller must run before opening a session.
+// shellOp names the operator-shell operations in errors.
+const shellOp = "shell"
+
+// ShellPreflight proves that an ephemeral operator session may be opened for
+// id, and returns the data that session needs.
 //
-// It executes nothing — that is why it takes no context. The interactive
-// transport and the command that drives it live outside this package; keeping
-// this side purely declarative is what lets them be built independently.
-func (m *Manager) ShellSpec(id string) (ShellSpec, error) {
-	const op = "shell"
+// It is the only way to obtain a ShellSpec, which is the point: a session
+// forwards the operator's SSH agent into the guest, so "where would the session
+// go" and "may it be opened" must not be separable questions.
+//
+// What it deliberately does not do is test the push. A preflight that proved
+// write access by using it would mutate a remote to answer a question, and it
+// would need a credential Torio does not have and must never acquire. The
+// checks below prove the session can be opened; whether a push succeeds is the
+// operator's business, inside the session, with their own key.
+func (m *Manager) ShellPreflight(ctx context.Context, id string) (ShellSession, error) {
+	const op = shellOp
+	spec, err := m.shellSpec(op, id)
+	if err != nil {
+		return ShellSession{}, err
+	}
+	session := ShellSession{ShellSpec: spec}
+
+	// Bootstrap is the guest gate, not a lighter re-derivation of it: it already
+	// proves the instance is Running, that the operator shell helper is a
+	// root-owned 0755 regular file nobody else can rewrite, and that both
+	// identities are in the shared group. Re-implementing weaker versions here
+	// would be the same checks with fewer guarantees.
+	if err := m.requirePrepared(ctx, op); err != nil {
+		return ShellSession{}, err
+	}
+	session.Verified = append(session.Verified, "vm_running", "operator_shell_helper", "shared_group_membership")
+
+	checkout, err := m.inspectCheckout(ctx, op, spec.Project.Path, spec.Project.Remote)
+	if err != nil {
+		return ShellSession{}, err
+	}
+	// A dirty worktree, a shallow clone or a repo-local credential helper are
+	// not checked here. The first two are exactly what an operator opens a
+	// session to deal with, and refusing them would leave no way to fix them.
+	if !checkout.PathExists || checkout.Symlink || !checkout.Directory || !checkout.Repository {
+		return ShellSession{}, shellDriftError(id, checkout)
+	}
+	session.Verified = append(session.Verified, "checkout_present")
+
+	if !checkout.OriginMatches {
+		return ShellSession{}, shellDriftError(id, checkout)
+	}
+	session.Verified = append(session.Verified, "origin_matches")
+
+	// Without the shared group ownership and setgid, the operator's session
+	// cannot write the tree `hermes` owns — or writes files `hermes` then
+	// cannot read back.
+	if !checkout.SharedPermissions {
+		return ShellSession{}, shellDriftError(id, checkout)
+	}
+	session.Verified = append(session.Verified, "shared_permissions")
+
+	if err := m.requireForwardableAgent(ctx, op); err != nil {
+		return ShellSession{}, err
+	}
+	session.Verified = append(session.Verified, "operator_ssh_agent")
+
+	return session, nil
+}
+
+// shellSpec resolves the registry entry into the data a session needs. It runs
+// nothing; ShellPreflight is what makes the result usable.
+func (m *Manager) shellSpec(op, id string) (ShellSpec, error) {
 	entry, workspace, err := m.resolve(op, id)
 	if err != nil {
 		return ShellSpec{}, err
@@ -338,6 +422,42 @@ func (m *Manager) ShellSpec(id string) (ShellSpec, error) {
 		OperatorUser:  m.bootstrapOpts.OperatorUser,
 		Preconditions: slices.Clone(shellPreconditions),
 	}, nil
+}
+
+// shellDriftError reports a checkout the registry claims is attached and the
+// guest says is not. It names the stable markers and nothing else — a rerun of
+// `project add` is the remedy for all of them.
+func shellDriftError(id string, checkout CheckoutStatus) error {
+	return &Error{
+		Op:   shellOp,
+		Kind: KindVerification,
+		Err: fmt.Errorf("the checkout for %q is not in a state a session can be opened in (%s); re-run `torio project add` to reconcile it",
+			id, strings.Join(checkout.issues(), ", ")),
+	}
+}
+
+// requireForwardableAgent proves the operator has an agent worth forwarding.
+//
+// `ssh -A` with no agent, or with an agent holding nothing, opens a session
+// that looks identical to a working one and fails only at the push — after the
+// operator has already done the work. The two failures are separated because
+// their remedies are: no socket is an agent that was never started, an empty
+// agent is access nobody has granted yet.
+func (m *Manager) requireForwardableAgent(ctx context.Context, op string) error {
+	if strings.TrimSpace(m.agent.Socket()) == "" {
+		return &Error{Op: op, Kind: KindPrecondition, Err: errors.New("SSH_AUTH_SOCK is not set; start an ssh-agent on this Mac, then `ssh-add` the key that can push")}
+	}
+	count, err := m.agent.Identities(ctx)
+	if err != nil {
+		// The cause is dropped rather than wrapped. It is the one diagnostic in
+		// this package derived from agent output, and agent output is where key
+		// material would be if it were anywhere.
+		return &Error{Op: op, Kind: KindPrecondition, Err: errors.New("the SSH agent at SSH_AUTH_SOCK could not be queried; confirm it is running")}
+	}
+	if count < 1 {
+		return &Error{Op: op, Kind: KindAuth, Err: errors.New("the SSH agent holds no identity to forward; `ssh-add` the key that can push")}
+	}
+	return nil
 }
 
 // resolve looks a registered project up and derives its workspace path. An ID
@@ -780,6 +900,114 @@ func (m *Manager) rollbackAfterConfigFailure(ctx context.Context, op string, rep
 		report.Notes = append(report.Notes, "hermes_project_archived")
 	}
 	report.Notes = append(report.Notes, "rerun_finishes")
+}
+
+// sshAgentProbeTimeout bounds the agent query. A wedged agent socket blocks
+// forever otherwise, and this runs before an interactive session that is
+// deliberately unbounded — the one place where "no timeout" is correct.
+const sshAgentProbeTimeout = 5 * time.Second
+
+// hostSSHAgent is the production SSHAgent: `ssh-add -l` over the typed runner.
+//
+// `-l` lists fingerprints, not keys (`-L` would list the public keys), and even
+// that never leaves this type: the exit code decides the outcome and the output
+// is reduced to a line count on the spot. Nothing derived from it reaches a
+// caller, a log or an error.
+type hostSSHAgent struct {
+	runner execx.Runner
+}
+
+var _ SSHAgent = hostSSHAgent{}
+
+func (h hostSSHAgent) Socket() string { return os.Getenv("SSH_AUTH_SOCK") }
+
+// Identities returns the number of identities the agent holds. It maps the
+// three documented `ssh-add -l` exits: 0 lists identities, 1 is a reachable
+// agent holding none, and anything else is an agent we could not query — which
+// is an error rather than a zero, because "no agent" and "empty agent" have
+// different remedies.
+func (h hostSSHAgent) Identities(ctx context.Context) (int, error) {
+	res, err := h.runner.Run(ctx, execx.Command{
+		Name:    "ssh-add",
+		Args:    []string{"-l"},
+		Timeout: sshAgentProbeTimeout,
+	})
+	if err != nil {
+		return 0, err
+	}
+	switch res.ExitCode {
+	case 0:
+		return countLines(res.Stdout), nil
+	case 1:
+		return 0, nil
+	default:
+		return 0, fmt.Errorf("ssh-add -l exited %d", res.ExitCode)
+	}
+}
+
+// countLines counts non-empty lines without retaining or copying their content.
+func countLines(out []byte) int {
+	n := 0
+	for _, line := range bytes.Split(out, []byte("\n")) {
+		if len(bytes.TrimSpace(line)) > 0 {
+			n++
+		}
+	}
+	return n
+}
+
+// CheckServiceEnv reads whether the persistent Hermes backend environment
+// declares SSH_AUTH_SOCK. It is the read-only counterpart of an operator
+// session: the session's forwarded agent is supposed to die with it, and this
+// is what notices if it did not.
+//
+// It reads a unit property and tests it for one variable name. The property
+// value itself is never returned, printed or logged. A guest with no backend
+// installed is not a failure — there is nothing to leak into — so it reports
+// "not checked" rather than inventing a verdict.
+func (m *Manager) CheckServiceEnv(ctx context.Context) (ServiceEnvCheck, error) {
+	const op = shellOp
+	var unavailable ServiceEnvCheck
+
+	uid, err := m.run(ctx, op, userExec("id", "-u", lima.HermesUser))
+	if err != nil || uid.ExitCode != 0 {
+		return unavailable, nil
+	}
+	runtimeDir, ok := userRuntimeDir(string(uid.Stdout))
+	if !ok {
+		return unavailable, nil
+	}
+
+	show, err := m.run(ctx, op,
+		userExecAs(lima.HermesUser, "env", "XDG_RUNTIME_DIR="+runtimeDir,
+			"systemctl", "--user", "show", serve.UnitName, "--property=Environment"))
+	if err != nil || show.ExitCode != 0 {
+		return unavailable, nil
+	}
+	if bytes.Contains(show.Stdout, []byte(agentSocketVar)) {
+		check := ServiceEnvCheck{Checked: true, AgentSocketPresent: true}
+		return check, &Error{
+			Op:   op,
+			Kind: KindVerification,
+			Err: fmt.Errorf("the persistent Hermes service environment declares %s; ephemeral operator forwarding must never reach it (ADR-0015)",
+				agentSocketVar),
+		}
+	}
+	return ServiceEnvCheck{Checked: true}, nil
+}
+
+// agentSocketVar is the environment variable that carries a forwarded agent.
+const agentSocketVar = "SSH_AUTH_SOCK"
+
+// userRuntimeDir derives /run/user/<uid> from `id -u` output. The uid must
+// parse as a number: it is interpolated into an argv, and an unparseable one is
+// unverifiable state rather than a value to pass along.
+func userRuntimeDir(out string) (string, bool) {
+	uid, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil || uid < 0 {
+		return "", false
+	}
+	return "/run/user/" + strconv.Itoa(uid), true
 }
 
 func findProject(f config.File, id string) (config.Project, bool) {

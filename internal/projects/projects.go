@@ -224,11 +224,11 @@ type UseReport struct {
 
 // ShellSpec is the data an interactive operator shell needs, and nothing more.
 //
-// It executes nothing — no guest command, no SSH, no transport of any kind —
-// which is why the method returning it takes no context. The interactive
-// transport is a separate typed runner and the `torio project shell` command
-// sits on top of it; both consume this value rather than re-deriving the path,
-// the identities or the requirements from config.
+// It executes nothing — no guest command, no SSH, no transport of any kind.
+// The interactive transport is a separate typed runner and the
+// `torio project shell` command sits on top of it; both consume this value
+// rather than re-deriving the path, the identities or the requirements from
+// config.
 type ShellSpec struct {
 	Project Project
 	// Group is the shared group the operator must land in to work the checkout.
@@ -243,13 +243,52 @@ type ShellSpec struct {
 	Preconditions []string
 }
 
-// shellPreconditions is the fixed checklist an interactive session must satisfy.
+// shellPreconditions is the fixed checklist an interactive session must
+// satisfy, in the order ShellPreflight proves it. It is a closed vocabulary:
+// every entry is a marker a caller may report, and nothing else is.
+//
+// Conspicuously absent: anything about the push itself. A preflight that
+// pushed to prove a session would work would be mutating a remote to answer a
+// question, with a capability Torio does not have and must never acquire.
 var shellPreconditions = []string{
 	"vm_running",
+	"operator_shell_helper",
+	"shared_group_membership",
 	"checkout_present",
 	"origin_matches",
-	"shared_group_membership",
+	"shared_permissions",
 	"operator_ssh_agent",
+}
+
+// ShellSession is a preflighted operator session: the spec the interactive
+// transport needs, plus the checks that were actually proven to get it.
+//
+// The two halves travel together on purpose. A ShellSpec alone says where a
+// session would go; only a ShellSession says that it may be opened.
+type ShellSession struct {
+	ShellSpec
+	// Verified names the preconditions this preflight proved, in the order it
+	// proved them. It is drawn from shellPreconditions and nothing else.
+	Verified []string
+}
+
+// ServiceEnvCheck is the read-only look at the persistent Hermes backend
+// environment that follows an operator session.
+//
+// ADR-0015 puts write capability in the ephemeral session and nowhere else:
+// the persistent `hermes` service identity must never hold SSH_AUTH_SOCK. This
+// is the cheap regression detector for that invariant. It carries a verdict —
+// never the environment it read.
+//
+// The two booleans are three states, and the middle one matters: a guest with
+// no backend installed has nothing to leak into, which is neither a clean bill
+// of health nor a failure.
+type ServiceEnvCheck struct {
+	// Checked reports that the backend unit environment was actually read.
+	Checked bool
+	// AgentSocketPresent reports the invariant breach: the persistent service
+	// environment declares SSH_AUTH_SOCK.
+	AgentSocketPresent bool
 }
 
 // Registry is the narrow config boundary the manager reads and persists the

@@ -8,11 +8,16 @@ import (
 	"testing"
 
 	"github.com/wzslr321/torio/internal/config"
+	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
 )
 
 func newTestManager(g Guest, r Registry) *Manager {
-	return New(g, r, lima.BootstrapOptions{OperatorUser: testOwner})
+	m := New(g, r, lima.BootstrapOptions{OperatorUser: testOwner})
+	// A host agent that is present and holds a key: the only shape that lets a
+	// preflight reach its last check. Every other shape is set per test.
+	m.agent = &fakeAgent{socket: testAgentSocket, identities: 1}
+	return m
 }
 
 func addRequest() AddRequest {
@@ -796,35 +801,326 @@ func TestUseFailsWhenActivationIsNotConfirmed(t *testing.T) {
 	assertKind(t, err, KindRegistration)
 }
 
-func TestShellSpecReturnsDataAndExecutesNothing(t *testing.T) {
-	g := attachedFake()
-	r := registryWith(testProject())
+// --- operator shell preflight ---
 
-	spec, err := newTestManager(g, r).ShellSpec(testID)
+// shellFake is a guest that satisfies every guest-side shell precondition: a
+// bootstrap-verified VM holding a compliant checkout of the registered remote.
+func shellFake() *fakeGuest {
+	f := attachedFake()
+	f.mode = "2775"
+	return f
+}
+
+func TestShellPreflightVerifiesEveryPreconditionAndOpensNothing(t *testing.T) {
+	g := shellFake()
+	agent := &fakeAgent{socket: testAgentSocket, identities: 2}
+	m := newTestManager(g, registryWith(testProject()))
+	m.agent = agent
+
+	session, err := m.ShellPreflight(context.Background(), testID)
 	if err != nil {
-		t.Fatalf("ShellSpec() error = %v", err)
+		t.Fatalf("ShellPreflight() error = %v", err)
 	}
-	if len(g.calls) != 0 {
-		t.Fatalf("ShellSpec() reached the guest: %v", g.calls)
+	if session.Project.Path != testPath || session.Group != sharedGroup ||
+		session.Instance != lima.InstanceName || session.OperatorUser != testOwner {
+		t.Fatalf("session = %#v", session)
 	}
-	if spec.Project.Path != testPath || spec.Group != sharedGroup ||
-		spec.Instance != lima.InstanceName || spec.OperatorUser != testOwner {
-		t.Fatalf("spec = %#v", spec)
+	for _, want := range shellPreconditions {
+		if !slices.Contains(session.Verified, want) {
+			t.Errorf("verified = %v, want it to contain %q", session.Verified, want)
+		}
 	}
-	for _, want := range []string{"vm_running", "checkout_present", "origin_matches", "operator_ssh_agent"} {
-		if !slices.Contains(spec.Preconditions, want) {
-			t.Errorf("preconditions = %v, want %q", spec.Preconditions, want)
+	if agent.calls != 1 {
+		t.Errorf("agent queried %d times, want exactly 1", agent.calls)
+	}
+}
+
+// The preflight proves a session can be opened. It must never prove it by
+// pushing: a push is the operator's act, it mutates a remote, and Torio has no
+// credential of its own to do it with.
+func TestShellPreflightNeverTestsThePush(t *testing.T) {
+	g := shellFake()
+
+	if _, err := newTestManager(g, registryWith(testProject())).ShellPreflight(context.Background(), testID); err != nil {
+		t.Fatalf("ShellPreflight() error = %v", err)
+	}
+	for _, call := range g.calls {
+		joined := strings.Join(call.argv, " ")
+		for _, forbidden := range []string{"push", "ssh -A", "ForwardAgent", "sh -c", "ssh-add"} {
+			if strings.Contains(joined, forbidden) {
+				t.Errorf("preflight argv %q contains %q", joined, forbidden)
+			}
 		}
 	}
 }
 
-func TestShellSpecRejectsAnUnregisteredProject(t *testing.T) {
+func TestShellPreflightRejectsAnUnregisteredProject(t *testing.T) {
 	g := readyFake()
+	agent := &fakeAgent{socket: testAgentSocket, identities: 1}
+	m := newTestManager(g, emptyRegistry())
+	m.agent = agent
 
-	_, err := newTestManager(g, emptyRegistry()).ShellSpec(testID)
+	_, err := m.ShellPreflight(context.Background(), testID)
 	assertKind(t, err, KindConflict)
-	if len(g.calls) != 0 {
-		t.Fatalf("ShellSpec() reached the guest: %v", g.calls)
+	if len(g.calls) != 0 || agent.calls != 0 {
+		t.Fatalf("an unknown project reached the guest (%v) or the agent (%d)", g.calls, agent.calls)
+	}
+}
+
+// A VM that is not Running and a guest missing the operator shell helper are
+// both bootstrap verification failures. The preflight reuses that one gate
+// rather than re-deriving a weaker check, and passes its reason through so the
+// operator learns which invariant failed.
+func TestShellPreflightRequiresABootstrapVerifiedGuest(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		reason string
+	}{
+		{"vm not running", `instance "torio" is stopped; run ` + "`torio vm start`" + ` first`},
+		{"helper missing", "operator_shell_helper: no operator shell helper at /usr/local/bin/torio-project-shell"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := shellFake()
+			g.bootstrapErr = errors.New(tc.reason)
+
+			_, err := newTestManager(g, registryWith(testProject())).ShellPreflight(context.Background(), testID)
+			assertKind(t, err, KindPrecondition)
+			if !strings.Contains(err.Error(), tc.reason) {
+				t.Errorf("error = %v, want it to name the failed bootstrap check", err)
+			}
+		})
+	}
+}
+
+// The registry says the project is attached. Every way the guest can disagree
+// is a postcondition that no longer holds, and the message names the stable
+// marker instead of leaving the operator to guess.
+func TestShellPreflightRefusesADriftedCheckout(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*fakeGuest)
+		marker string
+	}{
+		{"absent", func(f *fakeGuest) { f.pathExists = false; f.isRepo = false }, "checkout_absent"},
+		{"symlink", func(f *fakeGuest) { f.pathSymlink = true }, "path_is_symlink"},
+		{"not a repository", func(f *fakeGuest) { f.isRepo = false }, "not_a_git_repository"},
+		{"origin drift", func(f *fakeGuest) { f.origin = "git@github.com:owner/other.git" }, "origin_mismatch"},
+		{"shared permissions", func(f *fakeGuest) { f.mode = "755"; f.group = lima.HermesUser }, "shared_permissions_missing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := shellFake()
+			tc.mutate(g)
+			agent := &fakeAgent{socket: testAgentSocket, identities: 1}
+			m := newTestManager(g, registryWith(testProject()))
+			m.agent = agent
+
+			_, err := m.ShellPreflight(context.Background(), testID)
+			assertKind(t, err, KindVerification)
+			if !strings.Contains(err.Error(), tc.marker) {
+				t.Errorf("error = %v, want it to name %q", err, tc.marker)
+			}
+		})
+	}
+}
+
+// No agent socket is an environment the operator has not started yet; an agent
+// holding nothing is access nobody has granted. They are different remedies, so
+// they are different kinds.
+func TestShellPreflightRequiresAnAgentThatHoldsAnIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		agent *fakeAgent
+		want  ErrorKind
+	}{
+		{"no socket", &fakeAgent{socket: "", identities: 1}, KindPrecondition},
+		{"blank socket", &fakeAgent{socket: "   ", identities: 1}, KindPrecondition},
+		{"no identity", &fakeAgent{socket: testAgentSocket}, KindAuth},
+		{"unreachable agent", &fakeAgent{socket: testAgentSocket, err: errors.New("dial: no such file")}, KindPrecondition},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestManager(shellFake(), registryWith(testProject()))
+			m.agent = tc.agent
+
+			_, err := m.ShellPreflight(context.Background(), testID)
+			assertKind(t, err, tc.want)
+		})
+	}
+}
+
+// A failing agent probe carries whatever the agent printed. That output is the
+// one place key material could appear, so the preflight reports the check that
+// failed and drops the cause entirely.
+func TestShellPreflightNeverSurfacesAgentOutput(t *testing.T) {
+	m := newTestManager(shellFake(), registryWith(testProject()))
+	m.agent = &fakeAgent{socket: testAgentSocket, err: errors.New("256 SHA256:" + testSecret + " op@mac (ED25519)")}
+
+	_, err := m.ShellPreflight(context.Background(), testID)
+	assertKind(t, err, KindPrecondition)
+	if strings.Contains(err.Error(), testSecret) {
+		t.Fatalf("preflight error repeated agent output: %v", err)
+	}
+}
+
+// --- host SSH agent probe ---
+
+// fakeRunner is the host command double for the agent probe. It records the
+// exact command and replays one canned result.
+type fakeRunner struct {
+	cmds []execx.Command
+	res  execx.Result
+	err  error
+}
+
+func (f *fakeRunner) Run(_ context.Context, cmd execx.Command) (execx.Result, error) {
+	f.cmds = append(f.cmds, cmd)
+	return f.res, f.err
+}
+
+// agentListOutput is the shape `ssh-add -l` prints: fingerprints and comments.
+// It is not key material, and it still must never leave the probe.
+const agentListOutput = "256 SHA256:" + testSecret + " op@mac (ED25519)\n" +
+	"3072 SHA256:" + testSecret + "-2 op@mac (RSA)\n"
+
+func TestHostSSHAgentCountsIdentitiesWithoutReturningThem(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		res  execx.Result
+		want int
+	}{
+		{"two identities", execx.Result{ExitCode: 0, Stdout: []byte(agentListOutput)}, 2},
+		{"one identity", execx.Result{ExitCode: 0, Stdout: []byte("256 SHA256:x op@mac (ED25519)\n")}, 1},
+		{"agent holds none", execx.Result{ExitCode: 1, Stdout: []byte("The agent has no identities.\n")}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &fakeRunner{res: tc.res}
+			got, err := hostSSHAgent{runner: runner}.Identities(context.Background())
+			if err != nil {
+				t.Fatalf("Identities() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("Identities() = %d, want %d", got, tc.want)
+			}
+			if len(runner.cmds) != 1 {
+				t.Fatalf("commands = %v, want exactly one", runner.cmds)
+			}
+			cmd := runner.cmds[0]
+			// -l lists fingerprints; -L would list the public keys themselves.
+			if cmd.Name != "ssh-add" || !slices.Equal(cmd.Args, []string{"-l"}) {
+				t.Fatalf("command = %s %v, want `ssh-add -l`", cmd.Name, cmd.Args)
+			}
+			if cmd.Timeout <= 0 {
+				t.Error("the agent probe must be bounded; a wedged agent socket blocks forever")
+			}
+		})
+	}
+}
+
+// An agent that cannot be reached is not an agent holding nothing: the first is
+// a broken environment, the second is a key nobody added.
+func TestHostSSHAgentFailsClosedWhenItCannotQuery(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		res    execx.Result
+		runErr error
+	}{
+		{"cannot connect", execx.Result{ExitCode: 2, Stderr: []byte("Error connecting to agent")}, nil},
+		{"probe did not run", execx.Result{ExitCode: -1}, errors.New("exec: ssh-add not found")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := hostSSHAgent{runner: &fakeRunner{res: tc.res, err: tc.runErr}}.Identities(context.Background())
+			if err == nil {
+				t.Fatal("Identities() error = nil, want a failure")
+			}
+		})
+	}
+}
+
+func TestHostSSHAgentNeverRepeatsAgentOutput(t *testing.T) {
+	runner := &fakeRunner{res: execx.Result{ExitCode: 2, Stdout: []byte(agentListOutput), Stderr: []byte(agentListOutput)}}
+
+	_, err := hostSSHAgent{runner: runner}.Identities(context.Background())
+	if err == nil {
+		t.Fatal("Identities() error = nil, want a failure")
+	}
+	if strings.Contains(err.Error(), testSecret) {
+		t.Fatalf("the probe repeated agent output: %v", err)
+	}
+}
+
+func TestHostSSHAgentReadsTheSocketFromTheEnvironment(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", testAgentSocket)
+	if got := (hostSSHAgent{}).Socket(); got != testAgentSocket {
+		t.Fatalf("Socket() = %q, want %q", got, testAgentSocket)
+	}
+	t.Setenv("SSH_AUTH_SOCK", "")
+	if got := (hostSSHAgent{}).Socket(); got != "" {
+		t.Fatalf("Socket() = %q, want empty", got)
+	}
+}
+
+// --- post-session service environment check ---
+
+func TestCheckServiceEnvReportsACleanServiceEnvironment(t *testing.T) {
+	g := shellFake()
+
+	check, err := newTestManager(g, registryWith(testProject())).CheckServiceEnv(context.Background())
+	if err != nil {
+		t.Fatalf("CheckServiceEnv() error = %v", err)
+	}
+	if !check.Checked || check.AgentSocketPresent {
+		t.Fatalf("check = %#v", check)
+	}
+	if !g.saw("systemctl --user show hermes-serve.service --property=Environment") {
+		t.Fatalf("the unit environment was not read: %v", g.calls)
+	}
+	// Read-only: the check must never write, restart or reload anything.
+	for _, call := range g.calls {
+		joined := strings.Join(call.argv, " ")
+		for _, forbidden := range []string{"set-environment", "restart", "daemon-reload", "start", "stop"} {
+			if strings.Contains(joined, forbidden) {
+				t.Errorf("service env check argv %q contains %q", joined, forbidden)
+			}
+		}
+	}
+}
+
+func TestCheckServiceEnvFailsWhenTheServiceCarriesAForwardedAgent(t *testing.T) {
+	g := shellFake()
+	g.serviceEnvironment = "HERMES_HOME=/home/hermes/.hermes SSH_AUTH_SOCK=/tmp/agent.42/s"
+
+	check, err := newTestManager(g, registryWith(testProject())).CheckServiceEnv(context.Background())
+	assertKind(t, err, KindVerification)
+	if !check.Checked || !check.AgentSocketPresent {
+		t.Fatalf("check = %#v", check)
+	}
+	if strings.Contains(err.Error(), "/tmp/agent.42/s") {
+		t.Fatalf("the check echoed the service environment: %v", err)
+	}
+}
+
+// A guest with no backend unit has nothing to leak into. That is not a verdict
+// of "clean" and not a failure either — it is a check that did not run.
+func TestCheckServiceEnvReportsNotCheckedWhenTheUnitIsAbsent(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*fakeGuest)
+	}{
+		{"no unit", func(f *fakeGuest) { f.setFailure("systemctl --user show", 1) }},
+		{"no hermes uid", func(f *fakeGuest) { f.setFailure("id -u hermes", 1) }},
+		{"unparseable uid", func(f *fakeGuest) { f.hermesUID = "nobody" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := shellFake()
+			tc.setup(g)
+
+			check, err := newTestManager(g, registryWith(testProject())).CheckServiceEnv(context.Background())
+			if err != nil {
+				t.Fatalf("CheckServiceEnv() error = %v, want nil", err)
+			}
+			if check.Checked || check.AgentSocketPresent {
+				t.Fatalf("check = %#v", check)
+			}
+		})
 	}
 }
 

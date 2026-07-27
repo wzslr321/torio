@@ -36,9 +36,13 @@ type fakeProjectService struct {
 	removeReport projects.RemoveReport
 	removeErr    error
 
-	shellID   string
-	shellSpec projects.ShellSpec
-	shellErr  error
+	shellID      string
+	shellSession projects.ShellSession
+	shellErr     error
+
+	serviceEnv      projects.ServiceEnvCheck
+	serviceEnvErr   error
+	serviceEnvCalls int
 }
 
 func (f *fakeProjectService) Add(_ context.Context, req projects.AddRequest) (projects.AddReport, error) {
@@ -63,9 +67,14 @@ func (f *fakeProjectService) Remove(_ context.Context, id string) (projects.Remo
 	return f.removeReport, f.removeErr
 }
 
-func (f *fakeProjectService) ShellSpec(id string) (projects.ShellSpec, error) {
+func (f *fakeProjectService) ShellPreflight(_ context.Context, id string) (projects.ShellSession, error) {
 	f.shellID = id
-	return f.shellSpec, f.shellErr
+	return f.shellSession, f.shellErr
+}
+
+func (f *fakeProjectService) CheckServiceEnv(context.Context) (projects.ServiceEnvCheck, error) {
+	f.serviceEnvCalls++
+	return f.serviceEnv, f.serviceEnvErr
 }
 
 // fakeInteractiveRunner records the exact interactive command it was handed and
@@ -439,8 +448,31 @@ func TestProjectRemoveJSONEnvelope(t *testing.T) {
 
 // --- shell ---
 
+// shellSession is a preflighted session for the sample project: every
+// precondition proven, which is the only state the command opens a shell in.
+func shellSession() projects.ShellSession {
+	return projects.ShellSession{
+		ShellSpec: projects.ShellSpec{
+			Project:      sampleProject(),
+			Group:        "torio-projects",
+			Instance:     lima.InstanceName,
+			OperatorUser: "testop",
+		},
+		Verified: []string{"vm_running", "checkout_present", "origin_matches", "operator_ssh_agent"},
+	}
+}
+
+// withShell wires both interactive seams: the runner that would spawn ssh, and
+// the spec builder that reads host state a test must not depend on.
+func withShell(runner execx.InteractiveRunner, cmd execx.InteractiveCommand) func(*app) {
+	return func(a *app) {
+		a.newInteractive = func() execx.InteractiveRunner { return runner }
+		a.newShellSpec = func(string) (execx.InteractiveCommand, error) { return cmd, nil }
+	}
+}
+
 func TestProjectShellRejectsJSON(t *testing.T) {
-	service := &fakeProjectService{shellSpec: projects.ShellSpec{Project: sampleProject()}}
+	service := &fakeProjectService{shellSession: shellSession()}
 	runner := &fakeInteractiveRunner{}
 	code, _, _ := runProjectCLI(t, []string{"project", "shell", "torio", "--json"}, service,
 		func(a *app) { a.newInteractive = func() execx.InteractiveRunner { return runner } })
@@ -450,15 +482,16 @@ func TestProjectShellRejectsJSON(t *testing.T) {
 	if len(runner.cmds) != 0 {
 		t.Fatalf("a rejected invocation must not open a session: %+v", runner.cmds)
 	}
+	if service.shellID != "" {
+		t.Fatalf("a rejected invocation ran the preflight for %q", service.shellID)
+	}
 }
 
-func TestProjectShellRunsTheOperatorShellCommand(t *testing.T) {
-	service := &fakeProjectService{shellSpec: projects.ShellSpec{
-		Project:      sampleProject(),
-		Group:        "torio-projects",
-		Instance:     lima.InstanceName,
-		OperatorUser: "testop",
-	}}
+func TestProjectShellPreflightsThenRunsTheOperatorShellCommand(t *testing.T) {
+	service := &fakeProjectService{
+		shellSession: shellSession(),
+		serviceEnv:   projects.ServiceEnvCheck{Checked: true},
+	}
 	runner := &fakeInteractiveRunner{}
 	want := execx.InteractiveCommand{Name: "ssh", Args: []string{"-t", "lima-torio", "helper", lima.HermesWorkspacePath + "/torio"}}
 	var gotPath string
@@ -474,7 +507,7 @@ func TestProjectShellRunsTheOperatorShellCommand(t *testing.T) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
 	}
 	if service.shellID != "torio" {
-		t.Fatalf("shell id = %q", service.shellID)
+		t.Fatalf("preflight id = %q", service.shellID)
 	}
 	if gotPath != lima.HermesWorkspacePath+"/torio" {
 		t.Fatalf("shell spec path = %q", gotPath)
@@ -482,39 +515,141 @@ func TestProjectShellRunsTheOperatorShellCommand(t *testing.T) {
 	if len(runner.cmds) != 1 || !reflect.DeepEqual(runner.cmds[0], want) {
 		t.Fatalf("interactive command = %+v, want exactly %+v", runner.cmds, want)
 	}
-	if !strings.Contains(stdout, "torio") {
-		t.Errorf("session end is not reported: %q", stdout)
+	// The operator is told, before the session opens, that the capability they
+	// are about to hold is bounded by the session.
+	if !strings.Contains(stdout, lima.HermesWorkspacePath+"/torio") || !strings.Contains(stdout, "exit") {
+		t.Errorf("the opening line does not state where the session lands and when the capability ends: %q", stdout)
+	}
+	if !strings.Contains(stdout, "session ended") {
+		t.Errorf("the end of the session is not reported: %q", stdout)
+	}
+	if service.serviceEnvCalls != 1 {
+		t.Errorf("service environment checked %d times, want exactly 1", service.serviceEnvCalls)
+	}
+	if !strings.Contains(stdout, "hermes service environment: no forwarded agent socket") {
+		t.Errorf("the post-session service environment check is not reported: %q", stdout)
+	}
+}
+
+// Torio never sees the remote side of the session, so it must not describe it.
+// The one thing an operator could reasonably misread as a Torio guarantee is a
+// push, and the output says the opposite in as many words.
+func TestProjectShellNeverClaimsAPushHappened(t *testing.T) {
+	service := &fakeProjectService{shellSession: shellSession()}
+	code, stdout, stderr := runProjectCLI(t, []string{"project", "shell", "torio"}, service,
+		withShell(&fakeInteractiveRunner{}, execx.InteractiveCommand{Name: "ssh"}))
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	out := stdout + stderr
+	for _, forbidden := range []string{"push succeeded", "pushed successfully", "push complete", "changes are on"} {
+		if strings.Contains(out, forbidden) {
+			t.Errorf("output claims a push: %q contains %q", out, forbidden)
+		}
+	}
+	if !strings.Contains(stdout, "no claim about") {
+		t.Errorf("output does not disclaim the push: %q", stdout)
+	}
+	// A zero-value check is a check that did not run, and says so.
+	if !strings.Contains(stdout, "hermes service environment: not checked") {
+		t.Errorf("an unread service environment must not read as clean: %q", stdout)
 	}
 }
 
 func TestProjectShellChildExitIsExternal(t *testing.T) {
-	service := &fakeProjectService{shellSpec: projects.ShellSpec{Project: sampleProject()}}
+	service := &fakeProjectService{shellSession: shellSession()}
 	runner := &fakeInteractiveRunner{err: &execx.ExitError{Code: 3}}
-	code, _, stderr := runProjectCLI(t, []string{"project", "shell", "torio"}, service,
-		func(a *app) {
-			a.newInteractive = func() execx.InteractiveRunner { return runner }
-			a.newShellSpec = func(string) (execx.InteractiveCommand, error) {
-				return execx.InteractiveCommand{Name: "ssh"}, nil
-			}
-		})
+	code, stdout, stderr := runProjectCLI(t, []string{"project", "shell", "torio"}, service,
+		withShell(runner, execx.InteractiveCommand{Name: "ssh"}))
 	if code != int(ExitExternal) {
 		t.Fatalf("exit = %d, want %d; stderr=%q", code, ExitExternal, stderr)
 	}
 	if !strings.Contains(stderr, "3") {
 		t.Errorf("the child exit code is not reported: %q", stderr)
 	}
+	// A session that ended badly still forwarded an agent, so the end of the
+	// session is still reported and the service environment still checked.
+	if !strings.Contains(stdout, "session ended") || service.serviceEnvCalls != 1 {
+		t.Errorf("a failed session skipped the post-session report: %q, checks=%d", stdout, service.serviceEnvCalls)
+	}
 }
 
-func TestProjectShellSpecFailureMapsToExitCode(t *testing.T) {
-	service := &fakeProjectService{shellErr: &projects.Error{
-		Op: "shell", Kind: projects.KindConflict, Err: errors.New("project id is not registered"),
-	}}
-	code, _, _ := runProjectCLI(t, []string{"project", "shell", "nope"}, service,
-		func(a *app) {
-			a.newInteractive = func() execx.InteractiveRunner { return &fakeInteractiveRunner{} }
+// Every preflight failure the manager can report reaches the operator as the
+// contract exit code for its kind, and none of them opens a session.
+func TestProjectShellPreflightFailuresMapToExitCodesAndOpenNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		kind projects.ErrorKind
+		want ExitCode
+	}{
+		{"unknown project", projects.KindConflict, ExitConflict},
+		{"vm not running", projects.KindPrecondition, ExitPrecondition},
+		{"no agent socket", projects.KindPrecondition, ExitPrecondition},
+		{"agent holds no identity", projects.KindAuth, ExitPermission},
+		{"origin drift", projects.KindVerification, ExitVerification},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &fakeProjectService{shellErr: &projects.Error{
+				Op: "shell", Kind: tc.kind, Err: errors.New(tc.name),
+			}}
+			runner := &fakeInteractiveRunner{}
+			code, stdout, _ := runProjectCLI(t, []string{"project", "shell", "torio"}, service,
+				withShell(runner, execx.InteractiveCommand{Name: "ssh"}))
+			if code != int(tc.want) {
+				t.Fatalf("exit = %d, want %d", code, tc.want)
+			}
+			if len(runner.cmds) != 0 {
+				t.Fatalf("a failed preflight opened a session: %+v", runner.cmds)
+			}
+			if service.serviceEnvCalls != 0 || stdout != "" {
+				t.Fatalf("a failed preflight reported a session: %q, checks=%d", stdout, service.serviceEnvCalls)
+			}
 		})
-	if code != int(ExitConflict) {
-		t.Fatalf("exit = %d, want %d", code, ExitConflict)
+	}
+}
+
+// The forwarded agent reaching the persistent service identity is the one
+// invariant ADR-0015 puts above the session's own outcome, so it is reported
+// even when the session itself ended cleanly.
+func TestProjectShellReportsAServiceEnvironmentLeak(t *testing.T) {
+	service := &fakeProjectService{
+		shellSession: shellSession(),
+		serviceEnv:   projects.ServiceEnvCheck{Checked: true, AgentSocketPresent: true},
+		serviceEnvErr: &projects.Error{
+			Op: "shell", Kind: projects.KindVerification, Err: errors.New("the persistent Hermes service environment declares SSH_AUTH_SOCK"),
+		},
+	}
+	code, stdout, stderr := runProjectCLI(t, []string{"project", "shell", "torio"}, service,
+		withShell(&fakeInteractiveRunner{}, execx.InteractiveCommand{Name: "ssh"}))
+	if code != int(ExitVerification) {
+		t.Fatalf("exit = %d, want %d; stderr=%q", code, ExitVerification, stderr)
+	}
+	if !strings.Contains(stdout, "session ended") {
+		t.Errorf("the session end is not reported: %q", stdout)
+	}
+	if !strings.Contains(stderr, "SSH_AUTH_SOCK") {
+		t.Errorf("the leak is not named: %q", stderr)
+	}
+}
+
+// The interactive command carries the operator's forwarded agent socket and
+// whatever else their environment holds. None of it is Torio's to print.
+func TestProjectShellNeverEchoesTheSessionCommandOrEnvironment(t *testing.T) {
+	service := &fakeProjectService{shellSession: shellSession()}
+	cmd := execx.InteractiveCommand{
+		Name: "ssh",
+		Args: []string{"-A", "-o", "IdentityFile=" + knownShapeCanary},
+		Env:  []string{"SSH_AUTH_SOCK=/tmp/" + knownShapeCanary},
+	}
+	for _, runner := range []*fakeInteractiveRunner{
+		{},
+		{err: &execx.ExitError{Code: 130}},
+	} {
+		_, stdout, stderr := runProjectCLI(t, []string{"project", "shell", "torio"}, service,
+			withShell(runner, cmd))
+		if strings.Contains(stdout+stderr, knownShapeCanary) {
+			t.Errorf("output leaked the session command or environment: %q %q", stdout, stderr)
+		}
 	}
 }
 

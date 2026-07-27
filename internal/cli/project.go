@@ -22,7 +22,8 @@ type projectService interface {
 	Show(context.Context, string) (projects.ShowReport, error)
 	Use(context.Context, string) (projects.UseReport, error)
 	Remove(context.Context, string) (projects.RemoveReport, error)
-	ShellSpec(string) (projects.ShellSpec, error)
+	ShellPreflight(context.Context, string) (projects.ShellSession, error)
+	CheckServiceEnv(context.Context) (projects.ServiceEnvCheck, error)
 }
 
 var _ projectService = (*projects.Manager)(nil)
@@ -196,7 +197,11 @@ func newProjectShellCmd(a *app) *cobra.Command {
 		Short: "Open an ephemeral operator shell in a project checkout",
 		Long: "Open an interactive session in the project checkout with the operator's SSH " +
 			"agent forwarded, which is the only way write capability reaches the guest. The " +
-			"capability lives until you exit. This command is interactive: it does not " +
+			"capability lives until you exit.\n\n" +
+			"The session is preflighted first: the project must be registered, the VM " +
+			"bootstrap-verified, the checkout present with the registered origin and shared " +
+			"permissions, and the local SSH agent must hold an identity to forward. Torio " +
+			"never test-pushes to prove any of it. This command is interactive: it does not " +
 			"support --json.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -212,24 +217,80 @@ func newProjectShellCmd(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			spec, err := service.ShellSpec(args[0])
+			session, err := a.preflightShell(cmd, service, args[0])
 			if err != nil {
-				return mapProjectError("project.shell", err)
+				return err
 			}
-			shellCmd, err := a.newShellSpec(spec.Project.Path)
+			shellCmd, err := a.newShellSpec(session.Project.Path)
 			if err != nil {
 				return mapLimaError("project.shell", err)
+			}
+			if err := a.announceShell(session); err != nil {
+				return err
 			}
 			// Deliberately the command context, not a.opContext: an operator session
 			// ends when the operator ends it. Bounding it with the operation timeout
 			// would kill a live shell mid-push.
-			if err := a.newInteractive().RunInteractive(cmd.Context(), shellCmd); err != nil {
-				return mapOperatorShellError(err)
-			}
-			_, werr := fmt.Fprintf(a.stdout, "%s: operator session closed\n", spec.Project.ID)
-			return werr
+			runErr := a.newInteractive().RunInteractive(cmd.Context(), shellCmd)
+			return a.reportShellEnd(cmd, service, session, runErr)
 		},
 	}
+}
+
+// preflightShell runs the preflight under the bounded operation context. Only
+// the session itself is unbounded: the checks that decide whether to open it are
+// ordinary guest commands and must not hang.
+func (a *app) preflightShell(cmd *cobra.Command, service projectService, id string) (projects.ShellSession, error) {
+	ctx, cancel := a.opContext(cmd)
+	defer cancel()
+	session, err := service.ShellPreflight(ctx, id)
+	if err != nil {
+		return projects.ShellSession{}, mapProjectError("project.shell", err)
+	}
+	return session, nil
+}
+
+// announceShell states what the operator is about to hold and for how long,
+// from the host side. The guest helper prints its own line once the session is
+// up; this one is printed even when the transport never gets there.
+func (a *app) announceShell(session projects.ShellSession) error {
+	_, err := fmt.Fprintf(a.stdout,
+		"%s: opening an operator session in %s\n"+
+			"  your SSH agent is forwarded for this session only; the write capability ends at exit\n",
+		session.Project.ID, session.Project.Path)
+	return err
+}
+
+// reportShellEnd closes the session out. It reports one fact — the session
+// ended — and disclaims the one an operator might otherwise read into it: Torio
+// never sees the remote side, so it cannot and does not say what was pushed.
+//
+// The post-session service environment check runs on both paths. A session that
+// ended at exit 130 forwarded exactly the same agent as one that ended cleanly,
+// so the invariant is worth just as much. A detected leak outranks the child's
+// own exit status: the session is over either way, and a forwarded agent that
+// outlived it is the more serious finding.
+func (a *app) reportShellEnd(cmd *cobra.Command, service projectService, session projects.ShellSession, runErr error) error {
+	if _, err := fmt.Fprintf(a.stdout,
+		"%s: operator session ended\n"+
+			"  torio makes no claim about what was pushed; check the remote yourself\n",
+		session.Project.ID); err != nil {
+		return err
+	}
+
+	ctx, cancel := a.opContext(cmd)
+	defer cancel()
+	check, checkErr := service.CheckServiceEnv(ctx)
+	if _, err := fmt.Fprintf(a.stdout, "  hermes service environment: %s\n", serviceEnvState(check)); err != nil {
+		return err
+	}
+	if checkErr != nil {
+		return mapProjectError("project.shell", checkErr)
+	}
+	if runErr != nil {
+		return mapOperatorShellError(runErr)
+	}
+	return nil
 }
 
 // projectService builds the manager for one command run. The operator identity
@@ -556,6 +617,21 @@ func projectNotesDetails(in []string) map[string]any {
 		return nil
 	}
 	return map[string]any{"notes": strings.Join(in, ",")}
+}
+
+// serviceEnvState names the three outcomes of the post-session check. A guest
+// with no backend installed reports "not checked" rather than "clean": there
+// was nothing to leak into, which is not the same as having looked and found
+// nothing.
+func serviceEnvState(check projects.ServiceEnvCheck) string {
+	switch {
+	case check.AgentSocketPresent:
+		return "SSH_AUTH_SOCK present"
+	case check.Checked:
+		return "no forwarded agent socket"
+	default:
+		return "not checked"
+	}
 }
 
 // mapOperatorShellError classifies the end of an interactive session. A remote
