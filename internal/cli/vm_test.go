@@ -79,7 +79,7 @@ func listIncompatibleMountsJSON(name, status string) execx.Result {
 func TestVMInitCreatesHuman(t *testing.T) {
 	fake := &fakeLimaRunner{script: []scriptedResp{
 		{res: execx.Result{ExitCode: 0, Stdout: nil}}, // list: absent
-		{res: execx.Result{ExitCode: 0}},               // create
+		{res: execx.Result{ExitCode: 0}},              // create
 		{res: listCompatibleJSON("torio", "Stopped")}, // post-create verify
 	}}
 	code, stdout, stderr := runVMWithFake(t, []string{"vm", "init"}, fake)
@@ -549,7 +549,7 @@ func TestVMStopJSONErrorHasConcreteCommand(t *testing.T) {
 func bootstrapHappyResp() []scriptedResp {
 	out := func(s string) execx.Result { return execx.Result{ExitCode: 0, Stdout: []byte(s)} }
 	return []scriptedResp{
-		{res: listJSON("torio", "Running")},                  // list precondition
+		{res: listJSON("torio", "Running")},                       // list precondition
 		{res: out("1000\n")},                                      // id -u hermes
 		{res: out("torio-projects:x:1001:hermes\n")},              // getent group torio-projects
 		{res: out("hermes torio-projects\n")},                     // id -nG hermes (torio-projects)
@@ -575,6 +575,8 @@ func bootstrapHappyResp() []scriptedResp {
 		{res: out("hermes:torio-projects 2770\n")},                // stat workspace og/mode
 		{res: out("ext4 /dev/vda1\n")},                            // findmnt workspace
 		{res: execx.Result{ExitCode: 1}},                          // findmnt host-shares (none)
+		{res: out("regular file\n")},                              // stat operator shell helper type
+		{res: out("root:root 755\n")},                             // stat operator shell helper og/mode
 	}
 }
 

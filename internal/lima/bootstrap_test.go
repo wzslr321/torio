@@ -3,6 +3,7 @@ package lima
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/wzslr321/torio/internal/execx"
@@ -40,7 +41,9 @@ func bootstrapHappyScript() []scriptedResponse {
 		{result: stdoutResult("directory\n")},                                // 22 stat HermesWorkspacePath type
 		{result: stdoutResult("hermes:torio-projects 2770\n")},               // 23 stat HermesWorkspacePath og/mode
 		{result: stdoutResult("ext4 /dev/vda1\n")},                           // 24 findmnt HermesWorkspacePath
-		{result: exitResult(1, "", "")},                                        // 25 findmnt host-shares
+		{result: exitResult(1, "", "")},                                      // 25 findmnt host-shares
+		{result: stdoutResult("regular file\n")},                             // 26 stat helper type
+		{result: stdoutResult("root:root 755\n")},                            // 27 stat helper owner/mode
 	}
 }
 
@@ -64,8 +67,8 @@ func TestBootstrapHappyPathAllChecksPass(t *testing.T) {
 			t.Errorf("check %q not OK: %s", c.Name, c.Detail)
 		}
 	}
-	if fr.callCount() != 26 {
-		t.Fatalf("callCount = %d, want 26 (no install/shim mutating steps when reconciled)", fr.callCount())
+	if fr.callCount() != 28 {
+		t.Fatalf("callCount = %d, want 28 (no install/shim mutating steps when reconciled)", fr.callCount())
 	}
 
 	got := fr.callArgs(11)
@@ -149,8 +152,8 @@ func TestBootstrapReconcilesHermesShim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Bootstrap: unexpected error: %v", err)
 	}
-	if fr.callCount() != 27 {
-		t.Fatalf("callCount = %d, want 27 (ln reconcile step present)", fr.callCount())
+	if fr.callCount() != 29 {
+		t.Fatalf("callCount = %d, want 29 (ln reconcile step present)", fr.callCount())
 	}
 	if got, want := fr.callArgs(10), []string{"shell", "--tty=false", InstanceName, "--", "sudo", "-n", "ln", "-sfn", hermesTarget, hermesShimPath}; !equalArgs(got, want) {
 		t.Fatalf("ln argv = %v, want %v", got, want)
@@ -164,12 +167,12 @@ func TestBootstrapMissingLauncherInstallsHermes(t *testing.T) {
 	s := bootstrapHappyScript()
 	s[6] = scriptedResponse{result: exitResult(1, "", "")} // launcher missing
 	install := []scriptedResponse{
-		{result: exitResult(0, "", "")}, // apt-get update
-		{result: exitResult(0, "", "")}, // apt-get install deps
-		{result: exitResult(0, "", "")}, // curl install.sh
-		{result: exitResult(0, "", "")}, // bash install.sh
-		{result: exitResult(0, "", "")}, // rm install script
-		{result: exitResult(0, "", "")}, // test -x launcher after install
+		{result: exitResult(0, "", "")},                     // apt-get update
+		{result: exitResult(0, "", "")},                     // apt-get install deps
+		{result: exitResult(0, "", "")},                     // curl install.sh
+		{result: exitResult(0, "", "")},                     // bash install.sh
+		{result: exitResult(0, "", "")},                     // rm install script
+		{result: exitResult(0, "", "")},                     // test -x launcher after install
 		{result: stdoutResult(PromotedHermesCommit + "\n")}, // git rev-parse HEAD
 	}
 	s = append(s[:7], append(install, s[8:]...)...)
@@ -360,6 +363,82 @@ func TestBootstrapHostMountProbeFailureFailsClosed(t *testing.T) {
 
 			_, err := a.Bootstrap(context.Background(), bootstrapOpts())
 			assertKind(t, err, KindVerificationFailed)
+		})
+	}
+}
+
+// TestBootstrapVerifiesTheOperatorShellHelper proves bootstrap refuses to call a
+// target ready until the guest side of `torio project shell` is actually there.
+// The V1 headline flow ends in that helper, and nothing but provisioning creates
+// it: without this check a bootstrapped VM reports success and then fails at the
+// remote end the first time an operator tries to push.
+func TestBootstrapVerifiesTheOperatorShellHelper(t *testing.T) {
+	fr := &fakeRunner{script: bootstrapHappyScript()}
+	a := New(fr)
+
+	rep, err := a.Bootstrap(context.Background(), bootstrapOpts())
+	if err != nil {
+		t.Fatalf("Bootstrap: unexpected error: %v", err)
+	}
+	if !checkOK(rep, "operator_shell_helper") {
+		t.Fatalf("bootstrap did not verify the operator shell helper: %+v", rep.Checks)
+	}
+	if got, want := fr.callArgs(26), []string{"shell", "--tty=false", InstanceName, "--", "stat", "-c", "%F", OperatorShellHelper}; !equalArgs(got, want) {
+		t.Fatalf("helper type probe argv = %v, want %v", got, want)
+	}
+	if got, want := fr.callArgs(27), []string{"shell", "--tty=false", InstanceName, "--", "stat", "-c", "%U:%G %a", OperatorShellHelper}; !equalArgs(got, want) {
+		t.Fatalf("helper ownership probe argv = %v, want %v", got, want)
+	}
+	if got := checkDetail(rep, "operator_shell_helper"); !strings.Contains(got, "root:root") {
+		t.Errorf("operator_shell_helper detail = %q, want the observed ownership", got)
+	}
+}
+
+// TestBootstrapOperatorShellHelperDriftFailsClosed pins every shape of helper
+// drift that must stop a bootstrap. The helper runs inside a session holding the
+// operator's forwarded agent, so a helper that is not a root-owned, non-writable
+// regular file is a way to borrow that agent — and an unreadable one proves
+// nothing and must not pass either.
+func TestBootstrapOperatorShellHelperDriftFailsClosed(t *testing.T) {
+	cases := []struct {
+		name       string
+		kind       execx.Result // stat -c %F
+		ownership  execx.Result // stat -c '%U:%G %a'
+		wantDetail string
+	}{
+		{"missing", exitResult(1, "", "stat: cannot statx: No such file or directory\n"), stdoutResult("root:root 755\n"), "no operator shell helper"},
+		{"symlink", stdoutResult("symbolic link\n"), stdoutResult("root:root 777\n"), "want a regular file"},
+		{"directory", stdoutResult("directory\n"), stdoutResult("root:root 755\n"), "want a regular file"},
+		{"owned by the operator", stdoutResult("regular file\n"), stdoutResult("operator:operator 755\n"), "want root:root"},
+		{"owned by hermes", stdoutResult("regular file\n"), stdoutResult("hermes:torio-projects 755\n"), "want root:root"},
+		{"group-writable", stdoutResult("regular file\n"), stdoutResult("root:root 775\n"), "group- or world-writable"},
+		{"world-writable", stdoutResult("regular file\n"), stdoutResult("root:root 757\n"), "group- or world-writable"},
+		{"setgid-writable", stdoutResult("regular file\n"), stdoutResult("root:root 2775\n"), "group- or world-writable"},
+		{"not executable", stdoutResult("regular file\n"), stdoutResult("root:root 644\n"), "want one of"},
+		{"setuid", stdoutResult("regular file\n"), stdoutResult("root:root 4755\n"), "want one of"},
+		{"unreadable mode", stdoutResult("regular file\n"), stdoutResult("root:root rwxr-xr-x\n"), "unparseable helper mode"},
+		{"unreadable ownership", stdoutResult("regular file\n"), stdoutResult("\n"), "unparseable helper ownership/mode"},
+		{"ownership probe failed", stdoutResult("regular file\n"), exitResult(1, "", "stat: permission denied\n"), "could not read helper ownership/mode"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := bootstrapHappyScript()
+			s[26] = scriptedResponse{result: tc.kind}
+			s[27] = scriptedResponse{result: tc.ownership}
+			fr := &fakeRunner{script: s}
+			a := New(fr)
+
+			rep, err := a.Bootstrap(context.Background(), bootstrapOpts())
+			assertKind(t, err, KindVerificationFailed)
+			if !strings.Contains(err.Error(), tc.wantDetail) {
+				t.Errorf("error = %q, want it to name %q", err.Error(), tc.wantDetail)
+			}
+			if !strings.Contains(err.Error(), OperatorShellHelper) && !strings.Contains(err.Error(), "helper") {
+				t.Errorf("error = %q, want it to name the helper", err.Error())
+			}
+			if checkOK(rep, "operator_shell_helper") {
+				t.Errorf("drift was recorded as a passing check: %+v", rep.Checks)
+			}
 		})
 	}
 }

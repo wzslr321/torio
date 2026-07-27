@@ -3,6 +3,7 @@ package lima
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/wzslr321/torio/internal/execx"
@@ -55,7 +56,10 @@ import (
 //   - git --version works;
 //   - each required path is a directory with the expected owner, group, and mode
 //     on native ext4;
-//   - no macOS host-share mount (9p/virtiofs/fuse/nfs/cifs) is present.
+//   - no macOS host-share mount (9p/virtiofs/fuse/nfs/cifs) is present;
+//   - the operator shell helper is a root-owned, non-writable regular file at
+//     OperatorShellHelper — the guest side of `torio project shell`, provisioned
+//     by the template and never reconciled here.
 //
 // A rerun is success only when all postconditions are proven. A drift
 // (architecture/version/image/mount/ownership) is reported, not repaired.
@@ -130,6 +134,9 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 	if err := a.verifyNoHostMounts(ctx, &rep); err != nil {
 		return rep, err
 	}
+	if err := a.verifyOperatorShellHelper(ctx, &rep); err != nil {
+		return rep, err
+	}
 
 	return rep, nil
 }
@@ -158,17 +165,17 @@ const (
 // caller input) so the guest changes are a small, auditable, fixed set — never a
 // general remote-script transport.
 const (
-	dockerGroup        = "docker"
-	torioProjectsGroup = "torio-projects"
-	requiredArch       = "aarch64"
-	hermesAgentDir     = "/home/hermes/hermes-agent"
-	hermesTarget       = "/home/hermes/hermes-agent/venv/bin/hermes" // pinned launcher (owned by hermes)
-	hermesShimPath     = "/usr/local/bin/hermes"                     // on sudo secure_path
+	dockerGroup             = "docker"
+	torioProjectsGroup      = "torio-projects"
+	requiredArch            = "aarch64"
+	hermesAgentDir          = "/home/hermes/hermes-agent"
+	hermesTarget            = "/home/hermes/hermes-agent/venv/bin/hermes" // pinned launcher (owned by hermes)
+	hermesShimPath          = "/usr/local/bin/hermes"                     // on sudo secure_path
 	hermesInstallScriptPath = "/home/hermes/.torio-hermes-install.sh"
 	hermesInstallScriptURL  = "https://hermes-agent.nousresearch.com/install.sh"
 )
 
-// bootstrapPathSpec is one required directory and its expected ownership/mode.
+// bootstrapPathSpec is one required guest path and its expected ownership/mode.
 type bootstrapPathSpec struct {
 	path   string
 	owner  string
@@ -186,6 +193,21 @@ var bootstrapRequiredPaths = []bootstrapPathSpec{
 	{path: HermesBrainPath, owner: HermesUser, group: HermesUser, modes: []string{"750", "0750"}},
 	{path: HermesWorkspacePath, owner: HermesUser, group: torioProjectsGroup, modes: []string{"2770"}, setgid: true},
 }
+
+// operatorShellHelperSpec is the required guest state of the operator shell
+// helper (OperatorShellHelper), the fixed remote argv of `torio project shell`.
+// It is provisioned by the Lima template, never reconciled here: bootstrap
+// proves it, and a drift is reported rather than repaired.
+var operatorShellHelperSpec = bootstrapPathSpec{
+	path:  OperatorShellHelper,
+	owner: "root",
+	group: "root",
+	modes: []string{"755", "0755"},
+}
+
+// operatorShellHelperRemediation is the one repair for every helper drift: the
+// pinned template re-materializes the file, root-owned and 0755, on boot.
+const operatorShellHelperRemediation = "restart the VM so provisioning reinstalls " + OperatorShellHelper + " as root:root 0755"
 
 // hostShareFSTypes is the findmnt -t filter for macOS host-share filesystems. A
 // broad host mount over the guest is an ADR-0003 violation and fails closed.
@@ -588,6 +610,65 @@ func (a *Adapter) verifyNoHostMounts(ctx context.Context, rep *BootstrapReport) 
 	}
 }
 
+// verifyOperatorShellHelper proves the guest side of `torio project shell`
+// exists before bootstrap calls the target ready. The V1 headline flow ends in
+// that helper and nothing but provisioning creates it, so a missing helper is a
+// target that reports success and then fails at the remote end.
+//
+// The session the helper opens carries the operator's forwarded SSH agent, so
+// the file itself is part of the boundary: anything that can rewrite it can
+// borrow that agent. It must therefore be a regular file (a symlink would move
+// the real content somewhere unowned), owned root:root, and writable by nobody
+// else. `stat` does not dereference by default, so this reads the path itself.
+func (a *Adapter) verifyOperatorShellHelper(ctx context.Context, rep *BootstrapReport) error {
+	const name = "operator_shell_helper"
+	spec := operatorShellHelperSpec
+
+	st, err := a.guestProbe(ctx, rep, name, "stat", "-c", "%F", spec.path)
+	if err != nil {
+		return err
+	}
+	kind := strings.TrimSpace(string(st.Stdout))
+	if st.ExitCode != 0 || kind == "" {
+		return a.verifyFailed(rep, name, "no operator shell helper at "+spec.path, operatorShellHelperRemediation)
+	}
+	if kind != "regular file" {
+		return a.verifyFailed(rep, name, fmt.Sprintf("helper is a %s, want a regular file", kind), operatorShellHelperRemediation)
+	}
+
+	og, err := a.guestProbe(ctx, rep, name, "stat", "-c", "%U:%G %a", spec.path)
+	if err != nil {
+		return err
+	}
+	if og.ExitCode != 0 {
+		return a.verifyFailed(rep, name, "could not read helper ownership/mode", operatorShellHelperRemediation)
+	}
+	owner, group, mode, ok := parseStatOwnership(string(og.Stdout))
+	if !ok {
+		return a.verifyFailed(rep, name, "unparseable helper ownership/mode", operatorShellHelperRemediation)
+	}
+	if owner != spec.owner || group != spec.group {
+		return a.verifyFailed(rep, name,
+			fmt.Sprintf("helper owner:group %s:%s, want %s:%s", owner, group, spec.owner, spec.group),
+			"a helper the operator or hermes owns can be rewritten between sessions; "+operatorShellHelperRemediation)
+	}
+	writable, parsed := modeGrantsForeignWrite(mode)
+	if !parsed {
+		return a.verifyFailed(rep, name, "unparseable helper mode "+mode, operatorShellHelperRemediation)
+	}
+	if writable {
+		return a.verifyFailed(rep, name,
+			fmt.Sprintf("helper mode %s is group- or world-writable", mode),
+			"a writable helper is a privilege-escalation path into a session that carries the operator's forwarded agent; "+operatorShellHelperRemediation)
+	}
+	if !modeMatches(spec, mode) {
+		return a.verifyFailed(rep, name, fmt.Sprintf("helper mode %s, want one of %v", mode, spec.modes), operatorShellHelperRemediation)
+	}
+
+	rep.record(name, true, fmt.Sprintf("%s:%s %s", owner, group, mode))
+	return nil
+}
+
 // hasGroup reports whether a space-separated `id -nG` group list contains group.
 func hasGroup(groups, group string) bool {
 	for _, g := range strings.Fields(groups) {
@@ -612,6 +693,17 @@ func parseStatOwnership(out string) (owner, group, mode string, ok bool) {
 		return "", "", "", false
 	}
 	return parts[0], parts[1], mode, true
+}
+
+// modeGrantsForeignWrite reports whether a `stat -c %a` mode lets anyone but the
+// owner write, and whether the mode could be read at all. An unreadable mode is
+// not proof of anything and its caller fails closed.
+func modeGrantsForeignWrite(mode string) (writable, parsed bool) {
+	bits, err := strconv.ParseUint(strings.TrimSpace(mode), 8, 32)
+	if err != nil {
+		return false, false
+	}
+	return bits&0o022 != 0, true
 }
 
 // modeMatches reports whether the observed stat mode satisfies the path spec.
