@@ -39,10 +39,17 @@ który nie jest poleceniem.
 
 ## Testy
 
+Każdy PR uruchamia GitHub Actions workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+na pinowanym Go **1.26.5**: `make validate`, `go test ./...`, `go vet ./...` oraz
+osobny job `go test -race ./...`.
+
+Lokalnie:
+
 ```bash
 make validate             # docs --check + link check + artefakty + testy skryptów
 go test ./...             # gdy kod Go już istnieje
 go test -race ./...       # przed review zmian współbieżnych/state
+go vet ./...
 ```
 
 Każdy nowy behavior wymaga RED → GREEN → REFACTOR. Spike jest wyjątkiem tylko w katalogu `spikes/` i musi być usunięty albo jawnie zatwierdzony do przepisania test-first.
