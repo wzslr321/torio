@@ -201,8 +201,16 @@ func (a *app) opContext(cmd *cobra.Command) (context.Context, context.CancelFunc
 
 // wantsJSON reports whether args request JSON output, used only to render an
 // error envelope when a flag/parse error prevents normal flag binding.
+//
+// The scan stops at the first bare `--`: everything from there on is the
+// operator's payload for a remote command (`torio vm ssh -- echo --json`), not
+// a request for torio's own output mode. Only flags the operator gave to torio
+// itself, before the terminator, can select the machine envelope.
 func wantsJSON(args []string) bool {
 	for _, a := range args {
+		if a == "--" {
+			return false
+		}
 		switch a {
 		case "--json", "-json", "--json=true", "-json=true":
 			return true
