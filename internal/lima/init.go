@@ -12,7 +12,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 )
 
 // Init creates the Torio VM from the embedded, Gate-0-pinned template, or
@@ -36,8 +35,8 @@ func (a *Adapter) Init(ctx context.Context, opts InitOptions) (InitResult, error
 	}
 
 	opts = opts.withDefaults()
-	if strings.TrimSpace(opts.OperatorUser) == "" {
-		return out, &Error{Op: op, Kind: KindVerificationFailed, Err: fmt.Errorf("operator user is required")}
+	if err := validateOperatorUser(opts.OperatorUser); err != nil {
+		return out, &Error{Op: op, Kind: KindVerificationFailed, Err: err}
 	}
 
 	rec, err := a.currentInstance(ctx, op)
@@ -71,6 +70,17 @@ func (a *Adapter) Init(ctx context.Context, opts InitOptions) (InitResult, error
 		return out, commandFailed(op, res.ExitCode, res.Stderr)
 	}
 
+	rec, err = a.currentInstance(ctx, op)
+	if err != nil {
+		return out, err
+	}
+	if rec == nil {
+		return out, &Error{Op: op, Kind: KindPostconditionFailed, Err: fmt.Errorf("instance %q not found after create", InstanceName)}
+	}
+	if err := verifyCompatibleConfig(rec); err != nil {
+		return out, &Error{Op: op, Kind: KindPostconditionFailed, Err: err}
+	}
+
 	out.Created = true
 	return out, nil
 }
@@ -92,8 +102,8 @@ func verifyCompatibleConfig(rec *instanceRecord) error {
 	if len(cfg.Mounts) != 0 {
 		return fmt.Errorf("instance has %d mount(s); Torio V1 requires mounts: []", len(cfg.Mounts))
 	}
-	if len(cfg.Images) == 0 {
-		return fmt.Errorf("instance has no images pin")
+	if len(cfg.Images) != 1 {
+		return fmt.Errorf("instance has %d image(s); Torio V1 requires exactly one pinned image", len(cfg.Images))
 	}
 	img := cfg.Images[0]
 	if img.Digest != PromotedImageDigest {

@@ -23,10 +23,15 @@ import (
 func TestInitCreatesAbsentInstance(t *testing.T) {
 	var createArgs []string
 	var seenTemplate string
+	listCalls := 0
 	fr := &fakeRunner{respond: func(ctx context.Context, cmd execx.Command) (execx.Result, error) {
 		switch {
 		case len(cmd.Args) >= 1 && cmd.Args[0] == "list":
-			return stdoutResult(""), nil // absent
+			listCalls++
+			if listCalls == 1 {
+				return stdoutResult(""), nil // absent before create
+			}
+			return stdoutResult(fixtureCompatibleInstanceJSON(InstanceName, "Stopped")), nil
 		case len(cmd.Args) >= 1 && cmd.Args[0] == "create":
 			createArgs = append([]string{}, cmd.Args...)
 			if len(cmd.Args) >= 4 {
@@ -82,6 +87,80 @@ func TestInitCreatesAbsentInstance(t *testing.T) {
 	}
 	if _, err := os.Stat(seenTemplate); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("template %q should be removed after create; stat err=%v", seenTemplate, err)
+	}
+	if listCalls != 2 {
+		t.Fatalf("listCalls = %d, want 2 (pre-create absent + post-create verify)", listCalls)
+	}
+}
+
+func TestInitCreatePostListEmptyFailsClosed(t *testing.T) {
+	fr := &fakeRunner{respond: func(ctx context.Context, cmd execx.Command) (execx.Result, error) {
+		if cmd.Args[0] == "list" {
+			return stdoutResult(""), nil
+		}
+		return exitResult(0, "", ""), nil
+	}}
+	a := New(fr)
+
+	_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator"})
+	var lerr *Error
+	if !errors.As(err, &lerr) || lerr.Kind != KindPostconditionFailed {
+		t.Fatalf("want KindPostconditionFailed, got %v", err)
+	}
+}
+
+func TestInitCreatePostListIncompatibleFailsClosed(t *testing.T) {
+	cases := []struct {
+		name string
+		json string
+	}{
+		{"mounts", fixtureIncompatibleMountsJSON(InstanceName, "Stopped")},
+		{"forwardAgent", fixtureIncompatibleForwardAgentJSON(InstanceName, "Stopped")},
+		{"digest", fixtureIncompatibleDigestJSON(InstanceName, "Stopped")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			listCalls := 0
+			fr := &fakeRunner{respond: func(ctx context.Context, cmd execx.Command) (execx.Result, error) {
+				if cmd.Args[0] == "list" {
+					listCalls++
+					if listCalls == 1 {
+						return stdoutResult(""), nil
+					}
+					return stdoutResult(tc.json), nil
+				}
+				return exitResult(0, "", ""), nil
+			}}
+			a := New(fr)
+
+			_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator"})
+			var lerr *Error
+			if !errors.As(err, &lerr) || lerr.Kind != KindPostconditionFailed {
+				t.Fatalf("want KindPostconditionFailed, got %v", err)
+			}
+		})
+	}
+}
+
+func TestVerifyCompatibleConfigRejectsExtraImage(t *testing.T) {
+	rec := &instanceRecord{
+		Name: InstanceName,
+		Config: &instanceConfig{
+			VMType: "vz",
+			Arch:   "aarch64",
+			Images: []struct {
+				Location string `json:"location"`
+				Digest   string `json:"digest"`
+			}{
+				{Location: PromotedImageURL, Digest: PromotedImageDigest},
+				{Location: "https://example.com/other.img", Digest: "sha256:bad"},
+			},
+			Mounts: nil,
+		},
+	}
+	rec.Config.SSH.ForwardAgent = false
+	if err := verifyCompatibleConfig(rec); err == nil {
+		t.Fatal("want error for two images")
 	}
 }
 

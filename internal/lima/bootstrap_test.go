@@ -8,44 +8,51 @@ import (
 	"github.com/wzslr321/torio/internal/execx"
 )
 
+const bootstrapTestOperator = "operator"
+
 // bootstrapHappyScript is the ordered runner script for a fully-reconciled,
-// fully-verified V1 target: the shim already points at the pinned hermes launcher
-// and all guest postconditions pass, so no mutating step fires. The order mirrors
-// Adapter.Bootstrap's fixed call sequence and is the baseline the failure tests
-// below diverge from.
+// fully-verified V1 target: Hermes install pin verified, shim correct, and all
+// guest postconditions pass. Order mirrors Adapter.Bootstrap's fixed sequence.
 func bootstrapHappyScript() []scriptedResponse {
 	return []scriptedResponse{
-		{result: stdoutResult(fixtureInstanceJSON(InstanceName, "Running"))}, // 0 list (Running precondition)
-		{result: exitResult(0, "", "")},                                      // 1 test -x <target> (install present)
-		{result: stdoutResult(hermesTarget + "\n")},                          // 2 readlink shim (already correct)
-		{result: stdoutResult("1000\n")},                                     // 3 id -u hermes
-		{result: stdoutResult("torio-projects:x:1001:hermes\n")},             // 4 getent group torio-projects
-		{result: stdoutResult("hermes torio-projects\n")},                    // 5 id -nG hermes (torio-projects member)
-		{result: stdoutResult("hermes torio-projects\n")},                    // 6 id -nG hermes (not in docker)
-		{result: stdoutResult("aarch64\n")},                                  // 7 uname -m
-		{result: stdoutResult("Hermes Agent v0.19.0 (2026.7.20)\n")},         // 8 hermes --version (stable path)
-		{result: stdoutResult("git version 2.43.0\n")},                       // 9 git --version
-		{result: stdoutResult("directory\n")},                                // 10 stat HermesHome type
-		{result: stdoutResult("hermes:torio-projects 710\n")},                // 11 stat HermesHome owner/group/mode
-		{result: stdoutResult("ext4 /dev/vda1\n")},                           // 12 findmnt HermesHome
-		{result: stdoutResult("directory\n")},                                // 13 stat HermesProfilePath type
-		{result: stdoutResult("hermes:hermes 750\n")},                        // 14 stat HermesProfilePath owner/group/mode
-		{result: stdoutResult("ext4 /dev/vda1\n")},                           // 15 findmnt HermesProfilePath
-		{result: stdoutResult("directory\n")},                                // 16 stat HermesBrainPath type
-		{result: stdoutResult("hermes:hermes 750\n")},                        // 17 stat HermesBrainPath owner/group/mode
-		{result: stdoutResult("ext4 /dev/vda1\n")},                           // 18 findmnt HermesBrainPath
-		{result: stdoutResult("directory\n")},                                // 19 stat HermesWorkspacePath type
-		{result: stdoutResult("hermes:torio-projects 2770\n")},               // 20 stat HermesWorkspacePath owner/group/mode
-		{result: stdoutResult("ext4 /dev/vda1\n")},                           // 21 findmnt HermesWorkspacePath
-		{result: exitResult(1, "", "")},                                        // 22 findmnt host-shares (none → exit 1, empty)
+		{result: stdoutResult(fixtureInstanceJSON(InstanceName, "Running"))}, // 0 list
+		{result: stdoutResult("1000\n")},                                     // 1 id -u hermes
+		{result: stdoutResult("torio-projects:x:1001:hermes\n")},             // 2 getent group
+		{result: stdoutResult("hermes torio-projects\n")},                    // 3 id -nG hermes (torio-projects)
+		{result: stdoutResult("operator torio-projects\n")},                  // 4 id -nG operator
+		{result: stdoutResult("hermes torio-projects\n")},                    // 5 id -nG hermes (not docker)
+		{result: exitResult(0, "", "")},                                      // 6 test -x launcher (install present)
+		{result: stdoutResult(PromotedHermesCommit + "\n")},                  // 7 git rev-parse HEAD
+		{result: exitResult(0, "", "")},                                      // 8 test -x launcher (shim reconcile)
+		{result: stdoutResult(hermesTarget + "\n")},                          // 9 readlink shim
+		{result: stdoutResult("aarch64\n")},                                  // 10 uname -m
+		{result: stdoutResult("Hermes Agent v0.19.0 (2026.7.20)\n")},         // 11 hermes --version
+		{result: stdoutResult("git version 2.43.0\n")},                       // 12 git --version
+		{result: stdoutResult("directory\n")},                                // 13 stat HermesHome type
+		{result: stdoutResult("hermes:torio-projects 710\n")},                // 14 stat HermesHome og/mode
+		{result: stdoutResult("ext4 /dev/vda1\n")},                           // 15 findmnt HermesHome
+		{result: stdoutResult("directory\n")},                                // 16 stat HermesProfilePath type
+		{result: stdoutResult("hermes:hermes 750\n")},                        // 17 stat HermesProfilePath og/mode
+		{result: stdoutResult("ext4 /dev/vda1\n")},                           // 18 findmnt HermesProfilePath
+		{result: stdoutResult("directory\n")},                                // 19 stat HermesBrainPath type
+		{result: stdoutResult("hermes:hermes 750\n")},                        // 20 stat HermesBrainPath og/mode
+		{result: stdoutResult("ext4 /dev/vda1\n")},                           // 21 findmnt HermesBrainPath
+		{result: stdoutResult("directory\n")},                                // 22 stat HermesWorkspacePath type
+		{result: stdoutResult("hermes:torio-projects 2770\n")},               // 23 stat HermesWorkspacePath og/mode
+		{result: stdoutResult("ext4 /dev/vda1\n")},                           // 24 findmnt HermesWorkspacePath
+		{result: exitResult(1, "", "")},                                        // 25 findmnt host-shares
 	}
+}
+
+func bootstrapOpts() BootstrapOptions {
+	return BootstrapOptions{OperatorUser: bootstrapTestOperator}
 }
 
 func TestBootstrapHappyPathAllChecksPass(t *testing.T) {
 	fr := &fakeRunner{script: bootstrapHappyScript()}
 	a := New(fr)
 
-	rep, err := a.Bootstrap(context.Background(), BootstrapOptions{})
+	rep, err := a.Bootstrap(context.Background(), bootstrapOpts())
 	if err != nil {
 		t.Fatalf("Bootstrap: unexpected error: %v", err)
 	}
@@ -57,14 +64,11 @@ func TestBootstrapHappyPathAllChecksPass(t *testing.T) {
 			t.Errorf("check %q not OK: %s", c.Name, c.Detail)
 		}
 	}
-	if fr.callCount() != 23 {
-		t.Fatalf("callCount = %d, want 23 (no mutating step when already reconciled)", fr.callCount())
+	if fr.callCount() != 26 {
+		t.Fatalf("callCount = %d, want 26 (no install/shim mutating steps when reconciled)", fr.callCount())
 	}
 
-	// The hermes verification must run through the documented stable command
-	// path: as the hermes service user, via the bare `hermes` name (resolved by
-	// the shim on the sudo secure_path) — never a raw absolute venv path.
-	got := fr.callArgs(8)
+	got := fr.callArgs(11)
 	want := []string{"shell", "--tty=false", InstanceName, "--", "sudo", "-n", "-u", HermesUser, "--", "hermes", "--version"}
 	if !equalArgs(got, want) {
 		t.Fatalf("hermes stable-path argv = %v, want %v", got, want)
@@ -87,7 +91,7 @@ func TestBootstrapReportSurfacesObservedVersions(t *testing.T) {
 	fr := &fakeRunner{script: bootstrapHappyScript()}
 	a := New(fr)
 
-	rep, err := a.Bootstrap(context.Background(), BootstrapOptions{})
+	rep, err := a.Bootstrap(context.Background(), bootstrapOpts())
 	if err != nil {
 		t.Fatalf("Bootstrap: unexpected error: %v", err)
 	}
@@ -105,7 +109,7 @@ func TestBootstrapNotRunningIsPrecondition(t *testing.T) {
 	}}
 	a := New(fr)
 
-	_, err := a.Bootstrap(context.Background(), BootstrapOptions{})
+	_, err := a.Bootstrap(context.Background(), bootstrapOpts())
 	assertKind(t, err, KindNotRunning)
 	if fr.callCount() != 1 {
 		t.Fatalf("callCount = %d, want 1 (must not touch the guest when not Running)", fr.callCount())
@@ -118,7 +122,7 @@ func TestBootstrapMissingInstanceIsNotFound(t *testing.T) {
 	}}
 	a := New(fr)
 
-	_, err := a.Bootstrap(context.Background(), BootstrapOptions{})
+	_, err := a.Bootstrap(context.Background(), bootstrapOpts())
 	assertKind(t, err, KindNotFound)
 }
 
@@ -128,49 +132,27 @@ func TestBootstrapAmbiguousStateFailsClosed(t *testing.T) {
 	}}
 	a := New(fr)
 
-	_, err := a.Bootstrap(context.Background(), BootstrapOptions{})
+	_, err := a.Bootstrap(context.Background(), bootstrapOpts())
 	assertKind(t, err, KindAmbiguousState)
 }
 
 func TestBootstrapReconcilesHermesShim(t *testing.T) {
-	// The shim is missing: the narrow reconcile step must fire (ln), then full
-	// verification proceeds.
-	fr := &fakeRunner{script: []scriptedResponse{
-		{result: stdoutResult(fixtureInstanceJSON(InstanceName, "Running"))}, // 0 list
-		{result: exitResult(0, "", "")},                                      // 1 test -x target
-		{result: exitResult(1, "", "")},                                      // 2 readlink shim (missing → exit 1)
-		{result: exitResult(0, "", "")},                                      // 3 ln -sfn target shim
-		{result: stdoutResult("1000\n")},                                     // 4 id -u hermes
-		{result: stdoutResult("torio-projects:x:1001:hermes\n")},             // 5 getent group torio-projects
-		{result: stdoutResult("hermes torio-projects\n")},                    // 6 id -nG hermes (torio-projects)
-		{result: stdoutResult("hermes torio-projects\n")},                    // 7 id -nG hermes (not docker)
-		{result: stdoutResult("aarch64\n")},                                  // 8 uname -m
-		{result: stdoutResult("Hermes Agent v0.19.0\n")},                     // 9 hermes --version
-		{result: stdoutResult("git version 2.43.0\n")},                       // 10 git --version
-		{result: stdoutResult("directory\n")},                                // 11 stat home type
-		{result: stdoutResult("hermes:torio-projects 710\n")},                // 12 stat home og/mode
-		{result: stdoutResult("ext4 /dev/vda1\n")},                           // 13 findmnt home
-		{result: stdoutResult("directory\n")},                                // 14 stat profile type
-		{result: stdoutResult("hermes:hermes 750\n")},                        // 15 stat profile og/mode
-		{result: stdoutResult("ext4 /dev/vda1\n")},                           // 16 findmnt profile
-		{result: stdoutResult("directory\n")},                                // 17 stat brain type
-		{result: stdoutResult("hermes:hermes 750\n")},                        // 18 stat brain og/mode
-		{result: stdoutResult("ext4 /dev/vda1\n")},                           // 19 findmnt brain
-		{result: stdoutResult("directory\n")},                                // 20 stat workspace type
-		{result: stdoutResult("hermes:torio-projects 2770\n")},               // 21 stat workspace og/mode
-		{result: stdoutResult("ext4 /dev/vda1\n")},                           // 22 findmnt workspace
-		{result: exitResult(1, "", "")},                                        // 23 findmnt host-shares
-	}}
+	s := bootstrapHappyScript()
+	s[9] = scriptedResponse{result: exitResult(1, "", "")} // readlink shim missing
+	s = append(s[:10], append([]scriptedResponse{
+		{result: exitResult(0, "", "")}, // ln -sfn
+	}, s[10:]...)...)
+	fr := &fakeRunner{script: s}
 	a := New(fr)
 
-	rep, err := a.Bootstrap(context.Background(), BootstrapOptions{})
+	rep, err := a.Bootstrap(context.Background(), bootstrapOpts())
 	if err != nil {
 		t.Fatalf("Bootstrap: unexpected error: %v", err)
 	}
-	if fr.callCount() != 24 {
-		t.Fatalf("callCount = %d, want 24 (ln reconcile step present)", fr.callCount())
+	if fr.callCount() != 27 {
+		t.Fatalf("callCount = %d, want 27 (ln reconcile step present)", fr.callCount())
 	}
-	if got, want := fr.callArgs(3), []string{"shell", "--tty=false", InstanceName, "--", "sudo", "-n", "ln", "-sfn", hermesTarget, hermesShimPath}; !equalArgs(got, want) {
+	if got, want := fr.callArgs(10), []string{"shell", "--tty=false", InstanceName, "--", "sudo", "-n", "ln", "-sfn", hermesTarget, hermesShimPath}; !equalArgs(got, want) {
 		t.Fatalf("ln argv = %v, want %v", got, want)
 	}
 	if !checkOK(rep, "hermes_shim") {
@@ -178,52 +160,126 @@ func TestBootstrapReconcilesHermesShim(t *testing.T) {
 	}
 }
 
-func TestBootstrapMissingHermesInstallIsDrift(t *testing.T) {
-	// The pinned launcher is absent (test -x fails): bootstrap must report drift
-	// and must NOT create a dangling shim.
+func TestBootstrapMissingLauncherInstallsHermes(t *testing.T) {
 	s := bootstrapHappyScript()
-	s[1] = scriptedResponse{result: exitResult(1, "", "")} // test -x target → missing
+	s[6] = scriptedResponse{result: exitResult(1, "", "")} // launcher missing
+	install := []scriptedResponse{
+		{result: exitResult(0, "", "")}, // apt-get update
+		{result: exitResult(0, "", "")}, // apt-get install deps
+		{result: exitResult(0, "", "")}, // curl install.sh
+		{result: exitResult(0, "", "")}, // bash install.sh
+		{result: exitResult(0, "", "")}, // rm install script
+		{result: exitResult(0, "", "")}, // test -x launcher after install
+		{result: stdoutResult(PromotedHermesCommit + "\n")}, // git rev-parse HEAD
+	}
+	s = append(s[:7], append(install, s[8:]...)...)
 	fr := &fakeRunner{script: s}
+	a := New(fr)
+
+	_, err := a.Bootstrap(context.Background(), bootstrapOpts())
+	if err != nil {
+		t.Fatalf("Bootstrap: unexpected error: %v", err)
+	}
+	curlIdx := -1
+	for i := 0; i < fr.callCount(); i++ {
+		args := fr.callArgs(i)
+		for _, arg := range args {
+			if arg == "curl" {
+				curlIdx = i
+			}
+		}
+	}
+	if curlIdx < 0 {
+		t.Fatal("expected curl argv when launcher was missing")
+	}
+	got := fr.callArgs(curlIdx)
+	if !containsArg(got, hermesInstallScriptURL) {
+		t.Fatalf("curl argv = %v, want install URL", got)
+	}
+}
+
+func TestBootstrapExistingInstallSkipsCurl(t *testing.T) {
+	fr := &fakeRunner{script: bootstrapHappyScript()}
+	a := New(fr)
+
+	_, err := a.Bootstrap(context.Background(), bootstrapOpts())
+	if err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	for i := 0; i < fr.callCount(); i++ {
+		for _, arg := range fr.callArgs(i) {
+			if arg == "curl" {
+				t.Fatalf("call %d unexpectedly invoked curl: %v", i, fr.callArgs(i))
+			}
+		}
+	}
+}
+
+func TestBootstrapInstallWrongCommitFailsClosed(t *testing.T) {
+	s := bootstrapHappyScript()
+	s[7] = scriptedResponse{result: stdoutResult("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n")}
+	fr := &fakeRunner{script: s}
+	a := New(fr)
+
+	_, err := a.Bootstrap(context.Background(), bootstrapOpts())
+	assertKind(t, err, KindVerificationFailed)
+}
+
+func TestBootstrapOperatorNotInTorioProjectsFailsClosed(t *testing.T) {
+	s := bootstrapHappyScript()
+	s[4] = scriptedResponse{result: stdoutResult("operator\n")}
+	fr := &fakeRunner{script: s}
+	a := New(fr)
+
+	_, err := a.Bootstrap(context.Background(), bootstrapOpts())
+	assertKind(t, err, KindVerificationFailed)
+}
+
+func TestBootstrapRejectsEmptyOperator(t *testing.T) {
+	fr := &fakeRunner{script: bootstrapHappyScript()}
 	a := New(fr)
 
 	_, err := a.Bootstrap(context.Background(), BootstrapOptions{})
 	assertKind(t, err, KindVerificationFailed)
+	if fr.callCount() != 1 {
+		t.Fatalf("callCount = %d, want 1 (list only before operator validation)", fr.callCount())
+	}
 }
 
 func TestBootstrapArchMismatchFailsClosed(t *testing.T) {
 	s := bootstrapHappyScript()
-	s[7] = scriptedResponse{result: stdoutResult("x86_64\n")}
+	s[10] = scriptedResponse{result: stdoutResult("x86_64\n")}
 	fr := &fakeRunner{script: s}
 	a := New(fr)
 
-	_, err := a.Bootstrap(context.Background(), BootstrapOptions{})
+	_, err := a.Bootstrap(context.Background(), bootstrapOpts())
 	assertKind(t, err, KindVerificationFailed)
 }
 
 func TestBootstrapHermesVersionNonZeroExitFailsClosed(t *testing.T) {
 	s := bootstrapHappyScript()
-	s[8] = scriptedResponse{result: exitResult(127, "", "hermes: command not found")}
+	s[11] = scriptedResponse{result: exitResult(127, "", "hermes: command not found")}
 	fr := &fakeRunner{script: s}
 	a := New(fr)
 
-	_, err := a.Bootstrap(context.Background(), BootstrapOptions{})
+	_, err := a.Bootstrap(context.Background(), bootstrapOpts())
 	assertKind(t, err, KindVerificationFailed)
 }
 
 func TestBootstrapHermesVersionZeroExitButEmptyFailsClosed(t *testing.T) {
 	// A clean exit is not proof: empty/unrecognized version output is unverifiable.
 	s := bootstrapHappyScript()
-	s[8] = scriptedResponse{result: exitResult(0, "", "")}
+	s[11] = scriptedResponse{result: exitResult(0, "", "")}
 	fr := &fakeRunner{script: s}
 	a := New(fr)
 
-	_, err := a.Bootstrap(context.Background(), BootstrapOptions{})
+	_, err := a.Bootstrap(context.Background(), bootstrapOpts())
 	assertKind(t, err, KindVerificationFailed)
 }
 
 func TestBootstrapHermesPinnedVersionMismatchIsDrift(t *testing.T) {
 	s := bootstrapHappyScript()
-	s[8] = scriptedResponse{result: stdoutResult("Hermes Agent v0.19.0 (2026.7.20)\n")}
+	s[11] = scriptedResponse{result: stdoutResult("Hermes Agent v0.19.0 (2026.7.20)\n")}
 	fr := &fakeRunner{script: s}
 	a := New(fr)
 
@@ -233,53 +289,53 @@ func TestBootstrapHermesPinnedVersionMismatchIsDrift(t *testing.T) {
 
 func TestBootstrapHermesInDockerGroupFailsClosed(t *testing.T) {
 	s := bootstrapHappyScript()
-	s[6] = scriptedResponse{result: stdoutResult("hermes docker torio-projects\n")}
+	s[5] = scriptedResponse{result: stdoutResult("hermes docker torio-projects\n")}
 	fr := &fakeRunner{script: s}
 	a := New(fr)
 
-	_, err := a.Bootstrap(context.Background(), BootstrapOptions{})
+	_, err := a.Bootstrap(context.Background(), bootstrapOpts())
 	assertKind(t, err, KindVerificationFailed)
 }
 
 func TestBootstrapPathNotDirectoryFailsClosed(t *testing.T) {
 	s := bootstrapHappyScript()
-	s[10] = scriptedResponse{result: stdoutResult("regular file\n")}
+	s[13] = scriptedResponse{result: stdoutResult("regular file\n")}
 	fr := &fakeRunner{script: s}
 	a := New(fr)
 
-	_, err := a.Bootstrap(context.Background(), BootstrapOptions{})
+	_, err := a.Bootstrap(context.Background(), bootstrapOpts())
 	assertKind(t, err, KindVerificationFailed)
 }
 
 func TestBootstrapPathWrongOwnershipFailsClosed(t *testing.T) {
 	s := bootstrapHappyScript()
-	s[14] = scriptedResponse{result: stdoutResult("root:root 750\n")}
+	s[17] = scriptedResponse{result: stdoutResult("root:root 750\n")}
 	fr := &fakeRunner{script: s}
 	a := New(fr)
 
-	_, err := a.Bootstrap(context.Background(), BootstrapOptions{})
+	_, err := a.Bootstrap(context.Background(), bootstrapOpts())
 	assertKind(t, err, KindVerificationFailed)
 }
 
 func TestBootstrapPathNotNativeFilesystemFailsClosed(t *testing.T) {
 	// A path backed by a macOS host share (virtiofs) violates ADR-0003.
 	s := bootstrapHappyScript()
-	s[12] = scriptedResponse{result: stdoutResult("virtiofs virtiofs-share\n")}
+	s[15] = scriptedResponse{result: stdoutResult("virtiofs virtiofs-share\n")}
 	fr := &fakeRunner{script: s}
 	a := New(fr)
 
-	_, err := a.Bootstrap(context.Background(), BootstrapOptions{})
+	_, err := a.Bootstrap(context.Background(), bootstrapOpts())
 	assertKind(t, err, KindVerificationFailed)
 }
 
 func TestBootstrapHostMountPresentFailsClosed(t *testing.T) {
 	// A broad macOS host mount must be detected and fail closed.
 	s := bootstrapHappyScript()
-	s[22] = scriptedResponse{result: stdoutResult("/home/hermes virtiofs\n")}
+	s[25] = scriptedResponse{result: stdoutResult("/home/hermes virtiofs\n")}
 	fr := &fakeRunner{script: s}
 	a := New(fr)
 
-	_, err := a.Bootstrap(context.Background(), BootstrapOptions{})
+	_, err := a.Bootstrap(context.Background(), bootstrapOpts())
 	assertKind(t, err, KindVerificationFailed)
 }
 
@@ -298,11 +354,11 @@ func TestBootstrapHostMountProbeFailureFailsClosed(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := bootstrapHappyScript()
-			s[22] = scriptedResponse{result: tc.result}
+			s[25] = scriptedResponse{result: tc.result}
 			fr := &fakeRunner{script: s}
 			a := New(fr)
 
-			_, err := a.Bootstrap(context.Background(), BootstrapOptions{})
+			_, err := a.Bootstrap(context.Background(), bootstrapOpts())
 			assertKind(t, err, KindVerificationFailed)
 		})
 	}
@@ -312,11 +368,11 @@ func TestBootstrapRejectsTruncatedProbeOutput(t *testing.T) {
 	// Bounded, truncated guest output is untrustworthy: a verify probe that was
 	// cut off must fail closed rather than be parsed as ground truth.
 	s := bootstrapHappyScript()
-	s[7] = scriptedResponse{result: execx.Result{ExitCode: 0, Stdout: []byte("aarch64\n"), StdoutTruncated: true}}
+	s[10] = scriptedResponse{result: execx.Result{ExitCode: 0, Stdout: []byte("aarch64\n"), StdoutTruncated: true}}
 	fr := &fakeRunner{script: s}
 	a := New(fr)
 
-	_, err := a.Bootstrap(context.Background(), BootstrapOptions{})
+	_, err := a.Bootstrap(context.Background(), bootstrapOpts())
 	assertKind(t, err, KindVerificationFailed)
 }
 
@@ -331,7 +387,7 @@ func TestBootstrapTransportTimeoutIsExternal(t *testing.T) {
 	}
 	a := New(fr)
 
-	_, err := a.Bootstrap(context.Background(), BootstrapOptions{})
+	_, err := a.Bootstrap(context.Background(), bootstrapOpts())
 	assertKind(t, err, KindTimeout)
 }
 
@@ -344,7 +400,7 @@ func TestBootstrapPropagatesContext(t *testing.T) {
 	a := New(fr)
 
 	ctx := context.WithValue(context.Background(), ctxKey{}, "marker")
-	_, _ = a.Bootstrap(ctx, BootstrapOptions{})
+	_, _ = a.Bootstrap(ctx, bootstrapOpts())
 	if seen == nil {
 		t.Fatalf("runner never invoked")
 	}
@@ -368,6 +424,15 @@ func TestModeMatches(t *testing.T) {
 	if modeMatches(spec, "755") {
 		t.Error("755 must not match HermesHome spec")
 	}
+}
+
+func containsArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
 }
 
 // --- test helpers ---

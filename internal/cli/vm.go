@@ -210,15 +210,18 @@ func newVMBootstrapCmd(a *app) *cobra.Command {
 			"usable Remote Second Brain V1 path: a stable non-interactive `hermes` command " +
 			"and the V1 guest filesystem layout on native ext4.\n\n" +
 			"It operates only on the existing target after a verified Running precondition, " +
-			"through the typed Lima boundary. It is idempotent and narrow: it may ensure the " +
-			"`hermes` PATH shim, but never recreates or re-images the VM, installs a model/provider, " +
-			"accepts secrets, or creates services. It verifies (not merely trusts) the hermes user, " +
-			"torio-projects membership, absence of docker-group membership for hermes, architecture, " +
-			"the hermes command, git, the persistent profile/brain/workspace paths with correct " +
-			"ownership and modes on native Linux, and the absence of a broad host mount — failing " +
-			"closed with remediation on any drift.\n\n" +
+			"through the typed Lima boundary. It is idempotent and narrow: when the pinned " +
+			"Hermes Agent launcher is missing it installs the Gate-0 commit via the upstream " +
+			"install script (verifiable postcondition: git HEAD pin + launcher path), may ensure " +
+			"the `hermes` PATH shim, but never recreates or re-images the VM, installs a " +
+			"model/provider, accepts secrets, or creates services. It verifies (not merely trusts) " +
+			"the hermes user, torio-projects membership for hermes and the operator, absence of " +
+			"docker-group membership for hermes, architecture, the hermes command, git, the " +
+			"persistent profile/brain/workspace paths with correct ownership and modes on native " +
+			"Linux, and the absence of a broad host mount — failing closed with remediation on " +
+			"any drift.\n\n" +
 			"Bootstrap issues several bounded guest probes; run it with an ample --timeout " +
-			"(e.g. --timeout 5m).\n\n" +
+			"(e.g. --timeout 15m — Hermes install can be slow).\n\n" +
 			"After a successful run, reach the remote Hermes instance yourself (operator-controlled), " +
 			"e.g.:  torio vm ssh -- sudo -u " + lima.HermesUser + " -- hermes --version",
 		Args: cobra.NoArgs,
@@ -228,7 +231,16 @@ func newVMBootstrapCmd(a *app) *cobra.Command {
 			// V1 runs unpinned: the observed hermes version is reported so drift is
 			// visible. A later slice can thread version-lock pins through
 			// BootstrapOptions for enforcement.
-			rep, err := a.newLima().Bootstrap(ctx, lima.BootstrapOptions{})
+			opUser, err := a.lookupOperatorUser()
+			if err != nil {
+				return &CLIError{
+					Exit:    ExitExternal,
+					Code:    "OPERATOR_LOOKUP_FAILED",
+					Command: "vm.bootstrap",
+					Message: err.Error(),
+				}
+			}
+			rep, err := a.newLima().Bootstrap(ctx, lima.BootstrapOptions{OperatorUser: opUser})
 			if err != nil {
 				ce := mapLimaError("vm.bootstrap", err)
 				// Surface the checks recorded up to the failure (already bounded and

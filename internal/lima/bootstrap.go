@@ -19,6 +19,13 @@ import (
 // re-images the VM; never installs a model/provider; never accepts secrets; and
 // never creates gateway/serve services.
 //
+// When the pinned Hermes Agent launcher is missing, bootstrap reconciles a
+// Gate-0-pinned install (PromotedHermesCommit at hermesAgentDir) using the
+// upstream install.sh script downloaded to a hermes-writable path — never
+// curl|bash pipe. Residual risk: install.sh content is not checksum-pinned;
+// the verifiable postcondition is git HEAD == PromotedHermesCommit and an
+// executable launcher at hermesTarget. Then it reconciles the PATH shim.
+//
 // The intended guest identity is the dedicated non-root `hermes` service user
 // (uid distinct from the Lima login user): it owns the persistent profile under
 // /home/hermes/.hermes and the Second Brain vault under /home/hermes/brain, and
@@ -28,15 +35,20 @@ import (
 // `sudo -u hermes -- hermes …`; the bare `hermes` name resolves through a fixed
 // symlink on sudo's secure_path.
 //
-// Reconcile is idempotent and limited to the narrowly declared PATH/shim setup:
+// Reconcile is idempotent and limited to the narrowly declared Hermes install and
+// PATH/shim setup:
+//   - when the pinned launcher is missing, install Hermes Agent at the Gate-0
+//     commit via the upstream install script (typed argv, no pipe), then verify
+//     git HEAD and launcher executability;
 //   - ensure /usr/local/bin/hermes is a symlink to the pinned launcher, but only
-//     after confirming the launcher exists (a missing launcher is reported as
-//     drift, never papered over with a dangling shim).
+//     after confirming the launcher exists (a missing launcher after reconcile is
+//     reported as drift, never papered over with a dangling shim).
 //
 // Verification proves (never merely trusts an exit code) every postcondition and
 // fails closed on any mismatch or unverifiable state:
 //   - the hermes user exists;
 //   - group torio-projects exists and hermes is a member;
+//   - the operator (Lima login user) is a member of torio-projects;
 //   - hermes is NOT in the docker group;
 //   - uname -m == aarch64;
 //   - `hermes --version` works through the documented stable command path;
@@ -73,12 +85,11 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 		return rep, &Error{Op: bootstrapOp, Kind: KindAmbiguousState, Err: fmt.Errorf("instance %q is in ambiguous state %q", InstanceName, rec.Status)}
 	}
 
-	// --- Reconcile (idempotent, narrow) ---
-	if err := a.reconcileHermesShim(ctx, &rep); err != nil {
-		return rep, err
+	if err := validateOperatorUser(opts.OperatorUser); err != nil {
+		return rep, &Error{Op: bootstrapOp, Kind: KindVerificationFailed, Err: err}
 	}
 
-	// --- Verify (read-only, fail closed) ---
+	// --- Verify guest identity layout (read-only, fail closed) ---
 	if err := a.verifyHermesUser(ctx, &rep); err != nil {
 		return rep, err
 	}
@@ -88,9 +99,22 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 	if err := a.verifyHermesInTorioProjects(ctx, &rep); err != nil {
 		return rep, err
 	}
+	if err := a.verifyOperatorInTorioProjects(ctx, &rep, opts.OperatorUser); err != nil {
+		return rep, err
+	}
 	if err := a.verifyHermesNotInDocker(ctx, &rep); err != nil {
 		return rep, err
 	}
+
+	// --- Reconcile (idempotent, narrow) ---
+	if err := a.reconcileHermesInstall(ctx, &rep); err != nil {
+		return rep, err
+	}
+	if err := a.reconcileHermesShim(ctx, &rep); err != nil {
+		return rep, err
+	}
+
+	// --- Verify runtime and filesystem postconditions ---
 	if err := a.verifyArch(ctx, &rep); err != nil {
 		return rep, err
 	}
@@ -137,8 +161,11 @@ const (
 	dockerGroup        = "docker"
 	torioProjectsGroup = "torio-projects"
 	requiredArch       = "aarch64"
+	hermesAgentDir     = "/home/hermes/hermes-agent"
 	hermesTarget       = "/home/hermes/hermes-agent/venv/bin/hermes" // pinned launcher (owned by hermes)
 	hermesShimPath     = "/usr/local/bin/hermes"                     // on sudo secure_path
+	hermesInstallScriptPath = "/home/hermes/.torio-hermes-install.sh"
+	hermesInstallScriptURL  = "https://hermes-agent.nousresearch.com/install.sh"
 )
 
 // bootstrapPathSpec is one required directory and its expected ownership/mode.
@@ -170,9 +197,13 @@ const hostShareFSTypes = "9p,virtiofs,fuse,fuse.virtiofs,nfs,cifs"
 // type is still rejected.
 var nativeFSTypes = map[string]bool{"ext4": true, "ext3": true, "ext2": true, "xfs": true, "btrfs": true}
 
-// BootstrapOptions carries the (optional) pins the caller wants enforced. The
-// adapter does not import internal/config; the CLI passes pinned values through.
+// BootstrapOptions carries the pins and operator identity the caller wants
+// enforced. The adapter does not import internal/config; the CLI passes pinned
+// values through.
 type BootstrapOptions struct {
+	// OperatorUser is the Lima login identity; required and validated against the
+	// strict allowlist before any guest work.
+	OperatorUser string
 	// HermesVersion, if non-empty, is the pinned Hermes version the observed
 	// `hermes --version` must contain; a mismatch is reported as drift. Empty is
 	// unpinned: the observed version is reported but not enforced.
@@ -220,6 +251,110 @@ func (a *Adapter) guestProbe(ctx context.Context, rep *BootstrapReport, name str
 		return execx.Result{}, a.verifyFailed(rep, name, "guest output was truncated", "re-run with a smaller probe or inspect the guest manually")
 	}
 	return res, nil
+}
+
+// reconcileHermesInstall ensures the Gate-0-pinned Hermes Agent tree exists at
+// hermesAgentDir with HEAD == PromotedHermesCommit and an executable launcher.
+// When the launcher is already present, only the git pin is verified. When it is
+// missing, bootstrap runs apt-get deps, downloads install.sh to a hermes-writable
+// path (never curl|bash pipe), runs it with fixed flags, removes the script, and
+// verifies launcher + commit. install.sh content is not checksum-pinned; the
+// verifiable postcondition is git HEAD and launcher path.
+func (a *Adapter) reconcileHermesInstall(ctx context.Context, rep *BootstrapReport) error {
+	const name = "hermes_install"
+	present, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "test", "-x", hermesTarget)
+	if err != nil {
+		return err
+	}
+	if present.ExitCode == 0 {
+		return a.verifyHermesGitPin(ctx, rep, name)
+	}
+
+	if err := a.installHermesDeps(ctx, rep, name); err != nil {
+		return err
+	}
+	dl, err := a.guestProbe(ctx, rep, name,
+		"sudo", "-n", "-u", HermesUser, "--",
+		"curl", "-fsSL", "-o", hermesInstallScriptPath, hermesInstallScriptURL,
+	)
+	if err != nil {
+		return err
+	}
+	if dl.ExitCode != 0 {
+		return a.verifyFailed(rep, name, "could not download hermes install script", "check guest network and curl")
+	}
+	run, err := a.guestProbe(ctx, rep, name,
+		"sudo", "-n", "-u", HermesUser, "--",
+		"bash", hermesInstallScriptPath,
+		"--non-interactive", "--skip-setup", "--skip-browser",
+		"--dir", hermesAgentDir,
+		"--hermes-home", HermesProfilePath,
+		"--commit", PromotedHermesCommit,
+	)
+	if err != nil {
+		return err
+	}
+	if run.ExitCode != 0 {
+		return a.verifyFailed(rep, name, "hermes install script exited non-zero", "inspect the install script output on the guest")
+	}
+	rm, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "rm", "-f", hermesInstallScriptPath)
+	if err != nil {
+		return err
+	}
+	if rm.ExitCode != 0 {
+		return a.verifyFailed(rep, name, "could not remove downloaded install script", "remove "+hermesInstallScriptPath+" on the guest")
+	}
+	execOK, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "test", "-x", hermesTarget)
+	if err != nil {
+		return err
+	}
+	if execOK.ExitCode != 0 {
+		return a.verifyFailed(rep, name, "launcher not executable after install", "re-run bootstrap or inspect the hermes install on the guest")
+	}
+	return a.verifyHermesGitPin(ctx, rep, name)
+}
+
+func (a *Adapter) installHermesDeps(ctx context.Context, rep *BootstrapReport, name string) error {
+	upd, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "apt-get", "update", "-y")
+	if err != nil {
+		return err
+	}
+	if upd.ExitCode != 0 {
+		return a.verifyFailed(rep, name, "apt-get update failed", "fix guest apt sources and re-run bootstrap")
+	}
+	inst, err := a.guestProbe(ctx, rep, name,
+		"sudo", "-n", "apt-get", "install", "-y", "--no-install-recommends",
+		"ripgrep", "ffmpeg", "build-essential", "python3-dev", "libffi-dev",
+		"curl", "ca-certificates", "git",
+	)
+	if err != nil {
+		return err
+	}
+	if inst.ExitCode != 0 {
+		return a.verifyFailed(rep, name, "apt-get install of hermes build deps failed", "fix guest apt and re-run bootstrap")
+	}
+	return nil
+}
+
+func (a *Adapter) verifyHermesGitPin(ctx context.Context, rep *BootstrapReport, name string) error {
+	head, err := a.guestProbe(ctx, rep, name,
+		"sudo", "-n", "-u", HermesUser, "--",
+		"git", "-C", hermesAgentDir, "rev-parse", "HEAD",
+	)
+	if err != nil {
+		return err
+	}
+	observed := strings.TrimSpace(string(head.Stdout))
+	if head.ExitCode != 0 || observed == "" {
+		return a.verifyFailed(rep, name, "could not read hermes agent git HEAD", "confirm the install at "+hermesAgentDir)
+	}
+	if observed != PromotedHermesCommit {
+		return a.verifyFailed(rep, name,
+			fmt.Sprintf("hermes agent commit %q != pinned %q", observed, PromotedHermesCommit),
+			"reconcile the pinned hermes install; do not paper over commit drift")
+	}
+	rep.record(name, true, "commit="+PromotedHermesCommit)
+	return nil
 }
 
 func (a *Adapter) reconcileHermesShim(ctx context.Context, rep *BootstrapReport) error {
@@ -291,6 +426,22 @@ func (a *Adapter) verifyHermesInTorioProjects(ctx context.Context, rep *Bootstra
 	}
 	if !hasGroup(string(res.Stdout), torioProjectsGroup) {
 		return a.verifyFailed(rep, name, "hermes is not in torio-projects", "add hermes to the torio-projects group on the guest")
+	}
+	rep.record(name, true, "member")
+	return nil
+}
+
+func (a *Adapter) verifyOperatorInTorioProjects(ctx context.Context, rep *BootstrapReport, operator string) error {
+	const name = "operator_torio_projects"
+	res, err := a.guestProbe(ctx, rep, name, "id", "-nG", operator)
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 {
+		return a.verifyFailed(rep, name, "cannot read operator group membership", "confirm the Lima login user exists on the guest")
+	}
+	if !hasGroup(string(res.Stdout), torioProjectsGroup) {
+		return a.verifyFailed(rep, name, "operator is not in torio-projects", "add the Lima login user to torio-projects on the guest")
 	}
 	rep.record(name, true, "member")
 	return nil

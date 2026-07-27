@@ -12,6 +12,7 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -31,6 +32,10 @@ const (
 	DefaultMemory = "8GiB"
 	DefaultDisk   = "60GiB"
 )
+
+// operatorUserPattern is the strict allowlist for Lima login / operator identity.
+// Rejects shell metacharacters, spaces, slashes, quotes, and command substitution.
+var operatorUserPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]{0,63}$`)
 
 //go:embed templates/torio.yaml
 var embeddedTemplate []byte
@@ -72,20 +77,30 @@ func (o InitOptions) withDefaults() InitOptions {
 	return o
 }
 
+// validateOperatorUser rejects empty or disallowed operator identities before they
+// reach template substitution or typed guest argv (no shell metacharacters).
+func validateOperatorUser(user string) error {
+	user = strings.TrimSpace(user)
+	if user == "" || user == placeholderOperator {
+		return fmt.Errorf("operator user is required")
+	}
+	if !operatorUserPattern.MatchString(user) {
+		return fmt.Errorf("operator user %q is not allowed", user)
+	}
+	return nil
+}
+
 func renderTemplate(opts InitOptions) ([]byte, error) {
 	opts = opts.withDefaults()
 	op := strings.TrimSpace(opts.OperatorUser)
-	if op == "" || op == placeholderOperator {
-		return nil, fmt.Errorf("operator user is required")
+	if err := validateOperatorUser(op); err != nil {
+		return nil, err
 	}
 	if opts.CPUs < 1 {
 		return nil, fmt.Errorf("cpus must be >= 1")
 	}
 	if strings.ContainsAny(opts.Memory, "\n\r") || strings.ContainsAny(opts.Disk, "\n\r") {
 		return nil, fmt.Errorf("memory/disk must be a single-line size string")
-	}
-	if strings.ContainsAny(op, "\n\r\"'\\") {
-		return nil, fmt.Errorf("operator user contains forbidden characters")
 	}
 
 	text := string(embeddedTemplate)

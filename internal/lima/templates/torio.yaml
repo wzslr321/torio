@@ -42,7 +42,7 @@ provision:
       set -euxo pipefail
       export DEBIAN_FRONTEND=noninteractive
       apt-get update -y
-      apt-get install -y --no-install-recommends git curl ca-certificates xz-utils sudo uidmap dbus-user-session
+      apt-get install -y --no-install-recommends git curl ca-certificates xz-utils sudo uidmap dbus-user-session ripgrep ffmpeg build-essential python3-dev libffi-dev
 
       if ! getent group torio-projects >/dev/null; then
         groupadd --system torio-projects

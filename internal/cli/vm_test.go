@@ -71,6 +71,7 @@ func TestVMInitCreatesHuman(t *testing.T) {
 	fake := &fakeLimaRunner{script: []scriptedResp{
 		{res: execx.Result{ExitCode: 0, Stdout: nil}}, // list: absent
 		{res: execx.Result{ExitCode: 0}},               // create
+		{res: listCompatibleJSON("torio", "Stopped")}, // post-create verify
 	}}
 	code, stdout, stderr := runVMWithFake(t, []string{"vm", "init"}, fake)
 	if code != int(ExitOK) {
@@ -79,8 +80,8 @@ func TestVMInitCreatesHuman(t *testing.T) {
 	if !strings.Contains(stdout, "created") || !strings.Contains(stdout, "torio vm start") {
 		t.Fatalf("stdout = %q, want created + next step", stdout)
 	}
-	if len(fake.calls) != 2 {
-		t.Fatalf("calls = %d, want 2", len(fake.calls))
+	if len(fake.calls) != 3 {
+		t.Fatalf("calls = %d, want 3 (list, create, post-create list)", len(fake.calls))
 	}
 	create := fake.calls[1]
 	if len(create) < 5 || create[1] != "create" || create[2] != "--name=torio" || create[3] != "--tty=false" {
@@ -92,6 +93,7 @@ func TestVMInitJSONCreated(t *testing.T) {
 	fake := &fakeLimaRunner{script: []scriptedResp{
 		{res: execx.Result{ExitCode: 0, Stdout: nil}},
 		{res: execx.Result{ExitCode: 0}},
+		{res: listCompatibleJSON("torio", "Stopped")},
 	}}
 	code, stdout, _ := runVMWithFake(t, []string{"--json", "vm", "init"}, fake)
 	if code != int(ExitOK) {
@@ -491,12 +493,15 @@ func bootstrapHappyResp() []scriptedResp {
 	out := func(s string) execx.Result { return execx.Result{ExitCode: 0, Stdout: []byte(s)} }
 	return []scriptedResp{
 		{res: listJSON("torio", "Running")},                  // list precondition
-		{res: execx.Result{ExitCode: 0}},                          // test -x target
-		{res: out("/home/hermes/hermes-agent/venv/bin/hermes\n")}, // readlink shim (correct)
 		{res: out("1000\n")},                                      // id -u hermes
 		{res: out("torio-projects:x:1001:hermes\n")},              // getent group torio-projects
 		{res: out("hermes torio-projects\n")},                     // id -nG hermes (torio-projects)
+		{res: out("testop torio-projects\n")},                     // id -nG operator
 		{res: out("hermes torio-projects\n")},                     // id -nG hermes (not docker)
+		{res: execx.Result{ExitCode: 0}},                          // test -x launcher (install present)
+		{res: out(lima.PromotedHermesCommit + "\n")},              // git rev-parse HEAD
+		{res: execx.Result{ExitCode: 0}},                          // test -x launcher (shim)
+		{res: out("/home/hermes/hermes-agent/venv/bin/hermes\n")}, // readlink shim
 		{res: out("aarch64\n")},                                   // uname -m
 		{res: out("Hermes Agent v0.19.0 (2026.7.20)\n")},          // hermes --version
 		{res: out("git version 2.43.0\n")},                        // git --version
@@ -579,7 +584,7 @@ func TestVMBootstrapVerificationFailureIsExit6(t *testing.T) {
 	// Arch mismatch → verification failure → exit 6, with the failing check
 	// surfaced in the redacted error details.
 	s := bootstrapHappyResp()
-	s[7] = scriptedResp{res: execx.Result{ExitCode: 0, Stdout: []byte("x86_64\n")}}
+	s[10] = scriptedResp{res: execx.Result{ExitCode: 0, Stdout: []byte("x86_64\n")}}
 	fake := &fakeLimaRunner{script: s}
 	code, stdout, _ := runVMWithFake(t, []string{"vm", "bootstrap", "--json", "--timeout", "5m"}, fake)
 	if code != int(ExitVerification) {
@@ -597,7 +602,7 @@ func TestVMBootstrapVerificationFailureIsExit6(t *testing.T) {
 
 func TestVMBootstrapHumanErrorNoStdoutContamination(t *testing.T) {
 	s := bootstrapHappyResp()
-	s[7] = scriptedResp{res: execx.Result{ExitCode: 0, Stdout: []byte("x86_64\n")}}
+	s[10] = scriptedResp{res: execx.Result{ExitCode: 0, Stdout: []byte("x86_64\n")}}
 	fake := &fakeLimaRunner{script: s}
 	code, stdout, stderr := runVMWithFake(t, []string{"vm", "bootstrap", "--timeout", "5m"}, fake)
 	if code != int(ExitVerification) {
