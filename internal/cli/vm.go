@@ -208,14 +208,15 @@ func newVMBootstrapCmd(a *app) *cobra.Command {
 		Short: "Reconcile and verify the existing Torio target for Remote Second Brain V1",
 		Long: "Reconcile and verify the already-created Torio VM so an operator has a " +
 			"usable Remote Second Brain V1 path: a stable non-interactive `hermes` command " +
-			"and Docker reachable by the intended non-root guest user (" + lima.HermesUser + ").\n\n" +
+			"and the V1 guest filesystem layout on native ext4.\n\n" +
 			"It operates only on the existing target after a verified Running precondition, " +
 			"through the typed Lima boundary. It is idempotent and narrow: it may ensure the " +
-			"hermes docker-group membership and the `hermes` PATH shim, but never recreates or " +
-			"re-images the VM, installs a model/provider, accepts secrets, or creates services. " +
-			"It verifies (not merely trusts) architecture, the hermes command, Docker reach, git, " +
-			"the persistent KB/workspace paths on native Linux, and the absence of a broad host " +
-			"mount — failing closed with remediation on any drift.\n\n" +
+			"`hermes` PATH shim, but never recreates or re-images the VM, installs a model/provider, " +
+			"accepts secrets, or creates services. It verifies (not merely trusts) the hermes user, " +
+			"torio-projects membership, absence of docker-group membership for hermes, architecture, " +
+			"the hermes command, git, the persistent profile/brain/workspace paths with correct " +
+			"ownership and modes on native Linux, and the absence of a broad host mount — failing " +
+			"closed with remediation on any drift.\n\n" +
 			"Bootstrap issues several bounded guest probes; run it with an ample --timeout " +
 			"(e.g. --timeout 5m).\n\n" +
 			"After a successful run, reach the remote Hermes instance yourself (operator-controlled), " +
@@ -224,8 +225,8 @@ func newVMBootstrapCmd(a *app) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := a.opContext(cmd)
 			defer cancel()
-			// V1 runs unpinned: the observed hermes/docker versions are reported so
-			// drift is visible. A later slice can thread version-lock pins through
+			// V1 runs unpinned: the observed hermes version is reported so drift is
+			// visible. A later slice can thread version-lock pins through
 			// BootstrapOptions for enforcement.
 			rep, err := a.newLima().Bootstrap(ctx, lima.BootstrapOptions{})
 			if err != nil {
@@ -280,7 +281,8 @@ type vmBootstrapData struct {
 	Checks        []vmCheckData `json:"checks"`
 	GuestUser     string        `json:"guest_user"`
 	HermesHome    string        `json:"hermes_home"`
-	KBPath        string        `json:"kb_path"`
+	ProfilePath   string        `json:"profile_path"`
+	BrainPath     string        `json:"brain_path"`
 	WorkspacePath string        `json:"workspace_path"`
 }
 
@@ -302,7 +304,8 @@ func bootstrapData(rep lima.BootstrapReport) vmBootstrapData {
 		Checks:        checks,
 		GuestUser:     lima.HermesUser,
 		HermesHome:    lima.HermesHome,
-		KBPath:        lima.HermesKBPath,
+		ProfilePath:   lima.HermesProfilePath,
+		BrainPath:     lima.HermesBrainPath,
 		WorkspacePath: lima.HermesWorkspacePath,
 	}
 }
@@ -323,8 +326,8 @@ func bootstrapReportDetails(rep lima.BootstrapReport) map[string]any {
 
 // emitVMBootstrap renders a successful bootstrap. JSON mode emits exactly one
 // success envelope; human mode prints one line per proven check plus the
-// operator connection handoff (the persistent KB location and the stable command
-// path). The post-bootstrap action to reach Hermes stays operator-controlled.
+// operator connection handoff (the persistent profile/brain locations and the
+// stable command path). The post-bootstrap action to reach Hermes stays operator-controlled.
 func (a *app) emitVMBootstrap(rep lima.BootstrapReport) error {
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("vm.bootstrap", bootstrapData(rep), nil))
@@ -340,11 +343,12 @@ func (a *app) emitVMBootstrap(rep lima.BootstrapReport) error {
 	}
 	_, err := fmt.Fprintf(a.stdout,
 		"\nRemote Second Brain V1 path ready on %s.\n"+
-			"Persistent Hermes home: %s\n"+
-			"Persistent KB:          %s\n"+
-			"Persistent workspace:   %s\n"+
+			"Persistent Hermes home:    %s\n"+
+			"Persistent profile:        %s\n"+
+			"Persistent Second Brain:   %s\n"+
+			"Persistent workspace:      %s\n"+
 			"Reach Hermes (operator-controlled): torio vm ssh -- sudo -u %s -- hermes --version\n",
-		rep.Instance, lima.HermesHome, lima.HermesKBPath, lima.HermesWorkspacePath, lima.HermesUser)
+		rep.Instance, lima.HermesHome, lima.HermesProfilePath, lima.HermesBrainPath, lima.HermesWorkspacePath, lima.HermesUser)
 	return err
 }
 

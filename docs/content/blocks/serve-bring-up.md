@@ -1,8 +1,9 @@
 ## Bring up the loopback backend {#serve-bring-up}
 
 Install and start the persistent Hermes backend as a user systemd service inside
-the VM, using the existing `/home/hermes/.hermes` profile. It binds guest
-loopback only (`127.0.0.1:9119`) and never a public address:
+the VM, using the existing `/home/hermes/.hermes` profile (application state,
+not the Second Brain vault at `/home/hermes/brain`). It binds guest loopback
+only (`127.0.0.1:9119`) and never a public address:
 
 ```bash
 torio serve install --timeout 2m

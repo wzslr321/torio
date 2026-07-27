@@ -37,9 +37,8 @@ success. `bootstrap` operates only on the existing target after a verified
 `Running` precondition, through the typed Lima boundary. It is idempotent and,
 on a fully-reconciled target, mutates nothing. It:
 
-- ensures the intended non-root guest user `hermes` is in the `docker` group;
 - ensures `/usr/local/bin/hermes` is a symlink to the pinned launcher (only after confirming the launcher exists — a missing launcher is reported as drift, never a dangling shim);
-- **verifies** (not merely trusts an exit code): `uname -m == aarch64`; `hermes --version` through the documented stable command path; the Docker server is reachable by the `hermes` identity; `git --version`; the persistent knowledge-base and workspace paths are directories on native Linux (ext4), not a host share; and no broad macOS host mount is present.
+- **verifies** (not merely trusts an exit code): the `hermes` user exists; group `torio-projects` exists and `hermes` is a member; `hermes` is **not** in the `docker` group (rootful Docker for hermes is forbidden); `uname -m == aarch64`; `hermes --version` through the documented stable command path; `git --version`; the persistent profile, Second Brain, and workspace paths are directories with the expected owner, group, and mode on native Linux (ext4), not a host share; and no broad macOS host mount is present.
 
 Any drift or unverifiable state fails closed (exit 6) with remediation. A rerun
 is success only when every postcondition is proven. Use `--json` for the
@@ -51,18 +50,23 @@ machine-readable envelope (one document on stdout).
 | --- | --- |
 | Guest user | `hermes` |
 | Hermes home | `/home/hermes` |
-| Knowledge base / profile | `/home/hermes/.hermes` |
+| Profile / application state | `/home/hermes/.hermes` |
+| Second Brain vault | `/home/hermes/brain` |
 | Workspace root | `/home/hermes/projects` |
 
 These are also emitted in the `torio vm bootstrap` output (human and `--json`).
+
+V1 can create the VM via `torio vm init`; bootstrap then verifies the guest layout
+above on an already-running instance. It never recreates or re-images the VM.
 
 ## 2. Persistent Desktop backend (D5 — loopback-only)
 
 ### Bring up the loopback backend
 
 Install and start the persistent Hermes backend as a user systemd service inside
-the VM, using the existing `/home/hermes/.hermes` profile. It binds guest
-loopback only (`127.0.0.1:9119`) and never a public address:
+the VM, using the existing `/home/hermes/.hermes` profile (application state,
+not the Second Brain vault at `/home/hermes/brain`). It binds guest loopback
+only (`127.0.0.1:9119`) and never a public address:
 
 ```bash
 torio serve install --timeout 2m

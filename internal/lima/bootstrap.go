@@ -10,7 +10,7 @@ import (
 
 // Bootstrap reconciles and verifies the already-created Torio target so an
 // operator has a usable Remote Second Brain V1 path: a stable non-interactive
-// `hermes` command and Docker reachable by the intended non-root guest identity.
+// `hermes` command and the V1 guest filesystem layout on native ext4.
 //
 // It is deliberately narrow. It operates ONLY on the existing InstanceName after
 // a verified Running precondition, through the same typed limactl/execx boundary
@@ -20,31 +20,33 @@ import (
 // never creates gateway/serve services.
 //
 // The intended guest identity is the dedicated non-root `hermes` service user
-// (uid distinct from the Lima login user): it owns the persistent KB/profile
-// under /home/hermes and is a member of the docker group (verified evidence in
-// docs/spike-results/evidence/etap-0b/s0-target-vm.txt). `limactl shell` logs in
-// as the Lima user, so the documented stable path reaches hermes explicitly via
+// (uid distinct from the Lima login user): it owns the persistent profile under
+// /home/hermes/.hermes and the Second Brain vault under /home/hermes/brain, and
+// is a member of torio-projects (not the docker group — rootful Docker for
+// hermes is forbidden per ADR-0015). `limactl shell` logs in as the Lima user,
+// so the documented stable path reaches hermes explicitly via
 // `sudo -u hermes -- hermes …`; the bare `hermes` name resolves through a fixed
 // symlink on sudo's secure_path.
 //
-// Reconcile is idempotent and limited to the narrowly declared PATH/group/shim
-// setup:
-//   - ensure the `hermes` user is in the docker group (additive `usermod -aG`);
+// Reconcile is idempotent and limited to the narrowly declared PATH/shim setup:
 //   - ensure /usr/local/bin/hermes is a symlink to the pinned launcher, but only
 //     after confirming the launcher exists (a missing launcher is reported as
 //     drift, never papered over with a dangling shim).
 //
 // Verification proves (never merely trusts an exit code) every postcondition and
 // fails closed on any mismatch or unverifiable state:
+//   - the hermes user exists;
+//   - group torio-projects exists and hermes is a member;
+//   - hermes is NOT in the docker group;
 //   - uname -m == aarch64;
 //   - `hermes --version` works through the documented stable command path;
-//   - the Docker server is reachable by the hermes identity;
 //   - git --version works;
-//   - each required Hermes KB/workspace path is a directory on native ext4;
+//   - each required path is a directory with the expected owner, group, and mode
+//     on native ext4;
 //   - no macOS host-share mount (9p/virtiofs/fuse/nfs/cifs) is present.
 //
 // A rerun is success only when all postconditions are proven. A drift
-// (architecture/version/image/mount) is reported, not repaired.
+// (architecture/version/image/mount/ownership) is reported, not repaired.
 func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (BootstrapReport, error) {
 	rep := BootstrapReport{Instance: InstanceName}
 
@@ -72,21 +74,27 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 	}
 
 	// --- Reconcile (idempotent, narrow) ---
-	if err := a.reconcileDockerGroup(ctx, &rep); err != nil {
-		return rep, err
-	}
 	if err := a.reconcileHermesShim(ctx, &rep); err != nil {
 		return rep, err
 	}
 
 	// --- Verify (read-only, fail closed) ---
+	if err := a.verifyHermesUser(ctx, &rep); err != nil {
+		return rep, err
+	}
+	if err := a.verifyTorioProjectsGroup(ctx, &rep); err != nil {
+		return rep, err
+	}
+	if err := a.verifyHermesInTorioProjects(ctx, &rep); err != nil {
+		return rep, err
+	}
+	if err := a.verifyHermesNotInDocker(ctx, &rep); err != nil {
+		return rep, err
+	}
 	if err := a.verifyArch(ctx, &rep); err != nil {
 		return rep, err
 	}
 	if err := a.verifyHermes(ctx, &rep, opts.HermesVersion); err != nil {
-		return rep, err
-	}
-	if err := a.verifyDocker(ctx, &rep); err != nil {
 		return rep, err
 	}
 	if err := a.verifyGit(ctx, &rep); err != nil {
@@ -106,16 +114,19 @@ const bootstrapOp = "bootstrap"
 
 // The intended guest identity and the persistent Hermes locations. These are
 // exported so the CLI can surface the Remote Second Brain V1 connection handoff
-// (the persistent home/KB) without duplicating string literals.
+// without duplicating string literals.
 const (
 	// HermesUser is the dedicated non-root guest identity that owns the
-	// persistent KB/profile and is a member of the docker group.
+	// persistent profile and Second Brain vault.
 	HermesUser = "hermes"
 	// HermesHome is the persistent Hermes home on the VM's Linux filesystem.
 	HermesHome = "/home/hermes"
-	// HermesKBPath is the persistent Hermes profile / knowledge base directory.
-	HermesKBPath = "/home/hermes/.hermes"
-	// HermesWorkspacePath is the persistent workspace directory.
+	// HermesProfilePath is the persistent Hermes application profile / state
+	// directory (NOT the Second Brain vault).
+	HermesProfilePath = "/home/hermes/.hermes"
+	// HermesBrainPath is the persistent Second Brain vault directory.
+	HermesBrainPath = "/home/hermes/brain"
+	// HermesWorkspacePath is the persistent shared workspace directory.
 	HermesWorkspacePath = "/home/hermes/projects"
 )
 
@@ -123,19 +134,30 @@ const (
 // caller input) so the guest changes are a small, auditable, fixed set — never a
 // general remote-script transport.
 const (
-	dockerGroup    = "docker"
-	requiredArch   = "aarch64"
-	hermesTarget   = "/home/hermes/hermes-agent/venv/bin/hermes" // pinned launcher (owned by hermes)
-	hermesShimPath = "/usr/local/bin/hermes"                     // on sudo secure_path
+	dockerGroup        = "docker"
+	torioProjectsGroup = "torio-projects"
+	requiredArch       = "aarch64"
+	hermesTarget       = "/home/hermes/hermes-agent/venv/bin/hermes" // pinned launcher (owned by hermes)
+	hermesShimPath     = "/usr/local/bin/hermes"                     // on sudo secure_path
 )
 
-// bootstrapRequiredPaths are the persistent Hermes KB/profile and workspace
-// directories that must resolve on the VM's native Linux filesystem, never a
-// macOS host share (ADR-0003). Owned by the hermes user under its 0750 home, so
-// they are inspected via sudo.
-var bootstrapRequiredPaths = []string{
-	HermesKBPath,
-	HermesWorkspacePath,
+// bootstrapPathSpec is one required directory and its expected ownership/mode.
+type bootstrapPathSpec struct {
+	path   string
+	owner  string
+	group  string
+	modes  []string // accepted stat -c %a values (0710 may appear as 710)
+	setgid bool     // when true, mode must have the setgid bit (2xxx)
+}
+
+// bootstrapRequiredPaths are the persistent Hermes directories that must resolve
+// on the VM's native Linux filesystem with the V1 layout (ADR-0015 / Gate 0
+// FINDINGS). Owned paths are inspected via sudo.
+var bootstrapRequiredPaths = []bootstrapPathSpec{
+	{path: HermesHome, owner: HermesUser, group: torioProjectsGroup, modes: []string{"710", "0710"}},
+	{path: HermesProfilePath, owner: HermesUser, group: HermesUser, modes: []string{"750", "0750"}},
+	{path: HermesBrainPath, owner: HermesUser, group: HermesUser, modes: []string{"750", "0750"}},
+	{path: HermesWorkspacePath, owner: HermesUser, group: torioProjectsGroup, modes: []string{"2770"}, setgid: true},
 }
 
 // hostShareFSTypes is the findmnt -t filter for macOS host-share filesystems. A
@@ -200,30 +222,6 @@ func (a *Adapter) guestProbe(ctx context.Context, rep *BootstrapReport, name str
 	return res, nil
 }
 
-func (a *Adapter) reconcileDockerGroup(ctx context.Context, rep *BootstrapReport) error {
-	const name = "docker_group"
-	res, err := a.guestProbe(ctx, rep, name, "id", "-nG", HermesUser)
-	if err != nil {
-		return err
-	}
-	if res.ExitCode != 0 {
-		return a.verifyFailed(rep, name, "cannot read hermes group membership", "confirm the hermes user exists on the guest")
-	}
-	if hasGroup(string(res.Stdout), dockerGroup) {
-		rep.record(name, true, "already a member")
-		return nil
-	}
-	add, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "usermod", "-aG", dockerGroup, HermesUser)
-	if err != nil {
-		return err
-	}
-	if add.ExitCode != 0 {
-		return a.verifyFailed(rep, name, "usermod -aG docker hermes failed", "grant the hermes user docker group membership on the guest")
-	}
-	rep.record(name, true, "added to docker group")
-	return nil
-}
-
 func (a *Adapter) reconcileHermesShim(ctx context.Context, rep *BootstrapReport) error {
 	const name = "hermes_shim"
 	// Never create a dangling shim: confirm the pinned launcher exists first. A
@@ -251,6 +249,66 @@ func (a *Adapter) reconcileHermesShim(ctx context.Context, rep *BootstrapReport)
 		return a.verifyFailed(rep, name, "could not install the hermes shim", "check write access to "+hermesShimPath)
 	}
 	rep.record(name, true, "shim installed")
+	return nil
+}
+
+func (a *Adapter) verifyHermesUser(ctx context.Context, rep *BootstrapReport) error {
+	const name = "hermes_user"
+	res, err := a.guestProbe(ctx, rep, name, "id", "-u", HermesUser)
+	if err != nil {
+		return err
+	}
+	uid := strings.TrimSpace(string(res.Stdout))
+	if res.ExitCode != 0 || uid == "" {
+		return a.verifyFailed(rep, name, "hermes user not found", "provision the hermes service user on the guest")
+	}
+	rep.record(name, true, "uid="+uid)
+	return nil
+}
+
+func (a *Adapter) verifyTorioProjectsGroup(ctx context.Context, rep *BootstrapReport) error {
+	const name = "torio_projects_group"
+	res, err := a.guestProbe(ctx, rep, name, "getent", "group", torioProjectsGroup)
+	if err != nil {
+		return err
+	}
+	line := strings.TrimSpace(string(res.Stdout))
+	if res.ExitCode != 0 || line == "" {
+		return a.verifyFailed(rep, name, "group torio-projects not found", "create the torio-projects group on the guest")
+	}
+	rep.record(name, true, torioProjectsGroup)
+	return nil
+}
+
+func (a *Adapter) verifyHermesInTorioProjects(ctx context.Context, rep *BootstrapReport) error {
+	const name = "hermes_torio_projects"
+	res, err := a.guestProbe(ctx, rep, name, "id", "-nG", HermesUser)
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 {
+		return a.verifyFailed(rep, name, "cannot read hermes group membership", "confirm the hermes user exists on the guest")
+	}
+	if !hasGroup(string(res.Stdout), torioProjectsGroup) {
+		return a.verifyFailed(rep, name, "hermes is not in torio-projects", "add hermes to the torio-projects group on the guest")
+	}
+	rep.record(name, true, "member")
+	return nil
+}
+
+func (a *Adapter) verifyHermesNotInDocker(ctx context.Context, rep *BootstrapReport) error {
+	const name = "hermes_not_in_docker"
+	res, err := a.guestProbe(ctx, rep, name, "id", "-nG", HermesUser)
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 {
+		return a.verifyFailed(rep, name, "cannot read hermes group membership", "confirm the hermes user exists on the guest")
+	}
+	if hasGroup(string(res.Stdout), dockerGroup) {
+		return a.verifyFailed(rep, name, "hermes is in the docker group", "remove hermes from the docker group; rootful Docker for hermes is forbidden (ADR-0015)")
+	}
+	rep.record(name, true, "not a member")
 	return nil
 }
 
@@ -290,24 +348,6 @@ func (a *Adapter) verifyHermes(ctx context.Context, rep *BootstrapReport, pinned
 	return nil
 }
 
-func (a *Adapter) verifyDocker(ctx context.Context, rep *BootstrapReport) error {
-	const name = "docker_server"
-	// `docker version --format {{.Server.Version}}` returns non-zero if the
-	// server is unreachable, so a zero exit with a non-empty server version
-	// proves the daemon is reachable by the hermes identity — not merely that a
-	// client binary exists.
-	res, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "-u", HermesUser, "--", "docker", "version", "--format", "{{.Server.Version}}")
-	if err != nil {
-		return err
-	}
-	server := strings.TrimSpace(string(res.Stdout))
-	if res.ExitCode != 0 || server == "" {
-		return a.verifyFailed(rep, name, "docker server not reachable by the hermes identity", "ensure the docker daemon is running and hermes is in the docker group")
-	}
-	rep.record(name, true, server)
-	return nil
-}
-
 func (a *Adapter) verifyGit(ctx context.Context, rep *BootstrapReport) error {
 	const name = "git"
 	res, err := a.guestProbe(ctx, rep, name, "git", "--version")
@@ -323,16 +363,33 @@ func (a *Adapter) verifyGit(ctx context.Context, rep *BootstrapReport) error {
 }
 
 func (a *Adapter) verifyPaths(ctx context.Context, rep *BootstrapReport) error {
-	for _, p := range bootstrapRequiredPaths {
-		name := "path:" + p
-		st, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%F", p)
+	for _, spec := range bootstrapRequiredPaths {
+		name := "path:" + spec.path
+		st, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%F", spec.path)
 		if err != nil {
 			return err
 		}
 		if st.ExitCode != 0 || strings.TrimSpace(string(st.Stdout)) != "directory" {
 			return a.verifyFailed(rep, name, "not a directory", "create the persistent Hermes directory on the guest")
 		}
-		fm, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "findmnt", "-n", "-o", "FSTYPE,SOURCE", "-T", p)
+		og, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%U:%G %a", spec.path)
+		if err != nil {
+			return err
+		}
+		if og.ExitCode != 0 {
+			return a.verifyFailed(rep, name, "could not read ownership/mode", "verify the path exists on the guest")
+		}
+		owner, group, mode, ok := parseStatOwnership(string(og.Stdout))
+		if !ok {
+			return a.verifyFailed(rep, name, "unparseable ownership/mode", "verify the path exists on the guest")
+		}
+		if owner != spec.owner || group != spec.group {
+			return a.verifyFailed(rep, name, fmt.Sprintf("owner:group %s:%s, want %s:%s", owner, group, spec.owner, spec.group), "fix directory ownership on the guest")
+		}
+		if !modeMatches(spec, mode) {
+			return a.verifyFailed(rep, name, fmt.Sprintf("mode %s, want one of %v", mode, spec.modes), "fix directory permissions on the guest")
+		}
+		fm, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "findmnt", "-n", "-o", "FSTYPE,SOURCE", "-T", spec.path)
 		if err != nil {
 			return err
 		}
@@ -344,7 +401,7 @@ func (a *Adapter) verifyPaths(ctx context.Context, rep *BootstrapReport) error {
 		if !nativeFSTypes[fstype] {
 			return a.verifyFailed(rep, name, "backed by non-native filesystem "+fstype, "Hermes state must live on the VM's Linux filesystem, not a host share (ADR-0003)")
 		}
-		rep.record(name, true, strings.Join(fields, " "))
+		rep.record(name, true, fmt.Sprintf("%s:%s %s %s", owner, group, mode, strings.Join(fields, " ")))
 	}
 	return nil
 }
@@ -384,6 +441,32 @@ func (a *Adapter) verifyNoHostMounts(ctx context.Context, rep *BootstrapReport) 
 func hasGroup(groups, group string) bool {
 	for _, g := range strings.Fields(groups) {
 		if g == group {
+			return true
+		}
+	}
+	return false
+}
+
+// parseStatOwnership parses `stat -c '%U:%G %a'` output into owner, group, mode.
+func parseStatOwnership(out string) (owner, group, mode string, ok bool) {
+	line := strings.TrimSpace(out)
+	fields := strings.Fields(line)
+	if len(fields) < 2 {
+		return "", "", "", false
+	}
+	mode = fields[len(fields)-1]
+	og := strings.Join(fields[:len(fields)-1], " ")
+	parts := strings.SplitN(og, ":", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || mode == "" {
+		return "", "", "", false
+	}
+	return parts[0], parts[1], mode, true
+}
+
+// modeMatches reports whether the observed stat mode satisfies the path spec.
+func modeMatches(spec bootstrapPathSpec, mode string) bool {
+	for _, want := range spec.modes {
+		if mode == want {
 			return true
 		}
 	}
