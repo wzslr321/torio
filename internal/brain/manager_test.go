@@ -12,6 +12,7 @@ package brain
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -79,9 +80,12 @@ func TestInitCreatesMissingCanonicalDirectoryBeforeScaffolding(t *testing.T) {
 	}
 }
 
-func TestInitDoesNotTrustProjectListWhenShowIsMissing(t *testing.T) {
+// `show` exiting non-zero means the Hermes CLI is broken, not that the slug is
+// absent. The list fallback then only proves the CLI is reachable; its output
+// must never be parsed for the primary path.
+func TestInitDoesNotTrustProjectListWhenShowIsUnavailable(t *testing.T) {
 	g := initializedFake()
-	g.showMissing = true
+	g.showBrokenCLI = true
 
 	report, err := New(g).Init(context.Background())
 	if err != nil {
@@ -304,6 +308,81 @@ func TestStatusRejectsBrainPresentOnlyAsNonPrimaryProjectFolder(t *testing.T) {
 	}
 	if !report.ProjectConflict || report.State != StateDrift {
 		t.Fatalf("secondary-only path did not fail closed as drift: %#v", report)
+	}
+}
+
+// Real `hermes project show <slug>` exits 0 for an unknown slug and prints
+// nothing on stdout, so an absent project must never be reported as a slug
+// conflict on an otherwise-fresh guest.
+func TestStatusReportsUninitializedWhenProjectShowExitsZeroWithoutOutput(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*fakeGuest)
+	}{
+		{"canonical path missing", func(g *fakeGuest) { g.pathExists = false }},
+		{"canonical path empty", func(g *fakeGuest) { g.pathExists = true; g.empty = true }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := readyFake()
+			tc.mutate(g)
+
+			report, err := New(g).Status(context.Background())
+			if err != nil {
+				t.Fatalf("Status() error = %v", err)
+			}
+			if report.ProjectRegistered || report.ProjectConflict {
+				t.Fatalf("absent project reported as registered/conflicting: %#v", report)
+			}
+			if report.State != StateUninitialized {
+				t.Fatalf("state = %q, want %q; report=%#v", report.State, StateUninitialized, report)
+			}
+			for _, issue := range []string{"project_slug_conflict", "project_registered_without_scaffold"} {
+				if slices.Contains(report.Issues, issue) {
+					t.Fatalf("absent project raised issue %q: %#v", issue, report)
+				}
+			}
+		})
+	}
+}
+
+// An absent project must not make Init refuse a directory Torio just created
+// empty; it must fall through to registration.
+func TestInitRegistersProjectWhenProjectShowExitsZeroWithoutOutput(t *testing.T) {
+	g := readyFake()
+	g.pathExists = false
+
+	report, err := New(g).Init(context.Background())
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if !report.Created || report.Status.State != StateInitialized {
+		t.Fatalf("report = %#v, want created initialized Brain", report)
+	}
+	if !g.saw("hermes project create Second Brain " + Path + " --slug " + ProjectSlug) {
+		t.Fatalf("absent project was not registered: %v", g.calls)
+	}
+}
+
+// The exit-code fix must not weaken conflict detection: a slug whose printed
+// primary path is not ours is still a refusal.
+func TestStatusReportsConflictWhenProjectSlugPointsElsewhere(t *testing.T) {
+	g := initializedFake()
+	g.registered = false
+	g.wrongProject = true
+
+	report, err := New(g).Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if report.ProjectRegistered || !report.ProjectConflict {
+		t.Fatalf("foreign primary path was not a conflict: %#v", report)
+	}
+	if report.State != StateDrift {
+		t.Fatalf("state = %q, want %q; report=%#v", report.State, StateDrift, report)
+	}
+	if !slices.Contains(report.Issues, "project_slug_conflict") {
+		t.Fatalf("issues = %v, want project_slug_conflict", report.Issues)
 	}
 }
 

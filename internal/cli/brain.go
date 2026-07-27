@@ -129,6 +129,7 @@ type brainStatusData struct {
 	AttachmentFiles   int      `json:"attachment_files"`
 	TotalBytes        int64    `json:"total_bytes"`
 	ProjectRegistered bool     `json:"project_registered"`
+	ProjectConflict   bool     `json:"project_conflict"`
 	RetrievalSkill    string   `json:"retrieval_skill"`
 	Issues            []string `json:"issues"`
 }
@@ -158,6 +159,7 @@ func brainData(report brain.StatusReport) brainStatusData {
 		AttachmentFiles:   report.AttachmentFiles,
 		TotalBytes:        report.TotalBytes,
 		ProjectRegistered: report.ProjectRegistered,
+		ProjectConflict:   report.ProjectConflict,
 		RetrievalSkill:    string(report.SkillState),
 		Issues:            issues,
 	}
@@ -242,6 +244,7 @@ func brainStatusDetails(report brain.StatusReport) map[string]any {
 		"attachment_files":   data.AttachmentFiles,
 		"total_bytes":        data.TotalBytes,
 		"project_registered": data.ProjectRegistered,
+		"project_conflict":   data.ProjectConflict,
 		"retrieval_skill":    data.RetrievalSkill,
 		"issues":             data.Issues,
 	}
