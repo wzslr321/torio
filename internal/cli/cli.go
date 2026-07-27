@@ -18,7 +18,9 @@ import (
 
 	"github.com/wzslr321/torio/internal/brain"
 	"github.com/wzslr321/torio/internal/config"
+	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
+	"github.com/wzslr321/torio/internal/projects"
 	"github.com/wzslr321/torio/internal/serve"
 )
 
@@ -54,6 +56,17 @@ type app struct {
 	// production wires the manager over the same typed Lima guest boundary.
 	newBrain func(*lima.Adapter, lima.BootstrapOptions) brainService
 
+	// newProjects builds the project manager over the guest and the config
+	// registry. Same test seam pattern as newBrain.
+	newProjects func(*lima.Adapter, lima.BootstrapOptions) projectService
+
+	// newShellSpec builds the operator shell argv for a project path, and
+	// newInteractive the runner that executes it. They are separate seams
+	// because the production spec reads host state (the Lima ssh config, the
+	// SSH agent) that a test must not depend on.
+	newShellSpec   func(projectPath string) (execx.InteractiveCommand, error)
+	newInteractive func() execx.InteractiveRunner
+
 	// lookupOperatorUser resolves the Lima login identity for `vm init`.
 	// Production uses the current OS user; tests inject a fixed name.
 	lookupOperatorUser func() (string, error)
@@ -83,6 +96,22 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 		a.newBrain = func(adapter *lima.Adapter, opts lima.BootstrapOptions) brainService {
 			return brain.New(adapter, opts)
 		}
+	}
+	if a.newProjects == nil {
+		a.newProjects = func(adapter *lima.Adapter, opts lima.BootstrapOptions) projectService {
+			// The registry resolves the same canonical config path this
+			// invocation was started with, so --config/--state-dir apply to the
+			// project registry exactly as they do to everything else.
+			return projects.New(adapter, projects.FileRegistry{
+				Options: config.Options{ConfigPath: a.configPath, StateDir: a.stateDir},
+			}, opts)
+		}
+	}
+	if a.newShellSpec == nil {
+		a.newShellSpec = lima.OperatorShellSpec
+	}
+	if a.newInteractive == nil {
+		a.newInteractive = func() execx.InteractiveRunner { return &execx.InteractiveExecRunner{} }
 	}
 	if a.lookupOperatorUser == nil {
 		a.lookupOperatorUser = defaultLookupOperatorUser
@@ -180,6 +209,7 @@ func newRootCmd(a *app) *cobra.Command {
 	root.AddCommand(newVMCmd(a))
 	root.AddCommand(newServeCmd(a))
 	root.AddCommand(newBrainCmd(a))
+	root.AddCommand(newProjectCmd(a))
 	return root
 }
 
