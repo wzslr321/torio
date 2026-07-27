@@ -41,6 +41,15 @@ func (f *fakeLimaRunner) Run(_ context.Context, cmd execx.Command) (execx.Result
 // runner wired behind the Lima adapter seam, returning exit code + streams.
 func runVMWithFake(t *testing.T, args []string, fake execx.Runner) (int, string, string) {
 	t.Helper()
+	code, stdout, stderr, _ := runVMWithFakeBoundJSON(t, args, fake)
+	return code, stdout, stderr
+}
+
+// runVMWithFakeBoundJSON is runVMWithFake plus the value Cobra actually bound
+// into --json, so a test can prove an error envelope came from the early args
+// scan (the flag never got bound) rather than from the parsed flag.
+func runVMWithFakeBoundJSON(t *testing.T, args []string, fake execx.Runner) (int, string, string, bool) {
+	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var stdout, stderr bytes.Buffer
@@ -52,7 +61,7 @@ func runVMWithFake(t *testing.T, args []string, fake execx.Runner) (int, string,
 		lookupOperatorUser: func() (string, error) { return "testop", nil },
 	}
 	code := runWithApp(context.Background(), a, args)
-	return code, stdout.String(), stderr.String()
+	return code, stdout.String(), stderr.String(), a.jsonOut
 }
 
 func listCompatibleJSON(name, status string) execx.Result {
@@ -354,6 +363,54 @@ func TestVMSSHRemoteNonZeroIsNotSuccess(t *testing.T) {
 	env := decodeOneEnvelope(t, stdout)
 	if env["ok"] != false {
 		t.Errorf("ok = %v, want false", env["ok"])
+	}
+}
+
+// TestVMSSHForwardedTokensDoNotSelectJSONOutput pins the argv boundary: tokens
+// at and after the `--` terminator belong to the remote command, never to
+// torio. An operator who never asked for JSON must get the human error line on
+// stderr and a stdout free of any envelope, even when the forwarded command
+// itself contains a `--json` token.
+func TestVMSSHForwardedTokensDoNotSelectJSONOutput(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: execx.Result{ExitCode: 1, Stderr: []byte("boom")}},
+	}}
+	code, stdout, stderr := runVMWithFake(t, []string{"vm", "ssh", "--", "echo", "--json"}, fake)
+	if code != int(ExitExternal) {
+		t.Fatalf("exit = %d, want %d (external)", code, int(ExitExternal))
+	}
+	if stdout != "" {
+		t.Errorf("human error mode: stdout must stay free of an envelope, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "torio: remote command exited 1") {
+		t.Errorf("human error line missing from stderr, got %q", stderr)
+	}
+}
+
+// TestEarlyUsageErrorInfersJSONBeforeTerminator guards the fallback the
+// terminator boundary must not take down: when flag parsing fails before Cobra
+// binds --json, the args scan is the only signal left, so a --json given before
+// any `--` must still select the machine envelope. --timeout is parsed (and
+// rejected) first here, so a.jsonOut is provably still false.
+func TestEarlyUsageErrorInfersJSONBeforeTerminator(t *testing.T) {
+	fake := &fakeLimaRunner{}
+	code, stdout, _, boundJSON := runVMWithFakeBoundJSON(t, []string{"--timeout=bogus", "--json", "vm", "status"}, fake)
+	if code != int(ExitUsage) {
+		t.Fatalf("exit = %d, want %d (usage)", code, int(ExitUsage))
+	}
+	if boundJSON {
+		t.Fatalf("test no longer exercises the fallback: --json was bound before the parse error")
+	}
+	env := decodeOneEnvelope(t, stdout)
+	if env["ok"] != false {
+		t.Fatalf("envelope = %v, want ok=false", env)
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj["code"] != "USAGE" {
+		t.Fatalf("error = %v, want code=USAGE", errObj)
+	}
+	if len(fake.calls) != 0 {
+		t.Errorf("a usage error must not reach the adapter, got calls %v", fake.calls)
 	}
 }
 
