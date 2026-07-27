@@ -67,6 +67,20 @@ provision:
       # gain root-equivalent docker.sock access. Future container use requires
       # a hermes-owned rootless runtime behind a separate ADR.
 
+  # The guest entry point of `torio project shell` (internal/lima.OperatorShellHelper).
+  # A data file rather than a script, so Lima owns the ownership and mode and
+  # re-materializes the helper root-owned on every boot: the session it opens
+  # carries the operator's forwarded SSH agent, so nothing the operator or hermes
+  # can rewrite may sit on that path. Content is injected verbatim from
+  # internal/lima/templates/torio-project-shell.sh.
+  - mode: data
+    path: __TORIO_PROJECT_SHELL_PATH__
+    owner: "root:root"
+    permissions: "0755"
+    overwrite: true
+    content: |
+      __TORIO_PROJECT_SHELL__
+
   # Lima login user exists by the time user-mode provision runs.
   - mode: user
     script: |
