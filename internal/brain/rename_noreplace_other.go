@@ -1,4 +1,4 @@
-//go:build !darwin && !linux
+//go:build !darwin && !(linux && (amd64 || arm64))
 
 package brain
 

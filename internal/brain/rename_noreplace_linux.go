@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && (amd64 || arm64)
 
 package brain
 
@@ -21,7 +21,7 @@ func renameNoReplace(source, destination string) error {
 	}
 	atFDCWD := ^uintptr(99) // -100, as required by renameat2(2).
 	_, _, errno := syscall.Syscall6(
-		syscall.SYS_RENAMEAT2,
+		renameat2Trap,
 		atFDCWD,
 		uintptr(unsafe.Pointer(sourcePtr)),
 		atFDCWD,
