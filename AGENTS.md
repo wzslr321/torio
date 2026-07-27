@@ -2,39 +2,50 @@
 
 Ten plik jest nadrzędnym kontraktem pracy w repozytorium Torio. Jeśli inny dokument lub prompt jest sprzeczny z tym plikiem, zatrzymaj pracę i zgłoś konflikt. Nie rozwiązuj konfliktu przez zgadywanie.
 
-## Status Torio V0 (aktualny — nadrzędny wobec sekcji „platformowych” poniżej)
+## Status produktu (V0 delivered — V1 w implementacji)
 
-**Aktualnie dostarczonym produktem jest Torio V0 — wąski i w pełni operatorski.**
-Zakres i sposób działania produktu definiują **wyłącznie** [`README.md`](README.md)
-oraz dwa runbooki:
+**Aktualnie dostarczonym (released) produktem jest Torio V0 — wąski i w pełni
+operatorski.** Opis V0 dla operatorów nadal leży w [`README.md`](README.md)
+oraz dwóch runbookach:
 [`docs/runbooks/remote-second-brain-v1.md`](docs/runbooks/remote-second-brain-v1.md)
 i [`docs/runbooks/code-v0-REDACTED-PROJECT.md`](docs/runbooks/code-v0-REDACTED-PROJECT.md).
+`README.md` **NIE** jest przepisywany na V1 przed finalnym release taskiem.
 
-> Oba runbooki oraz strony w `site/` są **generowane** przez
+**Aktywny kierunek implementacji to Torio V1** (presentation-ready onboarding,
+obowiązkowy Second Brain, multi-project, operator-only push). Zakres i decyzje
+V1 definiują:
+[`docs/adr/0015-torio-v1-onboarding-projects-and-operator-push.md`](docs/adr/0015-torio-v1-onboarding-projects-and-operator-push.md)
+oraz plan
+[`.hermes/plans/2026-07-27_131723-torio-v1-presentation-ready.md`](.hermes/plans/2026-07-27_131723-torio-v1-presentation-ready.md).
+
+> Runbooki oraz strony w `site/` są **generowane** przez
 > `scripts/build_docs.py` ze źródeł w `docs/content/` i współdzielą sekcje, więc
 > nie mogą się rozjechać. Nie edytuj plików wygenerowanych — zmień źródło i
 > uruchom `make docs`. `make validate` zawodzi, gdy output odbiega od źródła.
 
 - Opisane niżej w tym pliku **platformowe** obowiązki i inwarianty Torio —
-  w szczególności sekcje **4–5** (project registry, admission control, per-task
-  isolation, fresh verifier, approval/integration/push oraz worker/container/
-  worktree invariants) — a także `docs/plans/`, `docs/contracts/`, `docs/adr/`,
-  `prompts/` i `docs/spike-results/`, opisują **superseded / pre-V0** eksplorację.
+  w szczególności sekcje **4–5** (legacy project registry / admission control,
+  per-task isolation, fresh verifier, approval/integration/push oraz
+  worker/container/worktree invariants) — a także starsze `docs/plans/`,
+  `docs/contracts/`, ADR-y 0001–0014 jako historia platformy, `prompts/` i
+  starsze `docs/spike-results/`, opisują **superseded / pre-V0** eksplorację.
   Są zachowane **wyłącznie jako kontekst historyczny** (patrz
   [`docs/legacy-architecture.md`](docs/legacy-architecture.md)) i **NIE MOGĄ być
-  implementowane ani traktowane jako następny task** w Torio V0.
+  implementowane ani traktowane jako następny task** w Torio V0 ani V1.
+  ADR-0015 i plan V1 **nie** reaktywują tej platformy.
 - Dyscyplina inżynierska i bezpieczeństwa z sekcji **6–10** (TDD, jeden wąski
   behavior slice na raz, `scripts/validate_artifacts.py`, typed adaptery i
   timeouty, redakcja sekretów jako `[REDACTED]`, wymóg evidence, brak sekretów w
   output/logach) **pozostaje w mocy** — o ile nie wymaga zarchiwizowanej platformy
   workerów/registry/verifiera.
-- **Rozstrzygnięcie precedensu (nadpisuje akapit powyżej dla zadań Torio V0):**
-  gdy sekcje platformowe tego pliku, plany, kontrakty, ADR-y, prompty lub spike
-  material są sprzeczne z `README.md` lub runbookami, autorytetem dla zakresu i
-  działania produktu są `README.md` i runbooki. Ta rozbieżność jest **oczekiwana**
-  i **nie jest** konfliktem wymagającym zatrzymania pracy — legacy ustępuje V0.
-  Zakaz cichej zmiany ADR-ów (sekcja 9) dotyczy nowych decyzji projektowych, nie
-  tej klasyfikacji archiwalnej.
+- **Precedens dla pracy implementacyjnej Torio V1:** gdy sekcje platformowe tego
+  pliku, legacy plany/kontrakty/ADR-y 0001–0014, prompty lub spike material są
+  sprzeczne z ADR-0015 albo planem V1, autorytetem są **ADR-0015 i plan V1**.
+  Gdy ADR-0015 / plan V1 są sprzeczne z `README.md` lub runbookami V0, rozbieżność
+  jest **oczekiwana** w trakcie implementacji: README/runbooki opisują dostarczone
+  V0 do release; nie traktuj ich jako stop-the-work konfliktu blokującego taski V1.
+  Zakaz cichej zmiany ADR-ów (sekcja 9) dotyczy nowych decyzji — ADR-0015 jest
+  jawnym, superseding zapisem granic V1.
 
 ## 1. Misja
 
