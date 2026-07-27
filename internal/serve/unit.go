@@ -29,7 +29,7 @@ func renderUnit() []byte {
 	b.WriteString("[Service]\n")
 	b.WriteString("Type=simple\n")
 	b.WriteString("WorkingDirectory=" + workingDir + "\n")
-	b.WriteString("Environment=HERMES_HOME=" + lima.HermesKBPath + "\n")
+	b.WriteString("Environment=HERMES_HOME=" + lima.HermesProfilePath + "\n")
 	b.WriteString("ExecStart=" + execStart + "\n")
 	b.WriteString("Restart=always\n")
 	b.WriteString("RestartSec=2\n")

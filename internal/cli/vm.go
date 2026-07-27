@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os/user"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -16,6 +17,18 @@ import (
 // well-known secret shapes; later slices may pass a config-derived redactor.
 func defaultNewLima() *lima.Adapter {
 	return lima.New(&execx.ExecRunner{})
+}
+
+func defaultLookupOperatorUser() (string, error) {
+	u, err := user.Current()
+	if err != nil {
+		return "", fmt.Errorf("resolve current user for Lima login identity: %w", err)
+	}
+	name := strings.TrimSpace(u.Username)
+	if name == "" {
+		return "", fmt.Errorf("current user has empty username")
+	}
+	return name, nil
 }
 
 // vmStateData is the minimal `data` object shared by `vm status` and `vm start`.
@@ -49,12 +62,88 @@ func newVMCmd(a *app) *cobra.Command {
 			return usageError(fmt.Sprintf("unknown vm subcommand %q", args[0]))
 		},
 	}
+	vm.AddCommand(newVMInitCmd(a))
 	vm.AddCommand(newVMStatusCmd(a))
 	vm.AddCommand(newVMStartCmd(a))
 	vm.AddCommand(newVMStopCmd(a))
 	vm.AddCommand(newVMBootstrapCmd(a))
 	vm.AddCommand(newVMSSHCmd(a))
 	return vm
+}
+
+func newVMInitCmd(a *app) *cobra.Command {
+	var cpus int
+	var memory string
+	var disk string
+	cmd := &cobra.Command{
+		Use:   "init",
+		Short: "Create or verify the Torio VM from the trusted template",
+		Long: "Create the Torio Lima VM from the embedded Gate-0 template, or succeed " +
+			"idempotently when an existing instance already matches the trusted pins " +
+			"(image digest, empty mounts, no persistent SSH agent forwarding). " +
+			"Incompatible existing instances fail closed — there is no --force and Torio " +
+			"never recreates or deletes them.\n\n" +
+			"Defaults: 4 CPUs, 8GiB memory, 60GiB disk. Next step after success: torio vm start.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx, cancel := a.opContext(cmd)
+			defer cancel()
+			opUser, err := a.lookupOperatorUser()
+			if err != nil {
+				return &CLIError{
+					Exit:    ExitExternal,
+					Code:    "OPERATOR_LOOKUP_FAILED",
+					Command: "vm.init",
+					Message: err.Error(),
+				}
+			}
+			res, err := a.newLima().Init(ctx, lima.InitOptions{
+				CPUs:         cpus,
+				Memory:       memory,
+				Disk:         disk,
+				OperatorUser: opUser,
+			})
+			if err != nil {
+				return mapLimaError("vm.init", err)
+			}
+			return a.emitVMInit(res)
+		},
+	}
+	cmd.Flags().IntVar(&cpus, "cpus", 0, "vCPU count (default 4)")
+	cmd.Flags().StringVar(&memory, "memory", "", "memory size, e.g. 8GiB (default 8GiB)")
+	cmd.Flags().StringVar(&disk, "disk", "", "disk size, e.g. 60GiB (default 60GiB)")
+	return cmd
+}
+
+// vmInitData is the `data` object for a successful `vm init`.
+type vmInitData struct {
+	Name          string `json:"name"`
+	Created       bool   `json:"created"`
+	Unchanged     bool   `json:"unchanged"`
+	ImageLocation string `json:"image_location"`
+	ImageDigest   string `json:"image_digest"`
+	NextStep      string `json:"next_step"`
+}
+
+func (a *app) emitVMInit(res lima.InitResult) error {
+	const next = "torio vm start"
+	if a.jsonOut {
+		data := vmInitData{
+			Name:          lima.InstanceName,
+			Created:       res.Created,
+			Unchanged:     !res.Created,
+			ImageLocation: res.ImageLocation,
+			ImageDigest:   res.ImageDigest,
+			NextStep:      next,
+		}
+		return writeJSON(a.stdout, successEnvelope("vm.init", data, nil))
+	}
+	if res.Created {
+		_, err := fmt.Fprintf(a.stdout, "%s: created\nnext: %s\n", lima.InstanceName, next)
+		return err
+	}
+	_, err := fmt.Fprintf(a.stdout, "%s: unchanged (compatible existing instance)\nnext: %s\n", lima.InstanceName, next)
+	return err
 }
 
 func newVMStatusCmd(a *app) *cobra.Command {
@@ -119,26 +208,39 @@ func newVMBootstrapCmd(a *app) *cobra.Command {
 		Short: "Reconcile and verify the existing Torio target for Remote Second Brain V1",
 		Long: "Reconcile and verify the already-created Torio VM so an operator has a " +
 			"usable Remote Second Brain V1 path: a stable non-interactive `hermes` command " +
-			"and Docker reachable by the intended non-root guest user (" + lima.HermesUser + ").\n\n" +
+			"and the V1 guest filesystem layout on native ext4.\n\n" +
 			"It operates only on the existing target after a verified Running precondition, " +
-			"through the typed Lima boundary. It is idempotent and narrow: it may ensure the " +
-			"hermes docker-group membership and the `hermes` PATH shim, but never recreates or " +
-			"re-images the VM, installs a model/provider, accepts secrets, or creates services. " +
-			"It verifies (not merely trusts) architecture, the hermes command, Docker reach, git, " +
-			"the persistent KB/workspace paths on native Linux, and the absence of a broad host " +
-			"mount — failing closed with remediation on any drift.\n\n" +
+			"through the typed Lima boundary. It is idempotent and narrow: when the pinned " +
+			"Hermes Agent launcher is missing it installs the Gate-0 commit via the upstream " +
+			"install script (verifiable postcondition: git HEAD pin + launcher path), may ensure " +
+			"the `hermes` PATH shim, but never recreates or re-images the VM, installs a " +
+			"model/provider, accepts secrets, or creates services. It verifies (not merely trusts) " +
+			"the hermes user, torio-projects membership for hermes and the operator, absence of " +
+			"docker-group membership for hermes, architecture, the hermes command, git, the " +
+			"persistent profile/brain/workspace paths with correct ownership and modes on native " +
+			"Linux, and the absence of a broad host mount — failing closed with remediation on " +
+			"any drift.\n\n" +
 			"Bootstrap issues several bounded guest probes; run it with an ample --timeout " +
-			"(e.g. --timeout 5m).\n\n" +
+			"(e.g. --timeout 15m — Hermes install can be slow).\n\n" +
 			"After a successful run, reach the remote Hermes instance yourself (operator-controlled), " +
 			"e.g.:  torio vm ssh -- sudo -u " + lima.HermesUser + " -- hermes --version",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := a.opContext(cmd)
 			defer cancel()
-			// V1 runs unpinned: the observed hermes/docker versions are reported so
-			// drift is visible. A later slice can thread version-lock pins through
+			// V1 runs unpinned: the observed hermes version is reported so drift is
+			// visible. A later slice can thread version-lock pins through
 			// BootstrapOptions for enforcement.
-			rep, err := a.newLima().Bootstrap(ctx, lima.BootstrapOptions{})
+			opUser, err := a.lookupOperatorUser()
+			if err != nil {
+				return &CLIError{
+					Exit:    ExitExternal,
+					Code:    "OPERATOR_LOOKUP_FAILED",
+					Command: "vm.bootstrap",
+					Message: err.Error(),
+				}
+			}
+			rep, err := a.newLima().Bootstrap(ctx, lima.BootstrapOptions{OperatorUser: opUser})
 			if err != nil {
 				ce := mapLimaError("vm.bootstrap", err)
 				// Surface the checks recorded up to the failure (already bounded and
@@ -191,7 +293,8 @@ type vmBootstrapData struct {
 	Checks        []vmCheckData `json:"checks"`
 	GuestUser     string        `json:"guest_user"`
 	HermesHome    string        `json:"hermes_home"`
-	KBPath        string        `json:"kb_path"`
+	ProfilePath   string        `json:"profile_path"`
+	BrainPath     string        `json:"brain_path"`
 	WorkspacePath string        `json:"workspace_path"`
 }
 
@@ -213,7 +316,8 @@ func bootstrapData(rep lima.BootstrapReport) vmBootstrapData {
 		Checks:        checks,
 		GuestUser:     lima.HermesUser,
 		HermesHome:    lima.HermesHome,
-		KBPath:        lima.HermesKBPath,
+		ProfilePath:   lima.HermesProfilePath,
+		BrainPath:     lima.HermesBrainPath,
 		WorkspacePath: lima.HermesWorkspacePath,
 	}
 }
@@ -234,8 +338,8 @@ func bootstrapReportDetails(rep lima.BootstrapReport) map[string]any {
 
 // emitVMBootstrap renders a successful bootstrap. JSON mode emits exactly one
 // success envelope; human mode prints one line per proven check plus the
-// operator connection handoff (the persistent KB location and the stable command
-// path). The post-bootstrap action to reach Hermes stays operator-controlled.
+// operator connection handoff (the persistent profile/brain locations and the
+// stable command path). The post-bootstrap action to reach Hermes stays operator-controlled.
 func (a *app) emitVMBootstrap(rep lima.BootstrapReport) error {
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("vm.bootstrap", bootstrapData(rep), nil))
@@ -251,11 +355,12 @@ func (a *app) emitVMBootstrap(rep lima.BootstrapReport) error {
 	}
 	_, err := fmt.Fprintf(a.stdout,
 		"\nRemote Second Brain V1 path ready on %s.\n"+
-			"Persistent Hermes home: %s\n"+
-			"Persistent KB:          %s\n"+
-			"Persistent workspace:   %s\n"+
+			"Persistent Hermes home:    %s\n"+
+			"Persistent profile:        %s\n"+
+			"Persistent Second Brain:   %s\n"+
+			"Persistent workspace:      %s\n"+
 			"Reach Hermes (operator-controlled): torio vm ssh -- sudo -u %s -- hermes --version\n",
-		rep.Instance, lima.HermesHome, lima.HermesKBPath, lima.HermesWorkspacePath, lima.HermesUser)
+		rep.Instance, lima.HermesHome, lima.HermesProfilePath, lima.HermesBrainPath, lima.HermesWorkspacePath, lima.HermesUser)
 	return err
 }
 
@@ -328,7 +433,7 @@ func mapLimaError(command string, err error) *CLIError {
 	switch lerr.Kind {
 	case lima.KindNotFound, lima.KindNotRunning, lima.KindAmbiguousState, lima.KindPostconditionFailed:
 		return &CLIError{Exit: ExitPrecondition, Code: code, Command: command, Message: lerr.Error()}
-	case lima.KindVerificationFailed:
+	case lima.KindVerificationFailed, lima.KindIncompatible:
 		return &CLIError{Exit: ExitVerification, Code: code, Command: command, Message: lerr.Error()}
 	case lima.KindBinaryUnavailable, lima.KindCommandFailed, lima.KindMalformedOutput,
 		lima.KindVersionMismatch, lima.KindTimeout, lima.KindCancelled:

@@ -48,6 +48,10 @@ type app struct {
 	// seam pattern as newLima: production wires it over the real Lima adapter,
 	// tests inject one backed by a fake guest.
 	newServe func() *serve.Adapter
+
+	// lookupOperatorUser resolves the Lima login identity for `vm init`.
+	// Production uses the current OS user; tests inject a fixed name.
+	lookupOperatorUser func() (string, error)
 }
 
 // Run builds the command tree, executes it, and returns the process exit code.
@@ -69,6 +73,9 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 	}
 	if a.newServe == nil {
 		a.newServe = func() *serve.Adapter { return serve.New(a.newLima()) }
+	}
+	if a.lookupOperatorUser == nil {
+		a.lookupOperatorUser = defaultLookupOperatorUser
 	}
 	root := newRootCmd(a)
 	root.SetArgs(args)

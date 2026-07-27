@@ -1,0 +1,85 @@
+# AI-Provenance:
+#   model: Cursor Grok 4.5
+#   harness: Cursor
+#   skills:
+#     - mark-ai-provenance
+#
+# Torio V1 product Lima template (embedded).
+# Pins and layout come from docs/spike-results/v1-onboarding-20260727T115633Z/FINDINGS.md
+# and spikes/v1-onboarding/torio-spike.yaml (promoted Gate 0 path).
+# Placeholders substituted by internal/lima.Init before limactl create:
+#   __TORIO_OPERATOR_USER__  __TORIO_CPUS__  __TORIO_MEMORY__  __TORIO_DISK__
+# No secrets. No broad macOS home/project mount. No rootful Docker for hermes.
+minimumLimaVersion: "2.0.0"
+
+vmType: vz
+arch: aarch64
+
+cpus: __TORIO_CPUS__
+memory: __TORIO_MEMORY__
+disk: __TORIO_DISK__
+
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/noble/release-20260705/ubuntu-24.04-server-cloudimg-arm64.img"
+    arch: aarch64
+    digest: "sha256:7df0201546f75b8bcc1044594c806c35749421ad3c9bc1be2a3ab806cfae39cc"
+    variant: server
+
+mounts: []
+
+ssh:
+  loadDotSSHPubKeys: false
+  forwardAgent: false
+
+containerd:
+  system: false
+  user: false
+
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -euxo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -y
+      apt-get install -y --no-install-recommends git curl ca-certificates xz-utils sudo uidmap dbus-user-session ripgrep ffmpeg build-essential python3-dev libffi-dev
+
+      if ! getent group torio-projects >/dev/null; then
+        groupadd --system torio-projects
+      fi
+
+      # Dedicated hermes service identity — NEVER rootful docker group (ADR-0015).
+      if ! id -u hermes >/dev/null 2>&1; then
+        useradd --create-home --shell /bin/bash --user-group hermes
+      fi
+      usermod -aG torio-projects hermes
+      if id -nG hermes | tr ' ' '\n' | grep -qx docker; then
+        gpasswd -d hermes docker || true
+      fi
+
+      chown hermes:torio-projects /home/hermes
+      chmod 0710 /home/hermes
+      install -d -o hermes -g torio-projects -m 2770 /home/hermes/projects
+      install -d -o hermes -g hermes -m 0750 /home/hermes/.hermes
+      install -d -o hermes -g hermes -m 0750 /home/hermes/brain
+
+      # Rootful Docker Engine is intentionally NOT installed. hermes must not
+      # gain root-equivalent docker.sock access. Future container use requires
+      # a hermes-owned rootless runtime behind a separate ADR.
+
+  # Lima login user exists by the time user-mode provision runs.
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -euxo pipefail
+      OPERATOR_USER="__TORIO_OPERATOR_USER__"
+      if [ "${OPERATOR_USER}" = "__TORIO_OPERATOR_USER__" ] || [ -z "${OPERATOR_USER}" ]; then
+        echo "torio template: OPERATOR_USER placeholder not substituted" >&2
+        exit 1
+      fi
+      if [ "$(id -un)" != "${OPERATOR_USER}" ]; then
+        echo "torio template: login identity $(id -un) != configured ${OPERATOR_USER}" >&2
+        exit 1
+      fi
+      sudo -n usermod -aG torio-projects "${OPERATOR_USER}"
+      id -nG "${OPERATOR_USER}" | tr ' ' '\n' | grep -qx torio-projects

@@ -6,11 +6,11 @@ output: docs/runbooks/remote-second-brain-v1.md
 
 Status: **controlled Remote Second Brain V1 path ready for operator use; formal Demo A remains pending.**
 
-This runbook drives the existing, already-created `torio` Lima VM through a
-reproducible **start → bootstrap/verify → connect** path. It is deliberately
-narrow: it does not create, recreate, or re-image the VM, install a model or
-provider, accept secrets, or create gateway/serve services. It does not claim
-S1–S8 are solved.
+This runbook drives the `torio` Lima VM through a reproducible **init (when
+needed) → start → bootstrap/verify → connect** path. V1 may create the VM via
+`torio vm init`; bootstrap never recreates or re-images it. The runbook is
+deliberately narrow: it does not install a model or provider, accept secrets, or
+create gateway/serve services. It does not claim S1–S8 are solved.
 
 The operational sections below are shared with the documentation site and are
 generated from one source, so the two cannot drift.
@@ -18,7 +18,7 @@ generated from one source, so the two cannot drift.
 ## Prerequisites
 
 - macOS host (Apple Silicon) with `limactl` on `PATH`.
-- The `torio` VM already created (this runbook never creates it).
+- The `torio` VM — create it with `torio vm init` when absent, or use an existing compatible instance.
 - The `torio` binary built from this repository: `go build -o torio ./cmd/torio`.
 
 ## 1. Start and bootstrap

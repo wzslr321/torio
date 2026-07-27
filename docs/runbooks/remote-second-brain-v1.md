@@ -5,11 +5,11 @@
 
 Status: **controlled Remote Second Brain V1 path ready for operator use; formal Demo A remains pending.**
 
-This runbook drives the existing, already-created `torio` Lima VM through a
-reproducible **start → bootstrap/verify → connect** path. It is deliberately
-narrow: it does not create, recreate, or re-image the VM, install a model or
-provider, accept secrets, or create gateway/serve services. It does not claim
-S1–S8 are solved.
+This runbook drives the `torio` Lima VM through a reproducible **init (when
+needed) → start → bootstrap/verify → connect** path. V1 may create the VM via
+`torio vm init`; bootstrap never recreates or re-images it. The runbook is
+deliberately narrow: it does not install a model or provider, accept secrets, or
+create gateway/serve services. It does not claim S1–S8 are solved.
 
 The operational sections below are shared with the documentation site and are
 generated from one source, so the two cannot drift.
@@ -17,29 +17,40 @@ generated from one source, so the two cannot drift.
 ## Prerequisites
 
 - macOS host (Apple Silicon) with `limactl` on `PATH`.
-- The `torio` VM already created (this runbook never creates it).
+- The `torio` VM — create it with `torio vm init` when absent, or use an existing compatible instance.
 - The `torio` binary built from this repository: `go build -o torio ./cmd/torio`.
 
 ## 1. Start and bootstrap
 
 ### Start and verify the VM
 
+If the VM does not exist yet, create it from the trusted template:
+
+```bash
+torio vm init
+```
+
 If `torio vm status` did not report `Running`, start the VM, then reconcile and
 verify it:
 
 ```bash
 torio vm start
-torio vm bootstrap --timeout 5m
+torio vm bootstrap --timeout 15m
 ```
 
-`start` is idempotent and confirms a `Running` post-state before reporting
-success. `bootstrap` operates only on the existing target after a verified
-`Running` precondition, through the typed Lima boundary. It is idempotent and,
-on a fully-reconciled target, mutates nothing. It:
+`init` creates the Gate-0-pinned Lima instance (or succeeds idempotently when a
+compatible one already exists) and verifies the post-create list output before
+reporting success. `start` is idempotent and confirms a `Running` post-state.
+`bootstrap` operates only on the existing target after a verified `Running`
+precondition, through the typed Lima boundary. Hermes Agent install can be slow —
+use an ample timeout (for example `--timeout 15m`). On a fully-reconciled target
+it mutates nothing; when the pinned launcher is missing it installs Hermes Agent
+at the Gate-0 commit (verifiable postcondition: git HEAD pin + launcher path),
+then reconciles the PATH shim. It:
 
-- ensures the intended non-root guest user `hermes` is in the `docker` group;
-- ensures `/usr/local/bin/hermes` is a symlink to the pinned launcher (only after confirming the launcher exists — a missing launcher is reported as drift, never a dangling shim);
-- **verifies** (not merely trusts an exit code): `uname -m == aarch64`; `hermes --version` through the documented stable command path; the Docker server is reachable by the `hermes` identity; `git --version`; the persistent knowledge-base and workspace paths are directories on native Linux (ext4), not a host share; and no broad macOS host mount is present.
+- installs the pinned Hermes Agent when `/home/hermes/hermes-agent/venv/bin/hermes` is missing (never curl|bash pipe — download to a hermes-writable path, run with fixed flags, verify git HEAD);
+- ensures `/usr/local/bin/hermes` is a symlink to the pinned launcher (only after confirming the launcher exists);
+- **verifies** (not merely trusts an exit code): the `hermes` user exists; group `torio-projects` exists; `hermes` and the Lima login operator are members; `hermes` is **not** in the `docker` group (rootful Docker for hermes is forbidden); `uname -m == aarch64`; `hermes --version` through the documented stable command path; `git --version`; the persistent profile, Second Brain, and workspace paths are directories with the expected owner, group, and mode on native Linux (ext4), not a host share; and no broad macOS host mount is present.
 
 Any drift or unverifiable state fails closed (exit 6) with remediation. A rerun
 is success only when every postcondition is proven. Use `--json` for the
@@ -51,18 +62,23 @@ machine-readable envelope (one document on stdout).
 | --- | --- |
 | Guest user | `hermes` |
 | Hermes home | `/home/hermes` |
-| Knowledge base / profile | `/home/hermes/.hermes` |
+| Profile / application state | `/home/hermes/.hermes` |
+| Second Brain vault | `/home/hermes/brain` |
 | Workspace root | `/home/hermes/projects` |
 
 These are also emitted in the `torio vm bootstrap` output (human and `--json`).
+
+V1 can create the VM via `torio vm init`; bootstrap then verifies the guest layout
+above on an already-running instance. It never recreates or re-images the VM.
 
 ## 2. Persistent Desktop backend (D5 — loopback-only)
 
 ### Bring up the loopback backend
 
 Install and start the persistent Hermes backend as a user systemd service inside
-the VM, using the existing `/home/hermes/.hermes` profile. It binds guest
-loopback only (`127.0.0.1:9119`) and never a public address:
+the VM, using the existing `/home/hermes/.hermes` profile (application state,
+not the Second Brain vault at `/home/hermes/brain`). It binds guest loopback
+only (`127.0.0.1:9119`) and never a public address:
 
 ```bash
 torio serve install --timeout 2m

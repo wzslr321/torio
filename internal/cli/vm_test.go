@@ -45,13 +45,111 @@ func runVMWithFake(t *testing.T, args []string, fake execx.Runner) (int, string,
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var stdout, stderr bytes.Buffer
 	a := &app{
-		stdout:  &stdout,
-		stderr:  &stderr,
-		build:   testBuild(),
-		newLima: func() *lima.Adapter { return lima.New(fake) },
+		stdout:             &stdout,
+		stderr:             &stderr,
+		build:              testBuild(),
+		newLima:            func() *lima.Adapter { return lima.New(fake) },
+		lookupOperatorUser: func() (string, error) { return "testop", nil },
 	}
 	code := runWithApp(context.Background(), a, args)
 	return code, stdout.String(), stderr.String()
+}
+
+func listCompatibleJSON(name, status string) execx.Result {
+	body := `{"name":"` + name + `","status":"` + status + `","config":{"vmType":"vz","arch":"aarch64","images":[{"location":"` + lima.PromotedImageURL + `","digest":"` + lima.PromotedImageDigest + `"}],"mounts":[],"ssh":{"forwardAgent":false}}}`
+	return execx.Result{ExitCode: 0, Stdout: []byte(body + "\n")}
+}
+
+func listIncompatibleMountsJSON(name, status string) execx.Result {
+	body := `{"name":"` + name + `","status":"` + status + `","config":{"vmType":"vz","arch":"aarch64","images":[{"location":"` + lima.PromotedImageURL + `","digest":"` + lima.PromotedImageDigest + `"}],"mounts":[{"location":"/Users/me"}],"ssh":{"forwardAgent":false}}}`
+	return execx.Result{ExitCode: 0, Stdout: []byte(body + "\n")}
+}
+
+// --- vm init ---
+
+func TestVMInitCreatesHuman(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: execx.Result{ExitCode: 0, Stdout: nil}}, // list: absent
+		{res: execx.Result{ExitCode: 0}},               // create
+		{res: listCompatibleJSON("torio", "Stopped")}, // post-create verify
+	}}
+	code, stdout, stderr := runVMWithFake(t, []string{"vm", "init"}, fake)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "created") || !strings.Contains(stdout, "torio vm start") {
+		t.Fatalf("stdout = %q, want created + next step", stdout)
+	}
+	if len(fake.calls) != 3 {
+		t.Fatalf("calls = %d, want 3 (list, create, post-create list)", len(fake.calls))
+	}
+	create := fake.calls[1]
+	if len(create) < 5 || create[1] != "create" || create[2] != "--name=torio" || create[3] != "--tty=false" {
+		t.Fatalf("create argv = %v", create)
+	}
+}
+
+func TestVMInitJSONCreated(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: execx.Result{ExitCode: 0, Stdout: nil}},
+		{res: execx.Result{ExitCode: 0}},
+		{res: listCompatibleJSON("torio", "Stopped")},
+	}}
+	code, stdout, _ := runVMWithFake(t, []string{"--json", "vm", "init"}, fake)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	env := decodeOneEnvelope(t, stdout)
+	if env["ok"] != true || env["command"] != "vm.init" {
+		t.Fatalf("envelope = %v", env)
+	}
+	data := env["data"].(map[string]any)
+	if data["created"] != true || data["unchanged"] != false {
+		t.Fatalf("data = %v", data)
+	}
+	if data["image_digest"] != lima.PromotedImageDigest {
+		t.Fatalf("digest = %v", data["image_digest"])
+	}
+	if data["next_step"] != "torio vm start" {
+		t.Fatalf("next_step = %v", data["next_step"])
+	}
+}
+
+func TestVMInitIdempotentCompatible(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: listCompatibleJSON("torio", "Stopped")},
+	}}
+	code, stdout, stderr := runVMWithFake(t, []string{"vm", "init"}, fake)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d; stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "unchanged") {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if len(fake.calls) != 1 {
+		t.Fatalf("must not create when compatible; calls=%d", len(fake.calls))
+	}
+}
+
+func TestVMInitIncompatibleFailsClosed(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: listIncompatibleMountsJSON("torio", "Stopped")},
+	}}
+	code, _, _ := runVMWithFake(t, []string{"vm", "init"}, fake)
+	if code != int(ExitVerification) {
+		t.Fatalf("exit = %d, want %d", code, int(ExitVerification))
+	}
+	if len(fake.calls) != 1 {
+		t.Fatalf("must not recreate; calls=%d", len(fake.calls))
+	}
+}
+
+func TestVMInitRejectsUnknownFlag(t *testing.T) {
+	fake := &fakeLimaRunner{}
+	code, _, _ := runVMWithFake(t, []string{"vm", "init", "--force"}, fake)
+	if code != int(ExitUsage) {
+		t.Fatalf("exit = %d, want usage", code)
+	}
 }
 
 // decodeOneEnvelope asserts stdout is exactly one JSON envelope and returns it.
@@ -390,22 +488,35 @@ func TestVMStopJSONErrorHasConcreteCommand(t *testing.T) {
 // --- vm bootstrap ---
 
 // bootstrapHappyResp is the ordered CLI-runner script for a fully-reconciled,
-// fully-verified target (mirrors internal/lima's bootstrapHappyScript).
+// fully-verified V1 target (mirrors internal/lima's bootstrapHappyScript).
 func bootstrapHappyResp() []scriptedResp {
 	out := func(s string) execx.Result { return execx.Result{ExitCode: 0, Stdout: []byte(s)} }
 	return []scriptedResp{
 		{res: listJSON("torio", "Running")},                  // list precondition
-		{res: out("hermes docker\n")},                             // id -nG hermes
-		{res: execx.Result{ExitCode: 0}},                          // test -x target
-		{res: out("/home/hermes/hermes-agent/venv/bin/hermes\n")}, // readlink shim (correct)
+		{res: out("1000\n")},                                      // id -u hermes
+		{res: out("torio-projects:x:1001:hermes\n")},              // getent group torio-projects
+		{res: out("hermes torio-projects\n")},                     // id -nG hermes (torio-projects)
+		{res: out("testop torio-projects\n")},                     // id -nG operator
+		{res: out("hermes torio-projects\n")},                     // id -nG hermes (not docker)
+		{res: execx.Result{ExitCode: 0}},                          // test -x launcher (install present)
+		{res: out(lima.PromotedHermesCommit + "\n")},              // git rev-parse HEAD
+		{res: execx.Result{ExitCode: 0}},                          // test -x launcher (shim)
+		{res: out("/home/hermes/hermes-agent/venv/bin/hermes\n")}, // readlink shim
 		{res: out("aarch64\n")},                                   // uname -m
 		{res: out("Hermes Agent v0.19.0 (2026.7.20)\n")},          // hermes --version
-		{res: out("29.6.2\n")},                                    // docker server version
 		{res: out("git version 2.43.0\n")},                        // git --version
-		{res: out("directory\n")},                                 // stat path0
-		{res: out("ext4 /dev/vda1\n")},                            // findmnt path0
-		{res: out("directory\n")},                                 // stat path1
-		{res: out("ext4 /dev/vda1\n")},                            // findmnt path1
+		{res: out("directory\n")},                                 // stat home type
+		{res: out("hermes:torio-projects 710\n")},                 // stat home og/mode
+		{res: out("ext4 /dev/vda1\n")},                            // findmnt home
+		{res: out("directory\n")},                                 // stat profile type
+		{res: out("hermes:hermes 750\n")},                         // stat profile og/mode
+		{res: out("ext4 /dev/vda1\n")},                            // findmnt profile
+		{res: out("directory\n")},                                 // stat brain type
+		{res: out("hermes:hermes 750\n")},                         // stat brain og/mode
+		{res: out("ext4 /dev/vda1\n")},                            // findmnt brain
+		{res: out("directory\n")},                                 // stat workspace type
+		{res: out("hermes:torio-projects 2770\n")},                // stat workspace og/mode
+		{res: out("ext4 /dev/vda1\n")},                            // findmnt workspace
 		{res: execx.Result{ExitCode: 1}},                          // findmnt host-shares (none)
 	}
 }
@@ -424,8 +535,11 @@ func TestVMBootstrapSuccessJSON(t *testing.T) {
 	if data["instance"] != "torio" {
 		t.Errorf("instance = %v, want torio", data["instance"])
 	}
-	if data["kb_path"] != "/home/hermes/.hermes" {
-		t.Errorf("kb_path = %v, want /home/hermes/.hermes", data["kb_path"])
+	if data["profile_path"] != "/home/hermes/.hermes" {
+		t.Errorf("profile_path = %v, want /home/hermes/.hermes", data["profile_path"])
+	}
+	if data["brain_path"] != "/home/hermes/brain" {
+		t.Errorf("brain_path = %v, want /home/hermes/brain", data["brain_path"])
 	}
 	checks, _ := data["checks"].([]any)
 	if len(checks) == 0 {
@@ -445,9 +559,12 @@ func TestVMBootstrapSuccessHumanHasHandoff(t *testing.T) {
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
 	}
-	// The handoff must identify the persistent KB location for the operator.
+	// The handoff must identify the persistent profile and brain locations.
 	if !strings.Contains(stdout, "/home/hermes/.hermes") {
-		t.Errorf("human output must surface the persistent KB path; got %q", stdout)
+		t.Errorf("human output must surface the persistent profile path; got %q", stdout)
+	}
+	if !strings.Contains(stdout, "/home/hermes/brain") {
+		t.Errorf("human output must surface the persistent Second Brain path; got %q", stdout)
 	}
 }
 
@@ -467,7 +584,7 @@ func TestVMBootstrapVerificationFailureIsExit6(t *testing.T) {
 	// Arch mismatch → verification failure → exit 6, with the failing check
 	// surfaced in the redacted error details.
 	s := bootstrapHappyResp()
-	s[4] = scriptedResp{res: execx.Result{ExitCode: 0, Stdout: []byte("x86_64\n")}}
+	s[10] = scriptedResp{res: execx.Result{ExitCode: 0, Stdout: []byte("x86_64\n")}}
 	fake := &fakeLimaRunner{script: s}
 	code, stdout, _ := runVMWithFake(t, []string{"vm", "bootstrap", "--json", "--timeout", "5m"}, fake)
 	if code != int(ExitVerification) {
@@ -485,7 +602,7 @@ func TestVMBootstrapVerificationFailureIsExit6(t *testing.T) {
 
 func TestVMBootstrapHumanErrorNoStdoutContamination(t *testing.T) {
 	s := bootstrapHappyResp()
-	s[4] = scriptedResp{res: execx.Result{ExitCode: 0, Stdout: []byte("x86_64\n")}}
+	s[10] = scriptedResp{res: execx.Result{ExitCode: 0, Stdout: []byte("x86_64\n")}}
 	fake := &fakeLimaRunner{script: s}
 	code, stdout, stderr := runVMWithFake(t, []string{"vm", "bootstrap", "--timeout", "5m"}, fake)
 	if code != int(ExitVerification) {
