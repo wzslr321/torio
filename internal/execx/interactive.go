@@ -47,12 +47,9 @@ func (e *ExitError) Error() string {
 }
 
 // InteractiveExecRunner is the real InteractiveRunner backed by os/exec.
-type InteractiveExecRunner struct {
-	// Redactor, if set, redacts diagnostics in addition to the default
-	// well-known secret shapes. There is no retained output to redact: this
-	// runner never sees the child's streams.
-	Redactor *redact.Redactor
-}
+// Diagnostics are redacted of well-known secret shapes; there is no retained
+// output to redact, because this runner never sees the child's streams.
+type InteractiveExecRunner struct{}
 
 // RunInteractive runs cmd with the parent's standard input, output and error
 // wired straight through to the child, and returns when the child exits. A
@@ -107,7 +104,7 @@ func (r *InteractiveExecRunner) RunInteractive(ctx context.Context, cmd Interact
 	// was torn down, it did not exit, and reporting it as an exit status would
 	// invent a remote failure that never happened.
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return fmt.Errorf("interactive %s: %w", r.redact(cmd.Name), ctxErr)
+		return fmt.Errorf("interactive %s: %w", redact.String(cmd.Name), ctxErr)
 	}
 
 	var exitErr *exec.ExitError
@@ -119,13 +116,5 @@ func (r *InteractiveExecRunner) RunInteractive(ctx context.Context, cmd Interact
 	// diagnostic names the executable and nothing else — an operator session's
 	// argv and environment are the credential-bearing parts — and even that is
 	// redacted.
-	return fmt.Errorf("interactive %s: %s", r.redact(cmd.Name), r.redact(runErr.Error()))
-}
-
-// redact applies the configured redactor (or the default) to s.
-func (r *InteractiveExecRunner) redact(s string) string {
-	if r.Redactor != nil {
-		return r.Redactor.String(s)
-	}
-	return redact.String(s)
+	return fmt.Errorf("interactive %s: %s", redact.String(cmd.Name), redact.String(runErr.Error()))
 }

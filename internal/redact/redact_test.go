@@ -66,47 +66,6 @@ func TestStringLeavesNonSecretsUnchanged(t *testing.T) {
 	}
 }
 
-func TestRedactorMasksRegisteredLiterals(t *testing.T) {
-	const secret = "correct-horse-battery-staple-9f3a"
-	r := New(secret)
-	out := r.String("value is " + secret + " end")
-	if strings.Contains(out, secret) {
-		t.Errorf("registered literal secret was not masked")
-	}
-	if !strings.Contains(out, Placeholder) {
-		t.Errorf("output missing placeholder: %q", out)
-	}
-}
-
-// TestRedactorHandlesOverlappingLiterals is the regression for the prefix bug:
-// a shorter literal that is an abbreviation/prefix of a longer one must not
-// leave a residue of the longer secret (New("abc","abcdef") must never leave
-// "def"). Order of registration must not matter.
-func TestRedactorHandlesOverlappingLiterals(t *testing.T) {
-	for _, lits := range [][]string{{"abc", "abcdef"}, {"abcdef", "abc"}} {
-		r := New(lits...)
-		out := r.String("x abcdef y")
-		if strings.Contains(out, "def") {
-			t.Errorf("literals %v left residue: %q", lits, out)
-		}
-		if strings.Contains(out, "abc") {
-			t.Errorf("literals %v left residue: %q", lits, out)
-		}
-		if !strings.Contains(out, Placeholder) {
-			t.Errorf("literals %v: missing placeholder: %q", lits, out)
-		}
-	}
-}
-
-func TestRedactorIgnoresEmptyLiteral(t *testing.T) {
-	// An empty registered secret must not turn every gap into a placeholder.
-	r := New("")
-	in := "nothing to redact here"
-	if out := r.String(in); out != in {
-		t.Errorf("empty literal altered output: %q -> %q", in, out)
-	}
-}
-
 func TestSliceRedactsEachElement(t *testing.T) {
 	in := []string{"--token", canaries["github"], "--user", "alice"}
 	out := Slice(in)

@@ -126,9 +126,7 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 			cerr = usageError(err.Error())
 		}
 		// The pre-run may not have set jsonOut (e.g. a flag error occurs first),
-		// so fall back to scanning args for --json. D1 ingests no runtime
-		// secrets, so no registered literals exist yet; known-shape redaction in
-		// fail still applies. Later slices pass a populated redactor here.
+		// so fall back to scanning args for --json.
 		jsonOut := a.jsonOut || wantsJSON(args)
 		// A categorized error knows its concrete command (e.g. "vm.status");
 		// only early parse/usage errors fall back to scanning args.
@@ -136,7 +134,7 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 		if command == "" {
 			command = firstNonFlag(args)
 		}
-		return fail(a.stdout, a.stderr, command, jsonOut, cerr, nil)
+		return fail(a.stdout, a.stderr, command, jsonOut, cerr)
 	}
 	return int(ExitOK)
 }

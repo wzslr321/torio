@@ -57,8 +57,9 @@ func helperCommand(mode string, env ...string) Command {
 }
 
 func TestRunRedactsRetainedOutputBothStreams(t *testing.T) {
-	const secret = "swordfish-6b1e-canary"
-	r := &ExecRunner{Redactor: redact.New(secret)}
+	// Matcher-valid GitHub-token shape; not a real credential.
+	const secret = "ghp_ABCDEFGHIJKLMNOPQRSTUVWX"
+	r := &ExecRunner{}
 
 	res, err := r.Run(context.Background(), helperCommand("emit", "HB_HELPER_PAYLOAD="+secret))
 	if err != nil {
@@ -69,7 +70,7 @@ func TestRunRedactsRetainedOutputBothStreams(t *testing.T) {
 	}
 	for name, out := range map[string][]byte{"stdout": res.Stdout, "stderr": res.Stderr} {
 		if strings.Contains(string(out), secret) {
-			t.Errorf("%s leaked the registered-literal secret", name)
+			t.Errorf("%s leaked the secret-shaped payload", name)
 		}
 		if !strings.Contains(string(out), redact.Placeholder) {
 			t.Errorf("%s not redacted: %q", name, string(out))

@@ -1,12 +1,18 @@
 // Package redact provides central redaction of sensitive material so that
 // diagnostics, logs, and error messages never carry secrets (AGENTS §6,
 // threat TM-12). Secrets are always rendered as the fixed Placeholder.
+//
+// Redaction is by shape only. A companion type that also masked literal secret
+// values registered at runtime existed here and was never constructed by
+// production code: Torio ingests no runtime secret to register — config is
+// non-secret by contract, no credentials are stored, and the operator's push
+// capability travels through a forwarded SSH agent Torio never sees. It was
+// removed rather than kept as an unexercised path; reinstating it is mechanical
+// if Torio ever does take a secret in.
 package redact
 
 import (
 	"regexp"
-	"sort"
-	"strings"
 )
 
 // Placeholder is the fixed replacement for any redacted material.
@@ -37,59 +43,6 @@ func Slice(in []string) []string {
 	out := make([]string, len(in))
 	for i, v := range in {
 		out[i] = String(v)
-	}
-	return out
-}
-
-// Redactor redacts known secret shapes and, additionally, any registered
-// literal secret values (for example a token whose value is known at runtime
-// but does not match a generic pattern).
-type Redactor struct {
-	// literals matches any registered literal in a single pass. It is nil when
-	// no literals were registered.
-	literals *regexp.Regexp
-}
-
-// New returns a Redactor that also masks each non-empty literal secret.
-//
-// Registered literals are matched longest-first in a single pass, so a shorter
-// literal that is a prefix/substring of a longer one cannot leave a residue of
-// the longer secret (e.g. New("abc", "abcdef") on "abcdef" yields the
-// placeholder, never "def"). Order of registration does not matter.
-func New(literals ...string) *Redactor {
-	kept := make([]string, 0, len(literals))
-	for _, l := range literals {
-		if l != "" {
-			kept = append(kept, l)
-		}
-	}
-	if len(kept) == 0 {
-		return &Redactor{}
-	}
-	// Go's regexp (RE2, leftmost-first alternation) prefers the earliest listed
-	// alternative at a match position, so ordering longest-first makes the
-	// longest containing literal win.
-	sort.SliceStable(kept, func(i, j int) bool { return len(kept[i]) > len(kept[j]) })
-	quoted := make([]string, len(kept))
-	for i, l := range kept {
-		quoted[i] = regexp.QuoteMeta(l)
-	}
-	return &Redactor{literals: regexp.MustCompile(strings.Join(quoted, "|"))}
-}
-
-// String redacts registered literals (single pass) and known secret shapes.
-func (r *Redactor) String(s string) string {
-	if r.literals != nil {
-		s = r.literals.ReplaceAllString(s, Placeholder)
-	}
-	return String(s)
-}
-
-// Slice returns a redacted copy of in without mutating it.
-func (r *Redactor) Slice(in []string) []string {
-	out := make([]string, len(in))
-	for i, v := range in {
-		out[i] = r.String(v)
 	}
 	return out
 }

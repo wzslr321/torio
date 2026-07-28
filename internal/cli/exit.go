@@ -68,14 +68,13 @@ func internalError(msg string) *CLIError {
 // line is written to stderr. Either way stdout stays free of mixed content.
 //
 // This is the final renderer, so it is also the last line of defense for
-// redaction (AGENTS §6, TM-12): the message and all detail values are scrubbed
-// of known secret shapes and, if red is non-nil, its registered literals — so
-// no secret can escape through an error path even if an upstream layer missed
-// it. red may be nil, in which case only known shapes are redacted.
-func fail(stdout, stderr io.Writer, command string, jsonOut bool, err *CLIError, red *redact.Redactor) int {
-	command = redactString(red, command)
-	msg := redactString(red, err.Message)
-	details := redactDetails(red, err.Details)
+// redaction (AGENTS §6, TM-12): the command name, the message and all detail
+// values are scrubbed of known secret shapes, so no secret can escape through
+// an error path even if an upstream layer missed it.
+func fail(stdout, stderr io.Writer, command string, jsonOut bool, err *CLIError) int {
+	command = redact.String(command)
+	msg := redact.String(err.Message)
+	details := redactDetails(err.Details)
 
 	if jsonOut {
 		env := errorEnvelope(command, &EnvelopeError{
@@ -94,17 +93,9 @@ func fail(stdout, stderr io.Writer, command string, jsonOut bool, err *CLIError,
 	return int(err.Exit)
 }
 
-// redactString applies red's literals (if any) plus known secret shapes.
-func redactString(red *redact.Redactor, s string) string {
-	if red != nil {
-		return red.String(s)
-	}
-	return redact.String(s)
-}
-
 // redactDetails returns a copy of details with string values redacted. Nested
 // maps are redacted recursively; other value types are left as-is.
-func redactDetails(red *redact.Redactor, details map[string]any) map[string]any {
+func redactDetails(details map[string]any) map[string]any {
 	if details == nil {
 		return nil
 	}
@@ -112,9 +103,9 @@ func redactDetails(red *redact.Redactor, details map[string]any) map[string]any 
 	for k, v := range details {
 		switch vv := v.(type) {
 		case string:
-			out[k] = redactString(red, vv)
+			out[k] = redact.String(vv)
 		case map[string]any:
-			out[k] = redactDetails(red, vv)
+			out[k] = redactDetails(vv)
 		default:
 			out[k] = v
 		}

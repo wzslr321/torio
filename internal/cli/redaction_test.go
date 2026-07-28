@@ -30,39 +30,40 @@ func TestKnownShapeCanaryMatchesProductionMatcher(t *testing.T) {
 	}
 }
 
-// TestFailRedactsRegisteredLiteral_Human exercises the final renderer directly
-// with a registered-literal redactor on the human (stderr) path.
-func TestFailRedactsRegisteredLiteral_Human(t *testing.T) {
-	const secret = "battery-horse-canary-7f2b"
+// TestFailRedactsKnownShape_Human exercises the final renderer directly on the
+// human (stderr) path.
+func TestFailRedactsKnownShape_Human(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := fail(&stdout, &stderr, "version", false,
-		&CLIError{Exit: ExitInternal, Code: "INTERNAL", Message: "boom " + secret},
-		redact.New(secret))
+		&CLIError{Exit: ExitInternal, Code: "INTERNAL", Message: "boom " + knownShapeCanary})
 
 	if code != int(ExitInternal) {
 		t.Fatalf("exit = %d, want %d", code, int(ExitInternal))
 	}
-	if strings.Contains(stderr.String(), secret) {
-		t.Errorf("stderr leaked registered literal")
+	if strings.Contains(stderr.String(), knownShapeCanary) {
+		t.Errorf("stderr leaked the canary")
 	}
 	if !strings.Contains(stderr.String(), redact.Placeholder) {
 		t.Errorf("stderr not redacted: %q", stderr.String())
 	}
 }
 
-// TestFailRedactsRegisteredLiteral_JSON exercises the renderer on the --json
-// path, including a redacted detail value, and asserts exactly one envelope.
-func TestFailRedactsRegisteredLiteral_JSON(t *testing.T) {
-	const secret = "battery-horse-canary-7f2b"
+// TestFailRedactsKnownShape_JSON exercises the renderer on the --json path.
+// Details are covered here and nowhere else: they are the one error surface
+// that carries structured, adapter-supplied values (bounded guest output,
+// bootstrap checks), so a leak there would not show up in the message tests.
+func TestFailRedactsKnownShape_JSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	fail(&stdout, &stderr, "version", true,
 		&CLIError{
 			Exit:    ExitInternal,
 			Code:    "INTERNAL",
-			Message: "boom " + secret,
-			Details: map[string]any{"context": "value " + secret},
-		},
-		redact.New(secret))
+			Message: "boom " + knownShapeCanary,
+			Details: map[string]any{
+				"context": "value " + knownShapeCanary,
+				"nested":  map[string]any{"inner": "value " + knownShapeCanary},
+			},
+		})
 
 	dec := json.NewDecoder(bytes.NewReader(stdout.Bytes()))
 	var env map[string]any
@@ -72,8 +73,8 @@ func TestFailRedactsRegisteredLiteral_JSON(t *testing.T) {
 	if err := dec.Decode(new(map[string]any)); err != io.EOF {
 		t.Fatalf("expected exactly one JSON document (io.EOF on 2nd decode), got %v", err)
 	}
-	if strings.Contains(stdout.String(), secret) {
-		t.Errorf("json envelope leaked registered literal: %q", stdout.String())
+	if strings.Contains(stdout.String(), knownShapeCanary) {
+		t.Errorf("json envelope leaked the canary: %q", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), redact.Placeholder) {
 		t.Errorf("json envelope not redacted")

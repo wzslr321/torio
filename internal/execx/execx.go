@@ -68,11 +68,9 @@ type Runner interface {
 	Run(ctx context.Context, cmd Command) (Result, error)
 }
 
-// ExecRunner is the real Runner backed by os/exec.
+// ExecRunner is the real Runner backed by os/exec. Retained output and
+// diagnostics are redacted of well-known secret shapes (see internal/redact).
 type ExecRunner struct {
-	// Redactor, if set, redacts retained output and diagnostics in addition to
-	// the default well-known secret shapes.
-	Redactor *redact.Redactor
 	// MaxOutputPerStream bounds retained stdout/stderr per command. If <= 0,
 	// DefaultMaxOutputPerStream is used.
 	MaxOutputPerStream int
@@ -133,8 +131,8 @@ func (r *ExecRunner) Run(ctx context.Context, cmd Command) (Result, error) {
 	errBytes, errTrunc := stderr.snapshot()
 	res := Result{
 		ExitCode:        -1,
-		Stdout:          []byte(r.redact(string(outBytes))),
-		Stderr:          []byte(r.redact(string(errBytes))),
+		Stdout:          []byte(redact.String(string(outBytes))),
+		Stderr:          []byte(redact.String(string(errBytes))),
 		StdoutTruncated: outTrunc,
 		StderrTruncated: errTrunc,
 	}
@@ -158,7 +156,7 @@ func (r *ExecRunner) Run(ctx context.Context, cmd Command) (Result, error) {
 	}
 
 	// Any other failure (e.g. executable not found) is reported, redacted.
-	return res, fmt.Errorf("run %s: %s", r.describe(cmd), r.redact(runErr.Error()))
+	return res, fmt.Errorf("run %s: %s", r.describe(cmd), redact.String(runErr.Error()))
 }
 
 // capWriter retains up to limit bytes and discards the rest, recording whether
@@ -200,18 +198,5 @@ func (r *ExecRunner) describe(cmd Command) string {
 	parts := make([]string, 0, len(cmd.Args)+1)
 	parts = append(parts, cmd.Name)
 	parts = append(parts, cmd.Args...)
-	if r.Redactor != nil {
-		parts = r.Redactor.Slice(parts)
-	} else {
-		parts = redact.Slice(parts)
-	}
-	return strings.Join(parts, " ")
-}
-
-// redact applies the configured redactor (or the default) to s.
-func (r *ExecRunner) redact(s string) string {
-	if r.Redactor != nil {
-		return r.Redactor.String(s)
-	}
-	return redact.String(s)
+	return strings.Join(redact.Slice(parts), " ")
 }

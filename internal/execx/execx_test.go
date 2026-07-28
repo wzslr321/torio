@@ -86,11 +86,13 @@ func TestRunHonorsContextCancellation(t *testing.T) {
 	}
 }
 
-// TestRunRedactsSecretsInDiagnostics proves a secret in the argument array does
-// not leak into the runner's error string.
+// TestRunRedactsSecretsInDiagnostics proves a secret-shaped value in the
+// argument array does not leak into the runner's error string, which includes
+// the command description.
 func TestRunRedactsSecretsInDiagnostics(t *testing.T) {
-	const secret = "swordfish-6b1e-canary"
-	r := &ExecRunner{Redactor: redact.New(secret)}
+	// Matcher-valid GitHub-token shape; not a real credential.
+	const secret = "ghp_ABCDEFGHIJKLMNOPQRSTUVWX"
+	r := &ExecRunner{}
 	// A binary that does not exist forces a start error whose wrapper includes
 	// the (redacted) command description.
 	_, err := r.Run(context.Background(), Command{

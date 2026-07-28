@@ -260,6 +260,9 @@ func TestRunInteractiveRejectsEmptyName(t *testing.T) {
 // start — names the executable and nothing else, and passes even that through
 // redaction (AGENTS §6). The argument array and the environment of an operator
 // session carry credentials by construction; they never reach a diagnostic.
+// The two properties are distinct and proven separately: argv and env are
+// omitted whatever they contain, so their canaries need no secret shape; the
+// executable path is redacted, so its canary must have one.
 func TestRunInteractiveRedactsDiagnosticsAndOmitsArgsAndEnv(t *testing.T) {
 	const argSecret = "swordfish-6b1e-canary"
 	const envSecret = "hunter-9c4d-canary"
@@ -267,7 +270,7 @@ func TestRunInteractiveRedactsDiagnosticsAndOmitsArgsAndEnv(t *testing.T) {
 	// must mask a known secret shape wherever it appears.
 	name := "/nonexistent/ghp_" + strings.Repeat("A", 24) + "/ssh"
 
-	r := &InteractiveExecRunner{Redactor: redact.New(argSecret, envSecret)}
+	r := &InteractiveExecRunner{}
 	err := r.RunInteractive(context.Background(), InteractiveCommand{
 		Name: name,
 		Args: []string{"--token", argSecret},
