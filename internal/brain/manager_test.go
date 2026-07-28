@@ -868,3 +868,46 @@ func TestStatusStillReportsDriftNobodyRepaired(t *testing.T) {
 		t.Errorf("status hid %q on an unrepaired guest: %v", issueSkillDrift, report.Issues)
 	}
 }
+
+// An operator who clears the Brain to start over must be able to recreate it.
+//
+// Before this, an empty canonical directory with the Hermes project still
+// registered was drift, and Init's drift branch only repairs a scaffold that
+// exists — so `brain init` refused, permanently. There was no way out either:
+// Hermes cannot free a slug, because `archive` leaves the project visible to
+// `project show` and no delete exists. Observed on a real guest while rebuilding
+// a Brain around an imported vault.
+func TestInitRebuildsAnEmptyBrainThatIsStillRegistered(t *testing.T) {
+	g := readyFake()
+	g.registered = true
+
+	report, err := New(g).Init(context.Background())
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if !report.Created || report.Status.State != StateInitialized {
+		t.Fatalf("report = %#v, want a rebuilt, initialized Brain", report)
+	}
+	if !g.saw("mv -T " + stagingPath + " " + Path) {
+		t.Errorf("no scaffold was promoted: %v", g.calls)
+	}
+	// The registration is reconciled, not duplicated: the slug already points
+	// at this path.
+	if g.saw("hermes project create") {
+		t.Errorf("init re-created a project that was already registered")
+	}
+}
+
+// A slug held by a project pointing somewhere else is a different situation and
+// must stay refused. Scaffolding under it would trample a project Torio does not
+// own, and no amount of emptiness here makes that safe.
+func TestInitStillRefusesWhenTheSlugBelongsToAnotherPath(t *testing.T) {
+	g := readyFake()
+	g.wrongProject = true
+
+	_, err := New(g).Init(context.Background())
+	assertKind(t, err, KindConflict)
+	if g.saw("mv -T " + stagingPath + " " + Path) {
+		t.Errorf("init scaffolded under a slug owned by another path: %v", g.calls)
+	}
+}
