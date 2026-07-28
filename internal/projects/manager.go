@@ -135,8 +135,15 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 	}
 
 	if !status.PathExists {
+		// --quiet for the same reason the preflight above asks only for HEAD,
+		// though this one is a latent case rather than an observed failure:
+		// clone progress is unbounded chatter on stderr, nothing here reads it,
+		// and it grows with repository size and network time. Raising the
+		// retained-output bound would be the wrong repair — it exists so a
+		// runaway child cannot exhaust memory, and no bound covers every
+		// repository.
 		if err := m.mustRun(ctx, op, KindGit, "clone the remote",
-			m.gitExec("clone", "--", entry.Remote, workspace)); err != nil {
+			m.gitExec("clone", "--quiet", "--", entry.Remote, workspace)); err != nil {
 			return report, err
 		}
 		report.Cloned = true
@@ -510,7 +517,18 @@ func (m *Manager) requireOperatorUser(op string) error {
 // is reported as an auth problem, because provisioning access is a human act
 // Torio deliberately cannot perform.
 func (m *Manager) preflightRemote(ctx context.Context, op, remote string) error {
-	res, err := m.run(ctx, op, m.gitExec("ls-remote", "--", remote))
+	// Asking for HEAD alone, because this proves readability and nothing else
+	// reads the output. An unqualified ls-remote returns every ref the server
+	// advertises, and GitHub advertises refs/pull/* — a busy upstream answered
+	// with 4.7 MiB, which exceeds execx.DefaultMaxOutputPerStream and turned a
+	// perfectly readable remote into "bounded guest output was truncated".
+	// Restricting the query keeps it at one line.
+	//
+	// Deliberately without --exit-code: an empty repository has no HEAD, and
+	// --exit-code would report that as unreadable when the guest can read it
+	// fine. Readability is already carried by the exit status below — an
+	// unreadable remote exits 128.
+	res, err := m.run(ctx, op, m.gitExec("ls-remote", "--", remote, "HEAD"))
 	if err != nil {
 		return err
 	}
