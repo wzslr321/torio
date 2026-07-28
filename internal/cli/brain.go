@@ -25,17 +25,21 @@ type brainService interface {
 	Init(context.Context) (brain.InitReport, error)
 	Status(context.Context) (brain.StatusReport, error)
 	Import(context.Context, brain.ImportOptions) (brain.TransferReport, error)
-	Export(context.Context, brain.ExportOptions) (brain.TransferReport, error)
 }
 
 func newBrainCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "brain",
 		Short: "Initialize and inspect the private Markdown Second Brain",
-		Long: "Manage the mandatory Torio V1 Second Brain at /home/hermes/brain. " +
+		Long: "Manage the mandatory Torio V1 Second Brain at " + brain.Path + ". " +
 			"The Brain stays on the guest's native filesystem, is private to hermes, " +
 			"and is registered as a separate Hermes Project. Commands report only " +
-			"bounded aggregate metadata, never note names or content.",
+			"bounded aggregate metadata, never note names or content.\n\n" +
+			"Torio brings data in and does not take it out. To copy the Brain back to " +
+			"the Mac, run limactl yourself:\n\n" +
+			"  limactl copy " + lima.InstanceName + ":" + brain.Path + "/ <host-destination>/\n\n" +
+			"That is an operator command, not a Torio feature: nothing verifies the " +
+			"result and Torio does not call it a backup.",
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return usageError("no subcommand given; run 'torio brain --help'")
@@ -46,7 +50,6 @@ func newBrainCmd(a *app) *cobra.Command {
 	cmd.AddCommand(newBrainInitCmd(a))
 	cmd.AddCommand(newBrainStatusCmd(a))
 	cmd.AddCommand(newBrainImportCmd(a))
-	cmd.AddCommand(newBrainExportCmd(a))
 	return cmd
 }
 
@@ -85,40 +88,6 @@ func newBrainImportCmd(a *app) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preflight and report without transferring or changing Brain data")
 	cmd.Flags().StringVar(&into, "into", "", "import as one new relative subtree below the Brain")
-	return cmd
-}
-
-func newBrainExportCmd(a *app) *cobra.Command {
-	var dryRun bool
-	cmd := &cobra.Command{
-		Use:   "export <new-host-directory>",
-		Short: "Export a verified working-tree copy of the Brain",
-		Long: "Export the current Brain working tree through private staging, verify it against " +
-			"a SHA-256 manifest, and atomically create a new host directory. Torio V1 does not " +
-			"export Git history: .git is excluded and no repository bundle is created. The " +
-			"destination must not already exist. Output contains only aggregate counts and a " +
-			"manifest digest, never note names or content.",
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, cancel := a.opContext(cmd)
-			defer cancel()
-			service, err := a.brainService("brain.export")
-			if err != nil {
-				return err
-			}
-			report, err := service.Export(ctx, brain.ExportOptions{
-				Destination: args[0],
-				DryRun:      dryRun,
-			})
-			if err != nil {
-				cliErr := mapBrainError("brain.export", err)
-				cliErr.Details = brainTransferDetails(report)
-				return cliErr
-			}
-			return a.emitBrainTransfer("brain.export", report)
-		},
-	}
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "verify and report without transferring or creating the destination")
 	return cmd
 }
 

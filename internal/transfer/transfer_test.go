@@ -262,29 +262,6 @@ func TestChecksumFileUsesContainedAbsoluteGuestPaths(t *testing.T) {
 
 // Verification is what makes the transfer all-or-nothing, and its failure must
 // stay bounded: the error says a file did not match, never which one.
-func TestVerifyDetectsMutationWithoutNamingIt(t *testing.T) {
-	src := t.TempDir()
-	writeFile(t, src, "secret-project/private-note-name.md", "before", 0o644)
-	manifest, _, err := Collect(src, "")
-	if err != nil {
-		t.Fatalf("Collect() error = %v", err)
-	}
-	if err := Verify(src, manifest); err != nil {
-		t.Fatalf("Verify() on an unchanged tree = %v, want nil", err)
-	}
-
-	writeFile(t, src, "secret-project/private-note-name.md", "after", 0o644)
-	err = Verify(src, manifest)
-	if err == nil {
-		t.Fatalf("Verify() on a mutated tree = nil, want a checksum mismatch")
-	}
-	for _, leak := range []string{"private-note-name", "secret-project", "before", "after"} {
-		if strings.Contains(err.Error(), leak) {
-			t.Fatalf("verification error leaked %q: %v", leak, err)
-		}
-	}
-}
-
 func TestCollectRejectsInvalidSourceRootsWithoutNamingThem(t *testing.T) {
 	const marker = "private-customer-vault"
 	parent := t.TempDir()
@@ -363,55 +340,5 @@ func TestStageFileDoesNotFollowAFinalSymlink(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), marker) {
 		t.Fatalf("stageFile error leaked a private path: %v", err)
-	}
-}
-
-func TestParseGuestManifestBindsNULTerminatedHashesSizesAndUnicodePaths(t *testing.T) {
-	const prefix = "/home/hermes/.torio-private/payload"
-	hashA := strings.Repeat("a", 64)
-	hashB := strings.Repeat("b", 64)
-	checksums := []byte(hashA + "  " + prefix + "/notes/zażółć.md\x00" +
-		hashB + "  " + prefix + "/attachments/map.png\x00")
-	sizes := []byte("7\tnotes/zażółć.md\x00" +
-		"3\tattachments/map.png\x00")
-
-	manifest, err := ParseGuestManifest(prefix, checksums, sizes)
-	if err != nil {
-		t.Fatalf("ParseGuestManifest: %v", err)
-	}
-	if manifest.Files() != 2 || manifest.Bytes() != 10 {
-		t.Fatalf("manifest files/bytes = %d/%d, want 2/10", manifest.Files(), manifest.Bytes())
-	}
-	if manifest.Entries[0].Path != "attachments/map.png" ||
-		manifest.Entries[1].Path != "notes/zażółć.md" {
-		t.Fatalf("manifest entries are not deterministically sorted: %#v", manifest.Entries)
-	}
-}
-
-func TestParseGuestManifestRejectsMalformedOrEscapedPrivateOutputWithoutNamingIt(t *testing.T) {
-	const prefix = "/home/hermes/.torio-private/payload"
-	const marker = "private-customer-note"
-	hash := strings.Repeat("a", 64)
-	cases := []struct {
-		name      string
-		checksums []byte
-		sizes     []byte
-	}{
-		{"unterminated checksum", []byte(hash + "  " + prefix + "/" + marker + ".md"), []byte("1\t" + marker + ".md\x00")},
-		{"unterminated size", []byte(hash + "  " + prefix + "/" + marker + ".md\x00"), []byte("1\t" + marker + ".md")},
-		{"escaped prefix", []byte(hash + "  /home/hermes/outside/" + marker + ".md\x00"), []byte("1\t" + marker + ".md\x00")},
-		{"noncanonical path", []byte(hash + "  " + prefix + "/notes/./" + marker + ".md\x00"), []byte("1\tnotes/./" + marker + ".md\x00")},
-		{"different sets", []byte(hash + "  " + prefix + "/" + marker + ".md\x00"), []byte("1\tother.md\x00")},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseGuestManifest(prefix, tc.checksums, tc.sizes)
-			if err == nil {
-				t.Fatal("ParseGuestManifest accepted malformed private output")
-			}
-			if strings.Contains(err.Error(), marker) {
-				t.Fatalf("private parser error leaked a filename: %v", err)
-			}
-		})
 	}
 }

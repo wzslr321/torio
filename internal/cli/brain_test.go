@@ -28,9 +28,6 @@ type fakeBrainService struct {
 	importReport brain.TransferReport
 	importErr    error
 	importOpts   brain.ImportOptions
-	exportReport brain.TransferReport
-	exportErr    error
-	exportOpts   brain.ExportOptions
 }
 
 func (f *fakeBrainService) Init(context.Context) (brain.InitReport, error) {
@@ -44,11 +41,6 @@ func (f *fakeBrainService) Status(context.Context) (brain.StatusReport, error) {
 func (f *fakeBrainService) Import(_ context.Context, opts brain.ImportOptions) (brain.TransferReport, error) {
 	f.importOpts = opts
 	return f.importReport, f.importErr
-}
-
-func (f *fakeBrainService) Export(_ context.Context, opts brain.ExportOptions) (brain.TransferReport, error) {
-	f.exportOpts = opts
-	return f.exportReport, f.exportErr
 }
 
 func initializedBrainReport() brain.StatusReport {
@@ -208,48 +200,14 @@ func TestBrainImportWiresOptionsAndEmitsBoundedJSON(t *testing.T) {
 	}
 }
 
-func TestBrainExportWiresOptionsAndDocumentsWorkingTreeOnly(t *testing.T) {
-	service := &fakeBrainService{exportReport: brain.TransferReport{
-		Files:          3,
-		Markdown:       3,
-		Bytes:          128,
-		ManifestSHA256: strings.Repeat("b", 64),
-		Skipped:        map[string]int{},
-		FinalPath:      "/private/backup",
-	}}
-
-	code, stdout, stderr := runBrainCLI(t, []string{
-		"brain", "export", "/private/backup", "--json",
-	}, service)
-	if code != int(ExitOK) {
-		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
-	}
-	if service.exportOpts.Destination != "/private/backup" || service.exportOpts.DryRun {
-		t.Fatalf("export options = %#v", service.exportOpts)
-	}
-	env := decodeOneEnvelope(t, stdout)
-	if env["command"] != "brain.export" {
-		t.Fatalf("envelope = %#v", env)
-	}
-
-	code, stdout, stderr = runBrainCLI(t, []string{"brain", "export", "--help"}, service)
-	if code != int(ExitOK) {
-		t.Fatalf("help exit = %d; stderr=%q", code, stderr)
-	}
-	if !strings.Contains(stdout, "working tree") || !strings.Contains(stdout, ".git") {
-		t.Fatalf("export help does not disclose the V1 history boundary: %q", stdout)
-	}
-}
-
 func TestBrainTransferErrorsDoNotEchoPrivateArguments(t *testing.T) {
 	const marker = "private-customer-vault"
 	service := &fakeBrainService{
 		importErr: &brain.Error{Op: "import", Kind: brain.KindPrecondition, Err: errors.New("host source preflight failed")},
-		exportErr: &brain.Error{Op: "export", Kind: brain.KindConflict, Err: errors.New("destination already exists")},
 	}
 	for _, args := range [][]string{
 		{"brain", "import", "/tmp/" + marker, "--json"},
-		{"brain", "export", "/tmp/" + marker, "--json"},
+		{"brain", "import", "/tmp/" + marker, "--dry-run", "--json"},
 	} {
 		code, stdout, stderr := runBrainCLI(t, args, service)
 		if code == int(ExitOK) {
