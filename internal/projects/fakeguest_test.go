@@ -199,12 +199,12 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 		return okResult(f.owner + ":" + f.group + " " + f.mode + "\n"), nil
 
 	// --- remote preflight and clone ---
-	case strings.Contains(joined, "git ls-remote -- "+f.remote):
+	case strings.Contains(joined, "git ls-remote -- "+f.remote+" HEAD"):
 		if !f.remoteReadable {
 			return exitResult(128, "", remoteFailureStderr), nil
 		}
 		return okResult("0123456789abcdef\tHEAD\n"), nil
-	case strings.Contains(joined, "git clone -- "+f.remote+" "+testPath):
+	case strings.Contains(joined, "git clone --quiet -- "+f.remote+" "+testPath):
 		if !f.remoteReadable {
 			return exitResult(128, "", remoteFailureStderr), nil
 		}

@@ -40,8 +40,8 @@ func TestAddClonesAbsentPathAndRegistersProject(t *testing.T) {
 	}
 	for _, fragment := range []string{
 		"env GIT_TERMINAL_PROMPT=0",
-		"git ls-remote -- " + testRemote,
-		"git clone -- " + testRemote + " " + testPath,
+		"git ls-remote -- " + testRemote + " HEAD",
+		"git clone --quiet -- " + testRemote + " " + testPath,
 		"chown -R hermes:torio-projects -- " + testPath,
 		"find " + testPath + " -type d -exec chmod g+s",
 		"sudo -n -u hermes -- git config --global --add safe.directory " + testPath,
@@ -126,7 +126,7 @@ func TestAddClonesAPublicHTTPSRemote(t *testing.T) {
 	if !report.Cloned {
 		t.Fatalf("report = %#v, want a fresh clone", report)
 	}
-	if !g.saw("git ls-remote -- "+publicRemote) || !g.saw("git clone -- "+publicRemote+" "+testPath) {
+	if !g.saw("git ls-remote -- "+publicRemote) || !g.saw("git clone --quiet -- "+publicRemote+" "+testPath) {
 		t.Fatalf("public remote did not take the noninteractive path: %v", g.calls)
 	}
 	if len(r.saved) != 1 || r.saved[0].Projects[0].Remote != publicRemote {
@@ -1135,5 +1135,63 @@ func assertKind(t *testing.T, err error, want ErrorKind) {
 	}
 	if got.Kind != want {
 		t.Fatalf("error kind = %q, want %q: %v", got.Kind, want, err)
+	}
+}
+
+// Neither command that talks to the remote may narrate. Torio retains at most
+// execx.DefaultMaxOutputPerStream per stream and treats truncation as a
+// verification failure, so a command that reports progress or dumps every ref
+// can fail on the size of the repository rather than on anything being wrong.
+//
+// The preflight is the observed case: an unqualified `git ls-remote` against a
+// busy upstream answered with 4.7 MiB, because GitHub advertises refs/pull/*.
+// Attaching that repository failed with "bounded guest output was truncated"
+// while the remote was perfectly readable. Restricting the query to HEAD kept
+// the same proof — a readable remote exits 0, an unreadable one exits 128 —
+// and brought the answer down to one line.
+//
+// The clone is the latent sibling, fixed alongside it: progress output grows
+// with repository size and network time, and nothing here reads it either.
+func TestRemoteCommandsCannotTruncateTheirOwnOutput(t *testing.T) {
+	g := readyFake()
+	if _, err := newTestManager(g, emptyRegistry()).Add(context.Background(), addRequest()); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	find := func(needle string) string {
+		for _, c := range g.calls {
+			if joined := strings.Join(c.argv, " "); strings.Contains(joined, needle) {
+				return joined
+			}
+		}
+		return ""
+	}
+
+	preflight := find("git ls-remote")
+	if preflight == "" {
+		t.Fatal("no remote preflight was issued")
+	}
+	if !strings.HasSuffix(preflight, " HEAD") {
+		t.Errorf("preflight asks for every ref the server advertises:\n%s", preflight)
+	}
+	// --exit-code would call an empty repository unreadable: it has no HEAD,
+	// yet the guest can read it fine.
+	if strings.Contains(preflight, "--exit-code") {
+		t.Errorf("preflight uses --exit-code, which fails an empty repository:\n%s", preflight)
+	}
+
+	clone := find("git clone")
+	if clone == "" {
+		t.Fatal("no clone was issued")
+	}
+	if !strings.Contains(clone, "--quiet") {
+		t.Errorf("clone is not quiet:\n%s", clone)
+	}
+	// Positions are measured inside the git invocation: the sudo prefix carries
+	// a "--" of its own, and comparing against that one would pass for the
+	// wrong reason.
+	gitPart := clone[strings.Index(clone, "git clone"):]
+	if strings.Index(gitPart, "--quiet") > strings.Index(gitPart, " -- ") {
+		t.Errorf("--quiet must precede git's -- separator, or it reads as a path:\n%s", gitPart)
 	}
 }
