@@ -272,6 +272,7 @@ torio project shell <id>
 ### MCP
 
 ```text
+torio mcp install
 torio mcp status
 ```
 
@@ -280,6 +281,19 @@ Serwery MCP są osiągane przez brokera działającego pod własną tożsamości
 ([ADR-0022](../adr/0022-mcp-credential-broker.md)). Torio nie dotyka tych credentiali: stawia
 granicę i dowodzi, że trzyma.
 
+- `install` tworzy nieuprzywilejowaną tożsamość `torio-mcp`, jej magazyn credentiali `0700`, grupę
+  `torio-mcp-clients` oraz root-owned katalog policy — po czym **dowodzi** wyniku zamiast ufać exit
+  code'om komend, które go wyprodukowały. Idempotentne (`changed:false` przy przebiegu bez zmian),
+  nie przyjmuje sekretów i **nie przyznaje niczego** poza członkostwem w grupie klientów, którego
+  `hermes` potrzebuje, by otworzyć socket. `torio-mcp` nigdy nie trafia do `torio-projects`, a
+  `hermes` nigdy do grupy `torio-mcp`; to dwie pomyłki, które unieważniłyby decyzję, zostawiając
+  wszystkie pozostałe checki zielone.
+- `install` **nie blokuje się** na credentialach zalegających pod profilem Hermesa. Są dokładnie
+  tym, co broker ma zlikwidować, ale odmowa instalacji przy ich obecności to zakleszczenie: operator
+  nie może zbudować rzeczy, do której ma migrować. Ten ciągły invariant należy do `status`.
+- Gdy `hermes` dopiero co dołączył do grupy klientów, `install` raportuje `restart_required` i mówi
+  o tym wprost. Długo żyjący proces nie nabywa grupy dlatego, że zmieniła się pod nim baza grup —
+  backend trzyma to, z czym wystartował, aż do `torio serve restart`.
 - `status` **dowodzi i raportuje; niczego nie naprawia.** Weryfikuje, że tożsamość brokera istnieje,
   że jego magazyn credentiali nie jest czytelny dla nikogo poza nim, że `hermes` może otworzyć socket
   brokera, ale **nie** należy do grupy samego brokera, oraz że pod profilem Hermesa nie pojawił się

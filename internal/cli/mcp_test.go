@@ -147,3 +147,59 @@ func TestMCPStatusIsReadOnly(t *testing.T) {
 		}
 	}
 }
+
+// freshMCPInstallScript is a guest with nothing provisioned: probes say absent,
+// mutations succeed, and the closing identity verification sees the result.
+func freshMCPInstallScript() []scriptedResp {
+	out := func(s string) scriptedResp { return scriptedResp{res: execx.Result{Stdout: []byte(s)}} }
+	fail := func(code int) scriptedResp { return scriptedResp{res: execx.Result{ExitCode: code}} }
+	return []scriptedResp{
+		fail(2),                          // getent group -> absent
+		out(""),                          // groupadd
+		fail(1),                          // id -u torio-mcp -> absent
+		out(""),                          // useradd
+		out("directory\n"),               // stat %F home
+		out("torio-mcp:torio-mcp 755\n"), // stat %U:%G %a -> too open
+		out(""),                          // chmod 700
+		out("hermes torio-projects\n"),   // id -nG hermes -> not a client yet
+		out(""),                          // usermod -aG
+		fail(1),                          // stat %F policy dir -> absent
+		out(""),                          // install -d
+		out("997\n"),                     // verify: id -u
+		out("torio-mcp-clients:x:995:hermes\n"),
+		out("hermes torio-projects torio-mcp-clients\n"),
+		out("hermes torio-projects torio-mcp-clients\n"),
+		out("directory\n"),
+		out("torio-mcp:torio-mcp 700\n"),
+	}
+}
+
+func TestMCPInstallFreshReportsChangeAndRestart(t *testing.T) {
+	code, stdout, stderr := runVMWithFake(t, []string{"mcp", "install", "--json"}, &fakeLimaRunner{script: freshMCPInstallScript()})
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q stdout=%q", code, stderr, stdout)
+	}
+	env := decodeOneEnvelope(t, stdout)
+	if env["ok"] != true || env["command"] != "mcp.install" {
+		t.Fatalf("unexpected envelope: %v", env)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data["changed"] != true {
+		t.Errorf("data.changed = %v, want true on a fresh guest", data["changed"])
+	}
+	if data["restart_required"] != true {
+		t.Errorf("data.restart_required = %v, want true: hermes only just joined the client group", data["restart_required"])
+	}
+}
+
+func TestMCPInstallHumanOutputNamesTheRestartStep(t *testing.T) {
+	code, stdout, _ := runVMWithFake(t, []string{"mcp", "install"}, &fakeLimaRunner{script: freshMCPInstallScript()})
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	// A broker the agent cannot reach, with no stated reason, is the failure mode
+	// this line exists to prevent.
+	if !strings.Contains(stdout, "serve restart") {
+		t.Errorf("human output does not tell the operator to restart the backend: %q", stdout)
+	}
+}

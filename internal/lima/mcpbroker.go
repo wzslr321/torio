@@ -69,20 +69,32 @@ func (r *MCPBrokerReport) record(name string, ok bool, detail string) {
 func (a *Adapter) VerifyMCPBroker(ctx context.Context) (MCPBrokerReport, error) {
 	rep := MCPBrokerReport{Instance: InstanceName}
 
-	steps := []func(context.Context, *MCPBrokerReport) error{
-		a.verifyBrokerUser,
-		a.verifyBrokerClientsGroup,
-		a.verifyHermesIsBrokerClient,
-		a.verifyHermesNotBrokerOwner,
-		a.verifyBrokerHome,
-		a.verifyNoHermesMCPTokens,
-	}
+	steps := append(brokerIdentitySteps(a), a.verifyNoHermesMCPTokens)
 	for _, step := range steps {
 		if err := step(ctx, &rep); err != nil {
 			return rep, err
 		}
 	}
 	return rep, nil
+}
+
+// brokerIdentitySteps prove the separation itself: the identities exist, the
+// credential store is reachable by nobody but its owner, and hermes may open the
+// socket without being able to read what is behind it.
+//
+// They are named apart from the full status set because install and status ask
+// different questions. Install proves what install created. Status additionally
+// asks whether a credential has since reappeared under the agent's own identity
+// — an ongoing invariant, not a postcondition of provisioning, and one that
+// would deadlock the installer if it gated it (see InstallMCPBroker).
+func brokerIdentitySteps(a *Adapter) []func(context.Context, *MCPBrokerReport) error {
+	return []func(context.Context, *MCPBrokerReport) error{
+		a.verifyBrokerUser,
+		a.verifyBrokerClientsGroup,
+		a.verifyHermesIsBrokerClient,
+		a.verifyHermesNotBrokerOwner,
+		a.verifyBrokerHome,
+	}
 }
 
 func (a *Adapter) brokerProbe(ctx context.Context, rep *MCPBrokerReport, name string, argv ...string) (result, error) {
