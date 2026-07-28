@@ -4,7 +4,7 @@
 // The backend is the JSON-RPC/WebSocket gateway Hermes Desktop and remote
 // clients connect to. Demo A binds it to guest loopback only (127.0.0.1); the
 // Mac reaches it through an operator-controlled SSH tunnel (ADR-0003,
-// docs/contracts/service-lifecycle.md). This package generates and manages a
+// docs/contracts/cli.md). This package generates and manages a
 // narrow user unit for the dedicated non-root `hermes` identity, never a broad
 // remote-shell facility: every guest action is a fixed argv run through the
 // injected Guest transport (limactl shell in production), with bounded, redacted
@@ -55,7 +55,7 @@ type Adapter struct {
 func New(guest Guest) *Adapter { return &Adapter{Guest: guest} }
 
 // The fixed, repository-controlled service facts. Loopback bind is a hard
-// invariant (docs/contracts/service-lifecycle.md); the values are constants —
+// invariant (docs/contracts/cli.md); the values are constants —
 // never caller input — so the generated unit and every probe target a single,
 // auditable loopback endpoint and can never be widened to a public bind.
 const (

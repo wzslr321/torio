@@ -14,7 +14,7 @@ var endpointRetryDelay = 500 * time.Millisecond
 // be installed (run `torio serve install` first), starts it via the user manager,
 // then fails closed unless BOTH postconditions hold: the re-queried systemd
 // state is active AND the loopback /api/status endpoint answers 200. An active
-// process with a dead endpoint is a failure (docs/contracts/service-lifecycle.md).
+// process with a dead endpoint is a failure (docs/contracts/cli.md).
 // Start is idempotent — starting an already-running, ready backend succeeds.
 func (a *Adapter) Start(ctx context.Context) (StatusReport, error) {
 	return a.activate(ctx, "start", "start")

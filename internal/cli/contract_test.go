@@ -4,8 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // TestUnknownGlobalFlagStillRejected keeps the fail-closed flag contract: a
@@ -63,4 +68,36 @@ func TestHelpIsTheNarrowExceptionToJSON(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestHelpTextCarriesNoProductVersionLabel keeps release labels out of every
+// string an operator can read. Which Torio scope is running is answered by
+// `torio version` and nowhere else: help text that says "V1" tells the reader
+// nothing they can act on, and it ages into a falsehood the moment the next
+// scope lands. Go comments are deliberately exempt — they are not a user-facing
+// surface, and they carry the ADR context that explains why a rule exists.
+func TestHelpTextCarriesNoProductVersionLabel(t *testing.T) {
+	label := regexp.MustCompile(`(?i)\bv[0-9]+\b`)
+
+	check := func(where, field, text string) {
+		if m := label.FindString(text); m != "" {
+			t.Errorf("%s: %s carries the product version label %q; "+
+				"the operator reads the version from `torio version`", where, field, m)
+		}
+	}
+
+	var walk func(*cobra.Command)
+	walk = func(c *cobra.Command) {
+		where := c.CommandPath()
+		check(where, "Short", c.Short)
+		check(where, "Long", c.Long)
+		check(where, "Example", c.Example)
+		visit := func(f *pflag.Flag) { check(where, "flag --"+f.Name, f.Usage) }
+		c.Flags().VisitAll(visit)
+		c.PersistentFlags().VisitAll(visit)
+		for _, sub := range c.Commands() {
+			walk(sub)
+		}
+	}
+	walk(newRootCmd(&app{stdout: io.Discard, stderr: io.Discard, build: testBuild()}))
 }

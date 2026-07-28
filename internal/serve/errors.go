@@ -37,7 +37,7 @@ const (
 	KindPostconditionFailed ErrorKind = "postcondition_failed"
 	// KindEndpointUnready means systemd reports the service active but the
 	// loopback readiness endpoint did not answer 200 — an active process with a
-	// dead endpoint is a failure (docs/contracts/service-lifecycle.md).
+	// dead endpoint is a failure (docs/contracts/cli.md).
 	// Verification failed (exit 6).
 	KindEndpointUnready ErrorKind = "endpoint_unready"
 	// KindValidationFailed means the generated unit failed `systemd-analyze

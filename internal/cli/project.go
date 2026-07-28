@@ -167,7 +167,7 @@ func newProjectRemoveCmd(a *app) *cobra.Command {
 		Use:   "remove <id>",
 		Short: "Forget a project without touching its checkout",
 		Long: "Archive the Hermes project and remove the config entry. The guest checkout is " +
-			"never deleted and the output says where it still is; V1 has no --delete.",
+			"never deleted and the output says where it still is; there is no --delete.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := a.opContext(cmd)
