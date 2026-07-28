@@ -1,8 +1,14 @@
 # Config contract (D2)
 
-Ten dokument opisuje typowaną konfigurację hosta oraz version-lock manifest wprowadzone w D2
+Ten dokument opisuje typowaną konfigurację hosta wprowadzoną w D2
 (patrz `archive/pre-v1:docs/plans/02-demo-a.md` § D2). Implementacja: `internal/config/`.
 Konfiguracja jest **non-secret** (AGENTS §6): materiał o kształcie sekretu jest odrzucany.
+
+> **Version-lock manifest (`version-lock.json`) nie istnieje.** Był zaprojektowany w D2, ale
+> nigdy nie został podpięty: żadna komenda go nie czytała, a jego jedyny konsument
+> (`lima.Probe`) nie był wołany. Kod i ten opis zostały usunięte — patrz
+> [ADR-0017](../adr/0017-pre-v1-exploration-leaves-the-working-tree.md). Opisana niżej granica
+> zaufania ścieżek obowiązuje bez zmian dla `config.json`.
 
 ## Lokalizacje (XDG)
 
@@ -10,8 +16,8 @@ Konfiguracja jest **non-secret** (AGENTS §6): materiał o kształcie sekretu je
 
 | Rola | Baza (env) | Fallback | Katalog aplikacji |
 |---|---|---|---|
-| Config | `XDG_CONFIG_HOME` | `$HOME/.config` | `<base>/hermes-box/` |
-| State  | `XDG_STATE_HOME`  | `$HOME/.local/state` | `<base>/hermes-box/` |
+| Config | `XDG_CONFIG_HOME` | `$HOME/.config` | `<base>/torio/` |
+| State  | `XDG_STATE_HOME`  | `$HOME/.local/state` | `<base>/torio/` |
 
 Reguły:
 
@@ -30,15 +36,14 @@ Reguły:
   malformed) zmienna XDG ani `$HOME` nie mogą zablokować w pełni jawnej inwokacji. Konsultowany jest
   wyłącznie base faktycznie potrzebny (bo jego override jest nieobecny), i każda faktycznie użyta
   wartość jest nadal ściśle walidowana (patrz reguła absolutności powyżej).
-- Przy explicit `--config`, zaufanym katalogiem config (dla `version-lock.json`) jest katalog
-  nadrzędny wskazanego pliku — manifest leży obok jawnego configu.
-- Pliki lokalizowane **wewnątrz** zaufanego katalogu (`config.json`, `version-lock.json`) używają
+- Przy explicit `--config` zaufanym katalogiem config jest katalog nadrzędny wskazanego pliku.
+- Pliki lokalizowane **wewnątrz** zaufanego katalogu (`config.json`) używają
   contained-join: nazwa musi być czystą nazwą pliku, a wynik nie może opuścić katalogu bazowego.
   Traversal jest odrzucany strukturalnie, nie przez czyszczenie stringów.
 
 ## Granica zaufania ścieżek (ADR-0013)
 
-Zanim `config.json`/`version-lock.json` staną się authority, ścieżki są egzekwowane fail-closed.
+Zanim `config.json` stanie się authority, ścieżki są egzekwowane fail-closed.
 Terminologia jest rozdzielona (koniec z „owner-only"):
 
 - **mode-private** — brak dostępu grupy/innych: `perm & 0o077 == 0`.
@@ -48,7 +53,7 @@ Terminologia jest rozdzielona (koniec z „owner-only"):
 Reguły (egzekwowane na **darwin/linux**; poza nimi jawny, udokumentowany no-op — hosty Demo A to
 macOS/Linux arm64):
 
-- Zaufane pliki (`config.json`, `version-lock.json`, także explicit `--config`) są otwierane
+- Zaufane pliki (`config.json`, także explicit `--config`) są otwierane
   **no-follow** (`O_NOFOLLOW`): symlink w ostatnim komponencie jest odrzucany. Typ, tryb i własność są
   weryfikowane przez `Fstat` **na tym samym deskryptorze**, z którego następuje odczyt — brak TOCTOU
   na ostatnim komponencie (`Lstat`+`ReadFile` jest niedozwolone). Plik musi być zwykły, mode-private
@@ -64,7 +69,7 @@ macOS/Linux arm64):
 - **explicit `--config`:** otrzymuje pełne egzekwowanie *pliku* (no-follow, typ, mode-private,
   owned-by-EUID); tryb jego katalogu nadrzędnego **nie** jest wymagany (operator może wskazać wspólną
   lokalizację).
-- **Zapis:** `WriteVersionLock` waliduje zaufany katalog **przed** utworzeniem plików — atomowy rename
+- **Zapis:** `WriteFile` waliduje zaufany katalog **przed** utworzeniem plików — atomowy rename
   nie „legalizuje" symlinkowanego/permissive/obcego katalogu jako authority.
 - Błędy uprawnień/typu/ścieżki nie ujawniają materiału o kształcie sekretu (redakcja na granicy).
 
@@ -156,8 +161,7 @@ Reguły całego registry:
 
 ## Zapis configu
 
-- Zapis idzie tą samą crash-safe ścieżką co version-lock: private temp → `fsync` → atomic rename,
-  `0600`, katalog `0700`.
+- Zapis jest crash-safe: private temp → `fsync` → atomic rename, `0600`, katalog `0700`.
 - Dokument jest walidowany **przed** utworzeniem pliku, a zaufany katalog **przed** zapisem — atomowy
   rename nie legalizuje symlinkowanego/permissive/obcego katalogu jako authority.
 - Projekty są sortowane po `id`, więc ten sam registry daje ten sam plik niezależnie od kolejności
@@ -165,36 +169,6 @@ Reguły całego registry:
 - Po rename plik jest **odczytany ponownie** tą samą zaufaną ścieżką co loader, sparsowany,
   zwalidowany i porównany z dokumentem, który miał zostać zapisany. Rozjazd jest raportowany, nie
   naprawiany po cichu — rename już się wydarzył, więc decyzję podejmuje operator.
-
-## Version-lock manifest — `version-lock.json`
-
-- Lokalizacja: `<config-dir>/version-lock.json` (kanoniczna, contained w katalogu config).
-- Własność: operator-authored, zaufany metadata pin. Non-secret; na darwin/linux zwykły plik,
-  mode-private (`0600`) i owned-by-EUID, otwierany no-follow (patrz „Granica zaufania ścieżek").
-- Format: JSON, dokładnie jeden dokument, nieznane pola odrzucane, `schema_version` = `"1"`.
-- Zapis jest crash-safe (temp → fsync → atomic rename); niepoprawny manifest jest odrzucany
-  **przed** utworzeniem pliku, a zaufany katalog jest walidowany **przed** zapisem (atomowy rename nie
-  legalizuje niezaufanego katalogu jako authority).
-
-Pola:
-
-| Pole | Typ | Wymagane | Semantyka |
-|---|---|---|---|
-| `schema_version` | string | tak | Musi być `"1"`. |
-| `lima` | string | nie | Przypięta wersja Lima. Pusty = nieprzypięte. |
-| `docker` | string | nie | Przypięta wersja Dockera. |
-| `hermes` | string | nie | Przypięta wersja Hermes CLI. |
-
-Każda ustawiona wartość musi pasować do wzorca `^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$` i nie może mieć
-kształtu sekretu.
-
-**Zakres D2:** manifest ma wyłącznie lifecycle parse/validate/write. D2 **nie** wykonuje runtime
-probingu, nie instaluje niczego i nie zawiera adapterów Lima/Docker/Hermes.
-
-**Konsumenci (przyszłe slice'y):**
-
-- **D3 — Lima adapter:** feature/version probe używa przypiętej wersji `lima`.
-- **D4 — Deterministic bootstrap:** instalacja przypiętych zależności (`docker`, `hermes`, `lima`).
 
 ## Exit / błędy
 

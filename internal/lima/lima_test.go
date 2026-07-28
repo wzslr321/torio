@@ -16,13 +16,13 @@ func TestContextIsPropagatedNotReplaced(t *testing.T) {
 	var seen context.Context
 	fr := &fakeRunner{respond: func(ctx context.Context, cmd execx.Command) (execx.Result, error) {
 		seen = ctx
-		return stdoutResult("limactl version 2.2.0\n"), nil
+		return stdoutResult(`{"name":"` + InstanceName + `","status":"Running"}` + "\n"), nil
 	}}
 	a := New(fr)
 
 	ctx := context.WithValue(context.Background(), ctxKey{}, "marker")
-	if _, err := a.Probe(ctx, ""); err != nil {
-		t.Fatalf("Probe: unexpected error: %v", err)
+	if _, err := a.Status(ctx); err != nil {
+		t.Fatalf("Status: unexpected error: %v", err)
 	}
 	if seen == nil {
 		t.Fatalf("runner never invoked")

@@ -7,6 +7,15 @@
 - Powiązane: [`0003-lima-trust-boundary.md`](0003-lima-trust-boundary.md) (granica VM — inna
   warstwa; ten ADR jej nie zmienia ani nie supersede'uje)
 
+> **Nota statusu (2026-07-28).** Polityka opisana niżej obowiązuje bez zmian dla `config.json`
+> i katalogów `ConfigDir`/`StateDir`; egzekwuje ją `internal/config/trust_darwinlinux.go`.
+> Druga ścieżka authority — **version-lock manifest `version-lock.json`** — nigdy nie została
+> podpięta: żadna komenda go nie czytała, a jedyny konsument pinu (`lima.Probe`) nie był wołany
+> z CLI. `versionlock.go`, `LoadVersionLock`, `WriteVersionLock`, `VersionLockPath` i `Probe`
+> zostały usunięte; patrz
+> [ADR-0017](0017-pre-v1-exploration-leaves-the-working-tree.md).
+> Ta nota nie zmienia decyzji — odnotowuje, która jej połowa została dostarczona.
+
 ## Context
 
 D2 wprowadziło typowaną konfigurację hosta (`config.json`) oraz version-lock manifest
