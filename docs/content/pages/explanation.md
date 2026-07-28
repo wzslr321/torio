@@ -3,7 +3,7 @@ output: site/explanation.html
 nav: Explanation
 order: 5
 title: Explanation — why Torio is narrow · Torio
-description: Why Torio is intentionally narrow — the VM, loopback, and tunnel boundary, human-only credentials, one hardcoded workspace, no Git automation, no editor integration, and legacy architecture kept only as history.
+description: Why Torio is intentionally narrow — the VM, loopback, and tunnel boundary, human-only credentials, projects as a list you keep, write capability that lives only in a session you opened, no editor integration, and earlier exploration kept only as history.
 kicker: Explanation
 scope_notice: "This page explains the reasoning behind the boundaries. It is background, not a procedure."
 ---
@@ -16,101 +16,114 @@ platform that only looks finished.
 
 ## The VM, loopback, and tunnel boundary {#vm-boundary}
 
-Torio operates on an **existing** Lima VM and never creates, re-images, or
-destroys it. The persistent Hermes backend runs as a user systemd service bound
-to **guest loopback only** — it is not exposed on any public or LAN address.
+Torio creates the Lima VM from a pinned template and reconciles it later, but it
+never re-images, resets, or deletes one. An instance that does not match the
+trusted pins fails closed rather than being recreated — there is no `--force`,
+because the recovery a `--force` would offer is indistinguishable from
+destroying the thing you were trying to keep.
 
-Reaching it from the Mac is therefore a deliberate, operator-controlled act: you
-open an SSH port forward yourself. Torio opens no tunnel and starts no chat.
-Keeping the backend loopback-bound and putting the operator in charge of the
-forward means network exposure is never an accident of running a command.
+The persistent Hermes backend runs as a user systemd service bound to **guest
+loopback only** — it is not exposed on any public or LAN address. Reaching it
+from the Mac is therefore a deliberate act: you open an SSH port forward
+yourself. Torio opens no tunnel and starts no chat. Keeping the backend
+loopback-bound and putting you in charge of the forward means network exposure
+is never an accident of running a command.
 
 The same reasoning explains the session token. The backend authenticates
 non-public API calls, and because `serve` is headless it never publishes a token
-of its own — so the operator pins one deliberately rather than the control plane
-minting and distributing credentials on their behalf.
+of its own — so you pin one deliberately rather than the control plane minting
+and distributing credentials on your behalf.
 
 ## Credentials are a human-only prerequisite {#credentials}
 
 Torio never sets up, configures, stores, or reads credentials, and never causes
-a credential prompt. For the Code V0 workspace, repo-scoped **read** access to
-the private remote must be established by a human, directly on the guest,
-outside Torio.
+a credential prompt. Read access to a repository must already work from the
+guest before you attach it; a remote the guest cannot read without prompting
+fails closed with a specific exit code.
 
-A credential-neutral preflight is the **gate**: if it passes, read access
-already exists and the workspace step proceeds; if it fails, work stops at the
-human prerequisite. The secret and the method by which it is provisioned never
-enter the repository, its evidence, or any pull request or comment. This keeps
-the control plane free of any secret material by construction.
+That failure is the boundary doing its job. The remedy is a human granting
+access on the guest, outside Torio — not a retry, and not a workaround. The
+secret and the method by which it is provisioned never enter this repository,
+its evidence, or any pull request. The control plane stays free of secret
+material by construction rather than by discipline.
 
 Model and provider credentials work the same way. `torio vm ssh` deliberately
 forwards no stdin or TTY, so the interactive provider picker cannot be driven
-through the control plane at all — configuring a model is something a human does
-in their own shell on the guest.
+through the control plane at all — configuring a model is something you do in
+your own shell on the guest.
 
-## Exactly one hardcoded workspace {#one-workspace}
+## Projects are a list you keep {#projects}
 
-Code V0 targets a single fixed repository and adds no generic project, registry,
-or worker machinery. It reuses the existing VM and serve paths plus Hermes' own
-native `project` command. One hardcoded workspace keeps the surface area — and
-the ways it can go wrong — small enough to hold in your head.
+The model can see the repositories you registered, and nothing else. Nothing is
+discovered, scanned, or picked up because it happened to be on disk.
 
-The workspace is also a **credential-neutral guest-side clone**: it is never
-seeded by copying a host checkout, because a recursive copy would drag host
-`.git` configuration, hooks, and keys across the VM boundary. If read access
-cannot be provisioned, the correct outcome is to stop — not to weaken the
-boundary.
+The workspace path is never an input. It is derived from the project id, so
+there is no way to point Torio at an arbitrary directory and no path to store in
+config that could later disagree with reality. Attaching is non-destructive by
+construction: it clones only into an absent path, verifies and adopts a checkout
+already there, and hard-stops on anything else without resetting, cleaning, or
+recloning.
 
-## No Git automation {#no-git-automation}
+A workspace is also never seeded by copying a checkout from your Mac, because a
+recursive copy would drag host Git configuration, hooks, and keys across the VM
+boundary. If read access cannot be provisioned, the correct outcome is to stop
+— not to weaken the boundary.
 
-There is no automated commit, push, merge, or release. The workspace gate is
-strictly non-destructive: a healthy checkout is retained as-is, and a non-repo,
-origin-mismatched, dirty, or wrong-branch state is a hard stop with no
-destructive action. Writes to history are human-only decisions, made after
-inspecting `git diff` and `git status`.
+## Write capability lives in a session, not in the system {#writes}
+
+There is no automated commit, push, merge, or release, and the persistent
+backend cannot perform one: it holds read access only.
+
+When you want to write to a remote, `torio project shell` forwards your own SSH
+agent into an interactive session, and that capability ends when you exit. This
+is the whole reason the split exists — a credential that lives only inside a
+session you opened cannot be used by something running while you sleep.
+
+Torio preflights that session but never test-pushes to prove it works, because a
+test push is a write nobody asked for. Afterwards it makes no claim about what
+you pushed. It does not know, and it will not guess.
 
 ## No editor integration, and no host mount {#no-editor-integration}
 
 Torio integrates with no editor and mounts no macOS directory into the VM. Both
 are deliberate. A broad host mount would carry host Git configuration, hooks,
-and keys across the VM boundary — the same reason the workspace is never seeded
-from a host checkout. So the workspace exists only on the VM's native
-filesystem, owned by the `hermes` identity, and an editor reaches it as your own
-tool over SSH rather than through a shared folder.
+and keys across the VM boundary — the same reason a workspace is never seeded
+from a host checkout. So checkouts exist only on the VM's native filesystem,
+owned by the `hermes` identity, and an editor reaches them as your own tool over
+SSH rather than through a shared folder.
 
 The upside is that the boundary sits in one place regardless of tooling. Whether
 you edit in Neovim, VS Code, Cursor, or a CLI agent, the tool is yours to
-install and drive; credentials remain a human prerequisite and writes to history
-remain human-only. The [how-to guide](how-to.html#editor) covers each tool and
-its caveats.
+install and drive; read access remains a human prerequisite and writes to
+history remain something you do inside a session you opened. The
+[how-to guide](how-to.html#editor) covers each tool and its caveats.
 
-## What Torio does and does not claim {#not-demonstrated}
+## Data comes in and does not go out {#data-direction}
 
-An operator has driven a Hermes Desktop coding session against the Code V0
-workspace by hand, and the prerequisites that turned out to be necessary —
-pinning a session token, setting Desktop's working directory, and configuring a
-provider — are written down in [Get started](tutorials.html#get-started).
+`torio brain import` brings a Markdown vault onto the guest through verified
+staging. There is no matching export, and that asymmetry is intentional: an
+export command would be a supported, verified-looking path for Brain content to
+leave the boundary, and every guarantee it implied would have to hold.
 
-That is a record of what a human did, not a feature. Torio still starts no chat,
-supplies no credentials, and selects no model: each of those steps is manual,
-and Torio neither performs nor automates them. Writing the steps down makes them
-reproducible without moving them inside the control plane.
+Copying the Brain back to your Mac is a `limactl copy` you run yourself. Torio
+does not verify it and does not call it a backup, which is exactly the honest
+description of what it is.
 
 ## How this documentation avoids drifting {#single-source}
 
-Every page on this site and both runbooks in the repository are generated from
-one set of Markdown sources under `docs/content/`. A section that appears in
-more than one place — pinning the session token, say, which is both a step in
-Get started and a task in the how-to guides — is a single file included in each,
-not a copy. A validation gate re-renders everything and fails if any committed
+Every page on this site and the runbook in the repository are generated from one
+set of Markdown sources under `docs/content/`. A section that appears in more
+than one place — pinning the session token, say, which is both a step in Get
+started and a task in the how-to guides — is a single file included in each, not
+a copy. A validation gate re-renders everything and fails if any committed
 output has drifted from its source, so the two cannot disagree even briefly.
 
-## Legacy architecture is history, not a roadmap {#legacy}
+## Earlier exploration is history, not a roadmap {#legacy}
 
-An earlier, much broader exploration predates V0: a staged roadmap, a control
-plane with a project registry and admission control, per-task worker isolation,
-fresh sandboxed verification, and an evidence and review pipeline. None of that
-is what Torio V0 delivers.
+A much broader exploration came first: a staged roadmap, a control plane with a
+project registry and admission control, per-task worker isolation, fresh
+sandboxed verification, and an evidence and review pipeline. None of that is
+what Torio is.
 
 That material is not part of the product and must not be treated as an
 onboarding or next-task path. It no longer ships in the repository's working
