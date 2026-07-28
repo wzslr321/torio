@@ -189,24 +189,46 @@ reasons, one of which fails silently:
 - Passing the token as a command argument would put the secret in the control plane's logs and in `/proc` on the guest. Typing it into a shell you opened yourself keeps it out of both, which is what the credential-neutral boundary expects.
 
 ```bash
-limactl shell torio            # interactive shell in the VM (Lima user)
+limactl shell torio                  # interactive shell in the VM (Lima user)
 sudo -iu hermes                      # become the hermes service identity
 
 install -d -m 700 ~/.config/systemd/user/hermes-serve.service.d
 umask 077
-cat > ~/.config/systemd/user/hermes-serve.service.d/override.conf <<'EOF'
-[Service]
-Environment=HERMES_DASHBOARD_SESSION_TOKEN=PASTE-YOUR-TOKEN-HERE
-EOF
-chmod 600 ~/.config/systemd/user/hermes-serve.service.d/override.conf
+nano ~/.config/systemd/user/hermes-serve.service.d/override.conf
 ```
 
+Type these two lines, then paste your token immediately after the `=`:
+
+```ini
+[Service]
+Environment=HERMES_DASHBOARD_SESSION_TOKEN=
+```
+
+Save with `Ctrl+O`, `Enter`, leave with `Ctrl+X`, then `exit` twice.
+
+The token is typed, never pasted as part of a ready-made block, and the line
+above deliberately stops at `=`. Copying a block that already contains a stand-in
+value pins **that** value: the backend starts, Desktop connects, every check
+passes, and the deployment is guarded by a token an attacker can read in the
+documentation. Leaving the value empty fails visibly instead, which is the
+failure you want.
+
 The file stores the token in plain text, so it must not be group- or
-world-readable: `700` on the directory, `600` on the file. Confirm with:
+world-readable: `700` on the directory, `600` on the file. `nano` writes through
+a new file, so check the result rather than assuming:
 
 ```bash
 torio vm ssh -- sudo -u hermes -- \
     stat -c '%a %U:%G %n' /home/hermes/.config/systemd/user/hermes-serve.service.d/override.conf
+```
+
+Confirm you pinned something, without printing it — this catches an empty value
+and a value you meant to replace:
+
+```bash
+torio vm ssh -- sudo -u hermes -- \
+    awk -F= '/SESSION_TOKEN/ {print "token_chars=" length($NF)}' \
+    /home/hermes/.config/systemd/user/hermes-serve.service.d/override.conf
 ```
 
 ### Apply it
@@ -228,8 +250,16 @@ curl -s -o /dev/null -w '%{http_code}\n' \
     -H 'X-Hermes-Session-Token: [REDACTED]' http://127.0.0.1:19119/api/sessions
 ```
 
-Because the value is pinned in the drop-in it is stable across restarts. Rotate
-it by editing the drop-in and repeating the reload and restart above.
+Because the value is pinned in the drop-in it is stable across restarts.
+
+### Rotate it
+
+Rotate whenever the value has been anywhere it should not have been — a
+screenshot, a paste buffer you shared, a terminal someone else watched. Generate
+a new value, edit the drop-in with `nano` exactly as above, then repeat the
+reload and restart. The old token stops working the moment the process comes
+back, so **update Desktop in the same sitting**: a stale token there produces a
+`401` that looks like a broken tunnel rather than a rejected credential.
 
 > The token is a **secret**: generate your own, keep it out of the repository,
 > its evidence, and any pull request or comment, and rotate it if it leaks.

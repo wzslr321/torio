@@ -120,19 +120,24 @@ torio serve status</code></pre></div>
 <h4 id="create-the-drop-in-on-the-guest">Create the drop-in on the guest</h4>
 <p>Do this in an <strong>interactive shell on the guest</strong>, not through <code>torio vm ssh</code>. Two reasons, one of which fails silently:</p>
 <ul><li><code>torio vm ssh</code> forwards no stdin, so piping a file in produces an <strong>empty file while still exiting <code>0</code></strong> — <code>echo … | torio vm ssh -- sudo -u hermes -- tee …</code> looks like it worked and did nothing.</li><li>Passing the token as a command argument would put the secret in the control plane's logs and in <code>/proc</code> on the guest. Typing it into a shell you opened yourself keeps it out of both, which is what the credential-neutral boundary expects.</li></ul>
-<div class="code-block"><pre data-lang="bash"><code>limactl shell torio            <span class="tok-comment"># interactive shell in the VM (Lima user)</span>
+<div class="code-block"><pre data-lang="bash"><code>limactl shell torio                  <span class="tok-comment"># interactive shell in the VM (Lima user)</span>
 sudo -iu hermes                      <span class="tok-comment"># become the hermes service identity</span>
 
 install -d -m 700 ~/.config/systemd/user/hermes-serve.service.d
 umask 077
-cat &gt; ~/.config/systemd/user/hermes-serve.service.d/override.conf &lt;&lt;<span class="tok-str">'EOF'</span>
-[Service]
-Environment=HERMES_DASHBOARD_SESSION_TOKEN=PASTE-YOUR-TOKEN-HERE
-EOF
-chmod 600 ~/.config/systemd/user/hermes-serve.service.d/override.conf</code></pre></div>
-<p>The file stores the token in plain text, so it must not be group- or world-readable: <code>700</code> on the directory, <code>600</code> on the file. Confirm with:</p>
+nano ~/.config/systemd/user/hermes-serve.service.d/override.conf</code></pre></div>
+<p>Type these two lines, then paste your token immediately after the <code>=</code>:</p>
+<div class="code-block"><pre data-lang="ini"><code>[Service]
+Environment=HERMES_DASHBOARD_SESSION_TOKEN=</code></pre></div>
+<p>Save with <code>Ctrl+O</code>, <code>Enter</code>, leave with <code>Ctrl+X</code>, then <code>exit</code> twice.</p>
+<p>The token is typed, never pasted as part of a ready-made block, and the line above deliberately stops at <code>=</code>. Copying a block that already contains a stand-in value pins <strong>that</strong> value: the backend starts, Desktop connects, every check passes, and the deployment is guarded by a token an attacker can read in the documentation. Leaving the value empty fails visibly instead, which is the failure you want.</p>
+<p>The file stores the token in plain text, so it must not be group- or world-readable: <code>700</code> on the directory, <code>600</code> on the file. <code>nano</code> writes through a new file, so check the result rather than assuming:</p>
 <div class="code-block"><pre data-lang="bash"><code>torio vm ssh -- sudo -u hermes -- \
     stat -c <span class="tok-str">'%a %U:%G %n'</span> /home/hermes/.config/systemd/user/hermes-serve.service.d/override.conf</code></pre></div>
+<p>Confirm you pinned something, without printing it — this catches an empty value and a value you meant to replace:</p>
+<div class="code-block"><pre data-lang="bash"><code>torio vm ssh -- sudo -u hermes -- \
+    awk -F= <span class="tok-str">'/SESSION_TOKEN/ {print "token_chars=" length($NF)}'</span> \
+    /home/hermes/.config/systemd/user/hermes-serve.service.d/override.conf</code></pre></div>
 <h4 id="apply-it">Apply it</h4>
 <p>Reload and restart. Plain <code>sudo -u hermes</code> does not set <code>XDG_RUNTIME_DIR</code>, so <code>systemctl --user</code> fails with <code>Failed to connect to bus: No medium found</code> unless it is passed explicitly (the <code>hermes</code> uid is <code>1000</code>):</p>
 <div class="code-block"><pre data-lang="bash"><code>torio vm ssh -- sudo -u hermes -- \
@@ -141,7 +146,9 @@ torio serve restart --timeout 2m</code></pre></div>
 <p>Verify the gate now opens — <code>401</code> without the header, <code>200</code> with it:</p>
 <div class="code-block"><pre data-lang="bash"><code>curl -s -o /dev/null -w <span class="tok-str">'%{http_code}\n'</span> \
     -H <span class="tok-str">'X-Hermes-Session-Token: [REDACTED]'</span> http://127.0.0.1:19119/api/sessions</code></pre></div>
-<p>Because the value is pinned in the drop-in it is stable across restarts. Rotate it by editing the drop-in and repeating the reload and restart above.</p>
+<p>Because the value is pinned in the drop-in it is stable across restarts.</p>
+<h4 id="rotate-it">Rotate it</h4>
+<p>Rotate whenever the value has been anywhere it should not have been — a screenshot, a paste buffer you shared, a terminal someone else watched. Generate a new value, edit the drop-in with <code>nano</code> exactly as above, then repeat the reload and restart. The old token stops working the moment the process comes back, so <strong>update Desktop in the same sitting</strong>: a stale token there produces a <code>401</code> that looks like a broken tunnel rather than a rejected credential.</p>
 <div class="callout"><p>The token is a <strong>secret</strong>: generate your own, keep it out of the repository, its evidence, and any pull request or comment, and rotate it if it leaks.</p></div>
 <h3 id="brain-bring-up">Step 6 — Create the Second Brain</h3>
 <p>The Brain is a private Markdown vault on the guest at <code>/home/hermes/brain</code>, versioned by a local Git repository and registered with Hermes as its own project, so any session can search it without you opening it first.</p>

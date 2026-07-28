@@ -14,6 +14,7 @@ pinned files that no longer exist.
 
 from __future__ import annotations
 
+import html
 import re
 import sys
 from pathlib import Path
@@ -29,6 +30,41 @@ SECRET_PATTERNS = {
 }
 
 MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+
+# A credential the documentation hands over as a ready-to-paste literal. The
+# Task 23 dogfood pasted `HERMES_DASHBOARD_SESSION_TOKEN=PASTE-YOUR-TOKEN-HERE`
+# out of the how-to unchanged: the backend started, Desktop connected, every
+# documented check passed, and the deployment was guarded by a token printed in
+# the docs. Nothing failed, which is exactly why nothing caught it.
+#
+# A documented assignment must stop at `=` and let the operator type the value,
+# so an unread instruction produces something that does not work rather than
+# something that works badly.
+#
+# The value is horizontal-whitespace-separated on purpose. Letting `\s*` cross
+# the newline made the corrected block fail on the closing code fence below it —
+# a rule that fires on its own fix teaches the next author to weaken it.
+CREDENTIAL_ASSIGNMENT = re.compile(
+    r"\b[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSPHRASE|API_KEY)[ \t]*=[ \t]*(\S*)"
+)
+
+# Values that are not handed to anyone: a redaction marker, or a shell expansion
+# that resolves to whatever the operator already set. An empty value is the
+# shape this rule exists to ask for and is exempt by being empty.
+CREDENTIAL_VALUE_EXEMPT = re.compile(r"^(?:\[REDACTED\]|\$\{?[A-Za-z_]|['\"]{2}$)")
+
+# Where an operator reads instructions and follows them. Block sources are
+# included because that is where the text is authored; the generated copies are
+# checked for drift by build_docs.py --check.
+CREDENTIAL_GLOBS = (
+    "README.md",
+    "docs/content/blocks/*.md",
+    "docs/content/pages/*.md",
+    "docs/content/runbooks/*.md",
+    "docs/runbooks/*.md",
+    "site/*.html",
+    "site/*.md",
+)
 
 # A docs/ path cited from Go source — in a comment or in help text the operator
 # reads. Either way the file has to exist: six references to a contract archived
@@ -162,12 +198,64 @@ def validate_secrets() -> list[str]:
     return errors
 
 
+def _as_read_by_a_human(text: str, suffix: str) -> str:
+    """Generated HTML, reduced to the text an operator actually reads.
+
+    Without this the rule reports the markup that closes a code block as the
+    value of an assignment that ends the line — `…SESSION_TOKEN=</code></pre>`.
+    Tags are stripped one line at a time so reported line numbers still point
+    into the file.
+    """
+    if suffix != ".html":
+        return text
+    return html.unescape(re.sub(r"<[^>\n]*>", "", text))
+
+
+def pasteable_credentials(text: str) -> list[tuple[int, str]]:
+    """(line, variable name) for every credential this text hands the reader.
+
+    Known limitation: a documented command that greps for the assignment by
+    writing `NAME=` in its pattern trips this. Phrase such a check so the name
+    and the `=` are not adjacent — `awk -F= '/NAME/ …'` rather than
+    `awk '/NAME=/ …'`.
+    """
+    findings: list[tuple[int, str]] = []
+    for match in CREDENTIAL_ASSIGNMENT.finditer(text):
+        value = match.group(1)
+        if not value or CREDENTIAL_VALUE_EXEMPT.match(value):
+            continue
+        line = text.count("\n", 0, match.start()) + 1
+        findings.append((line, match.group(0).split("=", 1)[0].rstrip()))
+    return findings
+
+
+def validate_no_pasteable_credentials() -> list[str]:
+    """No document hands the operator a credential value to paste."""
+    errors: list[str] = []
+    seen: set[Path] = set()
+    for glob in CREDENTIAL_GLOBS:
+        for path in sorted(ROOT.glob(glob)):
+            if not path.is_file() or path in seen:
+                continue
+            seen.add(path)
+            text = _as_read_by_a_human(
+                path.read_text(encoding="utf-8", errors="replace"), path.suffix
+            )
+            for line, name in pasteable_credentials(text):
+                errors.append(
+                    f"{path.relative_to(ROOT)}:{line}: documented credential carries a "
+                    f"value the reader can paste; stop the assignment at '=' ({name}=)"
+                )
+    return errors
+
+
 def main() -> int:
     checks = [
         ("relative Markdown links", validate_links),
         ("secret patterns", validate_secrets),
         ("docs cited from Go exist", validate_go_doc_references),
         ("no version labels for the operator", validate_no_version_labels),
+        ("no pasteable credentials in docs", validate_no_pasteable_credentials),
     ]
     errors: list[str] = []
     for name, check in checks:
