@@ -541,21 +541,6 @@ func scanTree(root string) (*Manifest, int64, error) {
 	return manifest, bytes, nil
 }
 
-// Scan returns the exact working-tree manifest under root. Unlike Collect it
-// applies no extension filter: export preserves every regular Brain data file
-// already present in the curated guest staging tree. Links, hardlinks, special
-// files, unsafe names, and unreadable roots fail closed.
-func Scan(root string) (*Manifest, error) {
-	if err := validateRoot(root, false); err != nil {
-		return nil, privateError("export staging is not a readable regular directory")
-	}
-	manifest, _, err := scanTree(root)
-	if err != nil {
-		return nil, privateError("export staging could not be verified safely")
-	}
-	return manifest, nil
-}
-
 // rejectEntry applies every non-extension rule in the order the proven harness
 // applies them: unsafe name, exclusion list, symlink, special file, hardlink,
 // executable bit. It reports the reason and whether the entry is rejected.

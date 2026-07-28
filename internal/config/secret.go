@@ -16,7 +16,7 @@ func containsSecretShape(s string) bool {
 }
 
 // redactErr guarantees no error leaving the config package carries secret-shaped
-// material. The raw-byte pre-scan in parseFile/parseVersionLock cannot see a
+// material. The raw-byte pre-scan in parseFile cannot see a
 // JSON-escaped secret (for example "ghp_…" has no literal "ghp_" on disk),
 // so the decoder can turn it back into a secret that then reaches an error via
 // %q interpolation of a decoded value or via the strict decoder echoing a

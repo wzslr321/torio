@@ -117,7 +117,7 @@ func Load(opts Options) (rt Runtime, err error) {
 	}
 
 	// For the default (non-explicit) config, ConfigDir is the trusted app
-	// directory holding config + version-lock; validate it if it exists. An
+	// directory holding the config document; validate it if it exists. An
 	// explicit --config is an operator-provided path whose parent mode is not
 	// enforced in D3.0 (ADR-0013 decision 1) — only the file itself is checked.
 	if !paths.explicitConfig {
@@ -171,7 +171,7 @@ func Load(opts Options) (rt Runtime, err error) {
 // always produces the same bytes regardless of the order they were added in.
 //
 // The document is validated before any file is created, and — as in
-// WriteVersionLock — the trusted directory is validated before the write: an
+// The trusted directory is validated before the write: an
 // atomic rename must not be what turns a symlinked, mode-permissive or
 // foreign-owned directory into config authority. After the rename the file is
 // re-read through the same trusted path the loader uses and compared against

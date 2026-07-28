@@ -443,7 +443,7 @@ func TestWriteFileRequiresCurrentSchemaVersion(t *testing.T) {
 	}
 }
 
-// TestWriteFileRejectsUntrustedConfigDir mirrors WriteVersionLock: an existing
+// TestWriteFileRejectsUntrustedConfigDir pins constraint 4: an existing
 // permissive directory must not become config authority just because the final
 // rename is atomic.
 func TestWriteFileRejectsUntrustedConfigDir(t *testing.T) {

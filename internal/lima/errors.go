@@ -21,9 +21,6 @@ const (
 	// be parsed into the expected shape (version string, JSON instance
 	// record, known status value).
 	KindMalformedOutput ErrorKind = "malformed_output"
-	// KindVersionMismatch means the probed version does not match a
-	// non-empty VersionLock.Lima pin.
-	KindVersionMismatch ErrorKind = "version_mismatch"
 	// KindTimeout means the operation's context deadline was exceeded.
 	KindTimeout ErrorKind = "timeout"
 	// KindCancelled means the operation's context was cancelled.

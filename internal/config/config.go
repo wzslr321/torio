@@ -1,6 +1,6 @@
 // Package config holds the typed runtime settings that bound an `torio`
 // invocation. In D1 this is limited to the operation timeout policy; the XDG
-// on-disk configuration and version-lock manifest are a later slice (D2).
+// on-disk configuration is a later slice (D2).
 package config
 
 import (
@@ -21,11 +21,6 @@ type Settings struct {
 	// Timeout bounds a single operation. It must be positive and must not
 	// exceed MaxTimeout.
 	Timeout time.Duration
-}
-
-// Default returns Settings populated with policy defaults.
-func Default() Settings {
-	return Settings{Timeout: DefaultTimeout}
 }
 
 // Validate reports whether the settings are within policy. It fails closed:

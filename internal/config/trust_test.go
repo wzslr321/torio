@@ -10,8 +10,8 @@ import (
 )
 
 // trust_test.go — D3.0 trusted-config-authority enforcement (ADR-0013).
-// These are integration tests through the public API (Load / LoadVersionLock /
-// WriteVersionLock) exercising every matrix row that is reproducible without a
+// These are integration tests through the public API (Load / WriteFile)
+// exercising every matrix row that is reproducible without a
 // second user. Ownership mismatch is covered here only when the process can
 // chown to a foreign uid (root); otherwise it is skipped and the deterministic
 // coverage lives in the pure verifyTrusted unit tests. The tag is darwin||linux
@@ -133,61 +133,6 @@ func TestLoadExplicitConfigHappyPath(t *testing.T) {
 	}
 }
 
-// --- version-lock: symlink / dir trust -------------------------------------
-
-// A version-lock.json symlink escaping its directory must be rejected.
-func TestLoadVersionLockRejectsSymlink(t *testing.T) {
-	dir := t.TempDir()
-	outside := filepath.Join(t.TempDir(), "evil-lock.json")
-	mustWrite(t, outside, `{"schema_version":"1","lima":"9.9.9"}`, 0o600)
-	link := filepath.Join(dir, versionLockFileName)
-	mustSymlink(t, outside, link)
-	if _, err := LoadVersionLock(link); err == nil {
-		t.Fatalf("symlinked version-lock must be rejected")
-	}
-}
-
-// A version-lock whose trusted directory is a symlink must be rejected.
-func TestLoadVersionLockRejectsSymlinkedParentDir(t *testing.T) {
-	realDir := filepath.Join(t.TempDir(), "real")
-	mustMkdir(t, realDir, 0o700)
-	mustWrite(t, filepath.Join(realDir, versionLockFileName), `{"schema_version":"1"}`, 0o600)
-	linkDir := filepath.Join(t.TempDir(), "link")
-	mustSymlink(t, realDir, linkDir)
-	if _, err := LoadVersionLock(filepath.Join(linkDir, versionLockFileName)); err == nil {
-		t.Fatalf("version-lock under a symlinked directory must be rejected")
-	}
-}
-
-// --- WriteVersionLock: validate trusted directory before writing (constraint 4)
-
-// WriteVersionLock into a symlinked trusted directory must be rejected: an
-// atomic final rename must not launder an untrusted directory into authority.
-func TestWriteVersionLockRejectsSymlinkedTrustedDir(t *testing.T) {
-	realDir := filepath.Join(t.TempDir(), "real")
-	mustMkdir(t, realDir, 0o700)
-	linkDir := filepath.Join(t.TempDir(), "link")
-	mustSymlink(t, realDir, linkDir)
-	m := VersionLock{SchemaVersion: VersionLockSchemaVersion, Lima: "1.0.0"}
-	if err := WriteVersionLock(filepath.Join(linkDir, versionLockFileName), m); err == nil {
-		t.Fatalf("WriteVersionLock into a symlinked trusted dir must be rejected")
-	}
-}
-
-// WriteVersionLock into a world-writable existing trusted directory must be
-// rejected.
-func TestWriteVersionLockRejectsWorldWritableTrustedDir(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "torio")
-	mustMkdir(t, dir, 0o700)
-	if err := os.Chmod(dir, 0o777); err != nil {
-		t.Fatalf("chmod: %v", err)
-	}
-	m := VersionLock{SchemaVersion: VersionLockSchemaVersion, Lima: "1.0.0"}
-	if err := WriteVersionLock(filepath.Join(dir, versionLockFileName), m); err == nil {
-		t.Fatalf("WriteVersionLock into a world-writable trusted dir must be rejected")
-	}
-}
-
 // --- StateDir: symlink / type / ownership trust ----------------------------
 //
 // StateDir is a core protected input in the accepted policy: Load validates it
@@ -237,7 +182,7 @@ func TestLoadRejectsStateDirOwnedByOtherUID(t *testing.T) {
 // --- no-leak: caller-controlled secret-shaped path in a trust error ---------
 //
 // D3.0 trust diagnostics interpolate the filesystem path, and an explicit
-// --config path (or a version-lock path/dir) is caller-controlled — it may
+// --config path is caller-controlled — it may
 // itself contain secret-shaped material. The public internal/config API must
 // redact its returned errors at the package boundary so a direct API caller
 // cannot log a secret-shaped path raw. secretCanary / its recognition by the
@@ -255,40 +200,6 @@ func TestLoadDoesNotLeakSecretShapedPathInTrustError(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), secretCanary) {
 		t.Errorf("Load error leaked secret-shaped path component: %q", err.Error())
-	}
-}
-
-// LoadVersionLock must not echo a secret-shaped manifest-file path component
-// when the file fails the trust policy. The parent directory is trusted (0700)
-// so the violation is on the file itself, exercising the read-path boundary.
-func TestLoadVersionLockDoesNotLeakSecretShapedPathInTrustError(t *testing.T) {
-	path := filepath.Join(privDir(t), secretCanary+".json")
-	mustWrite(t, path, `{"schema_version":"1"}`, 0o644) // non-private → trust violation
-	_, err := LoadVersionLock(path)
-	if err == nil {
-		t.Fatalf("non-private version-lock file must be rejected")
-	}
-	if strings.Contains(err.Error(), secretCanary) {
-		t.Errorf("LoadVersionLock error leaked secret-shaped path component: %q", err.Error())
-	}
-}
-
-// WriteVersionLock must not echo a secret-shaped trusted-directory path
-// component when the directory fails the trust policy (here: world-writable),
-// exercising the write-path boundary (constraint 4 + the redaction contract).
-func TestWriteVersionLockDoesNotLeakSecretShapedPathInTrustError(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), secretCanary) // dir name carries the secret shape
-	mustMkdir(t, dir, 0o700)
-	if err := os.Chmod(dir, 0o777); err != nil { // world-writable → trust violation
-		t.Fatalf("chmod: %v", err)
-	}
-	m := VersionLock{SchemaVersion: VersionLockSchemaVersion, Lima: "1.0.0"}
-	err := WriteVersionLock(filepath.Join(dir, versionLockFileName), m)
-	if err == nil {
-		t.Fatalf("world-writable trusted dir must be rejected")
-	}
-	if strings.Contains(err.Error(), secretCanary) {
-		t.Errorf("WriteVersionLock error leaked secret-shaped path component: %q", err.Error())
 	}
 }
 

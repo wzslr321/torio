@@ -229,8 +229,8 @@ func newVMBootstrapCmd(a *app) *cobra.Command {
 			ctx, cancel := a.opContext(cmd)
 			defer cancel()
 			// V1 runs unpinned: the observed hermes version is reported so drift is
-			// visible. A later slice can thread version-lock pins through
-			// BootstrapOptions for enforcement.
+			// visible. Enforcing a pin would need a new pin source and a new ADR;
+			// the D2 version-lock manifest was never wired and is gone (ADR-0017).
 			opUser, err := a.lookupOperatorUser()
 			if err != nil {
 				return &CLIError{
@@ -436,7 +436,7 @@ func mapLimaError(command string, err error) *CLIError {
 	case lima.KindVerificationFailed, lima.KindIncompatible:
 		return &CLIError{Exit: ExitVerification, Code: code, Command: command, Message: lerr.Error()}
 	case lima.KindBinaryUnavailable, lima.KindCommandFailed, lima.KindMalformedOutput,
-		lima.KindVersionMismatch, lima.KindTimeout, lima.KindCancelled:
+		lima.KindTimeout, lima.KindCancelled:
 		return &CLIError{Exit: ExitExternal, Code: code, Command: command, Message: lerr.Error()}
 	default:
 		e := internalError(lerr.Error())

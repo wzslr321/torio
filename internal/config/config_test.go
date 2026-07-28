@@ -5,16 +5,6 @@ import (
 	"time"
 )
 
-func TestDefaultAppliesDefaultTimeout(t *testing.T) {
-	s := Default()
-	if s.Timeout != DefaultTimeout {
-		t.Errorf("Default().Timeout = %v, want %v", s.Timeout, DefaultTimeout)
-	}
-	if err := s.Validate(); err != nil {
-		t.Errorf("Default() must be valid, got %v", err)
-	}
-}
-
 func TestValidateRejectsNonPositiveTimeout(t *testing.T) {
 	for _, d := range []time.Duration{0, -1 * time.Second, -time.Millisecond} {
 		s := Settings{Timeout: d}

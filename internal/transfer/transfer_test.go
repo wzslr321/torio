@@ -366,32 +366,6 @@ func TestStageFileDoesNotFollowAFinalSymlink(t *testing.T) {
 	}
 }
 
-func TestScanReturnsAWorkingTreeManifestAndRejectsLinks(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, root, "notes/a.md", "a", 0o600)
-	writeFile(t, root, "attachments/a.pdf", "pdf", 0o600)
-
-	manifest, err := Scan(root)
-	if err != nil {
-		t.Fatalf("Scan: %v", err)
-	}
-	if manifest.Files() != 2 || manifest.Bytes() != 4 {
-		t.Fatalf("manifest files/bytes = %d/%d, want 2/4", manifest.Files(), manifest.Bytes())
-	}
-
-	const marker = "private-link-target"
-	if err := os.Symlink(filepath.Join(root, "notes", "a.md"), filepath.Join(root, marker)); err != nil {
-		t.Fatalf("Symlink: %v", err)
-	}
-	_, err = Scan(root)
-	if err == nil {
-		t.Fatal("Scan accepted a symlink")
-	}
-	if strings.Contains(err.Error(), marker) {
-		t.Fatalf("Scan error leaked a private path: %v", err)
-	}
-}
-
 func TestParseGuestManifestBindsNULTerminatedHashesSizesAndUnicodePaths(t *testing.T) {
 	const prefix = "/home/hermes/.torio-private/payload"
 	hashA := strings.Repeat("a", 64)

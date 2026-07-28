@@ -2,6 +2,7 @@ package lima
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/wzslr321/torio/internal/execx"
@@ -75,4 +76,26 @@ func stdoutResult(s string) execx.Result {
 
 func exitResult(code int, stdout, stderr string) execx.Result {
 	return execx.Result{ExitCode: code, Stdout: []byte(stdout), Stderr: []byte(stderr)}
+}
+
+// wrapErr wraps a sentinel the way execx wraps a run failure, so classifyRunErr
+// is exercised through the same errors.Is chain production sees rather than the
+// bare sentinel.
+func wrapErr(sentinel error) error {
+	return fmt.Errorf("run limactl: %w", sentinel)
+}
+
+// equalArgs compares a recorded argv against the exact expected one. Adapter
+// tests pin argv verbatim, so a helper that reports only equality (never a
+// diff) keeps the assertion message the test's own.
+func equalArgs(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }

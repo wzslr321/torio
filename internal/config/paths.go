@@ -14,8 +14,6 @@ const (
 	appDir = "torio"
 	// configFileName is the default config document within the config dir.
 	configFileName = "config.json"
-	// versionLockFileName is the version-lock manifest within the config dir.
-	versionLockFileName = "version-lock.json"
 )
 
 // errNoHome is returned when the home directory is required (XDG unset) but
@@ -53,9 +51,9 @@ func (o Options) homeDir() (string, error) {
 
 // Paths are resolved, canonical config/state locations. ConfigDir and StateDir
 // are the trusted directories that hold, respectively, operator-authored config
-// plus the version-lock manifest, and runtime state written by later slices.
+// and runtime state written by later slices.
 type Paths struct {
-	// ConfigDir is the trusted directory holding config + version-lock.
+	// ConfigDir is the trusted directory holding the config document.
 	ConfigDir string
 	// ConfigFile is the resolved config document path. It defaults to
 	// ConfigDir/config.json but is the canonical explicit path when --config
@@ -102,7 +100,7 @@ func ResolvePaths(opts Options) (Paths, error) {
 
 	// Config file (and its trusted directory): explicit override bypasses XDG.
 	// With an explicit --config, the trusted config directory is the file's
-	// parent, so the version-lock manifest sits alongside the explicit config.
+	// parent, so anything contained in the config dir resolves alongside it.
 	if opts.ConfigPath != "" {
 		abs, err := canonical(opts.ConfigPath)
 		if err != nil {
@@ -148,12 +146,6 @@ func (o Options) xdgBase(envKey, fallbackRel string) (string, error) {
 		return "", fmt.Errorf("config: home directory must be an absolute path, got %q", home)
 	}
 	return filepath.Join(home, fallbackRel), nil
-}
-
-// VersionLockPath returns the canonical, contained version-lock manifest path
-// within the resolved config directory.
-func VersionLockPath(p Paths) (string, error) {
-	return containedJoin(p.ConfigDir, versionLockFileName)
 }
 
 // canonical makes p absolute (relative to the current working directory) and

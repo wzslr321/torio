@@ -233,22 +233,6 @@ func TestOneOverrideWithValidNonOverriddenXDG(t *testing.T) {
 	}
 }
 
-func TestVersionLockPathIsContainedInConfigDir(t *testing.T) {
-	home := t.TempDir()
-	p, err := ResolvePaths(Options{Getenv: envFunc(nil), HomeDir: homeFunc(home)})
-	if err != nil {
-		t.Fatalf("ResolvePaths: %v", err)
-	}
-	vlp, err := VersionLockPath(p)
-	if err != nil {
-		t.Fatalf("VersionLockPath: %v", err)
-	}
-	want := filepath.Join(p.ConfigDir, versionLockFileName)
-	if vlp != want {
-		t.Errorf("VersionLockPath = %q, want %q", vlp, want)
-	}
-}
-
 func TestContainedJoinRejectsTraversal(t *testing.T) {
 	base := t.TempDir()
 	for _, name := range []string{
