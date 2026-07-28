@@ -182,6 +182,11 @@ type bootstrapPathSpec struct {
 	group  string
 	modes  []string // accepted stat -c %a values (0710 may appear as 710)
 	setgid bool     // when true, mode must have the setgid bit (2xxx)
+
+	// allowStricter accepts a mode that grants strictly less than the spec.
+	// Set it only where the surrendered permission is one nothing outside the
+	// owning identity uses; see modeMatches.
+	allowStricter bool
 }
 
 // bootstrapRequiredPaths are the persistent Hermes directories that must resolve
@@ -189,8 +194,8 @@ type bootstrapPathSpec struct {
 // FINDINGS). Owned paths are inspected via sudo.
 var bootstrapRequiredPaths = []bootstrapPathSpec{
 	{path: HermesHome, owner: HermesUser, group: torioProjectsGroup, modes: []string{"710", "0710"}},
-	{path: HermesProfilePath, owner: HermesUser, group: HermesUser, modes: []string{"750", "0750"}},
-	{path: HermesBrainPath, owner: HermesUser, group: HermesUser, modes: []string{"750", "0750"}},
+	{path: HermesProfilePath, owner: HermesUser, group: HermesUser, modes: []string{"750", "0750"}, allowStricter: true},
+	{path: HermesBrainPath, owner: HermesUser, group: HermesUser, modes: []string{"750", "0750"}, allowStricter: true},
 	{path: HermesWorkspacePath, owner: HermesUser, group: torioProjectsGroup, modes: []string{"2770"}, setgid: true},
 }
 
@@ -707,9 +712,44 @@ func modeGrantsForeignWrite(mode string) (writable, parsed bool) {
 }
 
 // modeMatches reports whether the observed stat mode satisfies the path spec.
+// modeMatches reports whether the guest mode satisfies spec.
+//
+// An exact match always passes. A spec may additionally accept a mode that
+// grants strictly less, because two of the required directories are tightened
+// by their own owner in normal use: Hermes chmods /home/hermes/.hermes to 0700
+// the first time it writes provider credentials there. Bootstrap accepted 0750
+// and nothing else, so the first ordinary use of the product left every machine
+// permanently unbootstrapped — `brain init`, `project add` and every other
+// verified command failed closed, on a guest where nothing was wrong.
+//
+// Only the hermes-private directories opt in. The group bit they surrender
+// belongs to the hermes group, whose sole member is hermes. Everywhere else the
+// granted permission is load-bearing for somebody other than the owner — the
+// operator traverses HermesHome and writes under HermesWorkspacePath through
+// torio-projects, and the operator shell helper must stay executable by all —
+// so there a stricter mode is drift and still fails.
+//
+// Owner bits must still match exactly. "Stricter" means withholding access from
+// others, never the owner locking itself out.
 func modeMatches(spec bootstrapPathSpec, mode string) bool {
 	for _, want := range spec.modes {
 		if mode == want {
+			return true
+		}
+	}
+	if !spec.allowStricter {
+		return false
+	}
+	got, err := strconv.ParseUint(mode, 8, 32)
+	if err != nil {
+		return false
+	}
+	for _, want := range spec.modes {
+		w, err := strconv.ParseUint(want, 8, 32)
+		if err != nil {
+			continue
+		}
+		if got&0o700 == w&0o700 && got&^w == 0 {
 			return true
 		}
 	}

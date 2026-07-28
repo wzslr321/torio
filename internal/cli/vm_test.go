@@ -281,7 +281,7 @@ func TestVMSSHPassesExactTokenArray(t *testing.T) {
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
 	}
-	want := []string{"limactl", "shell", "--tty=false", "torio", "--", "uname", "-a"}
+	want := []string{"limactl", "shell", "--tty=false", "--workdir", "/", "torio", "--", "uname", "-a"}
 	if len(fake.calls) != 1 || !reflect.DeepEqual(fake.calls[0], want) {
 		t.Fatalf("argv = %v, want %v", fake.calls, want)
 	}
