@@ -26,10 +26,10 @@ func TestLoadRejectsDefaultConfigSymlink(t *testing.T) {
 	dir := filepath.Join(cfgHome, appDir)
 	mustMkdir(t, dir, 0o700)
 	outside := filepath.Join(t.TempDir(), "evil.json")
-	mustWrite(t, outside, `{"schema_version":"1","default_timeout":"99s"}`, 0o600)
+	mustWrite(t, outside, `{"schema_version":"2","default_timeout":"99s"}`, 0o600)
 	mustSymlink(t, outside, filepath.Join(dir, configFileName))
 
-	if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
+	if _, err := loadWith(t, Options{}, cfgHome); err == nil {
 		t.Fatalf("symlinked default config.json must be rejected")
 	}
 }
@@ -40,11 +40,11 @@ func TestLoadRejectsSymlinkedConfigDir(t *testing.T) {
 	cfgHome := t.TempDir()
 	realDir := filepath.Join(t.TempDir(), "real")
 	mustMkdir(t, realDir, 0o700)
-	mustWrite(t, filepath.Join(realDir, configFileName), `{"schema_version":"1"}`, 0o600)
+	mustWrite(t, filepath.Join(realDir, configFileName), `{"schema_version":"2"}`, 0o600)
 	// ConfigDir (<cfgHome>/torio) is a symlink to realDir.
 	mustSymlink(t, realDir, filepath.Join(cfgHome, appDir))
 
-	if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
+	if _, err := loadWith(t, Options{}, cfgHome); err == nil {
 		t.Fatalf("symlinked ConfigDir must be rejected")
 	}
 }
@@ -55,11 +55,11 @@ func TestLoadRejectsWorldWritableConfigDir(t *testing.T) {
 	cfgHome := t.TempDir()
 	dir := filepath.Join(cfgHome, appDir)
 	mustMkdir(t, dir, 0o700)
-	mustWrite(t, filepath.Join(dir, configFileName), `{"schema_version":"1"}`, 0o600)
+	mustWrite(t, filepath.Join(dir, configFileName), `{"schema_version":"2"}`, 0o600)
 	if err := os.Chmod(dir, 0o777); err != nil {
 		t.Fatalf("chmod dir: %v", err)
 	}
-	if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
+	if _, err := loadWith(t, Options{}, cfgHome); err == nil {
 		t.Fatalf("world-writable ConfigDir must be rejected")
 	}
 }
@@ -75,11 +75,11 @@ func TestLoadRejectsConfigFileOwnedByOtherUID(t *testing.T) {
 	dir := filepath.Join(cfgHome, appDir)
 	mustMkdir(t, dir, 0o700)
 	path := filepath.Join(dir, configFileName)
-	mustWrite(t, path, `{"schema_version":"1"}`, 0o600)
+	mustWrite(t, path, `{"schema_version":"2"}`, 0o600)
 	if err := os.Chown(path, 12345, -1); err != nil {
 		t.Fatalf("chown: %v", err)
 	}
-	if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
+	if _, err := loadWith(t, Options{}, cfgHome); err == nil {
 		t.Fatalf("config.json owned by a foreign uid must be rejected")
 	}
 }
@@ -91,11 +91,11 @@ func TestLoadRejectsConfigFileOwnedByOtherUID(t *testing.T) {
 func TestLoadRejectsExplicitConfigSymlink(t *testing.T) {
 	base := t.TempDir()
 	target := filepath.Join(base, "target.json")
-	mustWrite(t, target, `{"schema_version":"1","default_timeout":"99s"}`, 0o600)
+	mustWrite(t, target, `{"schema_version":"2","default_timeout":"99s"}`, 0o600)
 	link := filepath.Join(base, "link.json")
 	mustSymlink(t, target, link)
 
-	if _, err := loadWith(t, Options{ConfigPath: link}, t.TempDir(), t.TempDir()); err == nil {
+	if _, err := loadWith(t, Options{ConfigPath: link}, t.TempDir()); err == nil {
 		t.Fatalf("symlinked explicit --config must be rejected")
 	}
 }
@@ -103,8 +103,8 @@ func TestLoadRejectsExplicitConfigSymlink(t *testing.T) {
 // An explicit --config with group/world-readable mode must be rejected.
 func TestLoadRejectsExplicitConfigNonPrivate(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), "config.json")
-	mustWrite(t, cfg, `{"schema_version":"1"}`, 0o644)
-	if _, err := loadWith(t, Options{ConfigPath: cfg}, t.TempDir(), t.TempDir()); err == nil {
+	mustWrite(t, cfg, `{"schema_version":"2"}`, 0o644)
+	if _, err := loadWith(t, Options{ConfigPath: cfg}, t.TempDir()); err == nil {
 		t.Fatalf("non-private explicit --config must be rejected")
 	}
 }
@@ -114,7 +114,7 @@ func TestLoadRejectsExplicitConfigNonPrivate(t *testing.T) {
 func TestLoadRejectsExplicitConfigNonRegular(t *testing.T) {
 	d := filepath.Join(t.TempDir(), "adir")
 	mustMkdir(t, d, 0o700)
-	if _, err := loadWith(t, Options{ConfigPath: d}, t.TempDir(), t.TempDir()); err == nil {
+	if _, err := loadWith(t, Options{ConfigPath: d}, t.TempDir()); err == nil {
 		t.Fatalf("explicit --config to a directory must be rejected")
 	}
 }
@@ -123,59 +123,13 @@ func TestLoadRejectsExplicitConfigNonRegular(t *testing.T) {
 // regular file still loads (guards against over-rejection).
 func TestLoadExplicitConfigHappyPath(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), "config.json")
-	mustWrite(t, cfg, `{"schema_version":"1","default_timeout":"45s"}`, 0o600)
-	rt, err := loadWith(t, Options{ConfigPath: cfg}, t.TempDir(), t.TempDir())
+	mustWrite(t, cfg, `{"schema_version":"2","default_timeout":"45s"}`, 0o600)
+	rt, err := loadWith(t, Options{ConfigPath: cfg}, t.TempDir())
 	if err != nil {
 		t.Fatalf("private regular explicit --config must load: %v", err)
 	}
 	if !rt.ConfigLoaded {
 		t.Errorf("ConfigLoaded = false, want true")
-	}
-}
-
-// --- StateDir: symlink / type / ownership trust ----------------------------
-//
-// StateDir is a core protected input in the accepted policy: Load validates it
-// via statTrustedDirIfExists before any later slice trusts it. These public-API
-// tests lock that enforcement (symlinked directory, non-directory, and — when
-// root — a foreign-owned directory) so it cannot silently regress.
-
-// An existing StateDir that is itself a symlink must be rejected before it is
-// trusted (out-of-tree state directory must never become authority).
-func TestLoadRejectsSymlinkedStateDir(t *testing.T) {
-	realDir := filepath.Join(t.TempDir(), "real-state")
-	mustMkdir(t, realDir, 0o700)
-	linkDir := filepath.Join(t.TempDir(), "state-link")
-	mustSymlink(t, realDir, linkDir)
-	if _, err := loadWith(t, Options{StateDir: linkDir}, t.TempDir(), ""); err == nil {
-		t.Fatalf("symlinked StateDir must be rejected")
-	}
-}
-
-// An existing StateDir path that is a non-directory (regular file) must be
-// rejected by the directory-type check.
-func TestLoadRejectsStateDirNotDirectory(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "state-not-a-dir")
-	mustWrite(t, file, "x", 0o600)
-	if _, err := loadWith(t, Options{StateDir: file}, t.TempDir(), ""); err == nil {
-		t.Fatalf("StateDir that is a regular file must be rejected")
-	}
-}
-
-// An existing StateDir owned by a different uid must be rejected. Requires the
-// ability to chown to a foreign uid (root); skipped otherwise. Deterministic
-// coverage of the ownership rule lives in the pure verifyTrusted unit tests.
-func TestLoadRejectsStateDirOwnedByOtherUID(t *testing.T) {
-	if os.Geteuid() != 0 {
-		t.Skip("needs root to chown a directory to a foreign uid")
-	}
-	stateDir := filepath.Join(t.TempDir(), "state")
-	mustMkdir(t, stateDir, 0o700)
-	if err := os.Chown(stateDir, 12345, -1); err != nil {
-		t.Fatalf("chown: %v", err)
-	}
-	if _, err := loadWith(t, Options{StateDir: stateDir}, t.TempDir(), ""); err == nil {
-		t.Fatalf("StateDir owned by a foreign uid must be rejected")
 	}
 }
 
@@ -193,8 +147,8 @@ func TestLoadRejectsStateDirOwnedByOtherUID(t *testing.T) {
 func TestLoadDoesNotLeakSecretShapedPathInTrustError(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, secretCanary+".json")
-	mustWrite(t, cfg, `{"schema_version":"1"}`, 0o644) // group/world-readable → trust violation
-	_, err := loadWith(t, Options{ConfigPath: cfg}, t.TempDir(), t.TempDir())
+	mustWrite(t, cfg, `{"schema_version":"2"}`, 0o644) // group/world-readable → trust violation
+	_, err := loadWith(t, Options{ConfigPath: cfg}, t.TempDir())
 	if err == nil {
 		t.Fatalf("non-private explicit --config must be rejected")
 	}

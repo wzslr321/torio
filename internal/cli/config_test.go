@@ -16,10 +16,9 @@ import (
 
 // runVersionWithXDG runs `torio <args>` with isolated XDG dirs so no real user
 // config is touched, and returns exit code + captured streams.
-func runVersionWithXDG(t *testing.T, args []string, cfgHome, stateHome string) (int, string, string) {
+func runVersionWithXDG(t *testing.T, args []string, cfgHome string) (int, string, string) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", cfgHome)
-	t.Setenv("XDG_STATE_HOME", stateHome)
 	var stdout, stderr bytes.Buffer
 	code := Run(context.Background(), args, &stdout, &stderr, testBuild())
 	return code, stdout.String(), stderr.String()
@@ -36,24 +35,21 @@ func writeCLIConfig(t *testing.T, cfgHome, body string) {
 	}
 }
 
-// TestConfigAndStateDirGlobalsAcceptedBeforeAndAfterCommand replaces the
-// D1-era rejection: --config and --state-dir are now real persistent globals
-// in D2, usable both before and after the subcommand.
-func TestConfigAndStateDirGlobalsAcceptedBeforeAndAfterCommand(t *testing.T) {
+// TestConfigGlobalAcceptedBeforeAndAfterCommand replaces the D1-era rejection:
+// --config is a real persistent global in D2, usable both before and after the
+// subcommand.
+func TestConfigGlobalAcceptedBeforeAndAfterCommand(t *testing.T) {
 	cfgHome := t.TempDir()
-	stateHome := t.TempDir()
 	cfg := filepath.Join(cfgHome, "explicit.json")
-	if err := os.WriteFile(cfg, []byte(`{"schema_version":"1"}`), 0o600); err != nil {
+	if err := os.WriteFile(cfg, []byte(`{"schema_version":"2"}`), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	stateDir := filepath.Join(stateHome, "st")
 
 	for _, args := range [][]string{
-		{"--config", cfg, "--state-dir", stateDir, "version", "--json"},
-		{"version", "--config", cfg, "--state-dir", stateDir, "--json"},
+		{"--config", cfg, "version", "--json"},
+		{"version", "--config", cfg, "--json"},
 	} {
 		t.Setenv("XDG_CONFIG_HOME", cfgHome)
-		t.Setenv("XDG_STATE_HOME", stateHome)
 		var stdout, stderr bytes.Buffer
 		code := Run(context.Background(), args, &stdout, &stderr, testBuild())
 		if code != int(ExitOK) {
@@ -77,8 +73,8 @@ func TestConfigDefaultTimeoutIsConsumed(t *testing.T) {
 	cfgHome := t.TempDir()
 	// 1ns is within policy but expires before any work runs, so a consumed
 	// config timeout aborts the bounded operation.
-	writeCLIConfig(t, cfgHome, `{"schema_version":"1","default_timeout":"1ns"}`)
-	code, _, _ := runVersionWithXDG(t, []string{"version"}, cfgHome, t.TempDir())
+	writeCLIConfig(t, cfgHome, `{"schema_version":"2","default_timeout":"1ns"}`)
+	code, _, _ := runVersionWithXDG(t, []string{"version"}, cfgHome)
 	if code == int(ExitOK) {
 		t.Fatalf("exit = 0, want non-zero: config default_timeout must be consumed by the bounded operation")
 	}
@@ -89,8 +85,8 @@ func TestConfigDefaultTimeoutIsConsumed(t *testing.T) {
 // the command succeeds.
 func TestExplicitTimeoutOverridesConfig(t *testing.T) {
 	cfgHome := t.TempDir()
-	writeCLIConfig(t, cfgHome, `{"schema_version":"1","default_timeout":"1ns"}`)
-	code, _, stderr := runVersionWithXDG(t, []string{"version", "--timeout", "5s"}, cfgHome, t.TempDir())
+	writeCLIConfig(t, cfgHome, `{"schema_version":"2","default_timeout":"1ns"}`)
+	code, _, stderr := runVersionWithXDG(t, []string{"version", "--timeout", "5s"}, cfgHome)
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0 (explicit --timeout must override config); stderr=%q", code, stderr)
 	}
@@ -101,15 +97,15 @@ func TestExplicitTimeoutOverridesConfig(t *testing.T) {
 // error (exit 2), not a silent coercion.
 func TestOverMaxConfigTimeoutIsUsageError(t *testing.T) {
 	cfgHome := t.TempDir()
-	writeCLIConfig(t, cfgHome, `{"schema_version":"1","default_timeout":"999h"}`)
-	code, _, _ := runVersionWithXDG(t, []string{"version"}, cfgHome, t.TempDir())
+	writeCLIConfig(t, cfgHome, `{"schema_version":"2","default_timeout":"999h"}`)
+	code, _, _ := runVersionWithXDG(t, []string{"version"}, cfgHome)
 	if code != int(ExitUsage) {
 		t.Fatalf("exit = %d, want %d (over-max config default_timeout)", code, int(ExitUsage))
 	}
 }
 
 func TestAbsentDefaultConfigStillRunsVersion(t *testing.T) {
-	code, out, stderr := runVersionWithXDG(t, []string{"version"}, t.TempDir(), t.TempDir())
+	code, out, stderr := runVersionWithXDG(t, []string{"version"}, t.TempDir())
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0 (absent config is valid first-run); stderr=%q", code, stderr)
 	}
@@ -120,7 +116,7 @@ func TestAbsentDefaultConfigStillRunsVersion(t *testing.T) {
 
 func TestExplicitMissingConfigIsUsageError(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "nope.json")
-	code, _, _ := runVersionWithXDG(t, []string{"version", "--config", missing}, t.TempDir(), t.TempDir())
+	code, _, _ := runVersionWithXDG(t, []string{"version", "--config", missing}, t.TempDir())
 	if code != int(ExitUsage) {
 		t.Fatalf("exit = %d, want %d (explicit missing --config)", code, int(ExitUsage))
 	}
@@ -129,7 +125,7 @@ func TestExplicitMissingConfigIsUsageError(t *testing.T) {
 func TestMalformedConfigIsUsageError(t *testing.T) {
 	cfgHome := t.TempDir()
 	writeCLIConfig(t, cfgHome, `{not json`)
-	code, _, _ := runVersionWithXDG(t, []string{"version", "--json"}, cfgHome, t.TempDir())
+	code, _, _ := runVersionWithXDG(t, []string{"version", "--json"}, cfgHome)
 	if code != int(ExitUsage) {
 		t.Fatalf("exit = %d, want %d (malformed config)", code, int(ExitUsage))
 	}
@@ -145,10 +141,10 @@ func TestConfigSecretShapedValueDoesNotLeak(t *testing.T) {
 		t.Fatalf("canary %q is not recognized by the production redactor; fixture is invalid", canary)
 	}
 	cfgHome := t.TempDir()
-	writeCLIConfig(t, cfgHome, `{"schema_version":"1","default_timeout":"`+canary+`"}`)
+	writeCLIConfig(t, cfgHome, `{"schema_version":"2","default_timeout":"`+canary+`"}`)
 
 	// Human path.
-	code, _, stderr := runVersionWithXDG(t, []string{"version"}, cfgHome, t.TempDir())
+	code, _, stderr := runVersionWithXDG(t, []string{"version"}, cfgHome)
 	if code != int(ExitUsage) {
 		t.Fatalf("human: exit = %d, want %d", code, int(ExitUsage))
 	}
@@ -157,7 +153,7 @@ func TestConfigSecretShapedValueDoesNotLeak(t *testing.T) {
 	}
 
 	// JSON path: exactly one envelope, no leak.
-	code, stdout, _ := runVersionWithXDG(t, []string{"version", "--json"}, cfgHome, t.TempDir())
+	code, stdout, _ := runVersionWithXDG(t, []string{"version", "--json"}, cfgHome)
 	if code != int(ExitUsage) {
 		t.Fatalf("json: exit = %d, want %d", code, int(ExitUsage))
 	}
@@ -192,7 +188,7 @@ func TestConfigJSONEscapedSecretDoesNotLeak(t *testing.T) {
 	writeCLIConfig(t, cfgHome, body)
 
 	// Human path.
-	code, _, stderr := runVersionWithXDG(t, []string{"version"}, cfgHome, t.TempDir())
+	code, _, stderr := runVersionWithXDG(t, []string{"version"}, cfgHome)
 	if code != int(ExitUsage) {
 		t.Fatalf("human: exit = %d, want %d", code, int(ExitUsage))
 	}
@@ -201,7 +197,7 @@ func TestConfigJSONEscapedSecretDoesNotLeak(t *testing.T) {
 	}
 
 	// JSON path: exactly one envelope, no leak.
-	code, stdout, _ := runVersionWithXDG(t, []string{"version", "--json"}, cfgHome, t.TempDir())
+	code, stdout, _ := runVersionWithXDG(t, []string{"version", "--json"}, cfgHome)
 	if code != int(ExitUsage) {
 		t.Fatalf("json: exit = %d, want %d", code, int(ExitUsage))
 	}
@@ -223,11 +219,11 @@ func TestInsecureConfigPermissionsIsUsageError(t *testing.T) {
 		t.Skip("permission enforcement is Unix-only")
 	}
 	cfgHome := t.TempDir()
-	writeCLIConfig(t, cfgHome, `{"schema_version":"1"}`)
+	writeCLIConfig(t, cfgHome, `{"schema_version":"2"}`)
 	if err := os.Chmod(filepath.Join(cfgHome, "torio", "config.json"), 0o644); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}
-	code, _, _ := runVersionWithXDG(t, []string{"version"}, cfgHome, t.TempDir())
+	code, _, _ := runVersionWithXDG(t, []string{"version"}, cfgHome)
 	if code != int(ExitUsage) {
 		t.Fatalf("exit = %d, want %d (insecure config perms)", code, int(ExitUsage))
 	}
@@ -237,7 +233,7 @@ func TestInsecureConfigPermissionsIsUsageError(t *testing.T) {
 // even with config resolution active, `torio version --json` emits exactly one
 // envelope (second decode is io.EOF).
 func TestVersionJSONEnvelopeUnchangedWithConfig(t *testing.T) {
-	code, stdout, _ := runVersionWithXDG(t, []string{"version", "--json"}, t.TempDir(), t.TempDir())
+	code, stdout, _ := runVersionWithXDG(t, []string{"version", "--json"}, t.TempDir())
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0", code)
 	}

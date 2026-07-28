@@ -93,7 +93,6 @@ func (g *fakeServeGuest) SSHInput(_ context.Context, _ []byte, command []string)
 func runServeWithGuest(t *testing.T, args []string, g serve.Guest) (int, string, string) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var stdout, stderr bytes.Buffer
 	a := &app{
 		stdout:   &stdout,

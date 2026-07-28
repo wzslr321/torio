@@ -51,7 +51,6 @@ func runVMWithFake(t *testing.T, args []string, fake execx.Runner) (int, string,
 func runVMWithFakeBoundJSON(t *testing.T, args []string, fake execx.Runner) (int, string, string, bool) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var stdout, stderr bytes.Buffer
 	a := &app{
 		stdout:             &stdout,

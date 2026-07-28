@@ -77,25 +77,21 @@ Błąd:
 ```text
 --json                 machine output
 --config PATH          explicit non-secret config
---state-dir PATH       test/diagnostic override
 --timeout DURATION     bounded operation; cannot exceed policy maximum
 --verbose              more redacted diagnostics on stderr
 ```
 
+To pełna lista. Wszystkie cztery są realnymi globalnymi (persistent) flagami, działającymi przed
+i po subkomendzie; nieznana flaga jest odrzucana (usage, exit 2), nie akceptowana po cichu.
+`--config` resolwuje się do typowanej konfiguracji (patrz [`config.md`](config.md)) używanej przez
+wykonanie komendy — nie jest tylko parsowany. Błąd resolucji lub walidacji konfiguracji jest
+usage/schema error (exit 2).
+
 Nie ma globalnego `--force` omijającego policy. Komendy mogą mieć wąskie, udokumentowane recovery flags, ale nie mogą omijać approval, base check ani credential boundaries.
 
-### Dostępność per slice (implementacja)
-
-Powyższa lista to docelowy kontrakt. Zaimplementowane globalne flagi zależą od slice'a i nieznane
-flagi są odrzucane (usage, exit 2) — nie są po cichu akceptowane:
-
-- **D1:** `--json`, `--verbose`, `--timeout`. `--config` i `--state-dir` są **D2-pending** i w D1
-  zwracają usage error.
-- **D2:** dochodzą `--config PATH` i `--state-dir PATH` jako realne globalne (persistent) flagi,
-  działające przed i po subkomendzie. Resolują się do typowanej konfiguracji D2 (patrz
-  [`config.md`](config.md)) używanej przez wykonanie komendy — nie są tylko parsowane. Błąd
-  resolucji/walidacji konfiguracji jest usage/schema error (exit 2). Nieznana flaga nadal jest
-  odrzucana (exit 2).
+`--state-dir PATH` **nie istnieje**. Był globalną flagą w D2, ale wskazywał katalog, do którego
+Torio nigdy nic nie zapisało; zniknął wraz z manifestem version-lock —
+[ADR-0019](../adr/0019-state-directory-and-config-schema-v1-leave.md).
 
 ### `--help` a `--json`
 

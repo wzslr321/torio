@@ -11,7 +11,7 @@ func TestWriteFilePrivateCreatesOwnerOnlyFileAndDir(t *testing.T) {
 	base := t.TempDir()
 	dir := filepath.Join(base, "torio")
 	path := filepath.Join(dir, "config.json")
-	data := []byte(`{"schema_version":"1"}`)
+	data := []byte(`{"schema_version":"2"}`)
 
 	if err := writeFilePrivate(path, data); err != nil {
 		t.Fatalf("writeFilePrivate: %v", err)

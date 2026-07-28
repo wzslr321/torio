@@ -10,6 +10,11 @@ Konfiguracja jest **non-secret** (AGENTS §6): materiał o kształcie sekretu je
 > [ADR-0017](../adr/0017-pre-v1-exploration-leaves-the-working-tree.md). Opisana niżej granica
 > zaufania ścieżek obowiązuje bez zmian dla `config.json`.
 
+> **Katalog state nie istnieje.** `XDG_STATE_HOME`, `Paths.StateDir` i flaga `--state-dir` służyły
+> wyłącznie manifestowi version-lock i zniknęły razem z nim — patrz
+> [ADR-0019](../adr/0019-state-directory-and-config-schema-v1-leave.md). Torio nie zapisuje na
+> hoście żadnego trwałego stanu poza `config.json`.
+
 ## Lokalizacje (XDG)
 
 Ścieżki resolują się deterministycznie z zmiennych XDG, z udokumentowanymi fallbackami:
@@ -17,25 +22,22 @@ Konfiguracja jest **non-secret** (AGENTS §6): materiał o kształcie sekretu je
 | Rola | Baza (env) | Fallback | Katalog aplikacji |
 |---|---|---|---|
 | Config | `XDG_CONFIG_HOME` | `$HOME/.config` | `<base>/torio/` |
-| State  | `XDG_STATE_HOME`  | `$HOME/.local/state` | `<base>/torio/` |
 
 Reguły:
 
-- Ustawiony, ale **non-absolutny** `XDG_CONFIG_HOME`/`XDG_STATE_HOME` jest odrzucany fail-closed
+- Ustawiony, ale **non-absolutny** `XDG_CONFIG_HOME` jest odrzucany fail-closed
   (nie jest po cichu ignorowany ani "naprawiany").
 - Gdy XDG base jest nieustawiony i nie można ustalić `$HOME`, resolucja kończy się błędem
   (fail closed) zamiast zgadywać lokalizację.
 - Fallback `$HOME` musi być **absolutny**. Non-absolutny `$HOME` (przy nieustawionym XDG) jest
   odrzucany fail-closed — nie jest kanonikalizowany względem CWD — z tego samego powodu co
   non-absolutny XDG base: katalog roboczy nie może wyznaczać domyślnej zaufanej lokalizacji
-  config/state.
-- Flagi `--config PATH` i `--state-dir PATH` nadpisują wartości i są kanonikalizowane
+  configu.
+- Flaga `--config PATH` nadpisuje wartość i jest kanonikalizowana
   (`filepath.Abs` + `Clean`, bez rozwijania symlinków — explicit override to zaufany input).
-- **Lazy resolution / precedence:** każda lokalizacja jest resolowana niezależnie. Explicit
-  override (`--config`/`--state-dir`) całkowicie **omija** odpowiedni XDG base — nieużywana (nawet
-  malformed) zmienna XDG ani `$HOME` nie mogą zablokować w pełni jawnej inwokacji. Konsultowany jest
-  wyłącznie base faktycznie potrzebny (bo jego override jest nieobecny), i każda faktycznie użyta
-  wartość jest nadal ściśle walidowana (patrz reguła absolutności powyżej).
+- **Precedence:** explicit `--config` całkowicie **omija** XDG base — malformed `XDG_CONFIG_HOME`
+  ani `$HOME` nie mogą zablokować w pełni jawnej inwokacji. XDG jest konsultowany wyłącznie wtedy,
+  gdy override jest nieobecny, i wtedy nadal ściśle walidowany (patrz reguła absolutności powyżej).
 - Przy explicit `--config` zaufanym katalogiem config jest katalog nadrzędny wskazanego pliku.
 - Pliki lokalizowane **wewnątrz** zaufanego katalogu (`config.json`) używają
   contained-join: nazwa musi być czystą nazwą pliku, a wynik nie może opuścić katalogu bazowego.
@@ -58,7 +60,7 @@ macOS/Linux arm64):
   weryfikowane przez `Fstat` **na tym samym deskryptorze**, z którego następuje odczyt — brak TOCTOU
   na ostatnim komponencie (`Lstat`+`ReadFile` jest niedozwolone). Plik musi być zwykły, mode-private
   (`0600`) i owned-by-EUID.
-- Bezpośredni zaufany katalog (`ConfigDir`, `StateDir`), jeśli istnieje, musi być **nie-symlinkiem**,
+- Bezpośredni zaufany katalog (`ConfigDir`), jeśli istnieje, musi być **nie-symlinkiem**,
   katalogiem, mode-private i owned-by-EUID. Katalog nieistniejący = poprawny first-run. Walidacja
   otwiera katalog `O_RDONLY|O_DIRECTORY`, więc zaufany katalog musi być **używalny jako katalog
   aplikacji** — w praktyce `0700` (`mode-private` sam w sobie dopuszczałby np. `0100` tylko-exec, co
@@ -89,11 +91,11 @@ Pola:
 
 | Pole | Typ | Wymagane | Semantyka |
 |---|---|---|---|
-| `schema_version` | string | tak | `"1"` albo `"2"`. Inna wartość → odrzucone (bez migracji). |
+| `schema_version` | string | tak | `"2"`. Inna wartość → odrzucone (bez migracji). |
 | `default_timeout` | string (Go duration) | nie | Domyślny timeout operacji; walidowany > 0 i ≤ policy max. Zasila timeout policy, gdy `--timeout` nie podano jawnie (flaga wygrywa). |
-| `projects` | array | nie (tylko V2) | Aktywny project registry — patrz niżej. Pod `"1"` jest **nieznanym polem** i jest odrzucane. |
+| `projects` | array | nie | Aktywny project registry — patrz niżej. Pominięty normalizuje się do pustego registry. |
 
-Przykład (poprawny V2):
+Przykład (poprawny dokument):
 
 ```json
 {
@@ -150,14 +152,18 @@ Reguły całego registry:
 - Registry jest walidowany **przy odczycie i przy zapisie**, więc ręcznie wyedytowany dokument nie
   przemyci wpisu, którego write path by nie przyjął.
 
-## Kompatybilność V1 ↔ V2
+## Wersja schematu
 
-- Czytane są oba dokumenty. V1 normalizuje się do **pustego** registry, nie do błędu.
-- Każdy zapis emituje V2: pierwsza mutacja (dodanie/usunięcie projektu) podnosi wersję dokumentu.
-  `File` deklarujący inną wersję jest przy zapisie odrzucany, nie podnoszony po cichu.
-- Starsza binarka **jawnie odrzuca** V2 — i przez version gate (`"2"` nie jest wspierane), i przez
-  `DisallowUnknownFields` na polu `projects`. Nie może przeczytać V2 jako settings-only i po cichu
-  zgubić registry.
+- `"2"` jest **jedyną** wspieraną wersją, przy odczycie i przy zapisie. `File` deklarujący inną
+  wersję jest przy zapisie odrzucany, nie podnoszony po cichu.
+- Poprzednik `"1"` (settings-only, sprzed registry) **nie jest czytany**. Torio nie miało wydania,
+  które by taki dokument zapisało, więc żaden nie istnieje —
+  [ADR-0019](../adr/0019-state-directory-and-config-schema-v1-leave.md). Ręcznie napisany dokument
+  z `"1"` jest odrzucany jawnie (exit 2), nie czytany jako settings-only.
+- Starsza binarka **jawnie odrzuca** ten dokument — i przez własny version gate (`"2"` nie jest dla
+  niej wspierane), i przez `DisallowUnknownFields` na polu `projects`. Nie może przeczytać go jako
+  settings-only i po cichu zgubić registry. Ta gwarancja leży po jej stronie i obowiązuje
+  niezależnie od tego, co czyta binarka bieżąca.
 
 ## Zapis configu
 

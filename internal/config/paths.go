@@ -21,14 +21,12 @@ const (
 var errNoHome = errors.New("config: cannot determine home directory and XDG base is unset")
 
 // Options are the raw inputs to path/config resolution: the explicit CLI
-// overrides plus injectable environment/home accessors (nil uses the real OS
+// override plus injectable environment/home accessors (nil uses the real OS
 // helpers). Keeping them injectable makes resolution fully testable without
 // mutating process-global state.
 type Options struct {
 	// ConfigPath is the explicit --config value ("" if not given).
 	ConfigPath string
-	// StateDir is the explicit --state-dir value ("" if not given).
-	StateDir string
 	// Getenv reads environment variables. If nil, os.Getenv is used.
 	Getenv func(string) string
 	// HomeDir returns the user home directory. If nil, os.UserHomeDir is used.
@@ -49,9 +47,12 @@ func (o Options) homeDir() (string, error) {
 	return os.UserHomeDir()
 }
 
-// Paths are resolved, canonical config/state locations. ConfigDir and StateDir
-// are the trusted directories that hold, respectively, operator-authored config
-// and runtime state written by later slices.
+// Paths are resolved, canonical config locations. ConfigDir is the trusted
+// directory that holds operator-authored config.
+//
+// There is no state directory: Torio writes no runtime state on the host. The
+// one that existed served the version-lock manifest, which was never wired and
+// is gone (ADR-0019).
 type Paths struct {
 	// ConfigDir is the trusted directory holding the config document.
 	ConfigDir string
@@ -59,44 +60,25 @@ type Paths struct {
 	// ConfigDir/config.json but is the canonical explicit path when --config
 	// was given. It may not exist (absent default config is a valid first run).
 	ConfigFile string
-	// StateDir is the trusted runtime state directory.
-	StateDir string
 	// explicitConfig records whether ConfigFile came from --config. An explicit
 	// path that does not exist is an error; an absent default is a valid first
 	// run (see Load).
 	explicitConfig bool
 }
 
-// ResolvePaths computes canonical Paths from CLI overrides and the environment.
-// It performs no filesystem reads or writes; it only derives and canonicalizes
-// locations.
+// ResolvePaths computes canonical Paths from the CLI override and the
+// environment. It performs no filesystem reads or writes; it only derives and
+// canonicalizes locations.
 //
-// Each location is resolved independently and lazily: an explicit --config or
-// --state-dir override is a trusted direct input and bypasses XDG entirely, so
-// an unused (even malformed) XDG base or HOME never gates a fully explicit
-// invocation. Only a base that is actually needed — because its override is
-// absent — is consulted, in which case XDG_CONFIG_HOME / XDG_STATE_HOME take
-// precedence and fall back to the XDG-specified $HOME/.config and
-// $HOME/.local/state. Every value that is actually used is still validated:
-// a set-but-non-absolute XDG base (or non-absolute HOME fallback) is rejected
-// fail-closed rather than silently ignored or coerced against CWD.
+// An explicit --config override is a trusted direct input and bypasses XDG
+// entirely, so a malformed XDG base or HOME never gates a fully explicit
+// invocation. XDG_CONFIG_HOME is consulted only when the override is absent,
+// falling back to the XDG-specified $HOME/.config. A value that is actually
+// used is still validated: a set-but-non-absolute XDG base (or non-absolute
+// HOME fallback) is rejected fail-closed rather than silently ignored or
+// coerced against CWD.
 func ResolvePaths(opts Options) (Paths, error) {
 	var p Paths
-
-	// State directory: explicit override bypasses XDG.
-	if opts.StateDir != "" {
-		abs, err := canonical(opts.StateDir)
-		if err != nil {
-			return Paths{}, fmt.Errorf("resolve --state-dir: %w", err)
-		}
-		p.StateDir = abs
-	} else {
-		stateHome, err := opts.xdgBase("XDG_STATE_HOME", filepath.Join(".local", "state"))
-		if err != nil {
-			return Paths{}, err
-		}
-		p.StateDir = filepath.Join(stateHome, appDir)
-	}
 
 	// Config file (and its trusted directory): explicit override bypasses XDG.
 	// With an explicit --config, the trusted config directory is the file's
