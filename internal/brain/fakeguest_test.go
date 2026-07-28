@@ -23,6 +23,10 @@ import (
 	"github.com/wzslr321/torio/internal/lima"
 )
 
+
+// fakeGuestSessionUser is the identity `id -un` reports on the fake guest: the
+// Lima login user, which is who `limactl copy` writes as.
+const fakeGuestSessionUser = "operator"
 type fakeCall struct {
 	argv  []string
 	stdin []byte
@@ -230,6 +234,12 @@ func (f *fakeGuest) route(ctx context.Context, stdin []byte, argv []string) (exe
 		return okResult(""), nil
 	case strings.Contains(joined, "find "+importPayloadPath+" -type f"):
 		return okResult(strings.Repeat(".", f.importFiles)), nil
+	case joined == "id -un":
+		return okResult(fakeGuestSessionUser + "\n"), nil
+	case strings.Contains(joined, "chown -R -- "+lima.HermesUser+":"+lima.HermesUser+" "+importPayloadPath):
+		return okResult(""), nil
+	case strings.Contains(joined, "chmod -R u=rwX,g=rX,o= -- "+importPayloadPath):
+		return okResult(""), nil
 	case strings.Contains(joined, "sha256sum --quiet --strict -c "+importManifestPath):
 		return okResult(""), nil
 	case strings.Contains(joined, "mv -T "+importPayloadPath+" "+importCandidatePath):

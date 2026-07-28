@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/wzslr321/torio/internal/lima"
 )
 
 func writeHostTransferFile(t *testing.T, root, rel, content string, mode os.FileMode) {
@@ -372,5 +374,52 @@ func TestImportMayReplaceOnlyTheExactPristineScaffold(t *testing.T) {
 	}
 	if len(g.copies) != 0 {
 		t.Fatalf("non-pristine collision transferred content: %#v", g.copies)
+	}
+}
+
+// TestImportStagesWherePayloadTransportCanActuallyWrite pins the two facts that
+// made every real `torio brain import` fail before the first byte moved.
+//
+// The payload arrives over `limactl copy`, which is rsync running as the Lima
+// login user. Staging created 0700 hermes:hermes refused it — rsync stopped at
+// "cannot stat destination" — so the destination is grouped in the one guest
+// authority the operator and hermes share, and is group-writable. The staging
+// root above it is not: it holds the manifest that verification checks the
+// payload against, and the side supplying the payload must not be able to
+// rewrite its own reference.
+//
+// The tree then arrives owned by the operator with the host's 0700 directory
+// modes, which hermes cannot enter, so ownership is normalized before the first
+// hermes-side read rather than after it.
+func TestImportStagesWherePayloadTransportCanActuallyWrite(t *testing.T) {
+	source := t.TempDir()
+	writeHostTransferFile(t, source, "notes/decision.md", "# Decision", 0o600)
+	writeHostTransferFile(t, source, "attachments/diagram.png", "png", 0o600)
+
+	g := readyFake()
+	if _, err := New(g).Import(context.Background(), ImportOptions{Source: source}); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+
+	payloadStaging := "install -d -o " + fakeGuestSessionUser + " -g " + lima.TorioProjectsGroup + " -m 2770 " + importPayloadPath
+	if !g.saw(payloadStaging) {
+		t.Errorf("payload staging is not owned by the copy transport; want %q", payloadStaging)
+	}
+	rootStaging := "install -d -o " + lima.HermesUser + " -g " + lima.TorioProjectsGroup + " -m 0750 " + importStagingPath
+	if !g.saw(rootStaging) {
+		t.Errorf("staging root is not operator-readable-but-not-writable; want %q", rootStaging)
+	}
+
+	adopt := g.firstIndex("chown -R -- " + lima.HermesUser + ":" + lima.HermesUser + " " + importPayloadPath)
+	normalize := g.firstIndex("chmod -R u=rwX,g=rX,o= -- " + importPayloadPath)
+	firstRead := g.firstIndex("find " + importPayloadPath)
+	if adopt < 0 || normalize < 0 {
+		t.Fatalf("copied payload was never adopted by hermes: chown=%d chmod=%d", adopt, normalize)
+	}
+	if firstRead < 0 {
+		t.Fatal("payload was never verified on the guest")
+	}
+	if adopt > firstRead || normalize > firstRead {
+		t.Errorf("payload read as hermes at call %d before adoption (chown=%d, chmod=%d)", firstRead, adopt, normalize)
 	}
 }

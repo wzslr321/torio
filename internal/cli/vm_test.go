@@ -552,7 +552,8 @@ func bootstrapHappyResp() []scriptedResp {
 		{res: out("1000\n")},                                      // id -u hermes
 		{res: out("torio-projects:x:1001:hermes\n")},              // getent group torio-projects
 		{res: out("hermes torio-projects\n")},                     // id -nG hermes (torio-projects)
-		{res: out("testop torio-projects\n")},                     // id -nG operator
+		{res: out("testop\n")},                                    // id -un (guest session identity)
+		{res: out("testop torio-projects\n")},                     // id -nG (guest session groups)
 		{res: out("hermes torio-projects\n")},                     // id -nG hermes (not docker)
 		{res: execx.Result{ExitCode: 0}},                          // test -x launcher (install present)
 		{res: out(lima.PromotedHermesCommit + "\n")},              // git rev-parse HEAD

@@ -92,6 +92,12 @@ func (o InitOptions) withDefaults() InitOptions {
 
 // validateOperatorUser rejects empty or disallowed operator identities before they
 // reach template substitution or typed guest argv (no shell metacharacters).
+// ValidateOperatorUser accepts only a guest login name safe to place in a fixed
+// argv. It is exported because the guest session's own identity is read back at
+// runtime — `limactl copy` writes as that user, so staging must be owned by it —
+// and a name read from the guest is an input, not a constant.
+func ValidateOperatorUser(user string) error { return validateOperatorUser(user) }
+
 func validateOperatorUser(user string) error {
 	user = strings.TrimSpace(user)
 	if user == "" || user == placeholderOperator {

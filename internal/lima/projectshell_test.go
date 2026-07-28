@@ -145,8 +145,8 @@ func TestProjectShellHelperEntersTheGroupWithoutPrivilege(t *testing.T) {
 			t.Errorf("helper line %q uses %q; the operator session must not gain privilege", line, forbidden)
 		}
 	}
-	if !strings.Contains(code, torioProjectsGroup) {
-		t.Errorf("helper does not name the shared project group %q", torioProjectsGroup)
+	if !strings.Contains(code, TorioProjectsGroup) {
+		t.Errorf("helper does not name the shared project group %q", TorioProjectsGroup)
 	}
 
 	// sg's -c argument is the one string on the guest side that could carry a
