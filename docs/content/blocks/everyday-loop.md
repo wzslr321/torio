@@ -3,11 +3,13 @@
 Once the VM and backend are up, the day-to-day loop is the same whichever editor
 or interface you use:
 
-1. Open the checkout as `hermes`, or drive it from a Desktop session.
-2. Edit, or let your AI tool edit, files in the checkout.
-3. Run the one documented, non-destructive check.
-4. Review the change: `git -C /home/hermes/projects/REDACTED-PROJECT diff` and `… status`.
-5. Decide manually whether to commit or push.
+1. Work in a checkout — from a Desktop session, your own editor, or a shell.
+2. Edit, or let your AI tool edit, files there.
+3. Run a check that reads rather than writes.
+4. Review what changed: `git diff` and `git status`.
+5. Decide whether any of it should leave the VM.
+6. If it should: `torio project shell <id>`, commit, push, exit.
 
-Commit and push are **human-only** and out of scope for Torio: it automates no
-part of step 5.
+Steps 5 and 6 are the whole point of the split. Torio automates no part of
+either. The persistent backend cannot push at all — write capability exists only
+inside a session you opened, and ends when you exit it.

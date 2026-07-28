@@ -6,7 +6,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Tutorials — get started with Torio</title>
-    <meta name="description" content="Get started with Torio on one page — build the CLI, start the VM, bring up the loopback backend, open your tunnel, pin a session token, prepare the Code V0 workspace, connect Hermes Desktop, configure a provider, and run the operator loop." />
+    <meta name="description" content="Get started with Torio on one page — build the CLI, create the VM, bring up the loopback backend, open your tunnel, pin a session token, create the Second Brain, attach your first repository, connect Hermes Desktop, and learn the everyday loop." />
     <link rel="stylesheet" href="styles.css" />
     <script>
       // Resolve the saved theme before first paint so a reader who chose light
@@ -62,14 +62,15 @@
         <h1 id="tutorials">Tutorials</h1>
 <p>Guided, start-to-finish walkthroughs. Right now there is one; more will be added as Torio grows.</p>
 <h2 id="get-started">Get started</h2>
-<p>By the end of this page you will have built the CLI, started the existing VM, brought up the loopback-only Hermes backend, reached it from your Mac through a tunnel you control, prepared the single Code V0 workspace, and held a real Hermes Desktop session against it — with no automated commit, push, or credential handling anywhere in the loop.</p>
+<p>By the end of this page you will have built the CLI, created the Linux VM, brought up the loopback-only Hermes backend, reached it from your Mac through a tunnel you control, created your Second Brain, attached your first repository, and held a real Hermes Desktop session against it — with no automated commit, push, or credential handling anywhere in the loop.</p>
 <p>Work straight down. Nothing here sends you to another page to finish a step; the links are for going deeper afterwards.</p>
 <nav class="toc" aria-label="Steps on this page">
-<ul><li><a href="#prerequisites">Before you start</a></li><li><a href="#build-cli">Step 1 — Install the CLI</a></li><li><a href="#vm-bring-up">Step 2 — Start and verify the VM</a></li><li><a href="#serve-bring-up">Step 3 — Bring up the loopback backend</a></li><li><a href="#tunnel">Step 4 — Reach the backend from your Mac</a></li><li><a href="#session-token">Step 5 — Pin a session token</a></li><li><a href="#workspace-preflight">Step 6 — Check read access to the private remote</a></li><li><a href="#workspace-clone">Step 7 — Prepare the Code V0 workspace</a></li><li><a href="#workspace-project">Step 8 — Register the Hermes project</a></li><li><a href="#desktop-connect">Step 9 — Connect Hermes Desktop</a></li><li><a href="#desktop-workspace">Step 10 — Point Desktop at the workspace</a></li><li><a href="#provider-auth">Step 11 — Configure a model provider</a></li><li><a href="#workspace-check">Step 12 — Run one documented check</a></li><li><a href="#everyday-loop">Step 13 — Learn the everyday loop</a></li><li><a href="#step-end">Step 14 — Leave a clean end state</a></li></ul>
+<ul><li><a href="#prerequisites">Before you start</a></li><li><a href="#build-cli">Step 1 — Install the CLI</a></li><li><a href="#vm-bring-up">Step 2 — Create and verify the VM</a></li><li><a href="#serve-bring-up">Step 3 — Bring up the loopback backend</a></li><li><a href="#tunnel">Step 4 — Reach the backend from your Mac</a></li><li><a href="#session-token">Step 5 — Pin a session token</a></li><li><a href="#brain-bring-up">Step 6 — Create the Second Brain</a></li><li><a href="#project-attach">Step 7 — Attach your first repository</a></li><li><a href="#desktop-connect">Step 8 — Connect Hermes Desktop</a></li><li><a href="#desktop-workspace">Step 9 — Point Desktop at the project</a></li><li><a href="#provider-auth">Step 10 — Configure a model provider</a></li><li><a href="#everyday-loop">Step 11 — Learn the everyday loop</a></li><li><a href="#step-end">Step 12 — Leave a clean end state</a></li></ul>
 </nav>
 <h3 id="prerequisites">Before you start</h3>
 <p>You need all of the following in place first:</p>
-<ul><li>a macOS host on Apple Silicon with <code>limactl</code> on your <code>PATH</code> (Torio V1 uses Lima <code>vmType: vz</code> on <code>aarch64</code>; Intel Macs are out of scope for the product template);</li><li>the <code>torio</code> Lima VM — V1 may create it via <code>torio vm init</code>; the legacy V0 path may use an already-provisioned instance instead;</li><li>a checkout of the <code>torio</code> repository and a Go toolchain to build the CLI;</li><li>for the Code V0 workspace only: repo-scoped <strong>read</strong> access to the private remote must already exist on the guest. Provisioning it is a human-only prerequisite outside Torio.</li></ul>
+<ul><li>a macOS host on Apple Silicon with <code>limactl</code> on your <code>PATH</code> — Torio uses Lima <code>vmType: vz</code> on <code>aarch64</code>, and Intel Macs are out of scope for the guest template;</li><li>a checkout of the <code>torio</code> repository and a Go toolchain to build the CLI;</li><li>for each repository you plan to attach: read access that already works from the guest, without a prompt. Provisioning it is yours to do, outside Torio.</li></ul>
+<p>Torio creates the VM itself, so there is nothing to provision by hand first.</p>
 <h3 id="build-cli">Step 1 — Install the CLI</h3>
 <p>From a checkout of the <code>torio</code> repository, build the binary and put it on your <code>PATH</code>. Every command in these docs is written as <code>torio</code>, so do this once and the rest of the page just works:</p>
 <div class="code-block"><pre data-lang="bash"><code>go build -o torio ./cmd/torio
@@ -79,7 +80,7 @@ sudo install -m 755 torio /usr/local/bin/torio</code></pre></div>
 torio vm status</code></pre></div>
 <p>You should get one line naming the VM and its state, for example <code>torio: Stopped</code>.</p>
 <div class="callout"><p>Prefer not to install system-wide? Any directory already on your <code>PATH</code> works — for example <code>install -m 755 torio ~/.local/bin/torio</code>. If you skip this step entirely, <code>torio</code> will not resolve at all: a freshly built binary is not on your <code>PATH</code> and your shell does not search the current directory, so you would have to prefix every later command with <code>./</code> and run it from the repository root.</p></div>
-<h3 id="vm-bring-up">Step 2 — Start and verify the VM</h3>
+<h3 id="vm-bring-up">Step 2 — Create and verify the VM</h3>
 <p>If the VM does not exist yet, create it from the trusted template:</p>
 <div class="code-block"><pre data-lang="bash"><code>torio vm init</code></pre></div>
 <p>If <code>torio vm status</code> did not report <code>Running</code>, start the VM, then reconcile and verify it:</p>
@@ -91,7 +92,7 @@ torio vm bootstrap --timeout 15m</code></pre></div>
 <h4 id="persistent-locations">Persistent Hermes locations</h4>
 <div class="table-scroll"><table><thead><tr><th>What</th><th>Path (on the VM's native Linux filesystem)</th></tr></thead><tbody><tr><td>Guest user</td><td><code>hermes</code></td></tr><tr><td>Hermes home</td><td><code>/home/hermes</code></td></tr><tr><td>Profile / application state</td><td><code>/home/hermes/.hermes</code></td></tr><tr><td>Second Brain vault</td><td><code>/home/hermes/brain</code></td></tr><tr><td>Workspace root</td><td><code>/home/hermes/projects</code></td></tr></tbody></table></div>
 <p>These are also emitted in the <code>torio vm bootstrap</code> output (human and <code>--json</code>).</p>
-<p>V1 can create the VM via <code>torio vm init</code>; bootstrap then verifies the guest layout above on an already-running instance. It never recreates or re-images the VM.</p>
+<p><code>init</code> creates the VM; <code>bootstrap</code> then verifies the guest layout above on an already-running instance. Neither recreates or re-images it.</p>
 <h3 id="serve-bring-up">Step 3 — Bring up the loopback backend</h3>
 <p>Install and start the persistent Hermes backend as a user systemd service inside the VM, using the existing <code>/home/hermes/.hermes</code> profile (application state, not the Second Brain vault at <code>/home/hermes/brain</code>). It binds guest loopback only (<code>127.0.0.1:9119</code>) and never a public address:</p>
 <div class="code-block"><pre data-lang="bash"><code>torio serve install --timeout 2m
@@ -142,51 +143,51 @@ torio serve restart --timeout 2m</code></pre></div>
     -H <span class="tok-str">'X-Hermes-Session-Token: [REDACTED]'</span> http://127.0.0.1:19119/api/sessions</code></pre></div>
 <p>Because the value is pinned in the drop-in it is stable across restarts. Rotate it by editing the drop-in and repeating the reload and restart above.</p>
 <div class="callout"><p>The token is a <strong>secret</strong>: generate your own, keep it out of the repository, its evidence, and any pull request or comment, and rotate it if it leaks.</p></div>
-<h3 id="workspace-preflight">Step 6 — Check read access to the private remote</h3>
-<p>Read access to the private remote is <strong>outside the scope of Code V0 and of the control plane</strong>: Torio neither sets up nor configures credentials. A human must establish repo-scoped guest read access outside Torio; the secret and the method never enter this repository, its evidence, pull request comments, or the control-plane workflow.</p>
-<p>From the guest, as <code>hermes</code>, check read access to the exact remote without any prompt or askpass:</p>
-<div class="code-block"><pre data-lang="bash"><code>torio vm ssh --timeout 90s -- sudo -u hermes -- \
-    env GIT_TERMINAL_PROMPT=0 \
-    git ls-remote --exit-code https://github.com/REDACTED/REDACTED HEAD</code></pre></div>
-<ul><li>Exit <code>0</code> (prints the <code>HEAD</code> oid) → read access exists; continue.</li><li>Non-zero (<code>could not read Username … terminal prompts disabled</code>) → no read access. Stop and report the human-only prerequisite, then re-run once it is satisfied. Do <strong>not</strong> seed from a host copy.</li></ul>
-<h3 id="workspace-clone">Step 7 — Prepare the Code V0 workspace</h3>
-<p>Decide by the workspace's current state. Every branch is non-destructive:</p>
-<div class="table-scroll"><table><thead><tr><th>State of <code>/home/hermes/projects/REDACTED-PROJECT</code></th><th>Action</th></tr></thead><tbody><tr><td>Absent</td><td>Clone the exact remote into it.</td></tr><tr><td>Git repo, <code>origin</code> exact, on <code>main</code>, clean</td><td><strong>Retain as-is</strong> and only run the verification checks. No delete, reclone, reset, or clean.</td></tr><tr><td>Non-repo, origin mismatch, dirty, or wrong branch</td><td><strong>Hard stop</strong>, no destructive action. Report it.</td></tr></tbody></table></div>
-<p>Classify before acting — every command here is read-only:</p>
-<div class="code-block"><pre data-lang="bash"><code>torio vm ssh -- sudo -u hermes -- test -e /home/hermes/projects/REDACTED-PROJECT
-torio vm ssh -- sudo -u hermes -- git -C /home/hermes/projects/REDACTED-PROJECT remote get-url origin
-torio vm ssh -- sudo -u hermes -- git -C /home/hermes/projects/REDACTED-PROJECT rev-parse --abbrev-ref HEAD
-torio vm ssh -- sudo -u hermes -- git -C /home/hermes/projects/REDACTED-PROJECT status --porcelain</code></pre></div>
-<p>Only when the path is <strong>absent</strong>, clone the exact remote directly into it. The control plane runs credential-neutral <code>git</code>; the human-established read access supplies authentication and the control plane never reads it:</p>
-<div class="code-block"><pre data-lang="bash"><code>torio vm ssh -- sudo -u hermes -- \
-    git clone https://github.com/REDACTED/REDACTED \
-              /home/hermes/projects/REDACTED-PROJECT</code></pre></div>
-<p>Verify — all of these must hold, else hard stop:</p>
-<div class="code-block"><pre data-lang="bash"><code>torio vm ssh -- sudo -u hermes -- git -C /home/hermes/projects/REDACTED-PROJECT remote get-url origin
-torio vm ssh -- sudo -u hermes -- git -C /home/hermes/projects/REDACTED-PROJECT rev-parse --abbrev-ref HEAD
-torio vm ssh -- sudo -u hermes -- git -C /home/hermes/projects/REDACTED-PROJECT rev-parse --is-shallow-repository
-torio vm ssh -- sudo -u hermes -- git -C /home/hermes/projects/REDACTED-PROJECT status --porcelain
-torio vm ssh -- sudo -u hermes -- git -C /home/hermes/projects/REDACTED-PROJECT config --local --get credential.helper
-torio vm ssh -- sudo -u hermes -- git -C /home/hermes/projects/REDACTED-PROJECT fsck --no-dangling</code></pre></div>
-<p>Require: exact <code>origin</code>; on <code>main</code> (HEAD is the remote tip, fetch-verified by the clone); full, non-shallow history; clean tree; <strong>repo-local</strong> <code>credential.helper</code> unset; <code>fsck</code> clean; owned <code>hermes:hermes</code>.</p>
-<h3 id="workspace-project">Step 8 — Register the Hermes project</h3>
-<p>Hermes exposes native <strong>projects</strong> — human-named workspaces that can span multiple folders or repositories, and that anchor desktop session grouping (state is per-profile). This is the supported way to bind Hermes to this one workspace — <strong>not</strong> the systemd unit's working directory. Register the single path and make it active:</p>
-<div class="code-block"><pre data-lang="bash"><code>torio vm ssh -- sudo -u hermes -- \
-    hermes project create REDACTED-PROJECT /home/hermes/projects/REDACTED-PROJECT --use
-torio vm ssh -- sudo -u hermes -- hermes project list   <span class="tok-comment"># the active project is marked with *</span>
-torio vm ssh -- sudo -u hermes -- hermes project show REDACTED-PROJECT</code></pre></div>
-<p>Do <strong>not</strong> pass <code>--board</code>: kanban binding is the excluded worker path.</p>
-<h3 id="desktop-connect">Step 9 — Connect Hermes Desktop</h3>
+<h3 id="brain-bring-up">Step 6 — Create the Second Brain</h3>
+<p>The Brain is a private Markdown vault on the guest at <code>/home/hermes/brain</code>, versioned by a local Git repository and registered with Hermes as its own project, so any session can search it without you opening it first.</p>
+<div class="code-block"><pre data-lang="bash"><code>torio brain init
+torio brain status</code></pre></div>
+<p><code>init</code> builds the scaffold atomically through private guest staging, makes the first local commit, registers the Hermes project, and installs the global <code>torio-brain</code> retrieval skill. It is idempotent on state it manages, and it refuses to touch non-empty data it did not create — so a second run is safe and an existing vault is never silently absorbed.</p>
+<p>It configures no remote and pushes nothing. The Brain stays on the VM.</p>
+<div class="callout"><p>If a Hermes Desktop session was already open, restart it. Hermes caches a skill's prompt per backend process, so an open session will not see <code>torio-brain</code> until it reconnects.</p></div>
+<h4 id="brain-import">Bring an existing vault in</h4>
+<p>If you already keep Markdown notes on your Mac — an Obsidian vault, say — import them once:</p>
+<div class="code-block"><pre data-lang="bash"><code>torio brain import ~/path/to/vault --dry-run   <span class="tok-comment"># preflight, transfers nothing</span>
+torio brain import ~/path/to/vault</code></pre></div>
+<p>Start with <code>--dry-run</code>: it runs the full preflight and reports what would move, without transferring a byte or touching Brain data.</p>
+<p>The import is deliberately narrow. It carries Markdown, Canvas, and local attachments, and refuses or skips credential-shaped files, repository metadata, links, hardlinks, special files, and executables. Existing data is <strong>never</strong> overwritten — the one exception is a scaffold Torio itself created and you have not touched. To land the vault as one contained subtree instead of merging it into the root, pass <code>--into notes</code>.</p>
+<p>Output is counts, bytes, and a manifest digest. No note name and no note content ever appears in it.</p>
+<h4 id="brain-out">Getting it back out</h4>
+<p>Torio brings data in and does not take it out — there is no export command. Copying the Brain to your Mac is something you do explicitly:</p>
+<div class="code-block"><pre data-lang="bash"><code>limactl copy torio:/home/hermes/brain/ ~/torio-brain-copy/</code></pre></div>
+<p>That is your command. Nothing verifies the result, and Torio does not call it a backup.</p>
+<h3 id="project-attach">Step 7 — Attach your first repository</h3>
+<p>The model can see the repositories you registered, and nothing else. Nothing is discovered, scanned, or picked up because it happened to be on disk.</p>
+<div class="code-block"><pre data-lang="bash"><code>torio project add my-service https://github.com/you/my-service --use
+torio project list</code></pre></div>
+<p><code>add</code> clones the exact remote into the derived workspace path, gives you and <code>hermes</code> shared access to it, and registers the project with Hermes before it records anything in config. <code>--use</code> makes it the active project. If a valid checkout of that remote is already at the path, <code>add</code> verifies and adopts it rather than touching it.</p>
+<p><strong>You do not choose the path.</strong> It is always <code>/home/hermes/projects/&lt;id&gt;</code>, derived from the project id — never taken from you, never stored in config. Without <code>--id</code>, the id is the name you gave, which must be a lowercase slug; pass <code>--id</code> to pick a different one.</p>
+<p><strong>Read access is your job.</strong> Torio stores no Git credentials, prompts for none, and passes none to the model. A remote the guest cannot already read without prompting fails closed:</p>
+<div class="code-block"><pre data-lang="text"><code>torio: project add: guest cannot read the remote noninteractively   (exit 7)</code></pre></div>
+<p>The fix is to grant the guest read access yourself, on the guest, outside Torio — not to re-run the command. Do not work around it by copying a checkout from your Mac: a recursive copy drags host Git config, hooks, and keys across the VM boundary, which is exactly the thing this path exists to prevent.</p>
+<p>Nothing on the guest is reset, cleaned, or deleted, so if <code>add</code> fails partway a rerun finishes the work instead of starting over.</p>
+<h4 id="project-inspect">Inspect and forget</h4>
+<div class="code-block"><pre data-lang="bash"><code>torio project show my-service     <span class="tok-comment"># registry entry, checkout state, Hermes registration</span>
+torio project use my-service      <span class="tok-comment"># switch the active project</span>
+torio project remove my-service   <span class="tok-comment"># forget it</span></code></pre></div>
+<p><code>show</code> reports drift as stable markers rather than repairing it, and returns no file names, diffs, or raw Git output. <code>list</code> reads config only and runs nothing on the guest, so it works with the VM stopped.</p>
+<p><code>remove</code> archives the Hermes project and drops the config entry. <strong>The checkout is never deleted</strong> — the output tells you where it still is. There is no <code>--delete</code>.</p>
+<h3 id="desktop-connect">Step 8 — Connect Hermes Desktop</h3>
 <p>Desktop talks to the same loopback endpoint you forwarded, so bring the tunnel up first and confirm both ends are ready: <code>torio serve status</code> exits <code>0</code>, and the <code>curl</code> to <code>http://127.0.0.1:19119/api/status</code> returns <code>200</code>.</p>
 <p>In Hermes Desktop → Settings → <strong>Gateway Connection → Remote gateway</strong>, set:</p>
 <div class="table-scroll"><table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>Remote URL</td><td><code>http://127.0.0.1:19119</code> — the Mac end of the SSH forward to the guest backend on <code>127.0.0.1:9119</code></td></tr><tr><td>Session token</td><td>the value you pinned in the drop-in</td></tr></tbody></table></div>
 <p>After <strong>Save and reconnect</strong>, the status bar shows the remote endpoint plus matching client and backend versions.</p>
-<h3 id="desktop-workspace">Step 10 — Point Desktop at the workspace</h3>
-<p>Registering the Hermes project does <strong>not</strong> by itself change what Desktop shows. Settings → <strong>Workspace → Working Directory</strong> defaults to <code>.</code>, which resolves against the serve unit's <code>WorkingDirectory=/home/hermes/hermes-agent</code> — the Hermes source checkout — so the file tree shows the wrong repository. Set it explicitly:</p>
-<div class="code-block"><pre data-lang="text"><code>/home/hermes/projects/REDACTED-PROJECT</code></pre></div>
-<p>Optionally set <strong>Repository Discovery Roots</strong> to <code>/home/hermes/projects</code> so discovery stays inside the workspace root.</p>
+<h3 id="desktop-workspace">Step 9 — Point Desktop at the project</h3>
+<p>Registering the project does <strong>not</strong> by itself change what Desktop shows. Settings → <strong>Workspace → Working Directory</strong> defaults to <code>.</code>, which resolves against the serve unit's <code>WorkingDirectory=/home/hermes/hermes-agent</code> — the Hermes source checkout — so the file tree shows the wrong repository. Set it to the project's derived path:</p>
+<div class="code-block"><pre data-lang="text"><code>/home/hermes/projects/my-service</code></pre></div>
+<p>Optionally set <strong>Repository Discovery Roots</strong> to <code>/home/hermes/projects</code> so discovery stays inside the workspace root and sees every project you attached.</p>
 <p>Two dead ends worth skipping: the folder chip in the status bar opens a context menu, not a project switcher; and Desktop's <strong>Terminal</strong> tab is a shell on your <strong>Mac</strong>, not on the guest.</p>
-<h3 id="provider-auth">Step 11 — Configure a model provider</h3>
+<h3 id="provider-auth">Step 10 — Configure a model provider</h3>
 <p>Until a provider is configured, starting a session fails at agent init — for example <code>agent init failed: No Codex credentials stored</code>. Check what the guest currently has:</p>
 <div class="code-block"><pre data-lang="bash"><code>torio vm ssh -- sudo -u hermes -- hermes status</code></pre></div>
 <p><code>torio vm ssh</code> forwards no stdin or TTY by design, so the interactive picker cannot be driven through the control plane. Use an interactive shell on the guest instead. <code>limactl shell</code> logs you in as the Lima user, so become the <code>hermes</code> service identity explicitly:</p>
@@ -196,21 +197,15 @@ hermes model                        <span class="tok-comment"># interactive prov
 <span class="tok-comment"># or, for one provider's credential:</span>
 hermes auth add &lt;provider&gt;</code></pre></div>
 <p>Which provider and credential to use is the operator's judgement. The secret never enters the repository, its evidence, or any pull request or comment.</p>
-<h3 id="workspace-check">Step 12 — Run one documented check</h3>
-<p>Select exactly <strong>one</strong> command from the repository's own contributor documentation. For this repository the local-checks doc requires only Python, and the CI "validate" job runs a generated-artifact <strong>sync check</strong> in dry-run (<code>--check</code>) mode: it reads sources, recomputes the generated outputs in memory, and compares. It performs <strong>no</strong> file writes, <strong>no</strong> network access, and has <strong>no</strong> deploy, release, push, or data-destruction effect.</p>
-<p>Run it as <code>hermes</code>, then confirm the tree stayed clean:</p>
-<div class="code-block"><pre data-lang="bash"><code>torio vm ssh -- sudo -u hermes -- python3 &lt;repo&gt;/scripts/&lt;documented-check&gt; --check
-torio vm ssh -- sudo -u hermes -- git -C /home/hermes/projects/REDACTED-PROJECT status --porcelain</code></pre></div>
-<p>The second command must print nothing. Do not invent an install or test command; Go-based CI steps are not run here, matching the repository's own note that contributors only need Python locally.</p>
-<h3 id="everyday-loop">Step 13 — Learn the everyday loop</h3>
+<h3 id="everyday-loop">Step 11 — Learn the everyday loop</h3>
 <p>Once the VM and backend are up, the day-to-day loop is the same whichever editor or interface you use:</p>
-<ol><li>Open the checkout as <code>hermes</code>, or drive it from a Desktop session.</li><li>Edit, or let your AI tool edit, files in the checkout.</li><li>Run the one documented, non-destructive check.</li><li>Review the change: <code>git -C /home/hermes/projects/REDACTED-PROJECT diff</code> and <code>… status</code>.</li><li>Decide manually whether to commit or push.</li></ol>
-<p>Commit and push are <strong>human-only</strong> and out of scope for Torio: it automates no part of step 5.</p>
-<h3 id="step-end">Step 14 — Leave a clean end state</h3>
+<ol><li>Work in a checkout — from a Desktop session, your own editor, or a shell.</li><li>Edit, or let your AI tool edit, files there.</li><li>Run a check that reads rather than writes.</li><li>Review what changed: <code>git diff</code> and <code>git status</code>.</li><li>Decide whether any of it should leave the VM.</li><li>If it should: <code>torio project shell &lt;id&gt;</code>, commit, push, exit.</li></ol>
+<p>Steps 5 and 6 are the whole point of the split. Torio automates no part of either. The persistent backend cannot push at all — write capability exists only inside a session you opened, and ends when you exit it.</p>
+<h3 id="step-end">Step 12 — Leave a clean end state</h3>
 <p>Leave the VM and the backend <strong>running</strong>. Nothing you did here committed, pushed, merged, or deleted anything — that is the intended shape of the loop.</p>
 <p>If a step failed, every known first-run failure and its fix is in <a href="how-to.html#troubleshooting">why something isn't running</a>.</p>
 <h2 id="next">Where to go next</h2>
-<ul><li>Prefer your own editor over Desktop? <a href="how-to.html#editor">Edit the workspace with your own editor</a>.</li><li>Want the exact command surface and exit codes? <a href="reference.html">Reference</a>.</li><li>Want to know why the boundaries are drawn this way? <a href="explanation.html">Explanation</a>.</li></ul>
+<ul><li>Ready to push something? <a href="how-to.html#project-push">Push, when you decide to</a>.</li><li>Prefer your own editor over Desktop? <a href="how-to.html#editor">Edit a project with your own editor</a>.</li><li>Want the exact command surface and exit codes? <a href="reference.html">Reference</a>.</li><li>Want to know why the boundaries are drawn this way? <a href="explanation.html">Explanation</a>.</li></ul>
       </div>
     </main>
 

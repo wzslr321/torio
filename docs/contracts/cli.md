@@ -184,8 +184,9 @@ torio serve logs [--lines N]
   tekst pochodny od danych użytkownika. Traktuj to jako runtime-only ograniczenie ekspozycji, nie
   formalną gwarancję prywatności.
 - `serve` binduje loopback w VM. Dotarcie z Maca to operator-controlled SSH tunnel do gościa
-  `127.0.0.1:9119` (patrz [runbook](../runbooks/remote-second-brain-v1.md)); `torio` nie dodaje własnej
+  `127.0.0.1:9119` (patrz [runbook](../runbooks/first-run.md)); `torio` nie dodaje własnej
   funkcji tunelu. `serve` to **backend Desktopu**. `torio gateway` (messaging) nie istnieje.
+
 ### Brain
 
 ```text

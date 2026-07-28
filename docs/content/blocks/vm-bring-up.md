@@ -44,5 +44,5 @@ machine-readable envelope (one document on stdout).
 
 These are also emitted in the `torio vm bootstrap` output (human and `--json`).
 
-V1 can create the VM via `torio vm init`; bootstrap then verifies the guest layout
-above on an already-running instance. It never recreates or re-images the VM.
+`init` creates the VM; `bootstrap` then verifies the guest layout above on an
+already-running instance. Neither recreates or re-images it.

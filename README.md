@@ -2,72 +2,69 @@
 
 Project website: [torio.dev](https://torio.dev)
 
-> Torio is a thin, trusted control plane for running an AI second brain and a
-> single controlled coding workspace on a Linux VM on Apple Silicon Macs.
+> Torio is a thin, trusted control plane for running an AI second brain and your
+> coding projects on a Linux VM on Apple Silicon Macs.
 
-**Status: Torio V0.** The delivered product is deliberately narrow and fully
-operator-controlled. Everything below describes what exists today; anything not
-listed here is not part of V0.
+Torio is not the AI, not the VM, and not the chat window. It is the layer that
+brings those three into a known-good state and then gets out of the way.
 
-## What Torio V0 is today
+## What Torio does
 
-Torio V0 delivers two things on the **existing** `torio` Lima VM:
+- **Creates and reconciles the VM.** A Lima instance built from a pinned
+  template, verified rather than trusted: architecture, image digest, ownership,
+  modes, group membership, and the absence of any macOS host mount. Drift fails
+  closed with remediation instead of being quietly repaired.
+- **Runs the Hermes backend as a service.** A user systemd unit bound to the
+  guest's own loopback, validated before it is ever activated, and proven ready
+  by an actual `200` from the endpoint — not by a clean exit code.
+- **Keeps a private Second Brain.** A Markdown vault on the guest, versioned by
+  its own Git repository and registered with Hermes so any session can search
+  it. An existing vault can be imported through verified staging.
+- **Attaches the repositories you name.** Each one clones into a path derived
+  from its id, gets shared access for you and the service identity, and is
+  registered with Hermes. The model sees the projects you registered and no
+  others.
 
-1. **Remote Second Brain V1 (controlled dogfood).** A persistent Hermes backend
-   runs as a user systemd service inside the VM, bound to guest loopback only. It
-   is reached from the Mac exclusively through an **operator-established SSH
-   tunnel** — Torio itself opens no tunnel and starts no chat.
+## What Torio does not do
 
-2. **Code V0 — exactly one hardcoded workspace.** Torio prepares a single,
-   credential-neutral guest-side clone of one fixed repository at
-   `/home/hermes/projects/REDACTED-PROJECT` and registers it as a Hermes
-   project. The operator then inspects/edits it, runs one documented
-   non-destructive check, reviews `git diff` / `git status`, and **decides
-   manually** whether to commit or push.
+- **It holds no credentials.** It never stores, prompts for, or reads one, and
+  never causes a credential prompt. A remote the guest cannot already read
+  without prompting fails closed; granting that access is yours to do, on the
+  guest, outside Torio.
+- **It opens no tunnel.** The backend is loopback-only inside the VM. You open
+  the SSH forward yourself, so network exposure is never a side effect of
+  running a command.
+- **It writes no history.** No commit, push, merge, tag, or release. The
+  persistent backend has read access only. When you decide to push,
+  `torio project shell` forwards your own SSH agent into a session that ends
+  when you exit it.
+- **It takes no data out.** Import brings a vault in; there is no export.
+  Copying the Brain back to your Mac is a `limactl copy` you run yourself, which
+  Torio neither performs nor verifies nor calls a backup.
+- **It deletes nothing.** It never re-images or removes a VM, and forgetting a
+  project leaves its checkout on disk.
+- **It is not an agent platform.** No task queue, no dispatcher, no autonomous
+  workers.
 
-The operator-controlled code loop is: **edit/inspect → run one documented safe
-check → inspect diff/status → manual commit/push decision.** Commit and push are
-human-only and out of scope for Torio.
+## Prerequisites
 
-## Scope and limitations (what V0 is *not*)
-
-Torio V0 is intentionally not:
-
-- **not** a worker/agent platform (no dispatcher, queue, or autonomous workers);
-- **not** multi-project — exactly one hardcoded workspace;
-- **not** an isolated per-task sandbox;
-- **not** Git automation — no automated commit, push, merge, or release;
-- **not** an automated Hermes Desktop coding chat — an operator has driven a
-  Desktop session against the Code V0 workspace by hand, and the prerequisites
-  are documented in the runbooks, but supplying credentials, selecting a model,
-  and holding the session remain manual human steps that Torio never performs.
-
-## Prerequisites (high level)
-
-- A macOS host on Apple Silicon with `limactl` on `PATH`.
-- The `torio` Lima VM **already created** — Torio never creates,
-  re-images, or destroys it.
-- The `torio` binary built from this repository: `go build -o torio ./cmd/torio`.
-- For Code V0 only: repo-scoped **read** access to the private remote must
-  already exist on the guest. Provisioning that access is a **human-only
-  prerequisite outside Torio** (see the note below).
+- A macOS host on Apple Silicon with `limactl` on your `PATH`.
+- A Go toolchain, to build the CLI.
+- For each repository you attach: read access that already works from the guest,
+  without a prompt.
 
 ## Getting started
 
-Torio's canonical operational documentation is the two runbooks. They contain
-the exact, ordered commands; this README does not duplicate them.
+Build the CLI and put it on your `PATH`, so every documented command works as
+written:
 
-1. Build the CLI and put it on your `PATH`, so every documented command works as
-   written:
+```bash
+go build -o torio ./cmd/torio
+sudo install -m 755 torio /usr/local/bin/torio
+```
 
-   ```bash
-   go build -o torio ./cmd/torio
-   sudo install -m 755 torio /usr/local/bin/torio
-   ```
-2. Bring up the Remote Second Brain and connect over the operator tunnel:
-   [`docs/runbooks/remote-second-brain-v1.md`](docs/runbooks/remote-second-brain-v1.md).
-3. Prepare and drive the single Code V0 workspace:
-   [`docs/runbooks/code-v0-REDACTED-PROJECT.md`](docs/runbooks/code-v0-REDACTED-PROJECT.md).
+Then follow the runbook, which has the exact commands in order:
+[`docs/runbooks/first-run.md`](docs/runbooks/first-run.md).
 
 Optionally, validate the documentation pack for internal consistency:
 
@@ -75,45 +72,27 @@ Optionally, validate the documentation pack for internal consistency:
 python3 scripts/validate_artifacts.py
 ```
 
-## Private-repository read access is a human-only prerequisite
+## Documentation
 
-Torio never sets up, configures, stores, or reads credentials, and never causes a
-credential prompt. Read access to the private Code V0 remote must be established
-by a **human, directly on the guest, outside Torio**. The Code V0 runbook's
-**noninteractive credential preflight is the gate**: if it passes, read access
-exists and the workspace step proceeds; if it fails, stop at the human
-prerequisite. The secret and the method by which it is provisioned never enter
-this repository, its evidence, or any PR/comment.
+The operational surface is this file plus
+[`docs/runbooks/first-run.md`](docs/runbooks/first-run.md). Normative
+engineering rules for contributors and agents live in [`AGENTS.md`](AGENTS.md).
 
-## Canonical documentation surface
-
-The active operational surface of Torio V0 is only:
-
-- this `README.md`;
-- [`docs/runbooks/remote-second-brain-v1.md`](docs/runbooks/remote-second-brain-v1.md);
-- [`docs/runbooks/code-v0-REDACTED-PROJECT.md`](docs/runbooks/code-v0-REDACTED-PROJECT.md).
-
-Normative engineering rules for contributors and agents live in
-[`AGENTS.md`](AGENTS.md).
-
-## Documentation site
-
-A static, Diátaxis-organised Torio V0 documentation site lives in
-[`site/`](site/) (plain HTML + one CSS file, no runtime dependency). The complete
-first run — build, VM, backend, tunnel, session token, workspace, Hermes Desktop,
-provider — is on one page, `Get started`, in
-[`site/tutorials.html`](site/tutorials.html). It is prepared for deployment on
-**Vercel**, but **deployment is pending** — no Vercel project and no `torio.dev`
-domain are connected or configured by this repository yet. The high-level human
-setup sequence is in [`site/DEPLOYMENT.md`](site/DEPLOYMENT.md).
+A static, Diátaxis-organised documentation site lives in [`site/`](site/) —
+plain HTML and one CSS file, no runtime dependency. The complete first run is on
+one page, `Get started`, in [`site/tutorials.html`](site/tutorials.html). It is
+prepared for deployment on **Vercel**, but **deployment is pending**: no Vercel
+project and no `torio.dev` domain are connected or configured by this repository
+yet. The high-level human setup sequence is in
+[`site/DEPLOYMENT.md`](site/DEPLOYMENT.md).
 
 ### One source, two outputs
 
-The site pages **and** the runbooks are generated by
+The site pages **and** the runbook are generated by
 [`scripts/build_docs.py`](scripts/build_docs.py) from Markdown sources in
 [`docs/content/`](docs/content/). A section used in more than one place — pinning
 the session token, say — is a single file in `docs/content/blocks/` included by
-each, so the site and the runbooks cannot disagree.
+each, so the site and the runbook cannot disagree.
 
 ```bash
 make docs         # regenerate site/*.html and docs/runbooks/*.md
@@ -125,10 +104,9 @@ Edit the sources, never the outputs — see [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
 ## Earlier exploration
 
-A broader design exploration (Demo A / Demo B, worker/control-plane, registry,
-verifier, evidence pipeline) predates V0, was never delivered, and is
-**superseded**. It no longer ships in the working tree; it is kept under the
-annotated tag `archive/pre-v1` and read with
-`git show archive/pre-v1:<path>`. See
+A broader design exploration (worker/control-plane, registry, verifier, evidence
+pipeline) came first, was never delivered, and is **superseded**. It no longer
+ships in the working tree; it is kept under the annotated tag `archive/pre-v1`
+and read with `git show archive/pre-v1:<path>`. See
 [`docs/adr/0017-pre-v1-exploration-leaves-the-working-tree.md`](docs/adr/0017-pre-v1-exploration-leaves-the-working-tree.md).
 Do not use it as an onboarding or task path.

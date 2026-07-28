@@ -2,7 +2,9 @@
 """Portable validation for the Torio documentation surface.
 
 Uses only Python's standard library so it can run before Go or project dependencies
-are installed. It validates relative Markdown links and obvious secret material.
+are installed. It validates relative Markdown links, obvious secret material, that
+every document Go cites actually exists, and that no product version label reaches
+a surface an operator reads.
 
 Scope note: this script used to also check a fixed list of required artifacts and
 a JSON Schema subset. Both belonged to the pre-V1 exploration removed by ADR-0017;
@@ -27,6 +29,72 @@ SECRET_PATTERNS = {
 }
 
 MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+
+# A docs/ path cited from Go source — in a comment or in help text the operator
+# reads. Either way the file has to exist: six references to a contract archived
+# by ADR-0017 survived three pull requests because nothing checked (ADR-0020).
+#
+# A path qualified by a Git ref (`archive/pre-v1:docs/…`) is exempt: it names
+# something in history on purpose, and the tree is the wrong place to look.
+GO_DOC_REFERENCE = re.compile(r"(?<![:\w])docs/[A-Za-z0-9_./-]*\.md")
+
+# A product version label: a standalone V0/V1/v2 token. The lookbehind is what
+# separates a label from a path segment, an identifier, or a flag value — so
+# `archive/pre-v1`, `docs/adr/0015-torio-v1-…`, `IPv4` and Git's own
+# `--porcelain=v1` are not labels and never trip this.
+VERSION_LABEL = re.compile(r"(?<![\w/=-])[Vv][0-9]+\b")
+
+# Everything a user of Torio reads. ADR-0020 keeps labels out of exactly this
+# set; ADRs, docs/contracts/ and AGENTS.md deliberately keep theirs, because
+# there the version scope is the subject of the record rather than decoration.
+USER_FACING_GLOBS = ("README.md", "site/*.html", "docs/runbooks/*.md")
+
+GO_STRING_LITERAL = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+
+
+def _go_sources() -> list[Path]:
+    """Production Go sources. Tests are excluded: a test may legitimately name a
+    version to prove that the thing it names is gone."""
+    return sorted(
+        p
+        for d in ("internal", "cmd")
+        for p in (ROOT / d).rglob("*.go")
+        if not p.name.endswith("_test.go")
+    )
+
+
+def validate_go_doc_references() -> list[str]:
+    errors: list[str] = []
+    for path in _go_sources():
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            for target in GO_DOC_REFERENCE.findall(line):
+                if not (ROOT / target).exists():
+                    where = f"{path.relative_to(ROOT)}:{lineno}"
+                    errors.append(f"{where}: cites a document that does not exist: {target}")
+    return errors
+
+
+def validate_no_version_labels() -> list[str]:
+    errors: list[str] = []
+
+    for pattern in USER_FACING_GLOBS:
+        for path in sorted(ROOT.glob(pattern)):
+            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if match := VERSION_LABEL.search(line):
+                    where = f"{path.relative_to(ROOT)}:{lineno}"
+                    errors.append(f"{where}: product version label {match.group()!r}")
+
+    # Go string literals only. Comments keep their labels — they are not a
+    # user-facing surface and they carry the ADR context behind a rule.
+    for path in _go_sources():
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if line.lstrip().startswith("//"):
+                continue
+            for literal in GO_STRING_LITERAL.findall(line):
+                if match := VERSION_LABEL.search(literal):
+                    where = f"{path.relative_to(ROOT)}:{lineno}"
+                    errors.append(f"{where}: product version label {match.group()!r} in a string")
+    return errors
 
 
 def validate_links() -> list[str]:
@@ -79,6 +147,8 @@ def main() -> int:
     checks = [
         ("relative Markdown links", validate_links),
         ("secret patterns", validate_secrets),
+        ("docs cited from Go exist", validate_go_doc_references),
+        ("no version labels for the operator", validate_no_version_labels),
     ]
     errors: list[str] = []
     for name, check in checks:
