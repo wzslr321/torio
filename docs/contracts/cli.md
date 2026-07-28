@@ -109,8 +109,8 @@ envelope.
 
 ## Command surface
 
-To pełna lista. Każdy parent (`vm`, `serve`, `brain`, `project`) bez subkomendy albo z nieznaną
-subkomendą kończy się usage error (exit 2) — fail-closed, tak jak root.
+To pełna lista. Każdy parent (`vm`, `serve`, `brain`, `project`, `mcp`) bez subkomendy albo z
+nieznaną subkomendą kończy się usage error (exit 2) — fail-closed, tak jak root.
 
 ### Informacyjne
 
@@ -257,14 +257,60 @@ torio project shell <id>
 - `remove` archiwizuje Hermes Project i usuwa wpis z configu. Katalog checkoutu **nigdy** nie jest
   kasowany, a output mówi wprost, gdzie nadal jest. V1 nie ma `--delete`.
 - `shell` otwiera efemeryczną sesję operatora w checkoucie z forwardowanym agentem SSH. **To jedyna
-  droga, którą write capability dociera do gościa**, i żyje dokładnie do wyjścia z sesji; persistent
-  Hermes ma wyłącznie read. Sesja jest preflightowana (projekt zarejestrowany, VM zweryfikowana
+  droga, którą write capability wobec remote'ów Gita dociera do gościa**, i żyje dokładnie do
+  wyjścia z sesji; persistent Hermes ma wobec origin wyłącznie read. Zdanie było kiedyś napisane
+  bez tego zawężenia i przez to nieprawdziwe: zdolność zapisu docierająca przez serwer MCP nie
+  przechodzi tą drogą i nie kończy się z sesją — jest osobnym, jawnie przyznanym kanałem opisanym
+  niżej ([ADR-0022](../adr/0022-mcp-credential-broker.md)). Sesja jest preflightowana (projekt zarejestrowany, VM zweryfikowana
   bootstrapem, checkout obecny z zarejestrowanym origin i współdzielonymi uprawnieniami, lokalny
   agent trzyma tożsamość do forwardu), ale Torio **nigdy nie robi testowego pusha**, żeby cokolwiek
   udowodnić. Sesja nie jest ograniczana `--timeout`: kończy ją operator.
   Po jej zakończeniu Torio nie twierdzi, czego dotyczył push — sprawdź remote sam.
 - `shell` jest interaktywne i **nie wspiera `--json`**: nie ma dokumentu do wyemitowania, więc
   `--json` jest usage error (exit 2), a nie po cichu zignorowaną flagą.
+
+### MCP
+
+```text
+torio mcp install
+torio mcp status
+```
+
+Serwery MCP są osiągane przez brokera działającego pod własną tożsamością gościa `torio-mcp`, więc
+żaden credential upstreamu nie istnieje pod tożsamością, pod którą agent ma powłokę
+([ADR-0022](../adr/0022-mcp-credential-broker.md)). Torio nie dotyka tych credentiali: stawia
+granicę i dowodzi, że trzyma.
+
+- `install` tworzy nieuprzywilejowaną tożsamość `torio-mcp`, jej magazyn credentiali `0700`, grupę
+  `torio-mcp-clients` oraz root-owned katalog policy — po czym **dowodzi** wyniku zamiast ufać exit
+  code'om komend, które go wyprodukowały. Idempotentne (`changed:false` przy przebiegu bez zmian),
+  nie przyjmuje sekretów i **nie przyznaje niczego** poza członkostwem w grupie klientów, którego
+  `hermes` potrzebuje, by otworzyć socket. `torio-mcp` nigdy nie trafia do `torio-projects`, a
+  `hermes` nigdy do grupy `torio-mcp`; to dwie pomyłki, które unieważniłyby decyzję, zostawiając
+  wszystkie pozostałe checki zielone.
+- `install` **nie blokuje się** na credentialach zalegających pod profilem Hermesa. Są dokładnie
+  tym, co broker ma zlikwidować, ale odmowa instalacji przy ich obecności to zakleszczenie: operator
+  nie może zbudować rzeczy, do której ma migrować. Ten ciągły invariant należy do `status`.
+- Gdy `hermes` dopiero co dołączył do grupy klientów, `install` raportuje `restart_required` i mówi
+  o tym wprost. Długo żyjący proces nie nabywa grupy dlatego, że zmieniła się pod nim baza grup —
+  backend trzyma to, z czym wystartował, aż do `torio serve restart`.
+- `status` **dowodzi i raportuje; niczego nie naprawia.** Weryfikuje, że tożsamość brokera istnieje,
+  że jego magazyn credentiali nie jest czytelny dla nikogo poza nim, że `hermes` może otworzyć socket
+  brokera, ale **nie** należy do grupy samego brokera, oraz że pod profilem Hermesa nie pojawił się
+  żaden credential MCP. Nie uruchamia żadnej komendy mutującej.
+- Gość, na którym broker nigdy nie był provisionowany, to **niespełniony precondition (exit 3)**, a
+  nie drift. Granica, która przestała trzymać, to **verification failed (exit 6)**. Rozróżnienie jest
+  częścią kontraktu: operator, który po prostu nie uruchomił jeszcze instalatora, nie może dostać
+  alarmu o złamanej gwarancji, bo nauczy się ignorować ten, który ma znaczenie.
+- Wykrycie credentiali pod profilem Hermesa raportuje **liczbę plików i nigdy ich nazw**. Zwykłym
+  źródłem tego driftu jest `hermes mcp add` uruchomiony wprost na zarządzanym gościu, który
+  uwierzytelnia się w upstreamie i zapisuje token z powrotem pod tożsamość agenta.
+- **Zakres narzędzi jest jawny, sekrety nie.** Policy leży w `/etc/torio-mcp/policy.d/<usługa>.json`
+  jako `root:root 0644` — czytelna dla agenta i niezapisywalna przez niego. Domyślnie deny; przechodzą
+  wyłącznie narzędzia wymienione z nazwy, bez wnioskowania z nazw i bez wzorców.
+- Broker **nie broni przed confused deputy**: wstrzyknięta instrukcja może użyć każdego przyznanego
+  narzędzia wobec każdego dozwolonego celu. Przyznanie zapisu jest dopuszczalne i bywa uzasadnione —
+  ma być decyzją, którą ktoś podjął i którą widać, a nie skutkiem ubocznym instalacji.
 
 ## Idempotency
 
