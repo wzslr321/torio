@@ -1,6 +1,6 @@
-# Deployment handoff — Torio V0 docs site (Vercel)
+# Deployment handoff — the Torio documentation site (Vercel)
 
-This directory is the static Torio V0 documentation site: plain HTML, one CSS
+This directory is the static Torio documentation site: plain HTML, one CSS
 file, and one small `docs.js` that adds the colour-theme toggle and the copy
 buttons on code blocks. There is no framework, bundler, or CDN, and both
 JavaScript features are progressive enhancements — with scripts blocked the
@@ -27,8 +27,8 @@ Repository-side configuration is limited to a minimal
    the Root/Output Directory in project settings if prompted). No build command
    is required.
 3. **Verify the deployment.** Let Vercel produce a preview deployment, open it,
-   and confirm the four Diátaxis pages render and all navigation works, then
-   promote to production.
+   and confirm all five pages render and all navigation works, then promote to
+   production.
 4. **Add the domain.** Add `torio.dev` to the Vercel project and configure its
    DNS in Vercel and/or the domain provider, following their current
    verified instructions.

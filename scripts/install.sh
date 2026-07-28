@@ -40,7 +40,7 @@ require_platform() {
   os="$(uname -s)"
   arch="$(uname -m)"
   if [[ "$os" != "Darwin" || "$arch" != "arm64" ]]; then
-    die "unsupported platform ${os}/${arch}; Torio V1 supports only Darwin/arm64"
+    die "unsupported platform ${os}/${arch}; Torio supports only Darwin/arm64"
   fi
 }
 

@@ -47,7 +47,23 @@ VERSION_LABEL = re.compile(r"(?<![\w/=-])[Vv][0-9]+\b")
 # Everything a user of Torio reads. ADR-0020 keeps labels out of exactly this
 # set; ADRs, docs/contracts/ and AGENTS.md deliberately keep theirs, because
 # there the version scope is the subject of the record rather than decoration.
-USER_FACING_GLOBS = ("README.md", "site/*.html", "docs/runbooks/*.md")
+#
+# `site/*.md` and the installer joined the set after the first pass covered only
+# `site/*.html`: the deployment handoff still called itself the "V0 docs site"
+# and the installer still refused a host in the name of a release scope, and
+# neither was reachable by a glob that stopped at generated HTML.
+USER_FACING_GLOBS = (
+    "README.md",
+    "site/*.html",
+    "site/*.md",
+    "docs/runbooks/*.md",
+    "scripts/install.sh",
+)
+
+# Comment syntax per file type, or None where a file has no comments. Comments
+# are exempt for the same reason Go comments are: they carry the ADR context
+# that explains a rule, and no operator reads them.
+COMMENT_PREFIXES = {".go": "//", ".sh": "#", ".py": "#"}
 
 GO_STRING_LITERAL = re.compile(r'"(?:[^"\\\n]|\\.)*"')
 
@@ -79,7 +95,10 @@ def validate_no_version_labels() -> list[str]:
 
     for pattern in USER_FACING_GLOBS:
         for path in sorted(ROOT.glob(pattern)):
+            comment = COMMENT_PREFIXES.get(path.suffix)
             for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if comment and line.lstrip().startswith(comment):
+                    continue
                 if match := VERSION_LABEL.search(line):
                     where = f"{path.relative_to(ROOT)}:{lineno}"
                     errors.append(f"{where}: product version label {match.group()!r}")
