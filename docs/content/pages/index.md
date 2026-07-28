@@ -96,7 +96,7 @@ workers running while you sleep.
 <ul class="modes">
 <li><a class="mode-card" href="tutorials.html"><span class="name">Tutorials</span><span class="what">The guided end-to-end run, complete on one page. Start here.</span></a></li>
 <li><a class="mode-card" href="how-to.html"><span class="name">How-to guides</span><span class="what">One task at a time, once you are set up: the tunnel, the session token, Desktop, providers, your own editor, and troubleshooting.</span></a></li>
-<li><a class="mode-card" href="reference.html"><span class="name">Reference</span><span class="what">The <code>torio vm</code> and <code>torio serve</code> command surface, exit codes, and the fixed boundaries.</span></a></li>
+<li><a class="mode-card" href="reference.html"><span class="name">Reference</span><span class="what">Every <code>torio</code> command, exit codes, and the fixed boundaries.</span></a></li>
 <li><a class="mode-card" href="explanation.html"><span class="name">Explanation</span><span class="what">Why Torio is narrow, and why credentials and Git writes stay human-only.</span></a></li>
 </ul>
 

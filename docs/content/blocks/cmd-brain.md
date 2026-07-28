@@ -1,0 +1,36 @@
+## Command surface — `torio brain` {#brain}
+
+Manages the private Second Brain: a Markdown vault at `/home/hermes/brain`,
+versioned by a local Git repository, owned by `hermes`, and registered with
+Hermes as its own project so any session can search it. The parent takes no
+action itself; an absent or unknown subcommand is a usage error.
+
+| Command | What it does |
+| --- | --- |
+| `torio brain init` | Create the canonical scaffold atomically through private guest staging, make the first local commit, and register the Hermes project. Then install or refresh the global `torio-brain` retrieval skill so other projects can search the Brain. Idempotent for managed state; refuses to touch non-empty data it did not create. Configures no remote and pushes nothing. |
+| `torio brain status` | Report state (`initialized`, `uninitialized`, or drift), the canonical path, native filesystem, ownership and mode, Git worktree state, aggregate counts, Hermes project registration, and skill state. Changes nothing. |
+| `torio brain import <host-directory>` | Import an existing Markdown vault through private host and guest staging, verified by checksum on the guest. Accepts `--into SUBDIR` to land the import as one new contained subtree, and `--dry-run` to preflight without transferring anything. |
+
+**Output never contains note names or note content** — not in success output, not
+in `error.details`. Every command reports bounded aggregate metadata only: file
+counts, total bytes, a manifest digest, and stable drift markers. This is the
+Brain's privacy boundary, not a matter of brevity.
+
+`import` refuses or skips credential-shaped files, repository metadata, links,
+hardlinks, special files, and executables. Existing data is **never** overwritten
+— the single exception is an untouched scaffold that Torio itself created.
+
+Sessions that were already open when `init` ran will not see the retrieval skill:
+Hermes caches a skill's prompt per backend process, so restart them.
+
+### Getting the Brain back out {#brain-export}
+
+Torio brings data in and does not take it out. There is no `torio brain export`.
+Copying the Brain to your Mac is an explicit thing you do:
+
+```bash
+limactl copy torio:/home/hermes/brain/ <host-destination>/
+```
+
+That is your command, not a Torio feature: nothing verifies the result, and
+Torio does not call it a backup.
