@@ -6,7 +6,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Explanation — why Torio is narrow · Torio</title>
-    <meta name="description" content="Why Torio is intentionally narrow — the VM, loopback, and tunnel boundary, human-only credentials, projects as a list you keep, write capability that lives only in a session you opened, no editor integration, and earlier exploration kept only as history." />
+    <meta name="description" content="Why Torio is intentionally narrow — the VM, loopback, and tunnel boundary, human-only credentials, projects as a list you keep, write capability that lives only in a session you opened, no editor integration, why a stored note is an observation rather than the current state, and earlier exploration kept only as history." />
     <link rel="stylesheet" href="styles.css" />
     <script>
       // Resolve the saved theme before first paint so a reader who chose light
@@ -83,6 +83,13 @@
 <h2 id="data-direction">Data comes in and does not go out</h2>
 <p><code>torio brain import</code> brings a Markdown vault onto the guest through verified staging. There is no matching export, and that asymmetry is intentional: an export command would be a supported, verified-looking path for Brain content to leave the boundary, and every guarantee it implied would have to hold.</p>
 <p>Copying the Brain back to your Mac is a <code>limactl copy</code> you run yourself. Torio does not verify it and does not call it a backup, which is exactly the honest description of what it is.</p>
+<h2 id="brain-drift">A note is an observation, not the current state</h2>
+<p>Torio guarantees where your notes live, who owns them, and that a session can find them. It guarantees nothing about whether they are still true.</p>
+<p>A note records what was the case when it was written. It can stay accurate and still be the wrong thing to act on, because the situation around it moved and the note never said so: "we moved off the old provider" is true, and deleting the one service still running on it is not what you meant. A note tells you where to look, not what is true right now.</p>
+<p>The second failure is quieter, and it belongs to any vault a model writes into. Each time a model reads a note and re-saves or summarises it, it re-reads it through its own defaults, and the shift has a direction. An observation becomes a recommendation, a recommendation becomes a rule, and the qualifier that made the original honest — "probably", "on this machine, in July" — drops out. Every version reads as a clean note, so the file itself carries no sign of how far it has travelled from what was actually seen.</p>
+<p>Three habits contain that, and none of them are Torio features:</p>
+<ul><li>Write the source and the date into the note, and keep what a person said apart from what a model concluded from it.</li><li>Before a step that changes something, check the live thing — the config, the file, a test — rather than the note that describes it.</li><li>Commit as you work. Torio commits the vault at the operations it performs — creating it, and a checkpoint before an import — and <code>torio brain status</code> reports whether the worktree is clean, but your ongoing edits are yours to record. Kept history is what lets <code>git log -p</code> show a claim hardening across three rewrites; without it that is invisible.</li></ul>
+<p>Torio does not read your notes, summarise them, prune them, or mark them stale. The privacy boundary that keeps note names and contents out of every command's output is the same boundary that keeps Torio from curating what is inside. The vault is yours, Hermes owns retrieval and the session, and deciding what in there is still true stays with you.</p>
 <h2 id="single-source">How this documentation avoids drifting</h2>
 <p>Every page on this site and the runbook in the repository are generated from one set of Markdown sources under <code>docs/content/</code>. A section that appears in more than one place — pinning the session token, say, which is both a step in Get started and a task in the how-to guides — is a single file included in each, not a copy. A validation gate re-renders everything and fails if any committed output has drifted from its source, so the two cannot disagree even briefly.</p>
 <h2 id="legacy">Earlier exploration is history, not a roadmap</h2>

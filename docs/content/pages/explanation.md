@@ -3,7 +3,7 @@ output: site/explanation.html
 nav: Explanation
 order: 5
 title: Explanation — why Torio is narrow · Torio
-description: Why Torio is intentionally narrow — the VM, loopback, and tunnel boundary, human-only credentials, projects as a list you keep, write capability that lives only in a session you opened, no editor integration, and earlier exploration kept only as history.
+description: Why Torio is intentionally narrow — the VM, loopback, and tunnel boundary, human-only credentials, projects as a list you keep, write capability that lives only in a session you opened, no editor integration, why a stored note is an observation rather than the current state, and earlier exploration kept only as history.
 kicker: Explanation
 scope_notice: "This page explains the reasoning behind the boundaries. It is background, not a procedure."
 ---
@@ -108,6 +108,43 @@ leave the boundary, and every guarantee it implied would have to hold.
 Copying the Brain back to your Mac is a `limactl copy` you run yourself. Torio
 does not verify it and does not call it a backup, which is exactly the honest
 description of what it is.
+
+## A note is an observation, not the current state {#brain-drift}
+
+Torio guarantees where your notes live, who owns them, and that a session can
+find them. It guarantees nothing about whether they are still true.
+
+A note records what was the case when it was written. It can stay accurate and
+still be the wrong thing to act on, because the situation around it moved and
+the note never said so: "we moved off the old provider" is true, and deleting
+the one service still running on it is not what you meant. A note tells you
+where to look, not what is true right now.
+
+The second failure is quieter, and it belongs to any vault a model writes into.
+Each time a model reads a note and re-saves or summarises it, it re-reads it
+through its own defaults, and the shift has a direction. An observation becomes
+a recommendation, a recommendation becomes a rule, and the qualifier that made
+the original honest — "probably", "on this machine, in July" — drops out. Every
+version reads as a clean note, so the file itself carries no sign of how far it
+has travelled from what was actually seen.
+
+Three habits contain that, and none of them are Torio features:
+
+- Write the source and the date into the note, and keep what a person said
+  apart from what a model concluded from it.
+- Before a step that changes something, check the live thing — the config, the
+  file, a test — rather than the note that describes it.
+- Commit as you work. Torio commits the vault at the operations it performs —
+  creating it, and a checkpoint before an import — and `torio brain status`
+  reports whether the worktree is clean, but your ongoing edits are yours to
+  record. Kept history is what lets `git log -p` show a claim hardening across
+  three rewrites; without it that is invisible.
+
+Torio does not read your notes, summarise them, prune them, or mark them stale.
+The privacy boundary that keeps note names and contents out of every command's
+output is the same boundary that keeps Torio from curating what is inside. The
+vault is yours, Hermes owns retrieval and the session, and deciding what in
+there is still true stays with you.
 
 ## How this documentation avoids drifting {#single-source}
 
