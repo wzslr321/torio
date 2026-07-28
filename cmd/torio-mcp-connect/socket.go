@@ -6,8 +6,9 @@ import (
 	"io/fs"
 	"net"
 	"path/filepath"
-	"regexp"
 	"syscall"
+
+	"github.com/wzslr321/torio/internal/mcpbroker"
 )
 
 // socketDir is where the broker publishes one socket per service (ADR-0022 §3).
@@ -20,27 +21,16 @@ const socketDir = "/run/torio-mcp"
 // never mistaken for a whole path.
 const socketSuffix = ".sock"
 
-// maxServiceNameLen bounds the service name. A service name is a short label an
-// operator writes in a policy file and an MCP client config, not a free-form
-// identifier, and the bound is what stops an argv-sized string reaching a
-// syscall or a diagnostic line. It also keeps the resolved path inside
-// sun_path, the kernel's ~104-byte limit on a unix socket address: socketDir
-// plus the longest accepted name plus the suffix is 52 bytes, so an over-long
-// address is unreachable by construction rather than caught at connect time.
-const maxServiceNameLen = 32
-
-// servicePattern is the accepted service name: a lowercase slug of ASCII
-// letters, digits and inner hyphens, bounded to maxServiceNameLen. It is the
-// same shape internal/config accepts for a project id, for the same reason —
-// nothing in this charset can traverse, rename or escape a directory, which is
-// what makes it safe to derive a socket path from.
-//
-// The bound and the pattern must stay identical to the ones in
-// internal/mcpbroker, which validates the policy document that names the same
-// service. The two sides own opposite halves of one path: the broker's policy
-// file stem decides what the socket is called, this decides what may be asked
-// for. A name accepted here and rejected there is a socket nothing can reach.
-var servicePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$`)
+// The service-name rule is NOT defined here. It lives in
+// internal/mcpbroker.ValidateServiceName, because this binary and the policy
+// loader own opposite halves of one path: the loader decides what the broker
+// binds, this decides what may be asked for. Two copies of the rule would agree
+// until one was widened, and the symptom would not be a rejected name — it
+// would be a socket one side creates and the other cannot address. The bound in
+// that rule also keeps the resolved path inside the kernel's ~104-byte sun_path
+// limit: socketDir plus the longest accepted name plus socketSuffix is 52
+// bytes, so an over-long address is unreachable by construction rather than an
+// EINVAL at connect time.
 
 // socketPath resolves the broker socket for one service under base. base is a
 // parameter so tests can point at a temp dir; production always passes
@@ -52,16 +42,8 @@ var servicePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$`
 // cleanup step — a caller that meant "atlassian" and wrote "Atlassian" must be
 // told, not guessed at.
 func socketPath(base, service string) (string, error) {
-	if service == "" {
-		return "", errors.New("service name is required")
-	}
-	// Length is checked before the pattern so an oversized name is reported
-	// without being echoed back into a diagnostic.
-	if len(service) > maxServiceNameLen {
-		return "", fmt.Errorf("service name is longer than %d bytes", maxServiceNameLen)
-	}
-	if !servicePattern.MatchString(service) {
-		return "", fmt.Errorf("service name %q must be a lowercase slug of letters, digits and inner hyphens", service)
+	if err := mcpbroker.ValidateServiceName(service); err != nil {
+		return "", err
 	}
 	return filepath.Join(base, service+socketSuffix), nil
 }

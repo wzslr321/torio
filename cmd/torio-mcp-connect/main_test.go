@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/wzslr321/torio/internal/mcpbroker"
 	"time"
 )
 
@@ -43,7 +45,7 @@ func TestSocketPathRejectsNonSlugService(t *testing.T) {
 		{"nul byte", "atlassian\x00"},
 		{"newline", "atlas\nsian"},
 		{"non-ascii", "atlassián"},
-		{"too long", strings.Repeat("a", maxServiceNameLen+1)},
+		{"too long", strings.Repeat("a", mcpbroker.MaxServiceNameLen+1)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -83,7 +85,7 @@ func TestSocketPathIsContainedInBase(t *testing.T) {
 		{"a", "/run/torio-mcp/a.sock"},
 		{"jira-cloud", "/run/torio-mcp/jira-cloud.sock"},
 		{"s3", "/run/torio-mcp/s3.sock"},
-		{strings.Repeat("a", maxServiceNameLen), "/run/torio-mcp/" + strings.Repeat("a", maxServiceNameLen) + ".sock"},
+		{strings.Repeat("a", mcpbroker.MaxServiceNameLen), "/run/torio-mcp/" + strings.Repeat("a", mcpbroker.MaxServiceNameLen) + ".sock"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.service, func(t *testing.T) {
@@ -447,5 +449,24 @@ func TestRelayLeavesNothingRunningAfterACleanSession(t *testing.T) {
 			t.Fatalf("goroutines settled at %d, started at %d", after, before)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestSocketPathFitsSunPath makes the address-length argument executable rather
+// than a comment. A unix socket address is bounded by sun_path (~104 bytes on
+// darwin, 108 on linux); the service-name bound is what keeps the longest
+// resolvable path inside it. If either the directory or the bound grows, this
+// fails here instead of as an EINVAL from connect() on a machine somebody is
+// trying to debug.
+func TestSocketPathFitsSunPath(t *testing.T) {
+	const sunPathLimit = 104
+	longest := strings.Repeat("a", mcpbroker.MaxServiceNameLen)
+	path, err := socketPath(socketDir, longest)
+	if err != nil {
+		t.Fatalf("socketPath rejected the longest accepted name: %v", err)
+	}
+	if len(path)+1 > sunPathLimit { // +1 for the NUL the kernel stores
+		t.Errorf("longest socket path is %d bytes, over the %d-byte sun_path limit: %s",
+			len(path)+1, sunPathLimit, path)
 	}
 }
