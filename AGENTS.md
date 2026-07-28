@@ -105,7 +105,8 @@ Każda implementacja MUSI zachować:
 5. Workspace path jest wyprowadzany z id projektu, nigdy podawany przez użytkownika.
 6. Git remote NIE MOŻE zawierać hasła, tokenu, query ani fragmentu.
 7. Persistentny `hermes` ma do origin wyłącznie read; `ssh.forwardAgent` jest globalnie wyłączone.
-8. Write capability pochodzi wyłącznie z sesji `torio project shell` i kończy się razem z nią.
+8. Write capability **wobec remote'ów Gita** pochodzi wyłącznie z sesji `torio project shell` i kończy się razem z nią.
+8a. Zdolność zapisu przyznana przez serwer MCP jest osobnym kanałem: nie przechodzi przez `project shell`, nie kończy się z sesją, a jej zakres musi być jawny, wyliczalny i weryfikowany (ADR-0022).
 9. Guest helper sesji operatora jest `root:root 0755`; drift jest raportowany, nie naprawiany.
 10. Push, merge i release są osobnymi, human-only operacjami poza CLI.
 11. Transport Braina jest jednorazowy i ograniczony; treść payloadu nie trafia do stdout, logów ani evidence.

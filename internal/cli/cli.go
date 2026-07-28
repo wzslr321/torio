@@ -214,6 +214,7 @@ func newRootCmd(a *app) *cobra.Command {
 	root.AddCommand(newServeCmd(a))
 	root.AddCommand(newBrainCmd(a))
 	root.AddCommand(newProjectCmd(a))
+	root.AddCommand(newMCPCmd(a))
 	return root
 }
 

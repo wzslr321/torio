@@ -105,9 +105,21 @@ type result struct {
 
 func (r result) trimmed() string { return strings.TrimSpace(r.out) }
 
+// brokerFailed records drift: the broker is there, but a boundary this decision
+// depends on does not hold. It fails closed as a verification failure.
 func (a *Adapter) brokerFailed(rep *MCPBrokerReport, name, detail, remediation string) *Error {
 	rep.record(name, false, detail)
 	return &Error{Op: mcpBrokerOp, Kind: KindVerificationFailed, Err: fmt.Errorf("%s: %s (%s)", name, detail, remediation)}
+}
+
+// brokerMissing records that the broker was never provisioned. It is a separate
+// classification from brokerFailed on purpose: both fail closed, but only drift
+// means somebody broke a guarantee. Telling an operator who has simply not run
+// the installer that a custody boundary was violated would train them to ignore
+// the message that matters.
+func (a *Adapter) brokerMissing(rep *MCPBrokerReport, name, detail, remediation string) *Error {
+	rep.record(name, false, detail)
+	return &Error{Op: mcpBrokerOp, Kind: KindNotFound, Err: fmt.Errorf("%s: %s (%s)", name, detail, remediation)}
 }
 
 func (a *Adapter) verifyBrokerUser(ctx context.Context, rep *MCPBrokerReport) error {
@@ -118,7 +130,7 @@ func (a *Adapter) verifyBrokerUser(ctx context.Context, rep *MCPBrokerReport) er
 	}
 	uid := res.trimmed()
 	if res.exit != 0 || uid == "" {
-		return a.brokerFailed(rep, name, "torio-mcp user not found", "run `torio mcp install` to provision the broker identity")
+		return a.brokerMissing(rep, name, "torio-mcp user not found", "run `torio mcp install` to provision the broker identity")
 	}
 	rep.record(name, true, "uid="+uid)
 	return nil
@@ -131,7 +143,7 @@ func (a *Adapter) verifyBrokerClientsGroup(ctx context.Context, rep *MCPBrokerRe
 		return err
 	}
 	if res.exit != 0 || res.trimmed() == "" {
-		return a.brokerFailed(rep, name, "group torio-mcp-clients not found", "run `torio mcp install` to provision the broker identity")
+		return a.brokerMissing(rep, name, "group torio-mcp-clients not found", "run `torio mcp install` to provision the broker identity")
 	}
 	rep.record(name, true, TorioMCPClientsGroup)
 	return nil
@@ -184,7 +196,7 @@ func (a *Adapter) verifyBrokerHome(ctx context.Context, rep *MCPBrokerReport) er
 		return err
 	}
 	if st.exit != 0 || st.trimmed() != "directory" {
-		return a.brokerFailed(rep, name, "not a directory", "run `torio mcp install` to provision the broker credential store")
+		return a.brokerMissing(rep, name, "not a directory", "run `torio mcp install` to provision the broker credential store")
 	}
 
 	og, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%U:%G %a", torioMCPHomeSpec.path)

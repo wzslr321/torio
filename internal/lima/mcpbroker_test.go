@@ -2,6 +2,7 @@ package lima
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -66,15 +67,50 @@ func TestVerifyMCPBrokerHappyPath(t *testing.T) {
 	}
 }
 
+// TestVerifyMCPBrokerMissingUser pins the distinction the exit-code contract
+// rests on: a guest that was never provisioned is an unmet precondition, not
+// drift. Both fail closed, but only one of them means somebody broke a boundary,
+// and an operator who has simply not run the installer yet must not be told the
+// custody guarantee was violated.
 func TestVerifyMCPBrokerMissingUser(t *testing.T) {
 	fr := &fakeRunner{script: []scriptedResponse{{result: exitResult(1, "", "no such user")}}}
 	a := New(fr)
 
 	rep, err := a.VerifyMCPBroker(context.Background())
 	if err == nil {
-		t.Fatal("missing torio-mcp user: expected a verification failure, got nil")
+		t.Fatal("missing torio-mcp user: expected a failure, got nil")
 	}
 	assertFailedCheck(t, rep, "broker_user")
+
+	var lerr *Error
+	if !errors.As(err, &lerr) {
+		t.Fatalf("error %v is not a *lima.Error", err)
+	}
+	if lerr.Kind != KindNotFound {
+		t.Errorf("kind = %q, want %q: an unprovisioned broker is a precondition, not drift", lerr.Kind, KindNotFound)
+	}
+}
+
+// TestVerifyMCPBrokerBrokenBoundaryIsDrift is the other half of that
+// distinction: a broker that exists but whose custody boundary is broken must
+// classify as verification failure, so it reaches the operator as drift.
+func TestVerifyMCPBrokerBrokenBoundaryIsDrift(t *testing.T) {
+	script := okBrokerScript()
+	script[3] = scriptedResponse{result: stdoutResult("hermes torio-mcp\n")}
+	fr := &fakeRunner{script: script}
+	a := New(fr)
+
+	_, err := a.VerifyMCPBroker(context.Background())
+	if err == nil {
+		t.Fatal("hermes in the torio-mcp group: expected a failure, got nil")
+	}
+	var lerr *Error
+	if !errors.As(err, &lerr) {
+		t.Fatalf("error %v is not a *lima.Error", err)
+	}
+	if lerr.Kind != KindVerificationFailed {
+		t.Errorf("kind = %q, want %q", lerr.Kind, KindVerificationFailed)
+	}
 }
 
 // TestVerifyMCPBrokerHermesNotClient covers the boundary from the other side: an

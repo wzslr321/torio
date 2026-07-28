@@ -87,8 +87,12 @@ serwerami MCP wyłącznie przez brokera działającego pod osobnym uid.**
    a nie okazany sekret.
 
 4. **Policy jest jawna, sekrety nie.** Zakres narzędzi leży w
-   `/etc/torio-mcp/policy.d/<usługa>.yaml`, `root:root 0644` — **czytelny dla
-   agenta i niezapisywalny przez niego**. Domyślnie deny: broker przepuszcza
+   `/etc/torio-mcp/policy.d/<usługa>.json`, `root:root 0644` — **czytelny dla
+   agenta i niezapisywalny przez niego**. Format jest JSON-em, a nie YAML-em,
+   bo `internal/config` ma już fail-closed idiom schematu (jeden dokument,
+   `DisallowUnknownFields`, odrzucenie nieznanej wersji bez migracji), a
+   dokładanie parsera YAML do ścieżki zaufanej policy byłoby zależnością w
+   najgorszym możliwym miejscu. Domyślnie deny: broker przepuszcza
    wyłącznie narzędzia wymienione z nazwy, bez wnioskowania z nazw ani wzorców.
    Każdy wpis niosący zapis jest oznaczony jawnie, żeby raport mógł podać liczbę
    przyznanych narzędzi zapisujących.
