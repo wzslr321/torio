@@ -17,9 +17,14 @@ an existing vault is never silently absorbed.
 
 It configures no remote and pushes nothing. The Brain stays on the VM.
 
-> If a Hermes Desktop session was already open, restart it. Hermes caches a
-> skill's prompt per backend process, so an open session will not see
-> `torio-brain` until it reconnects.
+> If the backend was already running, restart it — `torio serve restart
+> --timeout 2m`. Hermes caches the assembled skills prompt **in the backend
+> process**, keyed on the skills directory rather than on the files in it, and
+> Torio installs the skill by writing it. Reconnecting Desktop is not enough:
+> the client reconnects, the process does not, and the cache it holds is the one
+> that decides whether `torio-brain` is offered. `torio brain status` reports
+> that the file is correct and says in as many words that it cannot tell whether
+> a running session has loaded it.
 
 ### Bring an existing vault in {#brain-import}
 

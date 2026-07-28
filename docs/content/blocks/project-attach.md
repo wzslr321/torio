@@ -24,8 +24,10 @@ and passes none to the model. A remote the guest cannot already read without
 prompting fails closed:
 
 ```text
-torio: project add: guest cannot read the remote noninteractively   (exit 7)
+torio: project add: auth: the guest cannot read the remote noninteractively; provision access for the hermes user out of band
 ```
+
+That is exit `7`.
 
 The fix is to grant the guest read access yourself, on the guest, outside Torio
 — not to re-run the command. Do not work around it by copying a checkout from

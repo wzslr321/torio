@@ -9,7 +9,10 @@ symptom, then apply the fix.
 | `zsh: command not found: torio` | The binary is not on your `PATH`. Build it and install it once — `go build -o torio ./cmd/torio` then `sudo install -m 755 torio /usr/local/bin/torio` — or run it in place as `./torio` from the repository root. |
 | `torio: no command given; run 'torio --help'` (exit 2) | You ran `torio` with no subcommand. Add one, for example `torio vm status`, or run `torio --help` to list the command surface. |
 | A `vm` command fails mentioning `limactl` (exit 8) | Lima is not installed, or `limactl` is not on your `PATH`. Install Lima and confirm `limactl` runs; Torio drives the VM through it. |
-| `torio: Stopped`, or a precondition error (exit 3) | The VM is not running. Start it with `torio vm start`, then re-run your command. |
+| `torio: stopped`, or a precondition error (exit 3) | The VM is not running. Start it with `torio vm start`, then re-run your command. |
+| `torio: not_found` from `torio vm status` (exit 0) | No VM exists yet. This is the answer on a Mac that has never run Torio; create one with `torio vm init`. |
+| `torio: timeout … exceeds policy maximum 10m0s` (exit 2) | `--timeout` is capped at ten minutes for any single operation, and the check runs before any work. Ask for `10m` or less. |
+| A Desktop session does not offer `torio-brain` although `torio brain status` says the skill is installed | Hermes caches the assembled skills prompt in the backend process. Restart the backend — `torio serve restart --timeout 2m` — not just the Desktop connection. |
 | `torio serve status` exits **3** | The backend service is not installed or not active. Run `torio serve install`, then `torio serve start`. |
 | `torio serve status` exits **6** | The service is active but the loopback endpoint did not answer. Check `torio serve logs`, then `torio serve restart`. |
 | `curl` to `127.0.0.1:19119/api/status` hangs or fails | The SSH tunnel is not up, or you forwarded a different local port. Re-open the forward and curl the same port you forwarded. |

@@ -75,18 +75,24 @@
 <p>From a checkout of the <code>torio</code> repository, build the binary and put it on your <code>PATH</code>. Every command in these docs is written as <code>torio</code>, so do this once and the rest of the page just works:</p>
 <div class="code-block"><pre data-lang="bash"><code>go build -o torio ./cmd/torio
 sudo install -m 755 torio /usr/local/bin/torio</code></pre></div>
-<p>Confirm it resolves and runs, using a read-only command:</p>
+<p>Confirm it resolves and runs:</p>
 <div class="code-block"><pre data-lang="bash"><code>which torio
-torio vm status</code></pre></div>
-<p>You should get one line naming the VM and its state, for example <code>torio: Stopped</code>.</p>
+torio version</code></pre></div>
+<p><code>version</code> is the only place the operator reads which build they have:</p>
+<div class="code-block"><pre data-lang="text"><code>torio dev (commit …, built …)
+go1.26.5 darwin/arm64</code></pre></div>
+<p>A binary built straight from a checkout calls itself <code>dev</code>; the commit is the one you built.</p>
+<p><code>torio vm status</code> also works from here and answers <code>torio: not_found</code> until the next step creates the VM. That is the expected answer on a Mac that has never run Torio, not a failure — it exits <code>0</code>.</p>
 <div class="callout"><p>Prefer not to install system-wide? Any directory already on your <code>PATH</code> works — for example <code>install -m 755 torio ~/.local/bin/torio</code>. If you skip this step entirely, <code>torio</code> will not resolve at all: a freshly built binary is not on your <code>PATH</code> and your shell does not search the current directory, so you would have to prefix every later command with <code>./</code> and run it from the repository root.</p></div>
 <h3 id="vm-bring-up">Step 2 — Create and verify the VM</h3>
-<p>If the VM does not exist yet, create it from the trusted template:</p>
-<div class="code-block"><pre data-lang="bash"><code>torio vm init</code></pre></div>
-<p>If <code>torio vm status</code> did not report <code>Running</code>, start the VM, then reconcile and verify it:</p>
-<div class="code-block"><pre data-lang="bash"><code>torio vm start
-torio vm bootstrap --timeout 15m</code></pre></div>
-<p><code>init</code> creates the Gate-0-pinned Lima instance (or succeeds idempotently when a compatible one already exists) and verifies the post-create list output before reporting success. <code>start</code> is idempotent and confirms a <code>Running</code> post-state. <code>bootstrap</code> operates only on the existing target after a verified <code>Running</code> precondition, through the typed Lima boundary. Hermes Agent install can be slow — use an ample timeout (for example <code>--timeout 15m</code>). On a fully-reconciled target it mutates nothing; when the pinned launcher is missing it installs Hermes Agent at the Gate-0 commit (verifiable postcondition: git HEAD pin + launcher path), then reconciles the PATH shim. It:</p>
+<p>Create the VM from the trusted template, start it, then reconcile and verify it. Run all three in order: each is idempotent, so this is also the sequence you re-run later.</p>
+<div class="code-block"><pre data-lang="bash"><code>torio vm init
+torio vm start
+torio vm bootstrap --timeout 10m</code></pre></div>
+<p><code>init</code> prints <code>next: torio vm start</code> whether it created the instance or found a compatible one, so there is no state in which you skip the second command.</p>
+<p><code>init</code> creates the Gate-0-pinned Lima instance (or succeeds idempotently when a compatible one already exists) and verifies the post-create list output before reporting success. <code>start</code> is idempotent and confirms a <code>Running</code> post-state. <code>bootstrap</code> operates only on the existing target after a verified <code>Running</code> precondition, through the typed Lima boundary. Hermes Agent install can be slow, so give it room — but <code>10m</code> is the policy maximum for any single operation, and asking for more is refused before any work starts:</p>
+<div class="code-block"><pre data-lang="text"><code>torio: timeout 15m0s exceeds policy maximum 10m0s</code></pre></div>
+<p>On a fully-reconciled target it mutates nothing; when the pinned launcher is missing it installs Hermes Agent at the Gate-0 commit (verifiable postcondition: git HEAD pin + launcher path), then reconciles the PATH shim. It:</p>
 <ul><li>installs the pinned Hermes Agent when <code>/home/hermes/hermes-agent/venv/bin/hermes</code> is missing (never curl|bash pipe — download to a hermes-writable path, run with fixed flags, verify git HEAD);</li><li>ensures <code>/usr/local/bin/hermes</code> is a symlink to the pinned launcher (only after confirming the launcher exists);</li><li><strong>verifies</strong> (not merely trusts an exit code): the <code>hermes</code> user exists; group <code>torio-projects</code> exists; <code>hermes</code> and the Lima login operator are members; <code>hermes</code> is <strong>not</strong> in the <code>docker</code> group (rootful Docker for hermes is forbidden); <code>uname -m == aarch64</code>; <code>hermes --version</code> through the documented stable command path; <code>git --version</code>; the persistent profile, Second Brain, and workspace paths are directories with the expected owner, group, and mode on native Linux (ext4), not a host share; and no broad macOS host mount is present.</li></ul>
 <p>Any drift or unverifiable state fails closed (exit 6) with remediation. A rerun is success only when every postcondition is proven. Use <code>--json</code> for the machine-readable envelope (one document on stdout).</p>
 <h4 id="persistent-locations">Persistent Hermes locations</h4>
@@ -156,7 +162,7 @@ torio serve restart --timeout 2m</code></pre></div>
 torio brain status</code></pre></div>
 <p><code>init</code> builds the scaffold atomically through private guest staging, makes the first local commit, registers the Hermes project, and installs the global <code>torio-brain</code> retrieval skill. It is idempotent on state it manages, and it refuses to touch non-empty data it did not create — so a second run is safe and an existing vault is never silently absorbed.</p>
 <p>It configures no remote and pushes nothing. The Brain stays on the VM.</p>
-<div class="callout"><p>If a Hermes Desktop session was already open, restart it. Hermes caches a skill's prompt per backend process, so an open session will not see <code>torio-brain</code> until it reconnects.</p></div>
+<div class="callout"><p>If the backend was already running, restart it — <code>torio serve restart --timeout 2m</code>. Hermes caches the assembled skills prompt <strong>in the backend process</strong>, keyed on the skills directory rather than on the files in it, and Torio installs the skill by writing it. Reconnecting Desktop is not enough: the client reconnects, the process does not, and the cache it holds is the one that decides whether <code>torio-brain</code> is offered. <code>torio brain status</code> reports that the file is correct and says in as many words that it cannot tell whether a running session has loaded it.</p></div>
 <h4 id="brain-import">Bring an existing vault in</h4>
 <p>If you already keep Markdown notes on your Mac — an Obsidian vault, say — import them once:</p>
 <div class="code-block"><pre data-lang="bash"><code>torio brain import ~/path/to/vault --dry-run   <span class="tok-comment"># preflight, transfers nothing</span>
@@ -175,7 +181,8 @@ torio project list</code></pre></div>
 <p><code>add</code> clones the exact remote into the derived workspace path, gives you and <code>hermes</code> shared access to it, and registers the project with Hermes before it records anything in config. <code>--use</code> makes it the active project. If a valid checkout of that remote is already at the path, <code>add</code> verifies and adopts it rather than touching it.</p>
 <p><strong>You do not choose the path.</strong> It is always <code>/home/hermes/projects/&lt;id&gt;</code>, derived from the project id — never taken from you, never stored in config. Without <code>--id</code>, the id is the name you gave, which must be a lowercase slug; pass <code>--id</code> to pick a different one.</p>
 <p><strong>Read access is your job.</strong> Torio stores no Git credentials, prompts for none, and passes none to the model. A remote the guest cannot already read without prompting fails closed:</p>
-<div class="code-block"><pre data-lang="text"><code>torio: project add: guest cannot read the remote noninteractively   (exit 7)</code></pre></div>
+<div class="code-block"><pre data-lang="text"><code>torio: project add: auth: the guest cannot read the remote noninteractively; provision access for the hermes user out of band</code></pre></div>
+<p>That is exit <code>7</code>.</p>
 <p>The fix is to grant the guest read access yourself, on the guest, outside Torio — not to re-run the command. Do not work around it by copying a checkout from your Mac: a recursive copy drags host Git config, hooks, and keys across the VM boundary, which is exactly the thing this path exists to prevent.</p>
 <p>Nothing on the guest is reset, cleaned, or deleted, so if <code>add</code> fails partway a rerun finishes the work instead of starting over.</p>
 <h4 id="project-inspect">Inspect and forget</h4>
