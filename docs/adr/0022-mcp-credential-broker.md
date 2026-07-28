@@ -86,6 +86,21 @@ serwerami MCP wyłącznie przez brokera działającego pod osobnym uid.**
    właściciel socketu i to, że tożsamość rozmówcy ustala kernel (`SO_PEERCRED`),
    a nie okazany sekret.
 
+   **Czego `SO_PEERCRED` tutaj nie kupuje.** Podaje uid procesu, który się
+   połączył — czyli więcej niż samo członkostwo w grupie, bo nazywa konkretną
+   tożsamość. Ale **nie odróżnia klienta MCP Hermesa od czegokolwiek innego
+   działającego pod tym samym uid**: jednolinijkowiec agenta wygląda identycznie.
+   Żadna policy „per wołający" nie może się na tym oprzeć i nie wolno tak tego
+   opisywać w dokumentacji operatora. To jest dowód tożsamości uid, nie programu.
+
+   Nazwa usługi jest ograniczona do 32 bajtów, i to ograniczenie jest nośne, a
+   nie kosmetyczne: adres unix socketu mieści się w `sun_path` (~104 bajty), a
+   `/run/torio-mcp/` plus najdłuższa dopuszczona nazwa plus `.sock` to 52 bajty.
+   Adres zbyt długi jest więc nieosiągalny konstrukcyjnie, zamiast wywalać się
+   na `connect()`. Obie strony — broker wiążący socket i przekaźnik go szukający
+   — muszą trzymać tę samą regułę; nazwa przyjęta przez jedną i odrzucona przez
+   drugą to socket, do którego nic nie dotrze.
+
 4. **Policy jest jawna, sekrety nie.** Zakres narzędzi leży w
    `/etc/torio-mcp/policy.d/<usługa>.json`, `root:root 0644` — **czytelny dla
    agenta i niezapisywalny przez niego**. Format jest JSON-em, a nie YAML-em,
@@ -107,7 +122,16 @@ serwerami MCP wyłącznie przez brokera działającego pod osobnym uid.**
    i **brak** członkostwa w `torio-mcp`; pustość `$HERMES_HOME/mcp-tokens/`;
    brak wpisu `mcp_servers` wskazującego gdziekolwiek poza przekaźnik; owner,
    grupa i mode socketu; parsowalność i własność plików policy; zgodność
-   raportowanego zakresu z plikami. Unit brokera jest walidowany
+   raportowanego zakresu z plikami.
+
+   **Sam socket obecny to za mało.** Plik socketu zostawiony przez brokera,
+   który się wywrócił, przechodzi każdy test właściciela, grupy i trybu, a
+   odrzuca każde połączenie. Weryfikacja musi traktować obecny-lecz-martwy
+   socket jako drift, inaczej `status` powie „granica trzyma" o maszynie, na
+   której nic nie działa. Rozróżnienie jest już wyrażone po stronie klienta:
+   brak socketu to inny błąd niż `ECONNREFUSED`.
+
+   Unit brokera jest walidowany
    `systemd-analyze verify` **przed** aktywacją, tak jak w `serve install`.
    Każdy drift to exit 6 i stabilne markery, nigdy cicha naprawa.
 
