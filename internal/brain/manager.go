@@ -560,7 +560,20 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 		if registered || projectConflict {
 			report.Issues = append(report.Issues, "project_registered_without_scaffold")
 		}
-		if report.PathSecure && report.NativeFilesystem && !registered && !projectConflict {
+		// An empty directory has nothing to overwrite, so a leftover
+		// registration on its own must not block a rebuild.
+		//
+		// Treating it as drift made `brain init` refuse forever: the drift
+		// branch repairs a scaffold that exists, and here there is none. There
+		// was no way out either, because Hermes cannot free a slug — `archive`
+		// keeps the project visible to `project show`, and no delete exists. An
+		// operator who cleared the Brain to start over was left with a Brain
+		// that could not be recreated by any supported command.
+		//
+		// A registration pointing at a *different* path stays drift. That slug
+		// belongs to something else, and scaffolding under it would trample a
+		// project Torio does not own.
+		if report.PathSecure && report.NativeFilesystem && !projectConflict {
 			report.State = StateUninitialized
 		} else {
 			report.State = StateDrift
