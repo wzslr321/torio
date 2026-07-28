@@ -10,6 +10,7 @@ docs-check:
 validate: docs-check
 	python3 scripts/validate_artifacts.py
 	python3 -m unittest discover -s scripts -p 'test_*.py'
+	bash spikes/v1-e2e/run_test.sh
 
 test: validate
 	@if command -v go >/dev/null 2>&1; then go test ./...; else echo "go not installed; documentation validation completed"; fi
