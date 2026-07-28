@@ -15,7 +15,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -74,11 +73,7 @@ type fakeGuest struct {
 	calls           []fakeCall
 	copies          []fakeCopy
 	copyToErr       error
-	copyFromErr     error
-	copyFromHook    func(string) error
 	importFiles     int
-	exportFiles     map[string]string
-	exportHardlink  bool
 	privateExists   map[string]bool
 	pristineTree    bool
 	exchangedEmpty  bool
@@ -160,17 +155,6 @@ func (f *fakeGuest) CopyToGuest(_ context.Context, hostSourceDir, guestDestinati
 	return f.copyToErr
 }
 
-func (f *fakeGuest) CopyFromGuest(_ context.Context, guestSourceDir, hostDestinationDir string) error {
-	f.copies = append(f.copies, fakeCopy{direction: "from_guest", host: hostDestinationDir, guest: guestSourceDir})
-	if f.copyFromErr != nil {
-		return f.copyFromErr
-	}
-	if f.copyFromHook != nil {
-		return f.copyFromHook(hostDestinationDir)
-	}
-	return nil
-}
-
 func (f *fakeGuest) route(ctx context.Context, stdin []byte, argv []string) (execx.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return execx.Result{ExitCode: -1}, err
@@ -236,35 +220,6 @@ func (f *fakeGuest) route(ctx context.Context, stdin []byte, argv []string) (exe
 		}
 		return exitResult(1, "", ""), nil
 		// Private Brain import staging and candidate routes.
-	case strings.Contains(joined, "rm -rf -- "+exportStagingPath):
-		return okResult(""), nil
-	case strings.Contains(joined, "cp -a -- "+Path+"/. "+exportPayloadPath+"/"):
-		return okResult(""), nil
-	case strings.Contains(joined, "rm -rf -- "+exportPayloadPath+"/.git"):
-		return okResult(""), nil
-	case strings.Contains(joined, "find "+exportPayloadPath+" -type l"),
-		strings.Contains(joined, "find "+exportPayloadPath+" ! -type d ! -type f"):
-		return okResult(""), nil
-	case strings.Contains(joined, "find "+Path+" -path "+Path+"/.git -prune -o -type l"),
-		strings.Contains(joined, "find "+Path+" -path "+Path+"/.git -prune -o ! -type d ! -type f"):
-		return okResult(""), nil
-	case strings.Contains(joined, "-type f -links +1"):
-		if f.exportHardlink {
-			return okResult("."), nil
-		}
-		return okResult(""), nil
-	case strings.Contains(joined, "-printf %s\t%P\\0"):
-		prefix := exportPayloadPath
-		if strings.Contains(joined, "find "+Path+" ") {
-			prefix = Path
-		}
-		return okResult(f.exportSizes(prefix)), nil
-	case strings.Contains(joined, "-exec sha256sum -z -- {} +"):
-		prefix := exportPayloadPath
-		if strings.Contains(joined, "find "+Path+" ") {
-			prefix = Path
-		}
-		return okResult(f.exportChecksums(prefix)), nil
 	case strings.Contains(joined, "rm -rf -- "+importStagingPath):
 		return okResult(""), nil
 	case strings.Contains(joined, "dd of="+importManifestPath):
@@ -579,33 +534,6 @@ func (f *fakeGuest) setCounts(markdown, attachments int, bytes int64) {
 	f.totalBytes = bytes
 }
 
-func (f *fakeGuest) exportSizes(_ string) string {
-	names := make([]string, 0, len(f.exportFiles))
-	for name := range f.exportFiles {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	var out strings.Builder
-	for _, name := range names {
-		fmt.Fprintf(&out, "%d\t%s\x00", len(f.exportFiles[name]), name)
-	}
-	return out.String()
-}
-
-func (f *fakeGuest) exportChecksums(prefix string) string {
-	names := make([]string, 0, len(f.exportFiles))
-	for name := range f.exportFiles {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	var out strings.Builder
-	for _, name := range names {
-		sum := sha256.Sum256([]byte(f.exportFiles[name]))
-		fmt.Fprintf(&out, "%s  %s/%s\x00", hex.EncodeToString(sum[:]), prefix, name)
-	}
-	return out.String()
-}
-
 var _ Guest = (*fakeGuest)(nil)
 
 type blockingGuest struct {
@@ -638,10 +566,6 @@ func (g *blockingGuest) SSHInput(ctx context.Context, stdin []byte, command []st
 
 func (g *blockingGuest) CopyToGuest(ctx context.Context, hostSourceDir, guestDestinationDir string) error {
 	return g.base.CopyToGuest(ctx, hostSourceDir, guestDestinationDir)
-}
-
-func (g *blockingGuest) CopyFromGuest(ctx context.Context, guestSourceDir, hostDestinationDir string) error {
-	return g.base.CopyFromGuest(ctx, guestSourceDir, hostDestinationDir)
 }
 
 func (g *blockingGuest) block(command []string) {

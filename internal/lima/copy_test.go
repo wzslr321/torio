@@ -26,49 +26,24 @@ func TestCopyToGuestUsesPromotedExactArgv(t *testing.T) {
 	}
 }
 
-func TestCopyFromGuestUsesPromotedExactArgv(t *testing.T) {
-	fr := &fakeRunner{script: []scriptedResponse{{result: exitResult(0, "", "")}}}
-	a := New(fr)
-
-	if err := a.CopyFromGuest(context.Background(), HermesHome+"/.torio-brain-export-staging/payload", "/private/tmp/torio-brain-export-123/payload"); err != nil {
-		t.Fatalf("CopyFromGuest: %v", err)
-	}
-	want := []string{
-		"copy",
-		"torio:/home/hermes/.torio-brain-export-staging/payload/",
-		"/private/tmp/torio-brain-export-123/payload/",
-	}
-	if got := fr.callArgs(0); !equalArgs(got, want) {
-		t.Fatalf("argv = %#v, want %#v", got, want)
-	}
-}
-
 func TestCopyRejectsPathsOutsideTheTypedBoundary(t *testing.T) {
 	cases := []struct {
 		name  string
-		toVM  bool
 		host  string
 		guest string
 	}{
-		{"relative host source", true, "relative", HermesHome + "/staging"},
-		{"relative host destination", false, "relative", HermesHome + "/staging"},
-		{"host root", true, "/", HermesHome + "/staging"},
-		{"guest outside hermes home", true, "/private/tmp/staging", "/tmp/staging"},
-		{"guest home itself", true, "/private/tmp/staging", HermesHome},
-		{"guest traversal", true, "/private/tmp/staging", HermesHome + "/../operator"},
-		{"guest remote syntax", false, "/private/tmp/staging", HermesHome + "/bad:target"},
+		{"relative host source", "relative", HermesHome + "/staging"},
+		{"host root", "/", HermesHome + "/staging"},
+		{"guest outside hermes home", "/private/tmp/staging", "/tmp/staging"},
+		{"guest home itself", "/private/tmp/staging", HermesHome},
+		{"guest traversal", "/private/tmp/staging", HermesHome + "/../operator"},
+		{"guest remote syntax", "/private/tmp/staging", HermesHome + "/bad:target"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			fr := &fakeRunner{}
 			a := New(fr)
-			var err error
-			if tc.toVM {
-				err = a.CopyToGuest(context.Background(), tc.host, tc.guest)
-			} else {
-				err = a.CopyFromGuest(context.Background(), tc.guest, tc.host)
-			}
-			if err == nil {
+			if err := a.CopyToGuest(context.Background(), tc.host, tc.guest); err == nil {
 				t.Fatal("copy accepted a path outside its typed boundary")
 			}
 			if fr.callCount() != 0 {

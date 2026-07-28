@@ -23,19 +23,6 @@ func (a *Adapter) CopyToGuest(ctx context.Context, hostSourceDir, guestDestinati
 	return a.copy(ctx, op, host, InstanceName+":"+guest)
 }
 
-// CopyFromGuest transfers one private guest staging directory below HermesHome
-// into a private host staging directory. It never returns command output:
-// rsync/scp backends may name payload files in diagnostics, and Brain filenames
-// are outside Torio's output and logging contract.
-func (a *Adapter) CopyFromGuest(ctx context.Context, guestSourceDir, hostDestinationDir string) error {
-	const op = "copy_from_guest"
-	host, guest, err := transferPaths(hostDestinationDir, guestSourceDir)
-	if err != nil {
-		return &Error{Op: op, Kind: KindVerificationFailed, Err: err}
-	}
-	return a.copy(ctx, op, InstanceName+":"+guest, host)
-}
-
 func (a *Adapter) copy(ctx context.Context, op, source, destination string) error {
 	res, err := a.runRaw(ctx, "copy", source, destination)
 	if err != nil {

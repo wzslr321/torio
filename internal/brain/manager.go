@@ -27,7 +27,6 @@ type Guest interface {
 	SSH(ctx context.Context, command []string) (execx.Result, error)
 	SSHInput(ctx context.Context, stdin []byte, command []string) (execx.Result, error)
 	CopyToGuest(ctx context.Context, hostSourceDir, guestDestinationDir string) error
-	CopyFromGuest(ctx context.Context, guestSourceDir, hostDestinationDir string) error
 }
 
 var _ Guest = (*lima.Adapter)(nil)
