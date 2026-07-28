@@ -84,6 +84,12 @@ go1.26.5 darwin/arm64</code></pre></div>
 <p>A binary built straight from a checkout calls itself <code>dev</code>; the commit is the one you built.</p>
 <p><code>torio vm status</code> also works from here and answers <code>torio: not_found</code> until the next step creates the VM. That is the expected answer on a Mac that has never run Torio, not a failure — it exits <code>0</code>.</p>
 <div class="callout"><p>Prefer not to install system-wide? Any directory already on your <code>PATH</code> works — for example <code>install -m 755 torio ~/.local/bin/torio</code>. If you skip this step entirely, <code>torio</code> will not resolve at all: a freshly built binary is not on your <code>PATH</code> and your shell does not search the current directory, so you would have to prefix every later command with <code>./</code> and run it from the repository root.</p></div>
+<h4 id="install-release">Installing a release build instead</h4>
+<p>Where a release exists and you would rather install its verified asset than build, fetch the asset with a tool that already holds your credentials, then point the installer at what you fetched:</p>
+<div class="code-block"><pre data-lang="bash"><code>gh release download vX.Y.Z -D /tmp/torio-rel
+scripts/install.sh --version X.Y.Z --base-url file:///tmp/torio-rel</code></pre></div>
+<p><code>install.sh</code> authenticates to nothing and never will. Torio stores and transports no credentials, and an installer carrying a forwarded token would be the one exception that makes the claim untrue. So a repository it cannot read anonymously answers <code>404</code> from <code>api.github.com</code>, and <code>gh</code> — which does hold your credentials — closes that gap without Torio touching them.</p>
+<p>Either route verifies <code>SHA256SUMS</code> before the binary is copied anywhere, which is the whole reason to use the installer rather than untarring by hand. Set <code>TORIO_REPO=owner/name</code> if the assets live somewhere other than the default.</p>
 <h3 id="vm-bring-up">Step 2 — Create and verify the VM</h3>
 <p>Create the VM from the trusted template, start it, then reconcile and verify it. Run all three in order: each is idempotent, so this is also the sequence you re-run later.</p>
 <div class="code-block"><pre data-lang="bash"><code>torio vm init

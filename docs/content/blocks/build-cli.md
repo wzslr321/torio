@@ -36,3 +36,24 @@ run Torio, not a failure — it exits `0`.
 > on your `PATH` and your shell does not search the current directory, so you
 > would have to prefix every later command with `./` and run it from the
 > repository root.
+
+### Installing a release build instead {#install-release}
+
+Where a release exists and you would rather install its verified asset than
+build, fetch the asset with a tool that already holds your credentials, then
+point the installer at what you fetched:
+
+```bash
+gh release download vX.Y.Z -D /tmp/torio-rel
+scripts/install.sh --version X.Y.Z --base-url file:///tmp/torio-rel
+```
+
+`install.sh` authenticates to nothing and never will. Torio stores and
+transports no credentials, and an installer carrying a forwarded token would be
+the one exception that makes the claim untrue. So a repository it cannot read
+anonymously answers `404` from `api.github.com`, and `gh` — which does hold your
+credentials — closes that gap without Torio touching them.
+
+Either route verifies `SHA256SUMS` before the binary is copied anywhere, which
+is the whole reason to use the installer rather than untarring by hand. Set
+`TORIO_REPO=owner/name` if the assets live somewhere other than the default.
