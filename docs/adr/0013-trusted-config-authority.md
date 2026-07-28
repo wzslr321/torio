@@ -8,13 +8,19 @@
   warstwa; ten ADR jej nie zmienia ani nie supersede'uje)
 
 > **Nota statusu (2026-07-28).** Polityka opisana niżej obowiązuje bez zmian dla `config.json`
-> i katalogów `ConfigDir`/`StateDir`; egzekwuje ją `internal/config/trust_darwinlinux.go`.
-> Druga ścieżka authority — **version-lock manifest `version-lock.json`** — nigdy nie została
-> podpięta: żadna komenda go nie czytała, a jedyny konsument pinu (`lima.Probe`) nie był wołany
-> z CLI. `versionlock.go`, `LoadVersionLock`, `WriteVersionLock`, `VersionLockPath` i `Probe`
-> zostały usunięte; patrz
-> [ADR-0017](0017-pre-v1-exploration-leaves-the-working-tree.md).
-> Ta nota nie zmienia decyzji — odnotowuje, która jej połowa została dostarczona.
+> i katalogu `ConfigDir`; egzekwuje ją `internal/config/trust_darwinlinux.go`.
+> Z macierzy poniżej wypadły dwa obiekty — nie dlatego, że reguła dla nich była zła, tylko
+> dlatego, że sam obiekt przestał istnieć:
+>
+> - **version-lock manifest `version-lock.json`** nigdy nie został podpięty: żadna komenda go nie
+>   czytała, a jedyny konsument pinu (`lima.Probe`) nie był wołany z CLI. `versionlock.go`,
+>   `LoadVersionLock`, `WriteVersionLock`, `VersionLockPath` i `Probe` zostały usunięte —
+>   [ADR-0017](0017-pre-v1-exploration-leaves-the-working-tree.md).
+> - **`StateDir`** stracił wraz z nim swojego jedynego mieszkańca. Torio nie zapisuje na hoście
+>   żadnego stanu, więc `Options.StateDir`, `Paths.StateDir`, gałąź `XDG_STATE_HOME` i flaga
+>   `--state-dir` zostały usunięte — [ADR-0019](0019-state-directory-and-config-schema-v1-leave.md).
+>
+> Ta nota nie zmienia decyzji — odnotowuje, która jej część została dostarczona.
 
 ## Context
 

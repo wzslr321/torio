@@ -101,7 +101,6 @@ func sampleProject() projects.Project {
 func runProjectCLI(t *testing.T, args []string, service projectService, opts ...func(*app)) (int, string, string) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var stdout, stderr bytes.Buffer
 	a := &app{
 		stdout:             &stdout,
@@ -128,7 +127,6 @@ func TestProjectNoSubcommandIsUsage(t *testing.T) {
 
 func TestProjectCommandsWireLimaAdapterAndOperator(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var stdout, stderr bytes.Buffer
 	wantAdapter := &lima.Adapter{}
 	var gotAdapter *lima.Adapter

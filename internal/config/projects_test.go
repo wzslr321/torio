@@ -11,7 +11,7 @@ import (
 // v2 returns a V2 document carrying projects, so a test asserts on registry
 // rules only — never on an incidental schema/timeout failure.
 func v2(projects ...Project) File {
-	return File{SchemaVersion: ConfigSchemaVersionV2, Projects: projects}
+	return File{SchemaVersion: ConfigSchemaVersion, Projects: projects}
 }
 
 // sampleProject is a minimal valid registry entry.
@@ -152,7 +152,7 @@ func TestFileValidateRejectsUnsupportedRemote(t *testing.T) {
 // TestFileValidateRejectsTooManyProjects keeps the registry bounded: config is
 // read on every invocation, so its size cannot be open-ended.
 func TestFileValidateRejectsTooManyProjects(t *testing.T) {
-	f := File{SchemaVersion: ConfigSchemaVersionV2}
+	f := File{SchemaVersion: ConfigSchemaVersion}
 	for i := 0; i <= maxProjects; i++ {
 		n := strconv.Itoa(i)
 		f.Projects = append(f.Projects, Project{
@@ -166,28 +166,30 @@ func TestFileValidateRejectsTooManyProjects(t *testing.T) {
 	}
 }
 
-// TestWithProjectUpgradesV1DocumentToV2 locks the write half of the rollout:
-// the first mutation of a settings-only document turns it into a V2 document,
-// so a registry is never written under a version that cannot express it.
-func TestWithProjectUpgradesV1DocumentToV2(t *testing.T) {
-	v1 := File{SchemaVersion: ConfigSchemaVersionV1, Timeout: 45 * time.Second}
-	got, err := v1.WithProject(sampleProject(), AddOptions{})
+// TestWithProjectStampsSchemaVersionAndKeepsSettings locks the write half of a
+// first mutation: a document that carries settings but no version — the in-memory
+// shape of a first run, where no file was read — is stamped with the current
+// version and keeps its settings, so WriteFile never has to reject what the
+// mutation helper just produced.
+func TestWithProjectStampsSchemaVersionAndKeepsSettings(t *testing.T) {
+	unstamped := File{Timeout: 45 * time.Second}
+	got, err := unstamped.WithProject(sampleProject(), AddOptions{})
 	if err != nil {
 		t.Fatalf("WithProject: %v", err)
 	}
-	if got.SchemaVersion != ConfigSchemaVersionV2 {
-		t.Errorf("SchemaVersion = %q, want %q", got.SchemaVersion, ConfigSchemaVersionV2)
+	if got.SchemaVersion != ConfigSchemaVersion {
+		t.Errorf("SchemaVersion = %q, want %q", got.SchemaVersion, ConfigSchemaVersion)
 	}
 	if got.Timeout != 45*time.Second {
-		t.Errorf("Timeout = %v, want the settings to survive the upgrade", got.Timeout)
+		t.Errorf("Timeout = %v, want the settings to survive the mutation", got.Timeout)
 	}
 	if len(got.Projects) != 1 || got.Projects[0] != sampleProject() {
 		t.Errorf("Projects = %+v, want the added project", got.Projects)
 	}
 	// The receiver is a value: the original document must be untouched, so a
 	// caller can never persist a half-updated registry.
-	if len(v1.Projects) != 0 || v1.SchemaVersion != ConfigSchemaVersionV1 {
-		t.Errorf("receiver was mutated: %+v", v1)
+	if len(unstamped.Projects) != 0 || unstamped.SchemaVersion != "" {
+		t.Errorf("receiver was mutated: %+v", unstamped)
 	}
 }
 

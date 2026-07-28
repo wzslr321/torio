@@ -68,7 +68,6 @@ func initializedBrainReport() brain.StatusReport {
 func runBrainCLI(t *testing.T, args []string, service brainService) (int, string, string) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var stdout, stderr bytes.Buffer
 	a := &app{
 		stdout:   &stdout,
@@ -89,7 +88,6 @@ func TestBrainNoSubcommandIsUsage(t *testing.T) {
 
 func TestBrainCommandsWireLimaAdapterAndOperatorToBootstrapGate(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var stdout, stderr bytes.Buffer
 	wantAdapter := &lima.Adapter{}
 	service := &fakeBrainService{statusReport: initializedBrainReport()}

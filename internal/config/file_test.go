@@ -27,14 +27,11 @@ func requireTrustPolicy(t *testing.T) {
 
 // loadWith resolves+loads config with a temp XDG_CONFIG_HOME so no real
 // user config is touched. It returns the Runtime and any error.
-func loadWith(t *testing.T, opts Options, cfgHome, stateHome string) (Runtime, error) {
+func loadWith(t *testing.T, opts Options, cfgHome string) (Runtime, error) {
 	t.Helper()
 	env := map[string]string{}
 	if cfgHome != "" {
 		env["XDG_CONFIG_HOME"] = cfgHome
-	}
-	if stateHome != "" {
-		env["XDG_STATE_HOME"] = stateHome
 	}
 	opts.Getenv = envFunc(env)
 	if opts.HomeDir == nil {
@@ -57,7 +54,7 @@ func writeConfig(t *testing.T, cfgHome, body string) string {
 }
 
 func TestLoadAbsentDefaultConfigIsValidFirstRun(t *testing.T) {
-	rt, err := loadWith(t, Options{}, t.TempDir(), t.TempDir())
+	rt, err := loadWith(t, Options{}, t.TempDir())
 	if err != nil {
 		t.Fatalf("absent default config must be valid, got %v", err)
 	}
@@ -71,7 +68,7 @@ func TestLoadAbsentDefaultConfigIsValidFirstRun(t *testing.T) {
 
 func TestLoadExplicitMissingConfigIsError(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "nope.json")
-	_, err := loadWith(t, Options{ConfigPath: missing}, t.TempDir(), t.TempDir())
+	_, err := loadWith(t, Options{ConfigPath: missing}, t.TempDir())
 	if err == nil {
 		t.Fatalf("explicit --config to a missing file must error")
 	}
@@ -79,8 +76,8 @@ func TestLoadExplicitMissingConfigIsError(t *testing.T) {
 
 func TestLoadValidConfigParsesFields(t *testing.T) {
 	cfgHome := t.TempDir()
-	writeConfig(t, cfgHome, `{"schema_version":"1","default_timeout":"45s"}`)
-	rt, err := loadWith(t, Options{}, cfgHome, t.TempDir())
+	writeConfig(t, cfgHome, `{"schema_version":"2","default_timeout":"45s"}`)
+	rt, err := loadWith(t, Options{}, cfgHome)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -99,12 +96,12 @@ func TestLoadV2ConfigParsesProjectRegistry(t *testing.T) {
 	cfgHome := t.TempDir()
 	writeConfig(t, cfgHome, `{"schema_version":"2","default_timeout":"45s","projects":[`+
 		`{"id":"my-project","display_name":"My Project","remote":"git@github.com:owner/my-project.git"}]}`)
-	rt, err := loadWith(t, Options{}, cfgHome, t.TempDir())
+	rt, err := loadWith(t, Options{}, cfgHome)
 	if err != nil {
 		t.Fatalf("Load V2: %v", err)
 	}
-	if rt.File.SchemaVersion != ConfigSchemaVersionV2 {
-		t.Errorf("SchemaVersion = %q, want %q", rt.File.SchemaVersion, ConfigSchemaVersionV2)
+	if rt.File.SchemaVersion != ConfigSchemaVersion {
+		t.Errorf("SchemaVersion = %q, want %q", rt.File.SchemaVersion, ConfigSchemaVersion)
 	}
 	if rt.File.Timeout != 45*time.Second {
 		t.Errorf("Timeout = %v, want 45s", rt.File.Timeout)
@@ -118,33 +115,32 @@ func TestLoadV2ConfigParsesProjectRegistry(t *testing.T) {
 	}
 }
 
-// TestLoadV1ConfigNormalizesToEmptyProjectRegistry locks the read-compatibility
-// half of the V2 rollout: a settings-only document from a pre-registry binary
-// still loads, and normalizes to an empty registry rather than to an error.
-func TestLoadV1ConfigNormalizesToEmptyProjectRegistry(t *testing.T) {
+// TestLoadOmittedProjectsNormalizesToEmptyRegistry locks the settings-only
+// shape of the current schema: "projects" is optional, and a document without
+// it loads with an empty registry rather than failing.
+func TestLoadOmittedProjectsNormalizesToEmptyRegistry(t *testing.T) {
 	cfgHome := t.TempDir()
-	writeConfig(t, cfgHome, `{"schema_version":"1","default_timeout":"45s"}`)
-	rt, err := loadWith(t, Options{}, cfgHome, t.TempDir())
+	writeConfig(t, cfgHome, `{"schema_version":"2","default_timeout":"45s"}`)
+	rt, err := loadWith(t, Options{}, cfgHome)
 	if err != nil {
-		t.Fatalf("Load V1: %v", err)
+		t.Fatalf("Load: %v", err)
 	}
-	if rt.File.SchemaVersion != ConfigSchemaVersionV1 {
-		t.Errorf("SchemaVersion = %q, want %q", rt.File.SchemaVersion, ConfigSchemaVersionV1)
+	if rt.File.SchemaVersion != ConfigSchemaVersion {
+		t.Errorf("SchemaVersion = %q, want %q", rt.File.SchemaVersion, ConfigSchemaVersion)
 	}
 	if len(rt.File.Projects) != 0 {
-		t.Errorf("Projects = %+v, want empty for a V1 document", rt.File.Projects)
+		t.Errorf("Projects = %+v, want empty when the document omits them", rt.File.Projects)
 	}
 }
 
-// TestLoadRejectsProjectsInV1Document proves the version gate is not cosmetic:
-// a registry smuggled into a document that declares V1 is an unknown field for
-// that schema and fails closed, so no reader can disagree about what V1 means.
-func TestLoadRejectsProjectsInV1Document(t *testing.T) {
+// TestLoadRejectsSettingsOnlySchemaVersion pins the removal of the pre-registry
+// schema: a document declaring "1" is rejected by version, not read as
+// settings-only. Torio never shipped a release that wrote one (ADR-0019).
+func TestLoadRejectsSettingsOnlySchemaVersion(t *testing.T) {
 	cfgHome := t.TempDir()
-	writeConfig(t, cfgHome, `{"schema_version":"1","projects":[`+
-		`{"id":"my-project","display_name":"My Project","remote":"https://github.com/owner/my-project.git"}]}`)
-	if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
-		t.Fatalf("projects under schema_version 1 must be rejected (fail closed)")
+	writeConfig(t, cfgHome, `{"schema_version":"1","default_timeout":"45s"}`)
+	if _, err := loadWith(t, Options{}, cfgHome); err == nil {
+		t.Fatalf("schema_version 1 must be rejected")
 	}
 }
 
@@ -157,7 +153,7 @@ func TestLoadRejectsWorkspacePathInProject(t *testing.T) {
 	writeConfig(t, cfgHome, `{"schema_version":"2","projects":[{"id":"my-project",`+
 		`"display_name":"My Project","remote":"https://github.com/owner/my-project.git",`+
 		`"path":"/home/hermes/projects/my-project"}]}`)
-	if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
+	if _, err := loadWith(t, Options{}, cfgHome); err == nil {
 		t.Fatalf("a project carrying a workspace path must be rejected (fail closed)")
 	}
 }
@@ -176,7 +172,7 @@ func TestLoadRejectsInvalidProjectInV2Document(t *testing.T) {
 	} {
 		cfgHome := t.TempDir()
 		writeConfig(t, cfgHome, `{"schema_version":"2","projects":`+projects+`}`)
-		if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
+		if _, err := loadWith(t, Options{}, cfgHome); err == nil {
 			t.Errorf("invalid registry %s must be rejected on load", projects)
 		}
 	}
@@ -185,7 +181,7 @@ func TestLoadRejectsInvalidProjectInV2Document(t *testing.T) {
 func TestLoadRejectsMalformedJSON(t *testing.T) {
 	cfgHome := t.TempDir()
 	writeConfig(t, cfgHome, `{not json`)
-	if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
+	if _, err := loadWith(t, Options{}, cfgHome); err == nil {
 		t.Fatalf("malformed JSON must be rejected")
 	}
 }
@@ -198,7 +194,7 @@ func TestLoadRejectsWrongSchemaVersion(t *testing.T) {
 	} {
 		cfgHome := t.TempDir()
 		writeConfig(t, cfgHome, body)
-		if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
+		if _, err := loadWith(t, Options{}, cfgHome); err == nil {
 			t.Errorf("unknown schema_version in %q must be rejected", body)
 		}
 	}
@@ -207,29 +203,29 @@ func TestLoadRejectsWrongSchemaVersion(t *testing.T) {
 func TestLoadRejectsMissingSchemaVersion(t *testing.T) {
 	cfgHome := t.TempDir()
 	writeConfig(t, cfgHome, `{"default_timeout":"10s"}`)
-	if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
+	if _, err := loadWith(t, Options{}, cfgHome); err == nil {
 		t.Fatalf("missing schema_version must be rejected")
 	}
 }
 
 func TestLoadRejectsUnknownField(t *testing.T) {
 	cfgHome := t.TempDir()
-	writeConfig(t, cfgHome, `{"schema_version":"1","surprise":true}`)
-	if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
+	writeConfig(t, cfgHome, `{"schema_version":"2","surprise":true}`)
+	if _, err := loadWith(t, Options{}, cfgHome); err == nil {
 		t.Fatalf("unknown field must be rejected (fail closed)")
 	}
 }
 
 func TestLoadRejectsSemanticallyInvalidTimeout(t *testing.T) {
 	for _, body := range []string{
-		`{"schema_version":"1","default_timeout":"-5s"}`,
-		`{"schema_version":"1","default_timeout":"999h"}`,
-		`{"schema_version":"1","default_timeout":"not-a-duration"}`,
-		`{"schema_version":"1","default_timeout":"0s"}`,
+		`{"schema_version":"2","default_timeout":"-5s"}`,
+		`{"schema_version":"2","default_timeout":"999h"}`,
+		`{"schema_version":"2","default_timeout":"not-a-duration"}`,
+		`{"schema_version":"2","default_timeout":"0s"}`,
 	} {
 		cfgHome := t.TempDir()
 		writeConfig(t, cfgHome, body)
-		if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
+		if _, err := loadWith(t, Options{}, cfgHome); err == nil {
 			t.Errorf("semantically invalid config %q must be rejected", body)
 		}
 	}
@@ -241,14 +237,14 @@ func TestLoadRejectsSemanticallyInvalidTimeout(t *testing.T) {
 // make More() report false despite invalid remaining bytes.
 func TestLoadRejectsTrailingBytesAndSecondDocument(t *testing.T) {
 	for _, body := range []string{
-		`{"schema_version":"1"}}`,                      // trailing }
-		`{"schema_version":"1"}]`,                      // trailing ]
-		`{"schema_version":"1"} trailing`,              // trailing garbage
-		`{"schema_version":"1"}{"schema_version":"1"}`, // second document
+		`{"schema_version":"2"}}`,                      // trailing }
+		`{"schema_version":"2"}]`,                      // trailing ]
+		`{"schema_version":"2"} trailing`,              // trailing garbage
+		`{"schema_version":"2"}{"schema_version":"2"}`, // second document
 	} {
 		cfgHome := t.TempDir()
 		writeConfig(t, cfgHome, body)
-		if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
+		if _, err := loadWith(t, Options{}, cfgHome); err == nil {
 			t.Errorf("body %q must be rejected (exactly one JSON document)", body)
 		}
 	}
@@ -276,8 +272,8 @@ func TestSecretCanaryIsRecognizedByProductionMatcher(t *testing.T) {
 // duration validation), and that the error text never echoes the secret.
 func TestLoadRejectsSecretShapedValueWithoutLeaking(t *testing.T) {
 	cfgHome := t.TempDir()
-	writeConfig(t, cfgHome, `{"schema_version":"1","default_timeout":"`+secretCanary+`"}`)
-	_, err := loadWith(t, Options{}, cfgHome, t.TempDir())
+	writeConfig(t, cfgHome, `{"schema_version":"2","default_timeout":"`+secretCanary+`"}`)
+	_, err := loadWith(t, Options{}, cfgHome)
 	if err == nil {
 		t.Fatalf("secret-shaped config value must be rejected")
 	}
@@ -328,13 +324,13 @@ func TestLoadDoesNotLeakJSONEscapedSecretInAnyField(t *testing.T) {
 		body string
 	}{
 		{"schema_version", `{"schema_version":"` + escapedSecretRaw + `"}`},
-		{"default_timeout", `{"schema_version":"1","default_timeout":"` + escapedSecretRaw + `"}`},
-		{"unknown_field_name", `{"schema_version":"1","` + escapedSecretRaw + `":true}`},
+		{"default_timeout", `{"schema_version":"2","default_timeout":"` + escapedSecretRaw + `"}`},
+		{"unknown_field_name", `{"schema_version":"2","` + escapedSecretRaw + `":true}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfgHome := t.TempDir()
 			writeConfig(t, cfgHome, tc.body)
-			_, err := loadWith(t, Options{}, cfgHome, t.TempDir())
+			_, err := loadWith(t, Options{}, cfgHome)
 			if err == nil {
 				t.Fatalf("JSON-escaped secret in %s must be rejected", tc.name)
 			}
@@ -363,12 +359,12 @@ func TestWriteFileWritesSortedV2Document(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
-	var raw fileJSONV2
+	var raw fileJSON
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatalf("written document is not valid JSON: %v", err)
 	}
-	if raw.SchemaVersion != ConfigSchemaVersionV2 {
-		t.Errorf("written schema_version = %q, want %q", raw.SchemaVersion, ConfigSchemaVersionV2)
+	if raw.SchemaVersion != ConfigSchemaVersion {
+		t.Errorf("written schema_version = %q, want %q", raw.SchemaVersion, ConfigSchemaVersion)
 	}
 	if raw.DefaultTimeout != "45s" {
 		t.Errorf("written default_timeout = %q, want %q", raw.DefaultTimeout, "45s")
@@ -401,7 +397,7 @@ func TestWriteFileRoundTripsThroughLoad(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	rt, err := loadWith(t, Options{}, cfgHome, t.TempDir())
+	rt, err := loadWith(t, Options{}, cfgHome)
 	if err != nil {
 		t.Fatalf("Load after WriteFile: %v", err)
 	}
@@ -431,12 +427,12 @@ func TestWriteFileRejectsInvalidDocumentBeforeCreatingFile(t *testing.T) {
 	}
 }
 
-// TestWriteFileRequiresCurrentSchemaVersion pins the one-way migration: writes
-// always emit V2, so no path can silently re-emit a V1 document and drop the
-// registry it was asked to persist.
+// TestWriteFileRequiresCurrentSchemaVersion pins the write gate: only the
+// current version reaches disk, so no path can emit a document the next
+// invocation would refuse to read.
 func TestWriteFileRequiresCurrentSchemaVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), appDir, configFileName)
-	for _, version := range []string{"", ConfigSchemaVersionV1, "3"} {
+	for _, version := range []string{"", "1", "3"} {
 		if err := WriteFile(path, File{SchemaVersion: version}); err == nil {
 			t.Errorf("WriteFile with schema_version %q must be rejected", version)
 		}
@@ -484,12 +480,19 @@ func TestVerifyPersistedRejectsMismatchedDocument(t *testing.T) {
 	}
 }
 
-// TestV2DocumentIsRejectedByAV1OnlyReader is the forward-compatibility promise:
-// a binary that predates the registry must refuse a document this binary writes
-// rather than read it as settings-only and silently drop the projects. It
-// replicates that reader — the exact V1 wire struct, decoded strictly, behind
-// the exact V1 version gate — and feeds it real writer output.
-func TestV2DocumentIsRejectedByAV1OnlyReader(t *testing.T) {
+// TestDocumentIsRejectedByAPreRegistryReader is the forward-compatibility
+// promise: a binary that predates the registry must refuse a document this
+// binary writes rather than read it as settings-only and silently drop the
+// projects. That reader no longer exists here, so the test replicates it — its
+// exact wire struct, decoded strictly, behind its exact version gate — and
+// feeds it real writer output.
+func TestDocumentIsRejectedByAPreRegistryReader(t *testing.T) {
+	// The settings-only wire form as a pre-registry binary declared it.
+	type preRegistryJSON struct {
+		SchemaVersion  string `json:"schema_version"`
+		DefaultTimeout string `json:"default_timeout"`
+	}
+
 	path := filepath.Join(t.TempDir(), appDir, configFileName)
 	if err := WriteFile(path, File{SchemaVersion: ConfigSchemaVersion, Projects: []Project{
 		{ID: "alpha", DisplayName: "Alpha", Remote: "https://github.com/owner/alpha.git"},
@@ -501,15 +504,15 @@ func TestV2DocumentIsRejectedByAV1OnlyReader(t *testing.T) {
 		t.Fatalf("read: %v", err)
 	}
 
-	var raw fileJSONV1
+	var raw preRegistryJSON
 	decodeErr := decodeStrict(data, &raw)
-	if decodeErr == nil && raw.SchemaVersion == ConfigSchemaVersionV1 {
-		t.Fatalf("a V1-only reader accepted a V2 document")
+	if decodeErr == nil && raw.SchemaVersion == "1" {
+		t.Fatalf("a pre-registry reader accepted a registry document")
 	}
 	// It must fail on the registry itself, not only on the version gate: even a
 	// reader that was lax about the version cannot mistake the document.
 	if decodeErr == nil {
-		t.Errorf("V1 strict decode accepted the V2 wire form; only the version gate rejected it")
+		t.Errorf("pre-registry strict decode accepted the wire form; only the version gate rejected it")
 	}
 }
 
@@ -529,23 +532,11 @@ func TestWriteFileDoesNotLeakSecretShapedRemote(t *testing.T) {
 func TestLoadRejectsInsecureConfigPermissions(t *testing.T) {
 	requireTrustPolicy(t)
 	cfgHome := t.TempDir()
-	path := writeConfig(t, cfgHome, `{"schema_version":"1"}`)
+	path := writeConfig(t, cfgHome, `{"schema_version":"2"}`)
 	if err := os.Chmod(path, 0o644); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}
-	if _, err := loadWith(t, Options{}, cfgHome, t.TempDir()); err == nil {
+	if _, err := loadWith(t, Options{}, cfgHome); err == nil {
 		t.Fatalf("group/world-readable config must be rejected on Unix")
-	}
-}
-
-func TestLoadRejectsInsecureExistingStateDir(t *testing.T) {
-	requireTrustPolicy(t)
-	stateDir := filepath.Join(t.TempDir(), "state")
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	_, err := loadWith(t, Options{StateDir: stateDir}, t.TempDir(), "")
-	if err == nil {
-		t.Fatalf("insecure existing --state-dir must be rejected on Unix")
 	}
 }

@@ -13,48 +13,37 @@ import (
 	"time"
 )
 
-const (
-	// ConfigSchemaVersionV1 is the settings-only document: no project registry.
-	// It is still read, and normalizes to an empty registry.
-	ConfigSchemaVersionV1 = "1"
-	// ConfigSchemaVersionV2 adds the non-secret project registry (ADR-0015).
-	ConfigSchemaVersionV2 = "2"
-	// ConfigSchemaVersion is the version this binary writes. Reads accept V1 and
-	// V2; every write emits V2, so the first mutation upgrades the document. A
-	// document declaring any other version is rejected rather than migrated —
-	// which is also why a binary that predates V2 refuses a V2 document instead
-	// of misreading it as settings-only.
-	ConfigSchemaVersion = ConfigSchemaVersionV2
-)
+// ConfigSchemaVersion is the only supported config document version: the
+// non-secret project registry schema (ADR-0015). A document declaring any other
+// version is rejected rather than migrated.
+//
+// The settings-only predecessor ("1") is no longer read. Torio never shipped a
+// release that wrote one, so no such document exists (ADR-0019). A binary that
+// predates the registry still refuses this document — by its own version gate
+// and by DisallowUnknownFields on "projects" — so it can never misread a
+// registry as settings-only.
+const ConfigSchemaVersion = "2"
 
 // File is the validated, typed content of the on-disk config document. It holds
 // only non-secret operator intent: runtime settings plus the active project
 // registry. A project's workspace path is deliberately absent — it is derived
 // from the project ID, never stored (ADR-0015).
 type File struct {
-	// SchemaVersion is the document schema version; ConfigSchemaVersionV1 or
-	// ConfigSchemaVersionV2 once validated.
+	// SchemaVersion is the document schema version; ConfigSchemaVersion once
+	// validated.
 	SchemaVersion string
 	// Timeout is the parsed default operation timeout, or 0 when the document
 	// omits default_timeout. When set it is bounded by policy (see Validate).
 	Timeout time.Duration
-	// Projects is the attached project registry. It is empty for a V1 document
-	// and for a V2 document without projects.
+	// Projects is the attached project registry. It is empty for a document
+	// without projects.
 	Projects []Project
 }
 
-// fileJSONV1 is the V1 wire form: settings only. It is the exact struct a
-// pre-registry binary decodes into, so a V2 document (which carries the unknown
-// "projects" field and an unsupported schema_version) fails closed against it.
-type fileJSONV1 struct {
-	SchemaVersion  string `json:"schema_version"`
-	DefaultTimeout string `json:"default_timeout"`
-}
-
-// fileJSONV2 is the V2 wire form of File. Unknown fields are rejected by the
+// fileJSON is the wire form of File. Unknown fields are rejected by the
 // decoder (DisallowUnknownFields) at every level, so the schema fails closed —
 // including a project object that tries to smuggle in a workspace path.
-type fileJSONV2 struct {
+type fileJSON struct {
 	SchemaVersion  string        `json:"schema_version"`
 	DefaultTimeout string        `json:"default_timeout,omitempty"`
 	Projects       []projectJSON `json:"projects"`
@@ -109,13 +98,6 @@ func Load(opts Options) (rt Runtime, err error) {
 
 	rt = Runtime{Paths: paths}
 
-	// Validate the trusted state directory if it already exists (non-symlink
-	// directory, mode-private, owned by the effective user). A not-yet-created
-	// state dir is fine (later slices create it privately).
-	if err := statTrustedDirIfExists(paths.StateDir); err != nil {
-		return Runtime{}, err
-	}
-
 	// For the default (non-explicit) config, ConfigDir is the trusted app
 	// directory holding the config document; validate it if it exists. An
 	// explicit --config is an operator-provided path whose parent mode is not
@@ -161,22 +143,19 @@ func Load(opts Options) (rt Runtime, err error) {
 // WriteFile validates f and persists it crash-safely with owner-only
 // permissions, then reads it back and validates it again.
 //
-// Every write emits the current schema version, so the first mutation of a V1
-// document upgrades it to V2 — a document is never rewritten under a version
-// that cannot express its registry. A File that does not declare the current
-// version is rejected rather than silently upgraded; the mutation helpers
-// (WithProject, WithoutProject) set it.
+// A File that does not declare the current schema version is rejected rather
+// than silently upgraded; the mutation helpers (WithProject, WithoutProject)
+// set it.
 //
 // The registry is sorted by ID before marshalling, so the same set of projects
 // always produces the same bytes regardless of the order they were added in.
 //
-// The document is validated before any file is created, and — as in
-// The trusted directory is validated before the write: an
-// atomic rename must not be what turns a symlinked, mode-permissive or
-// foreign-owned directory into config authority. After the rename the file is
-// re-read through the same trusted path the loader uses and compared against
-// the intended document, so a write that landed as something else is reported
-// instead of trusted.
+// The document is validated before any file is created, and the trusted
+// directory before the write: an atomic rename must not be what turns a
+// symlinked, mode-permissive or foreign-owned directory into config authority.
+// After the rename the file is re-read through the same trusted path the loader
+// uses and compared against the intended document, so a write that landed as
+// something else is reported instead of trusted.
 //
 // Every returned error is redacted at the package boundary (redactErr leaves a
 // non-secret error untouched).
@@ -193,7 +172,7 @@ func WriteFile(path string, f File) (err error) {
 		return fmt.Errorf("config: %w", err)
 	}
 
-	wire := fileJSONV2{SchemaVersion: out.SchemaVersion, Projects: []projectJSON{}}
+	wire := fileJSON{SchemaVersion: out.SchemaVersion, Projects: []projectJSON{}}
 	if out.Timeout != 0 {
 		wire.DefaultTimeout = out.Timeout.String()
 	}
@@ -254,18 +233,9 @@ func verifyPersisted(path string, want File) error {
 func (f File) Validate() (err error) {
 	defer func() { err = redactErr(err) }()
 
-	switch f.SchemaVersion {
-	case ConfigSchemaVersionV1:
-		// V1 has no registry. Carrying projects under it would mean a document
-		// this binary could write but a V1 reader would silently ignore.
-		if len(f.Projects) > 0 {
-			return fmt.Errorf("schema_version %q cannot carry projects (want %q)",
-				ConfigSchemaVersionV1, ConfigSchemaVersionV2)
-		}
-	case ConfigSchemaVersionV2:
-	default:
-		return fmt.Errorf("schema_version %q is not supported (want %q or %q)",
-			f.SchemaVersion, ConfigSchemaVersionV1, ConfigSchemaVersionV2)
+	if f.SchemaVersion != ConfigSchemaVersion {
+		return fmt.Errorf("schema_version %q is not supported (want %q)",
+			f.SchemaVersion, ConfigSchemaVersion)
 	}
 
 	if f.Timeout != 0 {
@@ -277,9 +247,9 @@ func (f File) Validate() (err error) {
 }
 
 // parseFile decodes and strictly validates a config document. The declared
-// schema version selects the wire form, so each version is decoded by the exact
-// struct that defines it: a V1 document carrying "projects" is an unknown field
-// and fails closed, and no V2 field can be silently accepted under V1.
+// version is checked before the decode, so an unsupported document is rejected
+// by version rather than by whichever field happens to be unknown to the one
+// wire form we have.
 //
 // The returned error never contains the raw document bytes or secret-shaped
 // material: the raw pre-scan rejects unescaped secrets early, and redactErr on
@@ -294,42 +264,30 @@ func parseFile(data []byte) (f File, err error) {
 	}
 
 	// Probe the declared version first. The probe is deliberately non-strict
-	// about other fields — the version-specific decode below is the one that
-	// enforces the schema — but it still rejects malformed JSON and trailing
-	// data (json.Unmarshal accepts exactly one document).
+	// about other fields — the decode below is the one that enforces the schema
+	// — but it still rejects malformed JSON and trailing data (json.Unmarshal
+	// accepts exactly one document).
 	var probe struct {
 		SchemaVersion string `json:"schema_version"`
 	}
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return File{}, fmt.Errorf("invalid JSON: %w", err)
 	}
+	if probe.SchemaVersion != ConfigSchemaVersion {
+		return File{}, fmt.Errorf("schema_version %q is not supported (want %q)",
+			probe.SchemaVersion, ConfigSchemaVersion)
+	}
 
-	switch probe.SchemaVersion {
-	case ConfigSchemaVersionV1:
-		var raw fileJSONV1
-		if err := decodeStrict(data, &raw); err != nil {
-			return File{}, err
-		}
-		// V1 knows nothing about projects; it normalizes to an empty registry.
-		f = File{SchemaVersion: ConfigSchemaVersionV1}
-		if err := f.setTimeout(raw.DefaultTimeout); err != nil {
-			return File{}, err
-		}
-	case ConfigSchemaVersionV2:
-		var raw fileJSONV2
-		if err := decodeStrict(data, &raw); err != nil {
-			return File{}, err
-		}
-		f = File{SchemaVersion: ConfigSchemaVersionV2}
-		if err := f.setTimeout(raw.DefaultTimeout); err != nil {
-			return File{}, err
-		}
-		for _, rp := range raw.Projects {
-			f.Projects = append(f.Projects, Project{ID: rp.ID, DisplayName: rp.DisplayName, Remote: rp.Remote})
-		}
-	default:
-		return File{}, fmt.Errorf("schema_version %q is not supported (want %q or %q)",
-			probe.SchemaVersion, ConfigSchemaVersionV1, ConfigSchemaVersionV2)
+	var raw fileJSON
+	if err := decodeStrict(data, &raw); err != nil {
+		return File{}, err
+	}
+	f = File{SchemaVersion: ConfigSchemaVersion}
+	if err := f.setTimeout(raw.DefaultTimeout); err != nil {
+		return File{}, err
+	}
+	for _, rp := range raw.Projects {
+		f.Projects = append(f.Projects, Project{ID: rp.ID, DisplayName: rp.DisplayName, Remote: rp.Remote})
 	}
 
 	if err := f.Validate(); err != nil {

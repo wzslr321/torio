@@ -306,8 +306,8 @@ type Registry interface {
 // config path the CLI does and persists through the config package's
 // crash-safe write (private temp, fsync, atomic rename, read back and verify).
 type FileRegistry struct {
-	// Options are the resolved config inputs (--config / --state-dir plus the
-	// environment accessors) the invocation was started with.
+	// Options are the resolved config inputs (--config plus the environment
+	// accessors) the invocation was started with.
 	Options config.Options
 }
 

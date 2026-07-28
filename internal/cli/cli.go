@@ -35,7 +35,6 @@ type app struct {
 	verbose    bool
 	timeout    time.Duration
 	configPath string
-	stateDir   string
 	logger     *slog.Logger
 
 	// runtime is the resolved D2 configuration (paths + config document). It is
@@ -100,10 +99,10 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 	if a.newProjects == nil {
 		a.newProjects = func(adapter *lima.Adapter, opts lima.BootstrapOptions) projectService {
 			// The registry resolves the same canonical config path this
-			// invocation was started with, so --config/--state-dir apply to the
-			// project registry exactly as they do to everything else.
+			// invocation was started with, so --config applies to the project
+			// registry exactly as it does to everything else.
 			return projects.New(adapter, projects.FileRegistry{
-				Options: config.Options{ConfigPath: a.configPath, StateDir: a.stateDir},
+				Options: config.Options{ConfigPath: a.configPath},
 			}, opts)
 		}
 	}
@@ -160,15 +159,12 @@ func newRootCmd(a *app) *cobra.Command {
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			a.logger = newLogger(a.stderr, a.verbose)
 
-			// Resolve the D2 configuration: XDG paths plus --config/--state-dir,
+			// Resolve the D2 configuration: the XDG config path plus --config,
 			// loading and strictly validating the on-disk config document. A
 			// resolution/validation failure is a usage/schema error (exit 2).
 			// config.Load never surfaces secret-shaped material, and the final
 			// error renderer redacts known shapes as defense in depth.
-			rt, err := config.Load(config.Options{
-				ConfigPath: a.configPath,
-				StateDir:   a.stateDir,
-			})
+			rt, err := config.Load(config.Options{ConfigPath: a.configPath})
 			if err != nil {
 				return usageError(err.Error())
 			}
@@ -189,8 +185,7 @@ func newRootCmd(a *app) *cobra.Command {
 			a.logger.Debug("dispatching command", "command", cmd.Name(), "json", a.jsonOut)
 			a.logger.Debug("configuration resolved",
 				"config_file", rt.Paths.ConfigFile,
-				"config_loaded", rt.ConfigLoaded,
-				"state_dir", rt.Paths.StateDir)
+				"config_loaded", rt.ConfigLoaded)
 			a.logger.Debug("operation bounded", "timeout", a.timeout)
 			return nil
 		},
@@ -203,7 +198,6 @@ func newRootCmd(a *app) *cobra.Command {
 	root.PersistentFlags().BoolVar(&a.verbose, "verbose", false, "emit more redacted diagnostics on stderr")
 	root.PersistentFlags().DurationVar(&a.timeout, "timeout", config.DefaultTimeout, "bound the operation; cannot exceed the policy maximum")
 	root.PersistentFlags().StringVar(&a.configPath, "config", "", "path to an explicit non-secret config file")
-	root.PersistentFlags().StringVar(&a.stateDir, "state-dir", "", "override the state directory (test/diagnostic)")
 
 	root.AddCommand(newVersionCmd(a))
 	root.AddCommand(newVMCmd(a))
