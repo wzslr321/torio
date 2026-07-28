@@ -39,12 +39,12 @@ generated from one source, so the two cannot drift.
 
 <!-- include: desktop-workspace level=3 -->
 
-Supplying provider credentials, selecting a model, and holding an actual chat
-are **manual human steps**. Credential entry is interactive and `torio vm ssh`
-forwards no stdin or TTY, so it cannot be scripted through the control plane —
-run the provider picker as `hermes` in a shell you opened yourself.
+<!-- include: provider-auth level=2 heading="9. Configure a model provider" -->
 
-<!-- include: project-push level=2 heading="9. Push, when you decide to" -->
+Selecting a model and holding an actual chat are **manual human steps** beyond
+this runbook, as is the credential entry the step above describes.
+
+<!-- include: project-push level=2 heading="10. Push, when you decide to" -->
 
 ## Stopping
 

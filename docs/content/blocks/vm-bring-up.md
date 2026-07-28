@@ -1,25 +1,31 @@
 ## Start and verify the VM {#vm-bring-up}
 
-If the VM does not exist yet, create it from the trusted template:
+Create the VM from the trusted template, start it, then reconcile and verify it.
+Run all three in order: each is idempotent, so this is also the sequence you
+re-run later.
 
 ```bash
 torio vm init
-```
-
-If `torio vm status` did not report `Running`, start the VM, then reconcile and
-verify it:
-
-```bash
 torio vm start
-torio vm bootstrap --timeout 15m
+torio vm bootstrap --timeout 10m
 ```
+
+`init` prints `next: torio vm start` whether it created the instance or found a
+compatible one, so there is no state in which you skip the second command.
 
 `init` creates the Gate-0-pinned Lima instance (or succeeds idempotently when a
 compatible one already exists) and verifies the post-create list output before
 reporting success. `start` is idempotent and confirms a `Running` post-state.
 `bootstrap` operates only on the existing target after a verified `Running`
-precondition, through the typed Lima boundary. Hermes Agent install can be slow —
-use an ample timeout (for example `--timeout 15m`). On a fully-reconciled target
+precondition, through the typed Lima boundary. Hermes Agent install can be slow,
+so give it room — but `10m` is the policy maximum for any single operation, and
+asking for more is refused before any work starts:
+
+```text
+torio: timeout 15m0s exceeds policy maximum 10m0s
+```
+
+On a fully-reconciled target
 it mutates nothing; when the pinned launcher is missing it installs Hermes Agent
 at the Gate-0 commit (verifiable postcondition: git HEAD pin + launcher path),
 then reconciles the PATH shim. It:

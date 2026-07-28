@@ -9,15 +9,26 @@ go build -o torio ./cmd/torio
 sudo install -m 755 torio /usr/local/bin/torio
 ```
 
-Confirm it resolves and runs, using a read-only command:
+Confirm it resolves and runs:
 
 ```bash
 which torio
-torio vm status
+torio version
 ```
 
-You should get one line naming the VM and its state, for example
-`torio: Stopped`.
+`version` is the only place the operator reads which build they have:
+
+```text
+torio dev (commit …, built …)
+go1.26.5 darwin/arm64
+```
+
+A binary built straight from a checkout calls itself `dev`; the commit is the
+one you built.
+
+`torio vm status` also works from here and answers `torio: not_found` until the
+next step creates the VM. That is the expected answer on a Mac that has never
+run Torio, not a failure — it exits `0`.
 
 > Prefer not to install system-wide? Any directory already on your `PATH` works
 > — for example `install -m 755 torio ~/.local/bin/torio`. If you skip this

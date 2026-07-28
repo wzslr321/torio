@@ -40,15 +40,26 @@ go build -o torio ./cmd/torio
 sudo install -m 755 torio /usr/local/bin/torio
 ```
 
-Confirm it resolves and runs, using a read-only command:
+Confirm it resolves and runs:
 
 ```bash
 which torio
-torio vm status
+torio version
 ```
 
-You should get one line naming the VM and its state, for example
-`torio: Stopped`.
+`version` is the only place the operator reads which build they have:
+
+```text
+torio dev (commit …, built …)
+go1.26.5 darwin/arm64
+```
+
+A binary built straight from a checkout calls itself `dev`; the commit is the
+one you built.
+
+`torio vm status` also works from here and answers `torio: not_found` until the
+next step creates the VM. That is the expected answer on a Mac that has never
+run Torio, not a failure — it exits `0`.
 
 > Prefer not to install system-wide? Any directory already on your `PATH` works
 > — for example `install -m 755 torio ~/.local/bin/torio`. If you skip this
@@ -59,26 +70,32 @@ You should get one line naming the VM and its state, for example
 
 ## 2. Create and verify the VM
 
-If the VM does not exist yet, create it from the trusted template:
+Create the VM from the trusted template, start it, then reconcile and verify it.
+Run all three in order: each is idempotent, so this is also the sequence you
+re-run later.
 
 ```bash
 torio vm init
-```
-
-If `torio vm status` did not report `Running`, start the VM, then reconcile and
-verify it:
-
-```bash
 torio vm start
-torio vm bootstrap --timeout 15m
+torio vm bootstrap --timeout 10m
 ```
+
+`init` prints `next: torio vm start` whether it created the instance or found a
+compatible one, so there is no state in which you skip the second command.
 
 `init` creates the Gate-0-pinned Lima instance (or succeeds idempotently when a
 compatible one already exists) and verifies the post-create list output before
 reporting success. `start` is idempotent and confirms a `Running` post-state.
 `bootstrap` operates only on the existing target after a verified `Running`
-precondition, through the typed Lima boundary. Hermes Agent install can be slow —
-use an ample timeout (for example `--timeout 15m`). On a fully-reconciled target
+precondition, through the typed Lima boundary. Hermes Agent install can be slow,
+so give it room — but `10m` is the policy maximum for any single operation, and
+asking for more is refused before any work starts:
+
+```text
+torio: timeout 15m0s exceeds policy maximum 10m0s
+```
+
+On a fully-reconciled target
 it mutates nothing; when the pinned launcher is missing it installs Hermes Agent
 at the Gate-0 commit (verifiable postcondition: git HEAD pin + launcher path),
 then reconciles the PATH shim. It:
@@ -283,9 +300,14 @@ an existing vault is never silently absorbed.
 
 It configures no remote and pushes nothing. The Brain stays on the VM.
 
-> If a Hermes Desktop session was already open, restart it. Hermes caches a
-> skill's prompt per backend process, so an open session will not see
-> `torio-brain` until it reconnects.
+> If the backend was already running, restart it — `torio serve restart
+> --timeout 2m`. Hermes caches the assembled skills prompt **in the backend
+> process**, keyed on the skills directory rather than on the files in it, and
+> Torio installs the skill by writing it. Reconnecting Desktop is not enough:
+> the client reconnects, the process does not, and the cache it holds is the one
+> that decides whether `torio-brain` is offered. `torio brain status` reports
+> that the file is correct and says in as many words that it cannot tell whether
+> a running session has loaded it.
 
 ### Bring an existing vault in
 
@@ -348,8 +370,10 @@ and passes none to the model. A remote the guest cannot already read without
 prompting fails closed:
 
 ```text
-torio: project add: guest cannot read the remote noninteractively   (exit 7)
+torio: project add: auth: the guest cannot read the remote noninteractively; provision access for the hermes user out of band
 ```
+
+That is exit `7`.
 
 The fix is to grant the guest read access yourself, on the guest, outside Torio
 — not to re-run the command. Do not work around it by copying a checkout from
@@ -422,12 +446,36 @@ Two dead ends worth skipping: the folder chip in the status bar opens a context
 menu, not a project switcher; and Desktop's **Terminal** tab is a shell on your
 **Mac**, not on the guest.
 
-Supplying provider credentials, selecting a model, and holding an actual chat
-are **manual human steps**. Credential entry is interactive and `torio vm ssh`
-forwards no stdin or TTY, so it cannot be scripted through the control plane —
-run the provider picker as `hermes` in a shell you opened yourself.
+## 9. Configure a model provider
 
-## 9. Push, when you decide to
+Until a provider is configured, starting a session fails at agent init — for
+example `agent init failed: No Codex credentials stored`. Check what the guest
+currently has:
+
+```bash
+torio vm ssh -- sudo -u hermes -- hermes status
+```
+
+`torio vm ssh` forwards no stdin or TTY by design, so the interactive picker cannot
+be driven through the control plane. Use an interactive shell on the guest
+instead. `limactl shell` logs you in as the Lima user, so become the `hermes`
+service identity explicitly:
+
+```bash
+limactl shell torio           # interactive shell in the VM (Lima user)
+sudo -iu hermes                     # become the hermes service identity
+hermes model                        # interactive provider/model picker
+# or, for one provider's credential:
+hermes auth add <provider>
+```
+
+Which provider and credential to use is the operator's judgement. The secret
+never enters the repository, its evidence, or any pull request or comment.
+
+Selecting a model and holding an actual chat are **manual human steps** beyond
+this runbook, as is the credential entry the step above describes.
+
+## 10. Push, when you decide to
 
 The persistent Hermes backend has read access to your checkouts and nothing
 more. It cannot push, and no credential of yours is stored anywhere it could
