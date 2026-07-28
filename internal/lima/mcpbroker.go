@@ -69,7 +69,7 @@ func (r *MCPBrokerReport) record(name string, ok bool, detail string) {
 func (a *Adapter) VerifyMCPBroker(ctx context.Context) (MCPBrokerReport, error) {
 	rep := MCPBrokerReport{Instance: InstanceName}
 
-	steps := append(brokerIdentitySteps(a), a.verifyNoHermesMCPTokens)
+	steps := append(brokerIdentitySteps(a), a.verifyNoHermesMCPTokens, a.verifyBrokerSockets)
 	for _, step := range steps {
 		if err := step(ctx, &rep); err != nil {
 			return rep, err

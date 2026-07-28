@@ -19,6 +19,7 @@ func okMCPScript() []scriptedResp {
 		out("directory\n"),                                               // stat %F broker home
 		out("torio-mcp:torio-mcp 700\n"),                                 // stat %U:%G %a broker home
 		{res: execx.Result{ExitCode: 1, Stderr: []byte("no such file")}}, // stat mcp-tokens: absent
+		{res: execx.Result{ExitCode: 1, Stderr: []byte("no such file")}}, // stat /run/torio-mcp: no daemon yet
 	}
 }
 
@@ -114,7 +115,9 @@ func TestMCPStatusBrokenCustodyIsVerification(t *testing.T) {
 func TestMCPStatusLeftoverTokensReportsCountNotNames(t *testing.T) {
 	script := okMCPScript()
 	script[6] = scriptedResp{res: execx.Result{Stdout: []byte("directory\n")}}
-	script = append(script, scriptedResp{res: execx.Result{Stdout: []byte("xxx")}})
+	// Spliced, not appended: the socket probe follows the token probes, so an
+	// extra reply at the end would be consumed by the wrong check.
+	script = append(script[:7], append([]scriptedResp{{res: execx.Result{Stdout: []byte("xxx")}}}, script[7:]...)...)
 	code, stdout, _ := runVMWithFake(t, []string{"mcp", "status", "--json"}, &fakeLimaRunner{script: script})
 	if code != int(ExitVerification) {
 		t.Fatalf("exit = %d, want %d (verification)", code, int(ExitVerification))

@@ -27,6 +27,7 @@ func okBrokerScript() []scriptedResponse {
 		{result: stdoutResult("directory\n")},                                 // stat -c %F home
 		{result: stdoutResult("torio-mcp:torio-mcp 700\n")},                   // stat -c %U:%G %a home
 		{result: exitResult(1, "", "stat: cannot statx '...': No such file")}, // stat mcp-tokens: absent
+		{result: exitResult(1, "", "no such file")},                           // stat /run/torio-mcp: no daemon yet
 	}
 }
 
@@ -47,6 +48,7 @@ func TestVerifyMCPBrokerHappyPath(t *testing.T) {
 		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", TorioMCPHome),
 		brokerProbeArgs("sudo", "-n", "stat", "-c", "%U:%G %a", TorioMCPHome),
 		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", HermesMCPTokensPath),
+		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", TorioMCPSocketDir),
 	}
 	if fr.callCount() != len(wantArgs) {
 		t.Fatalf("probe count = %d, want %d", fr.callCount(), len(wantArgs))
@@ -164,7 +166,7 @@ func TestVerifyMCPBrokerHomeIsGroupReadable(t *testing.T) {
 func TestVerifyMCPBrokerLeftoverTokens(t *testing.T) {
 	script := okBrokerScript()
 	script[6] = scriptedResponse{result: stdoutResult("directory\n")}
-	script = append(script, scriptedResponse{result: stdoutResult("xx")})
+	script = insertAt(script, 7, scriptedResponse{result: stdoutResult("xx")})
 	fr := &fakeRunner{script: script}
 	a := New(fr)
 
@@ -193,7 +195,7 @@ func TestVerifyMCPBrokerLeftoverTokens(t *testing.T) {
 func TestVerifyMCPBrokerEmptyTokensDirIsClean(t *testing.T) {
 	script := okBrokerScript()
 	script[6] = scriptedResponse{result: stdoutResult("directory\n")}
-	script = append(script, scriptedResponse{result: stdoutResult("")})
+	script = insertAt(script, 7, scriptedResponse{result: stdoutResult("")})
 	fr := &fakeRunner{script: script}
 	a := New(fr)
 
@@ -223,4 +225,15 @@ func assertFailedCheck(t *testing.T, rep MCPBrokerReport, name string) CheckResu
 	}
 	t.Fatalf("report has no check named %q; checks: %+v", name, rep.Checks)
 	return CheckResult{}
+}
+
+// insertAt splices a scripted response into the middle of a script. Probes run
+// in a fixed order, so a test that needs an extra reply must place it where the
+// adapter will ask for it — appending to the end silently feeds it to a later
+// check instead.
+func insertAt(script []scriptedResponse, i int, extra ...scriptedResponse) []scriptedResponse {
+	out := make([]scriptedResponse, 0, len(script)+len(extra))
+	out = append(out, script[:i]...)
+	out = append(out, extra...)
+	return append(out, script[i:]...)
 }
