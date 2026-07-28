@@ -44,8 +44,8 @@ func TestInitFreshBrainUsesStagingCommitAndRegistersProject(t *testing.T) {
 	if g.saw(" sh ") || g.saw("sh -c") || g.saw("--use") {
 		t.Errorf("init used a forbidden shell or --use: %v", g.calls)
 	}
-	if len(g.payloads()) != 5 {
-		t.Fatalf("guest payload count = %d, want lock token plus 3 scaffold files plus the retrieval skill",
+	if len(g.payloads()) != 6 {
+		t.Fatalf("guest payload count = %d, want lock token plus 3 scaffold files plus the retrieval skill and its category description",
 			len(g.payloads()))
 	}
 }
@@ -746,8 +746,13 @@ func TestInitRefusesToWriteThroughASymlinkedSkillPath(t *testing.T) {
 // here stops a later refactor from quietly moving it under the vault, under a
 // project, or under the Hermes profile root itself.
 func TestRetrievalSkillInstallsUnderTheGlobalHermesSkillsRoot(t *testing.T) {
-	if SkillPath != lima.HermesProfilePath+"/skills/"+SkillName {
-		t.Fatalf("SkillPath = %q, want $HERMES_HOME/skills/%s", SkillPath, SkillName)
+	if SkillPath != lima.HermesProfilePath+"/skills/"+SkillCategory+"/"+SkillName {
+		t.Fatalf("SkillPath = %q, want $HERMES_HOME/skills/%s/%s", SkillPath, SkillCategory, SkillName)
+	}
+	// One level of category, no deeper: Hermes derives the category from the
+	// first path segment, so a nested path would name a category nobody chose.
+	if strings.Count(strings.TrimPrefix(SkillPath, lima.HermesProfilePath+"/skills/"), "/") != 1 {
+		t.Fatalf("SkillPath = %q, want exactly one category segment above the skill", SkillPath)
 	}
 	if SkillFilePath != SkillPath+"/SKILL.md" {
 		t.Fatalf("SkillFilePath = %q, want %s/SKILL.md", SkillFilePath, SkillPath)
@@ -760,5 +765,70 @@ func TestRetrievalSkillInstallsUnderTheGlobalHermesSkillsRoot(t *testing.T) {
 	// would be loadable.
 	if strings.HasPrefix(skillStagingPath, lima.HermesProfilePath+"/skills") {
 		t.Fatalf("skillStagingPath %q is inside the skill discovery root", skillStagingPath)
+	}
+}
+
+// A guest installed before the category move carries a second SKILL.md under
+// the same skill name. Hermes does not pick one: skill_view collects every
+// candidate and, on more than one, returns an "Ambiguous skill name" error
+// instead. Leaving the old copy behind would therefore turn a visibility
+// improvement into a total loss of retrieval, so init must retire it.
+func TestInitRetiresThePreCategorySkillInstallation(t *testing.T) {
+	g := initializedFake()
+	g.legacySkillPresent = true
+	if _, err := New(g).Init(context.Background()); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if !g.saw("rm -f -- " + legacySkillPath + "/SKILL.md") {
+		t.Errorf("init left the superseded skill in place: %v", g.calls)
+	}
+	// rmdir, never `rm -r`: anything else under the old path is not Torio's,
+	// and with SKILL.md gone the name collision is already resolved.
+	if !g.saw("rmdir -- " + legacySkillPath) {
+		t.Errorf("init did not try to sweep up the emptied legacy directory")
+	}
+	if g.saw("rm -rf -- " + legacySkillPath) {
+		t.Errorf("init removed the legacy path recursively: %v", g.calls)
+	}
+}
+
+// Status has to see the collision too, otherwise an operator whose retrieval
+// silently stopped working is told everything is fine.
+func TestStatusReportsDriftWhileThePreCategorySkillSurvives(t *testing.T) {
+	g := initializedFake().withInstalledSkill(t)
+	g.legacySkillPresent = true
+	report, err := New(g).Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if report.SkillState != SkillDrift {
+		t.Errorf("skill state = %q, want %q while a second copy of the name exists", report.SkillState, SkillDrift)
+	}
+}
+
+// The category description is the only place in the skill index not truncated
+// at 60 characters, and Hermes reads it from the frontmatter `description`
+// key — a body-only file renders nothing at all.
+func TestCategoryDescriptionCarriesTheRuleInItsFrontmatter(t *testing.T) {
+	payload, _, err := retrievalCategory()
+	if err != nil {
+		t.Fatalf("retrievalCategory() error = %v", err)
+	}
+	text := string(payload)
+	if !strings.HasPrefix(text, "---\n") {
+		t.Fatalf("category description has no frontmatter block")
+	}
+	end := strings.Index(text[4:], "\n---")
+	if end < 0 {
+		t.Fatalf("category description frontmatter is unterminated")
+	}
+	front := text[4 : 4+end]
+	if !strings.Contains(front, "description:") {
+		t.Fatalf("category frontmatter has no description key; Hermes would render nothing:\n%s", front)
+	}
+	for _, want := range []string{Path, "bulk"} {
+		if !strings.Contains(front, want) {
+			t.Errorf("category description does not mention %q; it is the uncapped slot, so it should:\n%s", want, front)
+		}
 	}
 }

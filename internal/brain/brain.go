@@ -31,6 +31,33 @@ const (
 	// each SKILL.md, so one installed copy is visible in every session and
 	// every working directory. There is no project-local skills directory.
 	SkillName = "torio-brain"
+	// SkillCategory is the directory the skill is grouped under, and it is a
+	// deliberate choice rather than a tidy-up.
+	//
+	// Hermes has no skill routing: it renders a static, alphabetically ordered
+	// index of `name: description` lines into the stable system prompt, and the
+	// model picks by calling skill_view(name). Two properties of that index
+	// decide how visible a skill is, and Torio was losing on both. Categories
+	// render in sorted order, and a top-level skill is its own category — so
+	// `torio-brain` rendered 21st of 23, second from last. A category may also
+	// carry a DESCRIPTION.md whose text is NOT subject to the 60-character cap
+	// that truncates skill descriptions, and a top-level skill cannot have one.
+	//
+	// The bundled competitor exploits exactly that: `note-taking/obsidian`
+	// describes itself in 59 characters, sits 15th, and its category adds 133
+	// uncapped characters. In Task 23 Run B the session reached for it first,
+	// resolved a vault path that does not exist on this guest, and only
+	// recovered to the real Brain afterwards.
+	//
+	// "brain" sorts near the front and gives the skill a category description.
+	// Neither is enforcement — see EnvironmentHint for what carries the rule
+	// when the model does not load this skill at all.
+	SkillCategory = "brain"
+	// SkillCategoryPath is the guest directory for the skill's category.
+	SkillCategoryPath = lima.HermesProfilePath + "/skills/" + SkillCategory
+	// SkillCategoryFilePath holds the category description. Hermes reads the
+	// text from this file's YAML frontmatter `description` key, not its body.
+	SkillCategoryFilePath = SkillCategoryPath + "/DESCRIPTION.md"
 	// SkillPath is the guest directory that holds the retrieval skill.
 	//
 	// Torio writes the file directly rather than going through `hermes skills`
@@ -40,9 +67,39 @@ const (
 	// product surface must not be prunable. The cost of a direct write is that
 	// the per-process skill prompt cache is not invalidated, so `brain status`
 	// says so instead of pretending the skill is live in open sessions.
-	SkillPath = lima.HermesProfilePath + "/skills/" + SkillName
+	SkillPath = SkillCategoryPath + "/" + SkillName
 	// SkillFilePath is the only file Torio installs under SkillPath.
 	SkillFilePath = SkillPath + "/SKILL.md"
+	// legacySkillPath is where releases before the category move installed the
+	// skill. Removing it is not tidiness: skill_view collects every candidate
+	// matching a name and, on more than one, refuses outright with "Ambiguous
+	// skill name … Refusing to guess" rather than picking either. Leaving the
+	// old copy behind would therefore break retrieval completely — a worse
+	// outcome than never having moved it.
+	legacySkillPath = lima.HermesProfilePath + "/skills/" + SkillName
+
+	// EnvironmentHint is handed to the backend as HERMES_ENVIRONMENT_HINT, an
+	// explicit seam Hermes offers a host that wraps it: the text is appended to
+	// the stable system prompt of every session, uncapped, without forking the
+	// identity slot. Torio sets it on the user unit it already generates, so no
+	// file the operator owns is edited to deliver it.
+	//
+	// It exists because the skill index alone cannot be relied on. A hint is
+	// read whichever skill the model picks, and whether it picks one at all —
+	// so the vault path and the no-bulk-read rule stop depending on a routing
+	// contest against a bundled skill that recommends listing every note.
+	//
+	// This is a prompt instruction and nothing more. It does not enforce the
+	// rule: the agent runs as the same user that owns the vault, so no
+	// permission stops a bulk read. Do not describe it to an operator as a
+	// guarantee.
+	//
+	// Constraints from the transport: one line, and free of `$`, `%` and `"`,
+	// which systemd would expand or terminate the quoted value on.
+	EnvironmentHint = "This machine is managed by Torio. The user's private notes are one Markdown vault at " +
+		Path + "; there is no other vault, and no vault path to resolve from an environment variable " +
+		"or a fallback location. Read it with the " + SkillName + " skill: search for the few notes " +
+		"that answer the question, then read those. Never list or read the vault in bulk."
 
 	stagingPath = lima.HermesHome + "/.torio-brain-staging"
 	// skillStagingPath is deliberately outside the skill discovery root so a
@@ -51,7 +108,8 @@ const (
 	lockPath         = lima.HermesHome + "/.torio-brain-init.lock"
 	staleLockAge     = "10"
 
-	skillTemplate = "templates/skill/SKILL.md"
+	skillTemplate         = "templates/skill/SKILL.md"
+	skillCategoryTemplate = "templates/skill/DESCRIPTION.md"
 )
 
 var canonicalDirectories = []string{
@@ -73,7 +131,7 @@ var canonicalFiles = []string{
 //go:embed templates/*.md
 var scaffoldFS embed.FS
 
-//go:embed templates/skill/SKILL.md
+//go:embed templates/skill/SKILL.md templates/skill/DESCRIPTION.md
 var skillFS embed.FS
 
 // retrievalSkill returns the embedded skill payload and its content digest. The
@@ -81,7 +139,19 @@ var skillFS embed.FS
 // reading Brain content: Torio compares the guest file's sha256 against this,
 // never the file's bytes.
 func retrievalSkill() ([]byte, string, error) {
-	payload, err := skillFS.ReadFile(skillTemplate)
+	return embeddedPayload(skillTemplate)
+}
+
+// retrievalCategory returns the embedded category description and its digest.
+// It is installed and drift-checked exactly like the skill payload: the
+// category line is a product surface too, and an operator who edits it changes
+// what every session is told about the vault.
+func retrievalCategory() ([]byte, string, error) {
+	return embeddedPayload(skillCategoryTemplate)
+}
+
+func embeddedPayload(name string) ([]byte, string, error) {
+	payload, err := skillFS.ReadFile(name)
 	if err != nil {
 		return nil, "", err
 	}

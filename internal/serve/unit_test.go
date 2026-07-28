@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/wzslr321/torio/internal/brain"
 )
 
 // TestRenderUnitMatchesGolden locks the exact bytes of the generated user unit.
@@ -45,5 +47,38 @@ func TestRenderUnitEnforcesInvariants(t *testing.T) {
 		if strings.Contains(u, forbidden) {
 			t.Errorf("unit contains a non-loopback bind marker %q", forbidden)
 		}
+	}
+}
+
+// The hint is the one channel that reaches a session regardless of which skill
+// the model loads, so what it says is a product decision, not formatting.
+func TestUnitCarriesTheBrainEnvironmentHint(t *testing.T) {
+	u := string(renderUnit())
+	if !strings.Contains(u, "Environment=\"HERMES_ENVIRONMENT_HINT=") {
+		t.Fatalf("unit does not set HERMES_ENVIRONMENT_HINT:\n%s", u)
+	}
+	for _, want := range []string{
+		brain.Path,      // where the vault is
+		brain.SkillName, // what to read it with
+		"bulk",          // the rule the bundled competitor lacks
+	} {
+		if !strings.Contains(u, want) {
+			t.Errorf("environment hint does not mention %q:\n%s", want, brain.EnvironmentHint)
+		}
+	}
+}
+
+// systemd would expand or terminate the value early on these, and a truncated
+// hint is worse than none: it would deliver half a sentence to every session.
+func TestEnvironmentHintSurvivesSystemdQuoting(t *testing.T) {
+	for _, forbidden := range []string{"\n", "\"", "$", "%", "\\"} {
+		if strings.Contains(brain.EnvironmentHint, forbidden) {
+			t.Errorf("environment hint contains %q, which systemd does not carry verbatim in a quoted value", forbidden)
+		}
+	}
+	// One Environment= line per directive: a stray newline would silently make
+	// the remainder of the hint an unparsable unit directive.
+	if got := strings.Count(string(renderUnit()), "HERMES_ENVIRONMENT_HINT"); got != 1 {
+		t.Errorf("HERMES_ENVIRONMENT_HINT appears %d times, want exactly 1", got)
 	}
 }
