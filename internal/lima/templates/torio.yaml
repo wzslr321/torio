@@ -7,8 +7,10 @@
 # Torio V1 product Lima template (embedded).
 # Pins and layout come from docs/spike-results/v1-onboarding-20260727T115633Z/FINDINGS.md
 # and spikes/v1-onboarding/torio-spike.yaml (promoted Gate 0 path).
-# Placeholders substituted by internal/lima.Init before limactl create:
-#   __TORIO_OPERATOR_USER__  __TORIO_CPUS__  __TORIO_MEMORY__  __TORIO_DISK__
+# internal/lima.Init substitutes the operator user, cpus, memory, disk and the
+# operator shell helper before limactl create. Their tokens are deliberately not
+# spelled out here: substitution is a plain string replace over the whole file,
+# so any occurrence — including one inside a comment or a guard — is rewritten.
 # No secrets. No broad macOS home/project mount. No rootful Docker for hermes.
 minimumLimaVersion: "2.0.0"
 
@@ -87,10 +89,16 @@ provision:
       #!/bin/bash
       set -euxo pipefail
       OPERATOR_USER="__TORIO_OPERATOR_USER__"
-      if [ "${OPERATOR_USER}" = "__TORIO_OPERATOR_USER__" ] || [ -z "${OPERATOR_USER}" ]; then
-        echo "torio template: OPERATOR_USER placeholder not substituted" >&2
-        exit 1
-      fi
+      # Matched as a glob, never spelled out as the placeholder. The renderer
+      # substitutes every occurrence of the exact token, so a guard that named
+      # it compared the value against itself, fired on every correctly rendered
+      # template, and left the operator out of torio-projects for good.
+      case "${OPERATOR_USER}" in
+        "" | __TORIO_*)
+          echo "torio template: OPERATOR_USER placeholder not substituted" >&2
+          exit 1
+          ;;
+      esac
       if [ "$(id -un)" != "${OPERATOR_USER}" ]; then
         echo "torio template: login identity $(id -un) != configured ${OPERATOR_USER}" >&2
         exit 1
