@@ -3,6 +3,7 @@ package mcpbroker
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"time"
 	"unicode/utf8"
@@ -40,10 +41,20 @@ type AuditRecord struct {
 	// evidence rather than a note: ADR-0022 puts identity in the kernel precisely
 	// so no presented secret can stand in for it.
 	UID uint32
-	// Allowed is the verdict. The Reason behind a denial is deliberately not
-	// recorded: it is derivable from the policy documents, which are readable, and
-	// every field here is one an operator must be able to justify keeping.
+	// Allowed is the verdict.
 	Allowed bool
+	// Reason is why. It is recorded rather than left to be derived from the
+	// policy documents, because deriving it needs the policy as it stood when
+	// the decision was taken and nothing keeps that: after one edit the
+	// reconstruction is a guess. It also separates two denials that mean
+	// different things — a call addressed to a service that was never configured
+	// reads as probing, a call naming a tool outside an existing grant reads as
+	// an agent being steered past its grant.
+	//
+	// It is safe to record precisely because it is a closed enum: one of a fixed
+	// set of tokens, never caller text, so it cannot become somewhere a payload
+	// hides.
+	Reason Reason
 }
 
 // maxAuditFieldLen bounds a caller-supplied name in a rendered audit line. A
@@ -66,6 +77,7 @@ type auditLineJSON struct {
 	Tool      string `json:"tool"`
 	UID       uint32 `json:"uid"`
 	Decision  string `json:"decision"`
+	Reason    string `json:"reason"`
 }
 
 // WriteAudit renders rec as one JSON object on one line of w.
@@ -100,15 +112,38 @@ func WriteAudit(w io.Writer, rec AuditRecord) error {
 	if rec.Allowed {
 		decision = "allow"
 	}
+	// A verdict and its reason must agree. An AuditRecord whose Allowed is true
+	// while Reason still holds its zero value would render an "allow" line
+	// reading "unknown_service" — a line that is worse than no line, because an
+	// operator would reasonably believe it. Refuse it instead of rendering it.
+	if rec.Allowed != (rec.Reason == ReasonGranted) {
+		return fmt.Errorf("audit record is incoherent: allowed=%t with reason %q", rec.Allowed, auditReason(rec.Reason))
+	}
+
 	line := auditLineJSON{
 		Timestamp: rec.Time.UTC().Format(time.RFC3339),
 		Service:   boundAuditField(rec.Service),
 		Tool:      boundAuditField(rec.Tool),
 		UID:       rec.UID,
 		Decision:  decision,
+		Reason:    auditReason(rec.Reason),
 	}
 
 	return json.NewEncoder(w).Encode(line)
+}
+
+// auditReason renders the decision reason as one of a closed token set. An
+// out-of-range value becomes "unknown" rather than reaching the line as
+// anything caller-influenced: the field's safety rests entirely on it being a
+// fixed vocabulary, so an unrecognised value must degrade to another fixed
+// token, never to free text.
+func auditReason(r Reason) string {
+	switch r {
+	case ReasonUnknownService, ReasonToolNotGranted, ReasonGranted:
+		return r.String()
+	default:
+		return "unknown"
+	}
 }
 
 // boundAuditField truncates a caller-supplied name to maxAuditFieldLen bytes,

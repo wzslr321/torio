@@ -31,6 +31,11 @@ func TestAuditRecordCannotCarryContent(t *testing.T) {
 		"Tool":    reflect.String,
 		"UID":     reflect.Uint32,
 		"Allowed": reflect.Bool,
+		// Reason is admitted on the same terms as the rest: a Uint8 over a closed
+		// enum can hold one of a fixed set of tokens and nothing else. It is here
+		// because a denial cannot be triaged once the policy file has been edited,
+		// not because it was convenient. Any further field must clear the same bar.
+		"Reason": reflect.Uint8,
 	}
 
 	if rt.NumField() != len(want) {
@@ -64,12 +69,17 @@ func TestAuditRecordCannotCarryContent(t *testing.T) {
 // decisionAt builds a record with a fixed instant, so a rendered line is
 // comparable byte for byte.
 func decisionAt(service, tool string, uid uint32, allowed bool) AuditRecord {
+	reason := ReasonToolNotGranted
+	if allowed {
+		reason = ReasonGranted
+	}
 	return AuditRecord{
 		Time:    time.Date(2026, 7, 29, 11, 4, 5, 0, time.UTC),
 		Service: service,
 		Tool:    tool,
 		UID:     uid,
 		Allowed: allowed,
+		Reason:  reason,
 	}
 }
 
@@ -89,8 +99,8 @@ func TestWriteAuditRendersOneLinePerRecord(t *testing.T) {
 	}
 
 	want := []string{
-		`{"ts":"2026-07-29T11:04:05Z","service":"atlassian","tool":"getJiraIssue","uid":1001,"decision":"allow"}`,
-		`{"ts":"2026-07-29T11:04:05Z","service":"atlassian","tool":"deleteJiraProject","uid":1001,"decision":"deny"}`,
+		`{"ts":"2026-07-29T11:04:05Z","service":"atlassian","tool":"getJiraIssue","uid":1001,"decision":"allow","reason":"granted"}`,
+		`{"ts":"2026-07-29T11:04:05Z","service":"atlassian","tool":"deleteJiraProject","uid":1001,"decision":"deny","reason":"tool_not_granted"}`,
 	}
 	for i, w := range want {
 		if lines[i] != w {
@@ -112,7 +122,11 @@ func TestWriteAuditRendersOnlyThePermittedKeys(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("audit line is not one JSON object: %v", err)
 	}
-	want := []string{"ts", "service", "tool", "uid", "decision"}
+	// "reason" was added deliberately: it is a closed enum, carries no payload,
+	// and a denial cannot be triaged after the policy has been edited without it.
+	// Every other addition must be argued the same way — that is what this
+	// assertion is for.
+	want := []string{"ts", "service", "tool", "uid", "decision", "reason"}
 	if len(got) != len(want) {
 		t.Fatalf("keys = %v, want exactly %v", slices.Sorted(maps.Keys(got)), want)
 	}
@@ -189,4 +203,68 @@ func TestWriteAuditRejectsRecordWithoutTimestamp(t *testing.T) {
 	if buf.Len() != 0 {
 		t.Errorf("rejected record still wrote %q", buf.String())
 	}
+}
+
+// TestAuditRecordsTheDenialReason: the reason is derivable from the policy
+// documents only if you hold the policy as it was when the decision was taken,
+// and nobody keeps that. Recorded at decision time it is evidence; reconstructed
+// afterwards from a file that has since been edited it is a guess.
+//
+// It also separates two denials that mean different things operationally: a
+// call addressed to a service that was never configured reads as probing, a
+// call naming a tool outside an existing grant reads as an agent being steered
+// past its grant. Both are one fixed token, so neither can carry a payload.
+func TestAuditRecordsTheDenialReason(t *testing.T) {
+	cases := []struct {
+		name   string
+		rec    AuditRecord
+		expect string
+	}{
+		{"unknown service", AuditRecord{Time: auditFixedTime(), Service: "nope", Tool: "search", Reason: ReasonUnknownService}, "unknown_service"},
+		{"tool not granted", AuditRecord{Time: auditFixedTime(), Service: "atlassian", Tool: "createJiraIssue", Reason: ReasonToolNotGranted}, "tool_not_granted"},
+		{"granted", AuditRecord{Time: auditFixedTime(), Service: "atlassian", Tool: "search", Allowed: true, Reason: ReasonGranted}, "granted"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := WriteAudit(&buf, tc.rec); err != nil {
+				t.Fatalf("WriteAudit: %v", err)
+			}
+			var line map[string]any
+			if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+				t.Fatalf("audit line is not one JSON document: %v (%q)", err, buf.String())
+			}
+			if line["reason"] != tc.expect {
+				t.Errorf("reason = %v, want %q (line: %s)", line["reason"], tc.expect, buf.String())
+			}
+		})
+	}
+}
+
+// TestAuditReasonIsAFixedToken keeps the reason from becoming a place a payload
+// can hide: it is rendered from a closed enum, so an out-of-range value must not
+// reach the line as caller-influenced text.
+func TestAuditReasonIsAFixedToken(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteAudit(&buf, AuditRecord{Time: auditFixedTime(), Service: "s", Tool: "t", Reason: Reason(200)}); err != nil {
+		t.Fatalf("WriteAudit: %v", err)
+	}
+	var line map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+		t.Fatalf("audit line is not one JSON document: %v", err)
+	}
+	got, _ := line["reason"].(string)
+	for _, known := range []string{"unknown_service", "tool_not_granted", "granted", "unknown"} {
+		if got == known {
+			return
+		}
+	}
+	t.Errorf("reason = %q, want one of the closed token set", got)
+}
+
+// auditFixedTime is a stable instant for audit-rendering tests: the package
+// refuses a record with no timestamp, and a test that supplied "now" would make
+// its own output unreproducible.
+func auditFixedTime() time.Time {
+	return time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
 }

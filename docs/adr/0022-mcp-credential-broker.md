@@ -113,9 +113,26 @@ serwerami MCP wyłącznie przez brokera działającego pod osobnym uid.**
    przyznanych narzędzi zapisujących.
 
 5. **Audyt.** Broker loguje każde wywołanie: znacznik czasu, usługa, nazwa
-   narzędzia, uid wołającego, decyzja allow/deny. **Nigdy argumenty ani treść
-   odpowiedzi** — inaczej zawartość Jiry i Confluence wyciekłaby do logów. To ta
-   sama reguła, którą `cli.md` nakłada na Braina.
+   narzędzia, uid wołającego, decyzja allow/deny oraz **powód**. **Nigdy
+   argumenty ani treść odpowiedzi** — inaczej zawartość Jiry i Confluence
+   wyciekłaby do logów. To ta sama reguła, którą `cli.md` nakłada na Braina.
+
+   Powód jest zapisywany, a nie wyprowadzany z plików policy, bo wyprowadzenie
+   wymaga policy w brzmieniu z momentu decyzji, a nic tego nie przechowuje —
+   po jednej edycji rekonstrukcja jest zgadywaniem. Rozdziela też dwie odmowy o
+   różnym znaczeniu operacyjnym: wywołanie do nieskonfigurowanej usługi czyta się
+   jak sondowanie, wywołanie narzędzia spoza istniejącego grantu jak agenta
+   prowadzonego poza jego zakres. Jest bezpieczny, bo pochodzi z zamkniętego
+   enuma — jeden ze stałych tokenów, nigdy tekst wołającego.
+
+   **Log audytu jest wąskim kanałem zapisu w stronę pliku uprzywilejowanego.**
+   Przy odmowie nazwa narzędzia pochodzi w całości od agenta i nie była w żadnym
+   dokumencie policy, więc agent może zakodować dane w wymyślonych nazwach i
+   sprawić, że broker je zapisze. Ograniczenie do 128 bajtów ze znacznikiem
+   ucięcia i escaping JSON-a zamykają podrobienie kolejnej linii i przycinają
+   przepustowość, ale kanału nie likwidują. To jest ta sama, nierozwiązana
+   sprawa co „wyniesienie danych" w Consequences — z tą różnicą, że biegnie w
+   drugą stronę, i ADR nie mówił o tym kierunku.
 
 6. **Weryfikacja fail-closed**, w idiomie reszty Torio — dowodzona, nie zakładana:
    istnienie uid/gid i tryb home; członkostwo `hermes` w `torio-mcp-clients`
