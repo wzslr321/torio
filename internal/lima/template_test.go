@@ -63,6 +63,76 @@ func TestRenderTemplateInstallsTheOperatorShellHelper(t *testing.T) {
 	}
 }
 
+// TestRenderedTemplateAddsTheOperatorToTorioProjects runs the user-mode
+// provision script the way the guest runs it, with the commands it calls
+// stubbed out.
+//
+// Nothing else puts the Lima login user in torio-projects, and `vm bootstrap`
+// verifies that membership rather than creating it. So when this script exits
+// early, a freshly created VM can never finish bootstrap — which is what it did
+// on the first real run: the guard meant to catch an unsubstituted placeholder
+// compared OPERATOR_USER against the placeholder itself, and the renderer
+// substitutes *every* occurrence, leaving a comparison that is always true.
+// Asserting the rendered bytes was not enough to catch that; the script has to
+// be executed.
+func TestRenderedTemplateAddsTheOperatorToTorioProjects(t *testing.T) {
+	const operator = "operator"
+	body, err := renderTemplate(InitOptions{OperatorUser: operator})
+	if err != nil {
+		t.Fatalf("renderTemplate: %v", err)
+	}
+	text := string(body)
+	at := strings.Index(text, "- mode: user")
+	if at < 0 {
+		t.Fatalf("rendered template has no user-mode provision step")
+	}
+	script, ok := blockScalarAfter(text[at:], "script: |")
+	if !ok {
+		t.Fatalf("user-mode provision step carries no script block")
+	}
+
+	dir := t.TempDir()
+	stubs := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(stubs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	record := filepath.Join(dir, "usermod.args")
+	// Stubs stand in for the guest: the test observes what the script would do
+	// without needing a VM, root, or a real group database.
+	stubBodies := map[string]string{
+		"id": "#!/bin/sh\ncase \"$1\" in\n" +
+			"-un) echo " + operator + " ;;\n" +
+			"-nG) echo \"" + operator + " torio-projects\" ;;\n" +
+			"*) exit 64 ;;\nesac\n",
+		"sudo":    "#!/bin/sh\n[ \"$1\" = -n ] && shift\nexec \"$@\"\n",
+		"usermod": "#!/bin/sh\nprintf '%s\\n' \"$*\" >" + record + "\n",
+	}
+	for name, stub := range stubBodies {
+		if err := os.WriteFile(filepath.Join(stubs, name), []byte(stub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	path := filepath.Join(dir, "provision.sh")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("/bin/bash", path)
+	cmd.Env = append(os.Environ(), "PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("user-mode provision failed on a correctly rendered template: %v\n%s", err, out)
+	}
+
+	args, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("provision never reached usermod: %v", err)
+	}
+	want := "-aG torio-projects " + operator
+	if got := strings.TrimSpace(string(args)); got != want {
+		t.Errorf("usermod called with %q, want %q", got, want)
+	}
+}
+
 // TestRenderedTemplateValidatesWithInstalledLima checks the actual Lima 2.x
 // schema when the pinned host dependency is available. CI jobs without Lima
 // still exercise every byte and invariant above.
