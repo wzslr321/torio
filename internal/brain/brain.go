@@ -108,6 +108,11 @@ const (
 	lockPath         = lima.HermesHome + "/.torio-brain-init.lock"
 	staleLockAge     = "10"
 
+	// issueSkillDrift is the machine-readable issue string for a retrieval skill
+	// that does not match what Torio ships. Named once so the writer and the
+	// repair that clears it cannot drift apart.
+	issueSkillDrift = "retrieval_skill_drift"
+
 	skillTemplate         = "templates/skill/SKILL.md"
 	skillCategoryTemplate = "templates/skill/DESCRIPTION.md"
 )

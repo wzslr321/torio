@@ -832,3 +832,39 @@ func TestCategoryDescriptionCarriesTheRuleInItsFrontmatter(t *testing.T) {
 		}
 	}
 }
+
+// The status an init report carries is taken before the skill is repaired, so
+// without clearing it the same block prints `skill: installed` alongside
+// `issues: retrieval_skill_drift`. An operator who just watched the repair
+// succeed reads that as a failure — observed on a real guest during the v0.1.0
+// upgrade.
+func TestInitDoesNotReportDriftItJustRepaired(t *testing.T) {
+	g := initializedFake().withInstalledSkill(t)
+	g.legacySkillPresent = true
+
+	report, err := New(g).Init(context.Background())
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if report.Status.SkillState != SkillInstalled {
+		t.Fatalf("skill state = %q, want %q", report.Status.SkillState, SkillInstalled)
+	}
+	if slices.Contains(report.Status.Issues, issueSkillDrift) {
+		t.Errorf("init reported %q as an outstanding issue after repairing it: %v", issueSkillDrift, report.Status.Issues)
+	}
+}
+
+// Clearing the issue must not become a habit of hiding it: a Brain nobody
+// repaired still has to say so.
+func TestStatusStillReportsDriftNobodyRepaired(t *testing.T) {
+	g := initializedFake().withInstalledSkill(t)
+	g.legacySkillPresent = true
+
+	report, err := New(g).Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if !slices.Contains(report.Issues, issueSkillDrift) {
+		t.Errorf("status hid %q on an unrepaired guest: %v", issueSkillDrift, report.Issues)
+	}
+}

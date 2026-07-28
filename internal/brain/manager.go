@@ -14,6 +14,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -210,6 +211,15 @@ func (m *Manager) activateRetrieval(ctx context.Context, op string, report *Init
 	}
 	report.SkillUpdated = updated
 	report.Status.SkillState = SkillInstalled
+	// The status this report carries was taken before the repair. Leaving the
+	// drift issue on it prints `skill: installed` and `issues:
+	// retrieval_skill_drift` in the same block, which reads as a failure to an
+	// operator who just watched the repair succeed. Clear what was fixed rather
+	// than re-inspecting the guest: installSkill already verified the payload
+	// against its digest before returning.
+	report.Status.Issues = slices.DeleteFunc(report.Status.Issues, func(issue string) bool {
+		return issue == issueSkillDrift
+	})
 	return nil
 }
 
@@ -475,7 +485,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 	}
 	report.SkillState = skill.state
 	if skill.state == SkillDrift {
-		report.Issues = append(report.Issues, "retrieval_skill_drift")
+		report.Issues = append(report.Issues, issueSkillDrift)
 	}
 
 	link, err := m.testRootPath(ctx, op, "-L", Path)
