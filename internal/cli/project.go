@@ -402,7 +402,7 @@ func (a *app) emitProjectAdd(report projects.AddReport) error {
 			Activated:      report.Activated,
 			Notes:          notes(report.Notes),
 			NextStep:       next,
-		}, nil))
+		}))
 	}
 	state := "attached"
 	switch {
@@ -435,7 +435,7 @@ func (a *app) emitProjectList(list []projects.Project) error {
 			out = append(out, projectView(p))
 		}
 		return writeJSON(a.stdout, successEnvelope("project.list",
-			projectListData{Projects: out, Count: len(out)}, nil))
+			projectListData{Projects: out, Count: len(out)}))
 	}
 	if len(list) == 0 {
 		_, err := fmt.Fprint(a.stdout,
@@ -461,7 +461,7 @@ func (a *app) emitProjectShow(report projects.ShowReport) error {
 			Hermes:      hermesView(report.Hermes),
 			Issues:      notes(report.Issues),
 			NextStep:    next,
-		}, nil))
+		}))
 	}
 	state := "ok"
 	if len(report.Issues) > 0 {
@@ -495,7 +495,7 @@ func (a *app) emitProjectUse(report projects.UseReport) error {
 			projectData: projectView(report.Project),
 			Active:      true,
 			NextStep:    next,
-		}, nil))
+		}))
 	}
 	_, err := fmt.Fprintf(a.stdout, "%s: active\nnext: %s\n", report.Project.ID, next)
 	return err
@@ -513,7 +513,7 @@ func (a *app) emitProjectRemove(report projects.RemoveReport) error {
 			CheckoutPath:          report.CheckoutPath,
 			Notes:                 notes(report.Notes),
 			NextStep:              next,
-		}, nil))
+		}))
 	}
 	hermes := "hermes project archived"
 	switch {

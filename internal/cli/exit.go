@@ -20,11 +20,15 @@ const (
 	ExitInternal ExitCode = 1
 	// ExitUsage is a usage or schema-validation error (missing arg, invalid config).
 	ExitUsage ExitCode = 2
-	// ExitPrecondition is an unmet precondition (VM stopped, task not frozen).
+	// ExitPrecondition is an unmet precondition (VM stopped, Brain absent).
 	ExitPrecondition ExitCode = 3
-	// ExitPolicy is a policy denial (forbidden mount/tool/skill).
-	ExitPolicy ExitCode = 4
-	// ExitConflict is a stale/conflict state (base/candidate/policy changed).
+	// 4 was "policy denied" in the pre-V0 worker platform (forbidden
+	// mount/tool/skill). V1 has no policy engine to deny anything, so no
+	// command produces it. The number stays unused rather than reassigned: the
+	// table is a contract, and reusing a code would silently change what an
+	// existing 4 meant.
+	//
+	// ExitConflict is a stale/conflict state (an id or remote already taken).
 	ExitConflict ExitCode = 5
 	// ExitVerification is a verification failure (trusted check exit != 0).
 	ExitVerification ExitCode = 6
