@@ -1,129 +1,136 @@
-# Architektura
+# Architektura Torio V1
 
-## Widok systemowy
+> Ten dokument zastępuje czternaście numerowanych dokumentów projektowych
+> (`01-product-brief` … `14-local-development`), które opisywały pre-V0 platformę
+> workerów. Są pod tagiem `archive/pre-v1`
+> ([ADR-0017](adr/0017-pre-v1-exploration-leaves-the-working-tree.md)).
+>
+> Zakres V1 rozstrzyga
+> [ADR-0015](adr/0015-torio-v1-onboarding-projects-and-operator-push.md). Ten
+> dokument nie jest streszczeniem kodu — opisuje wyłącznie to, czego z kodu nie
+> widać: gdzie przebiega granica zaufania i dlaczego akurat tam.
 
-```mermaid
-flowchart TB
-  subgraph Mac[macOS / Apple Silicon]
-    Desktop[Hermes Desktop]
-    IDE[IDE + Remote SSH]
-    Admin[Human admin CLI]
-    Drop[Explicit transfer folder]
-  end
+## Czym Torio jest
 
-  subgraph VM[Lima Linux VM / trust boundary]
-    Serve[hermes serve\nloopback only]
-    Gateway[Hermes messaging gateway\n+ Kanban dispatcher]
-    Brain[Hermes Brain profile]
-    Kanban[(Hermes Kanban SQLite)]
-    HB[Hermes Box Control Plane]
-    Ledger[(hb policy/evidence SQLite)]
-    Git[Trusted project repos + Git adapter]
-    Runtime[Hermes Worker Runtime\ntrusted process]
-    Docker[Docker Engine]
-    Worker[Fresh task container\nuntrusted workload]
-    Verifier[Fresh verifier container\nuntrusted candidate execution]
-  end
+Cienkim control plane'em nad Limą, Hermes Agentem i Gitem. Nie jest frameworkiem
+agentowym, task queue ani worktree managerem — te warstwy albo należą do
+Hermesa, albo świadomie nie istnieją.
 
-  Desktop -->|SSH tunnel/transport| Serve
-  IDE -->|SSH| VM
-  Admin -->|admin capability| HB
-  Drop -->|narrow mount| VM
-  Serve --> Brain
-  Gateway --> Brain
-  Brain -->|submit only| HB
-  HB -->|admit/create ready task| Kanban
-  Gateway -->|claim/spawn| Runtime
-  Runtime -->|native Docker backend in PoC| Docker
-  Docker --> Worker
-  HB --> Git
-  HB --> Ledger
-  HB -->|after stop: exact snapshot| Git
-  HB -->|verify exact candidate| Verifier
-  HB -->|approve/integrate/push| Git
-```
+## Granica zaufania
 
-## Trust zones
+Jedna maszyna wirtualna Lima o nazwie `torio`, arm64, `vmType: vz`.
+Wszystko, co dotyczy pracy agenta, dzieje się na jej natywnym filesystemie.
+Granicą jest brzeg VM, nie proces i nie profil Hermesa.
 
-### Zone A — macOS
+Dwie konsekwencje ustawiają resztę architektury:
 
-Zawiera UI i człowieka. Agent runtime nie ma szerokiego dostępu do hosta. Jedyny stały mount to jawny transfer folder.
+**Brak szerokiego mountu macOS.** `mounts: []` w szablonie gościa. Repozytoria
+i Brain leżą na dysku VM, nie w katalogu domowym Maca widzianym przez guest.
+Dlatego transport danych (`torio brain import`) jest jednorazowym, ograniczonym
+`limactl copy` przez prywatny staging, a nie kopiowaniem po współdzielonej
+ścieżce. Profil Hermesa nie jest sandboxem i nie próbujemy go nim uczynić —
+izolację daje brzeg VM.
 
-### Zone B — trusted VM runtime
+**Tożsamość serwisowa nie jest root-equivalent.** Guest ma dedykowanego
+użytkownika `hermes`, który **nie należy do grupy `docker`** — szablon usuwa go
+z niej przy provisioningu, a `torio vm bootstrap` weryfikuje nieobecność
+i zawodzi closed. Rootful Docker Engine nie jest instalowany. Członkostwo
+w `docker` to root na gościu, więc dawałoby agentowi dokładnie tę władzę, której
+granica VM ma go pozbawiać.
 
-Zawiera Hermes Brain, gateway, Kanban, control plane, Git repos i Docker Engine. Administrator VM jest częścią TCB. W Demo B również proces Hermes Worker Runtime jest częścią TCB, ponieważ natywny backend wywołuje Docker na hoście.
+## Podział własności
 
-### Zone C — untrusted workload
+| Warstwa | Owner |
+| --- | --- |
+| Lifecycle Limy, provisioning, weryfikacja gościa | Torio |
+| Deklaracja podpiętych projektów (niesekretna) | Torio (`config.json` V2) |
+| Ścieżki workspace'ów i vaulta | Torio (wyprowadzane, nie podawane) |
+| Sesja operatora z write capability | Torio (`project shell`) |
+| Model execution, sesje, pamięć, profile | Hermes Agent |
+| Rejestr projektów po stronie agenta | Hermes Agent (`hermes project` CLI) |
+| Kanban, dispatch, retry | Hermes Agent |
 
-Task i verifier containers wykonują model-generated commands oraz candidate code. Nie mają host credentials, Docker API, innych repo ani host-side tools.
+Torio nie zapisuje do wewnętrznego stanu Hermesa. Rejestracja projektu idzie
+przez publiczne `hermes project`, nie przez `~/.hermes/kanban.db`.
 
-## Control flow
+## Ścieżki danych
 
-### Remote Brain
+Trzy katalogi pod `/home/hermes`, celowo rozdzielone:
 
-```text
-Desktop → SSH → loopback hermes serve → Brain profile
-Messaging adapter → gateway → Brain profile
-```
+- `/home/hermes/.hermes` — **profil i stan aplikacyjny** Hermesa
+  (`HermesProfilePath`), `hermes:hermes 0750`;
+- `/home/hermes/brain` — **Second Brain**, prywatny vault Markdown
+  (`HermesBrainPath`), `hermes:hermes 0750`;
+- `/home/hermes/projects` — **workspace'y**, `hermes:torio-projects 2770` (setgid).
 
-`serve` i gateway są osobnymi procesami/lifecycle. Gateway jest instalowany natywnym `hermes gateway install`. `serve` potrzebuje własnej user service Hermes Box, jeśli zainstalowana wersja CLI obsługuje `serve`; spike definiuje compatibility path.
+Rozdzielenie pierwszych dwóch jest decyzją, nie kosmetyką: przed V1 kod nazywał
+katalog stanu aplikacji „Knowledge Base", co mieszało prywatne notatki
+z artefaktami Hermesa. `torio vm bootstrap` sprawdza ownership i mode każdej
+z tych ścieżek.
 
-### Coding task
+Setgid na `projects` jest tym, co pozwala operatorowi i tożsamości `hermes`
+pracować na tym samym checkoutcie: oba konta należą do grupy `torio-projects`,
+więc pliki tworzone przez jedno są zapisywalne dla drugiego. Bez tego sesja
+operatora zostawiałaby checkout, w którym agent nie może dalej pracować.
 
-```text
-Brain/human submit
-→ HB admission validates trusted project + request
-→ resolve effective policy from registry/trusted base
-→ snapshot policy
-→ prepare exact workspace
-→ create/admit Hermes Kanban task
-→ native dispatcher spawns worker profile
-→ worker runtime routes file/terminal to fresh task container
-→ worker produces candidate files and completes Kanban attempt
-→ HB stops container and revokes writes
-→ trusted Git adapter creates review commit/tree
-→ fresh verifier checks exact snapshot
-→ human reviews and approves exact evidence
-→ fast-forward integrate if target still equals base
-→ explicit separate push
-```
+**Workspace path nie jest wejściem.** Wyprowadza się z id projektu jako
+`/home/hermes/projects/<id>`. Użytkownik podaje id i remote; ścieżki nie podaje
+nigdy, a config obiektu z polem `path` nie przyjmuje.
 
-## Admission boundary
+## Skąd bierze się prawo zapisu do origin
 
-Brain nie może tworzyć gotowych do dispatchu coding tasks z arbitralną policy. Wersja docelowa udostępnia narrow `submit` tool/API. Control plane:
+To jest właściwa treść V1 i jedyne miejsce, gdzie architektura mówi „nie" czemuś,
+co byłoby wygodne.
 
-1. waliduje project ID i request schema,
-2. odrzuca żądane rozszerzenie capability,
-3. rozwiązuje effective policy,
-4. przygotowuje workspace,
-5. dopiero wtedy publikuje/admituje task do execution boardu.
+Persistentny Hermes ma do origin wyłącznie **read**. Nie ma tokenu, nie
+dziedziczy `SSH_AUTH_SOCK`, a szablon gościa ustawia `ssh.forwardAgent: false`
+globalnie.
 
-W pierwszym Demo B submit może być ręczny, ale architektura nie może uzależniać bezpieczeństwa od promptu Braina.
-
-## State ownership
-
-- Hermes Kanban: intent, assignee, queue status, retries, run history, comments.
-- `hb.db`: project binding, effective policy, execution resources, candidate, verification, approval, integration i push.
-- Git: base/review/tree OIDs i refs.
-- Docker: zasób wykonawczy, nigdy źródło prawdy.
-
-`hb` po restarcie reconciliuje ledger z Git/Docker/Hermes; nie odtwarza stanu z nazw kontenerów na ślepo.
-
-## Deployment evolution
-
-### Demo B TCB
+Write capability istnieje wyłącznie w czasie trwania jednej interaktywnej sesji:
 
 ```text
-Hermes Worker Runtime + HB + Docker adapter = trusted
-Task container = untrusted
+torio project shell <id>
+  → ssh -A -t lima-torio /usr/local/bin/torio-project-shell /home/hermes/projects/<id>
+  → zwykłe komendy Git w tożsamości operatora, w grupie torio-projects
+  → exit — forwarded agent znika razem z sesją
 ```
 
-### Hardening
+Helper na gościu jest `root:root 0755` i materializuje go szablon Limy przy
+każdym starcie. Bootstrap tylko dowodzi jego stanu i zgłasza drift zamiast go
+naprawiać. Powód jest wprost: przez tę ścieżkę przechodzi przekazany agent
+operatora, więc nic, co `hermes` albo operator mogą nadpisać, nie może na niej
+leżeć.
 
-```text
-HB owns Docker
-Hermes worker has no Docker access
-Hermes worker connects to task container through SSH/narrow executor API
-```
+Torio nie przechowuje credentiali Git write, nie automatyzuje push, merge ani
+release, i nie wykonuje test-pusha, żeby cokolwiek udowodnić. Remote z wbudowanym
+hasłem, tokenem, query albo fragmentem jest odrzucany.
 
-Ta ewolucja ma zachować ten sam `Executor` interface i evidence contract.
+## Second Brain w projektach
+
+Brain jest osobnym Hermes Project do bezpośredniej pracy. Dostęp z pozostałych
+projektów daje **globalny skill `torio-brain`** — retrieval przez file/search
+tools, nie wstrzyknięcie treści.
+
+Wybór jest świadomy. Bulk injection całego vaulta do system promptu każdego
+projektu unieważniałby prompt cache przy każdej zmianie notatki i przenosiłby
+prywatne treści do kontekstu projektów, które ich nie potrzebują. Dodanie
+`/home/hermes/brain` jako folderu każdego projektu ma ten sam skutek i jest
+zakazane.
+
+## Backend i dostęp z Maca
+
+`hermes serve` biegnie jako **user systemd service** na gościu, związany
+z `127.0.0.1:9119`. Loopback gościa, nie interfejs VM. Z Maca dostęp idzie
+wyłącznie przez tunel SSH, który zestawia operator — Torio żadnego tunelu nie
+otwiera i żadnej sesji czatu nie zaczyna.
+
+## Gdzie Torio się kończy
+
+Świadomie nie istnieją: agent loop, drugi Kanban, dispatcher, queue, retry
+engine, per-task worker containers, fresh verifier, automatyczny
+merge/push/release, secret broker, domenowy egress allowlist, import hostowego
+checkoutu i szeroki mount katalogu macOS.
+
+Ta lista nie jest roadmapą. Pierwsza wersja tego repozytorium zaprojektowała
+większość z tych rzeczy i żadnej nie dostarczyła; materiał jest pod
+`archive/pre-v1` i nie wraca do implementacji.

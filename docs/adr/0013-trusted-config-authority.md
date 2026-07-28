@@ -3,7 +3,7 @@
 - Status: Accepted (rev. 3 — final policy acceptance; wdrożone w D3.0 enforcement slice)
 - Date: 2026-07-25
 - Dotyczy: `internal/config/`, kontrakt [`../contracts/config.md`](../contracts/config.md), plan
-  [`../plans/02-demo-a.md`](../plans/02-demo-a.md) (entry gate przed D3)
+  `archive/pre-v1:docs/plans/02-demo-a.md` (entry gate przed D3)
 - Powiązane: [`0003-lima-trust-boundary.md`](0003-lima-trust-boundary.md) (granica VM — inna
   warstwa; ten ADR jej nie zmienia ani nie supersede'uje)
 
@@ -163,10 +163,10 @@ Testy są napisane i przechodzą (`internal/config`, TDD RED→GREEN):
 - Wszystkie trzy odtworzone wektory + symlinkowany `ConfigDir` + spoofing własności zamknięte
   fail-closed przed jakimkolwiek konsumowaniem config/version-lock przez D3/D4.
 - Przy akceptacji (krok enforcement, po sign-off): dodać wiersz **TM-16** do
-  [`../04-threat-model.md`](../04-threat-model.md) („Config/version-lock authority spoofowana przez
+  `archive/pre-v1:docs/04-threat-model.md` („Config/version-lock authority spoofowana przez
   symlink, world-writable lub obcy-UID trusted dir/plik" → control: no-follow open + non-symlink dir
   + mode-private + owned-by-EUID → fail-closed test) oraz wpis w
-  [`../13-requirements-traceability.md`](../13-requirements-traceability.md); zaktualizować
+  `archive/pre-v1:docs/13-requirements-traceability.md`; zaktualizować
   [`../contracts/config.md`](../contracts/config.md) o politykę no-follow, typ, mode-private i
   owned-by-EUID, z rozdzieloną terminologią (mode-private vs owned-by-EUID; koniec z „owner-only").
 - Platforma: enforcement darwin/linux; poza tym jawny udokumentowany no-op.
@@ -199,5 +199,5 @@ Ten ADR jest **Accepted (rev. 3)** i wdrożony w D3.0 enforcement slice (TDD RED
   Usunięte: `perm_unix.go`, `perm_other.go`, `statPrivate`, `statDirIfExists`.
 
 Wraz z enforcementem zaktualizowano [`../contracts/config.md`](../contracts/config.md), threat model
-(TM-16, [`../04-threat-model.md`](../04-threat-model.md)) i traceability
-([`../13-requirements-traceability.md`](../13-requirements-traceability.md)).
+(TM-16, `archive/pre-v1:docs/04-threat-model.md`) i traceability
+(`archive/pre-v1:docs/13-requirements-traceability.md`).

@@ -51,7 +51,7 @@ func validateProjectPath(projectPath string) error {
 // operator shell into projectPath.
 //
 // The flags are the promoted Gate-0 shape
-// (docs/spike-results/v1-operator-shell-20260727T132420Z/FINDINGS.md):
+// (archive/pre-v1:docs/spike-results/v1-operator-shell-20260727T132420Z/FINDINGS.md):
 //
 //	ssh -F ~/.lima/<instance>/ssh.config \
 //	  -o ControlMaster=no -o ControlPath=none -o ForwardAgent=yes -A \

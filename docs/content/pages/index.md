@@ -45,16 +45,21 @@ touching your data — the same run twice changes nothing the second time.
 
 ## What a session looks like {#session}
 
-First run is three commands. After that, `torio doctor` is the only one you need
-to remember: it probes the host, Lima, the VM, Hermes, Docker, and the backend,
-and tells you which one is wrong instead of leaving you to guess.
+First run is four commands. After that, `torio serve status` is the one to
+remember: it reports the systemd unit, the loopback endpoint and the Hermes
+version, so a backend that stopped answering names itself instead of leaving you
+to guess.
 
 <div class="terminal" aria-label="Example session">
 <div class="terminal-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="terminal-title">first run</span></div>
 <pre class="terminal-body"><code><span class="tp">$</span> torio vm init          <span class="tok-comment"># create the VM from a pinned template</span>
+<span class="tp">$</span> torio vm bootstrap     <span class="tok-comment"># install and verify what the backend needs</span>
+<span class="tp">$</span> torio serve install
 <span class="tp">$</span> torio serve start      <span class="tok-comment"># backend up on the VM's own loopback</span>
-<span class="tp">$</span> torio doctor           <span class="tok-comment"># and prove the whole stack answers</span>
-<span class="tok-ok">doctor: ok</span>  ·  vm running  ·  serve active  ·  127.0.0.1:9119
+<span class="tp">$</span> torio serve status     <span class="tok-comment"># and prove it answers</span>
+<span class="tok-ok">Backend ready on http://127.0.0.1:9119/api/status</span>
+  systemd:  active (active=true, enabled=true)
+  endpoint: 200 (ready=true)
 <span class="term-note">— then, in a second terminal you leave open —</span>
 <span class="tp">$</span> ssh -L 9119:127.0.0.1:9119 …   <span class="tok-comment"># your tunnel; now Desktop can connect</span></code></pre>
 </div>

@@ -4,4 +4,4 @@ Accepted ADRs are immutable historical decisions. If a decision changes, add a n
 
 Status values: Proposed, Accepted, Accepted for PoC, Superseded, Rejected.
 
-Every ADR contains context, decision, consequences and rejected alternatives. Security-boundary changes also update `docs/04-threat-model.md` and traceability.
+Every ADR contains context, decision, consequences and rejected alternatives. Security-boundary changes also update [`../03-architecture.md`](../03-architecture.md) and the invariants in `AGENTS.md` §5.

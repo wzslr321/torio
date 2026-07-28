@@ -166,7 +166,7 @@ func TestProbeCancellation(t *testing.T) {
 func TestProbeRejectsNonSemverVersionGrammar(t *testing.T) {
 	// The real, documented `limactl --version` output is a semver core
 	// "MAJOR.MINOR.PATCH" (verified: "limactl version 2.2.0"; evidence in
-	// docs/spike-results/evidence/etap-0d-lima-adapter/limactl-version.txt).
+	// archive/pre-v1:docs/spike-results/evidence/etap-0d-lima-adapter/limactl-version.txt).
 	// A permissive `\S+` capture would accept junk that is not a version and
 	// hand a caller-facing "version" that no version-lock pin could ever
 	// legitimately match — so anything that is not a semver version must fail

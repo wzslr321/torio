@@ -12,7 +12,7 @@
 // internal/cli's job.
 //
 // Discovery that fixes this design (sanitized evidence under
-// docs/spike-results/evidence/d5-serve-discovery-*):
+// archive/pre-v1:docs/spike-results/evidence/d5-serve-discovery-*):
 //   - `hermes serve` defaults to --host 127.0.0.1 --port 9119 and exposes an
 //     unauthenticated readiness endpoint GET /api/status -> 200 (JSON with a
 //     version). --skip-build serves the backend without an npm build step.

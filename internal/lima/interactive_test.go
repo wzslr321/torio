@@ -28,7 +28,7 @@ func operatorShellHost(t *testing.T) string {
 }
 
 // TestOperatorShellSpecBuildsThePromotedArgv pins the exact argv proven by the
-// promoted Gate-0 spike (docs/spike-results/v1-operator-shell-20260727T132420Z):
+// promoted Gate-0 spike (archive/pre-v1:docs/spike-results/v1-operator-shell-20260727T132420Z):
 // -F first, then the -o overrides, then -A. The remote side is a fixed guest
 // helper plus the project path — two argv elements, never a command string.
 func TestOperatorShellSpecBuildsThePromotedArgv(t *testing.T) {
