@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/wzslr321/torio/internal/brain"
 	"github.com/wzslr321/torio/internal/lima"
 )
 
@@ -20,6 +21,7 @@ import (
 //   - Restart=always keeps the backend persistent; loopback-only means no
 //     network-ordering dependency is needed.
 //   - WantedBy=default.target + user linger makes it start at boot.
+//   - Environment=HERMES_ENVIRONMENT_HINT carries EnvironmentHint; see there.
 func renderUnit() []byte {
 	execStart := hermesShim + " serve --skip-build --host " + BindHost + " --port " + strconv.Itoa(BindPort)
 	var b strings.Builder
@@ -30,6 +32,7 @@ func renderUnit() []byte {
 	b.WriteString("Type=simple\n")
 	b.WriteString("WorkingDirectory=" + workingDir + "\n")
 	b.WriteString("Environment=HERMES_HOME=" + lima.HermesProfilePath + "\n")
+	b.WriteString("Environment=\"HERMES_ENVIRONMENT_HINT=" + brain.EnvironmentHint + "\"\n")
 	b.WriteString("ExecStart=" + execStart + "\n")
 	b.WriteString("Restart=always\n")
 	b.WriteString("RestartSec=2\n")

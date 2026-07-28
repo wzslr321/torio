@@ -23,10 +23,10 @@ import (
 	"github.com/wzslr321/torio/internal/lima"
 )
 
-
 // fakeGuestSessionUser is the identity `id -un` reports on the fake guest: the
 // Lima login user, which is who `limactl copy` writes as.
 const fakeGuestSessionUser = "operator"
+
 type fakeCall struct {
 	argv  []string
 	stdin []byte
@@ -71,19 +71,27 @@ type fakeGuest struct {
 	skillGroup      string
 	skillMode       string
 	skillStaged     []byte
-	failContains    map[string]int
-	truncateOn      string
-	transportErr    error
-	calls           []fakeCall
-	copies          []fakeCopy
-	copyToErr       error
-	importFiles     int
-	privateExists   map[string]bool
-	pristineTree    bool
-	exchangedEmpty  bool
-	cancel          context.CancelFunc
-	cancelOn        string
-	failExchangeAt  int
+	// Category state mirrors the skill's: the DESCRIPTION.md is installed,
+	// digested and ownership-checked exactly like SKILL.md.
+	categoryDirMode string
+	categoryPresent bool
+	categoryDigest  string
+	categoryMode    string
+	// legacySkillPresent models a guest installed before the category move.
+	legacySkillPresent bool
+	failContains       map[string]int
+	truncateOn         string
+	transportErr       error
+	calls              []fakeCall
+	copies             []fakeCopy
+	copyToErr          error
+	importFiles        int
+	privateExists      map[string]bool
+	pristineTree       bool
+	exchangedEmpty     bool
+	cancel             context.CancelFunc
+	cancelOn           string
+	failExchangeAt     int
 }
 
 func readyFake() *fakeGuest {
@@ -120,12 +128,23 @@ func (f *fakeGuest) withInstalledSkill(t *testing.T) *fakeGuest {
 	if err != nil {
 		t.Fatalf("retrievalSkill() error = %v", err)
 	}
+	_, categoryDigest, err := retrievalCategory()
+	if err != nil {
+		t.Fatalf("retrievalCategory() error = %v", err)
+	}
 	f.skillDirMode = "750"
 	f.skillPresent = true
 	f.skillDigest = digest
 	f.skillOwner = lima.HermesUser
 	f.skillGroup = lima.HermesUser
 	f.skillMode = "640"
+	// A current installation includes the category description; without it the
+	// skill renders at the top level with no uncapped description, which is the
+	// state the category move exists to leave behind.
+	f.categoryDirMode = "750"
+	f.categoryPresent = true
+	f.categoryDigest = categoryDigest
+	f.categoryMode = "640"
 	return f
 }
 
@@ -329,6 +348,61 @@ func (f *fakeGuest) route(ctx context.Context, stdin []byte, argv []string) (exe
 		return okResult(lima.HermesUser + ":" + lima.HermesUser + " " + f.skillDirMode + "\n"), nil
 	case strings.Contains(joined, "install -d -o hermes -g hermes -m 0750 "+SkillPath):
 		f.skillDirMode = "750"
+		return okResult(""), nil
+	// Category routes. SkillCategoryPath is a prefix of both SkillPath and
+	// SkillCategoryFilePath, so it must be matched after them.
+	case strings.Contains(joined, "test -L "+SkillCategoryFilePath):
+		return exitResult(1, "", ""), nil
+	case strings.Contains(joined, "test -f "+SkillCategoryFilePath):
+		if f.categoryPresent {
+			return okResult(""), nil
+		}
+		return exitResult(1, "", ""), nil
+	case strings.Contains(joined, "stat -c %U:%G %a "+SkillCategoryFilePath):
+		if !f.categoryPresent {
+			return exitResult(1, "", "no such file or directory"), nil
+		}
+		return okResult(lima.HermesUser + ":" + lima.HermesUser + " " + f.categoryMode + "\n"), nil
+	case strings.Contains(joined, "sha256sum -- "+SkillCategoryFilePath):
+		if !f.categoryPresent {
+			return exitResult(1, "", "no such file or directory"), nil
+		}
+		return okResult(f.categoryDigest + "  " + SkillCategoryFilePath + "\n"), nil
+	case strings.Contains(joined, "mv -T "+skillStagingPath+" "+SkillCategoryFilePath):
+		sum := sha256.Sum256(f.skillStaged)
+		f.categoryPresent = true
+		f.categoryDigest = hex.EncodeToString(sum[:])
+		f.categoryMode = "640"
+		f.skillStaged = nil
+		return okResult(""), nil
+	case strings.Contains(joined, "test -L "+SkillCategoryPath):
+		return exitResult(1, "", ""), nil
+	case strings.Contains(joined, "test -d "+SkillCategoryPath):
+		if f.categoryDirMode != "" {
+			return okResult(""), nil
+		}
+		return exitResult(1, "", ""), nil
+	case strings.Contains(joined, "stat -c %U:%G %a "+SkillCategoryPath):
+		if f.categoryDirMode == "" {
+			return exitResult(1, "", "no such file or directory"), nil
+		}
+		return okResult(lima.HermesUser + ":" + lima.HermesUser + " " + f.categoryDirMode + "\n"), nil
+	case strings.Contains(joined, "install -d -o hermes -g hermes -m 0750 "+SkillCategoryPath):
+		f.categoryDirMode = "750"
+		return okResult(""), nil
+	// Pre-category installation, retired by removeLegacySkill.
+	case strings.Contains(joined, "test -L "+legacySkillPath):
+		return exitResult(1, "", ""), nil
+	case strings.Contains(joined, "test -f "+legacySkillPath+"/SKILL.md"),
+		strings.Contains(joined, "test -d "+legacySkillPath):
+		if f.legacySkillPresent {
+			return okResult(""), nil
+		}
+		return exitResult(1, "", ""), nil
+	case strings.Contains(joined, "rm -f -- "+legacySkillPath+"/SKILL.md"):
+		f.legacySkillPresent = false
+		return okResult(""), nil
+	case strings.Contains(joined, "rmdir -- "+legacySkillPath):
 		return okResult(""), nil
 	case strings.Contains(joined, "tee "+skillStagingPath):
 		f.skillStaged = append([]byte(nil), stdin...)

@@ -213,16 +213,21 @@ func (m *Manager) activateRetrieval(ctx context.Context, op string, report *Init
 	return nil
 }
 
-// installSkill makes $HERMES_HOME/skills/torio-brain/SKILL.md match the embedded
-// payload. It is content-addressed: an already-current, correctly owned payload
-// is left untouched so a rerun is a no-op, and any other state is rewritten
-// atomically from a staging file outside the skill discovery root.
+// installSkill makes the retrieval skill and its category description match the
+// embedded payloads. It is content-addressed: an already-current, correctly
+// owned pair is left untouched so a rerun is a no-op, and any other state is
+// rewritten atomically from a staging file outside the skill discovery root.
+// A pre-category installation is retired first — see removeLegacySkill.
 func (m *Manager) installSkill(ctx context.Context, op string) (updated bool, retErr error) {
 	payload, digest, err := retrievalSkill()
 	if err != nil {
 		return false, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("embedded retrieval skill unavailable")}
 	}
-	probe, err := m.probeSkill(ctx, op, digest)
+	category, categoryDigest, err := retrievalCategory()
+	if err != nil {
+		return false, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("embedded retrieval skill category unavailable")}
+	}
+	probe, err := m.probeSkill(ctx, op, digest, categoryDigest)
 	if err != nil {
 		return false, err
 	}
@@ -238,24 +243,25 @@ func (m *Manager) installSkill(ctx context.Context, op string) (updated bool, re
 			_, _ = m.run(ctx, op, rootExec("rm", "-f", "--", skillStagingPath))
 		}
 	}()
+	if err := m.removeLegacySkill(ctx, op); err != nil {
+		return false, err
+	}
+	if err := m.mustRun(ctx, op, KindGuestCommand, "create retrieval skill category directory",
+		rootExec("install", "-d", "-o", lima.HermesUser, "-g", lima.HermesUser, "-m", "0750", SkillCategoryPath)); err != nil {
+		return false, err
+	}
+	if err := m.writeSkillFile(ctx, op, "retrieval skill category description", category, SkillCategoryFilePath); err != nil {
+		return false, err
+	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "create retrieval skill directory",
 		rootExec("install", "-d", "-o", lima.HermesUser, "-g", lima.HermesUser, "-m", "0750", SkillPath)); err != nil {
 		return false, err
 	}
-	if err := m.mustRunInput(ctx, op, KindGuestCommand, "write retrieval skill payload", payload,
-		userExec("tee", skillStagingPath)); err != nil {
-		return false, err
-	}
-	if err := m.mustRun(ctx, op, KindGuestCommand, "set retrieval skill permissions",
-		rootExec("chmod", "0640", skillStagingPath)); err != nil {
-		return false, err
-	}
-	if err := m.mustRun(ctx, op, KindGuestCommand, "promote retrieval skill payload",
-		rootExec("mv", "-T", skillStagingPath, SkillFilePath)); err != nil {
+	if err := m.writeSkillFile(ctx, op, "retrieval skill payload", payload, SkillFilePath); err != nil {
 		return false, err
 	}
 
-	installed, err := m.probeSkill(ctx, op, digest)
+	installed, err := m.probeSkill(ctx, op, digest, categoryDigest)
 	if err != nil {
 		return false, err
 	}
@@ -265,6 +271,53 @@ func (m *Manager) installSkill(ctx context.Context, op string) (updated bool, re
 	return true, nil
 }
 
+// writeSkillFile lands one payload at dest by way of the staging path, which is
+// deliberately outside the skill discovery root so a half-written file can
+// never be walked as a skill.
+func (m *Manager) writeSkillFile(ctx context.Context, op, what string, payload []byte, dest string) error {
+	if err := m.mustRunInput(ctx, op, KindGuestCommand, "write "+what, payload,
+		userExec("tee", skillStagingPath)); err != nil {
+		return err
+	}
+	if err := m.mustRun(ctx, op, KindGuestCommand, "set "+what+" permissions",
+		rootExec("chmod", "0640", skillStagingPath)); err != nil {
+		return err
+	}
+	return m.mustRun(ctx, op, KindGuestCommand, "promote "+what,
+		rootExec("mv", "-T", skillStagingPath, dest))
+}
+
+// removeLegacySkill retires the installation that releases before the category
+// move left at $HERMES_HOME/skills/torio-brain.
+//
+// It removes the SKILL.md and then rmdirs the directory — never `rm -r`. What
+// has to go is the second file carrying the same skill name, because two of
+// them make skill_view refuse to load either. The directory itself is only
+// swept up if removing that file left it empty; anything else under the old
+// path is not Torio's to delete, and by then it is no longer a skill.
+func (m *Manager) removeLegacySkill(ctx context.Context, op string) error {
+	link, err := m.testPath(ctx, op, "-L", legacySkillPath)
+	if err != nil {
+		return err
+	}
+	if link {
+		return &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("the superseded retrieval skill path is a symlink; refusing to remove it")}
+	}
+	present, err := m.testPath(ctx, op, "-d", legacySkillPath)
+	if err != nil {
+		return err
+	}
+	if !present {
+		return nil
+	}
+	if err := m.mustRun(ctx, op, KindGuestCommand, "remove the superseded retrieval skill",
+		rootExec("rm", "-f", "--", legacySkillPath+"/SKILL.md")); err != nil {
+		return err
+	}
+	_, _ = m.run(ctx, op, rootExec("rmdir", "--", legacySkillPath))
+	return nil
+}
+
 // skillProbe is the bounded on-disk view of the retrieval skill. It carries a
 // digest comparison result, never the payload and never Brain content.
 type skillProbe struct {
@@ -272,8 +325,8 @@ type skillProbe struct {
 	symlink bool
 }
 
-func (m *Manager) probeSkill(ctx context.Context, op, digest string) (skillProbe, error) {
-	for _, path := range []string{SkillFilePath, SkillPath} {
+func (m *Manager) probeSkill(ctx context.Context, op, digest, categoryDigest string) (skillProbe, error) {
+	for _, path := range []string{SkillFilePath, SkillPath, SkillCategoryFilePath, SkillCategoryPath} {
 		link, err := m.testPath(ctx, op, "-L", path)
 		if err != nil {
 			return skillProbe{}, err
@@ -282,37 +335,62 @@ func (m *Manager) probeSkill(ctx context.Context, op, digest string) (skillProbe
 			return skillProbe{state: SkillDrift, symlink: true}, nil
 		}
 	}
-	dir, err := m.testPath(ctx, op, "-d", SkillPath)
+	// A copy still sitting at the pre-category path is drift even when the new
+	// one is perfect: two files claiming the same skill name make skill_view
+	// refuse to load either of them.
+	legacy, err := m.testPath(ctx, op, "-f", legacySkillPath+"/SKILL.md")
 	if err != nil {
 		return skillProbe{}, err
 	}
-	if !dir {
-		return skillProbe{state: SkillNotInstalled}, nil
+	if legacy {
+		return skillProbe{state: SkillDrift}, nil
 	}
-	file, err := m.testPath(ctx, op, "-f", SkillFilePath)
-	if err != nil {
-		return skillProbe{}, err
+	for _, path := range []string{SkillCategoryPath, SkillPath} {
+		dir, err := m.testPath(ctx, op, "-d", path)
+		if err != nil {
+			return skillProbe{}, err
+		}
+		if !dir {
+			return skillProbe{state: SkillNotInstalled}, nil
+		}
 	}
-	if !file {
-		return skillProbe{state: SkillNotInstalled}, nil
+	for _, path := range []string{SkillFilePath, SkillCategoryFilePath} {
+		file, err := m.testPath(ctx, op, "-f", path)
+		if err != nil {
+			return skillProbe{}, err
+		}
+		if !file {
+			return skillProbe{state: SkillNotInstalled}, nil
+		}
 	}
 	secure, err := m.skillOwnershipSecure(ctx, op)
 	if err != nil {
 		return skillProbe{}, err
 	}
-	sum, err := m.run(ctx, op, userExec("sha256sum", "--", SkillFilePath))
-	if err != nil {
-		return skillProbe{}, err
-	}
-	if sum.ExitCode != 0 {
-		return skillProbe{}, commandError(op, KindVerification, "digest retrieval skill payload", sum.ExitCode)
-	}
-	fields := strings.Fields(string(sum.Stdout))
-	if len(fields) == 0 {
-		return skillProbe{}, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("could not parse retrieval skill digest")}
-	}
-	if !secure || fields[0] != digest {
+	if !secure {
 		return skillProbe{state: SkillDrift}, nil
+	}
+	for _, spec := range []struct {
+		path string
+		want string
+	}{
+		{SkillFilePath, digest},
+		{SkillCategoryFilePath, categoryDigest},
+	} {
+		sum, err := m.run(ctx, op, userExec("sha256sum", "--", spec.path))
+		if err != nil {
+			return skillProbe{}, err
+		}
+		if sum.ExitCode != 0 {
+			return skillProbe{}, commandError(op, KindVerification, "digest retrieval skill payload", sum.ExitCode)
+		}
+		fields := strings.Fields(string(sum.Stdout))
+		if len(fields) == 0 {
+			return skillProbe{}, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("could not parse retrieval skill digest")}
+		}
+		if fields[0] != spec.want {
+			return skillProbe{state: SkillDrift}, nil
+		}
 	}
 	return skillProbe{state: SkillInstalled}, nil
 }
@@ -322,6 +400,8 @@ func (m *Manager) skillOwnershipSecure(ctx context.Context, op string) (bool, er
 		path string
 		mode string
 	}{
+		{SkillCategoryPath, "750"},
+		{SkillCategoryFilePath, "640"},
 		{SkillPath, "750"},
 		{SkillFilePath, "640"},
 	} {
@@ -385,7 +465,11 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 	if err != nil {
 		return report, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("embedded retrieval skill unavailable")}
 	}
-	skill, err := m.probeSkill(ctx, op, digest)
+	_, categoryDigest, err := retrievalCategory()
+	if err != nil {
+		return report, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("embedded retrieval skill category unavailable")}
+	}
+	skill, err := m.probeSkill(ctx, op, digest, categoryDigest)
 	if err != nil {
 		return report, err
 	}
