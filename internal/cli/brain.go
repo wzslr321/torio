@@ -31,7 +31,7 @@ func newBrainCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "brain",
 		Short: "Initialize and inspect the private Markdown Second Brain",
-		Long: "Manage the mandatory Torio V1 Second Brain at " + brain.Path + ". " +
+		Long: "Manage the mandatory Torio Second Brain at " + brain.Path + ". " +
 			"The Brain stays on the guest's native filesystem, is private to hermes, " +
 			"and is registered as a separate Hermes Project. Commands report only " +
 			"bounded aggregate metadata, never note names or content.\n\n" +

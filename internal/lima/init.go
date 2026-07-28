@@ -97,13 +97,13 @@ func verifyCompatibleConfig(rec *instanceRecord) error {
 		return fmt.Errorf("arch %q != aarch64", cfg.Arch)
 	}
 	if cfg.SSH.ForwardAgent {
-		return fmt.Errorf("ssh.forwardAgent is true; Torio V1 forbids persistent agent forwarding")
+		return fmt.Errorf("ssh.forwardAgent is true; Torio forbids persistent agent forwarding")
 	}
 	if len(cfg.Mounts) != 0 {
-		return fmt.Errorf("instance has %d mount(s); Torio V1 requires mounts: []", len(cfg.Mounts))
+		return fmt.Errorf("instance has %d mount(s); Torio requires mounts: []", len(cfg.Mounts))
 	}
 	if len(cfg.Images) != 1 {
-		return fmt.Errorf("instance has %d image(s); Torio V1 requires exactly one pinned image", len(cfg.Images))
+		return fmt.Errorf("instance has %d image(s); Torio requires exactly one pinned image", len(cfg.Images))
 	}
 	img := cfg.Images[0]
 	if img.Digest != PromotedImageDigest {

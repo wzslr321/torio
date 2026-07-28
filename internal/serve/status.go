@@ -12,7 +12,7 @@ import (
 // StatusReport is the structured readiness of the backend. It proves both the
 // user-systemd state AND actual HTTP endpoint readiness through loopback: an
 // active process with a dead endpoint is NOT ready
-// (docs/contracts/service-lifecycle.md).
+// (docs/contracts/cli.md).
 type StatusReport struct {
 	Installed     bool
 	Enabled       bool

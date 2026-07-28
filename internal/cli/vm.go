@@ -205,10 +205,10 @@ func newVMStopCmd(a *app) *cobra.Command {
 func newVMBootstrapCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "bootstrap",
-		Short: "Reconcile and verify the existing Torio target for Remote Second Brain V1",
+		Short: "Reconcile and verify the existing Torio target for Hermes",
 		Long: "Reconcile and verify the already-created Torio VM so an operator has a " +
-			"usable Remote Second Brain V1 path: a stable non-interactive `hermes` command " +
-			"and the V1 guest filesystem layout on native ext4.\n\n" +
+			"usable Hermes path: a stable non-interactive `hermes` command " +
+			"and the guest filesystem layout on native ext4.\n\n" +
 			"It operates only on the existing target after a verified Running precondition, " +
 			"through the typed Lima boundary. It is idempotent and narrow: when the pinned " +
 			"Hermes Agent launcher is missing it installs the Gate-0 commit via the upstream " +
@@ -354,7 +354,7 @@ func (a *app) emitVMBootstrap(rep lima.BootstrapReport) error {
 		}
 	}
 	_, err := fmt.Fprintf(a.stdout,
-		"\nRemote Second Brain V1 path ready on %s.\n"+
+		"\nHermes path ready on %s.\n"+
 			"Persistent Hermes home:    %s\n"+
 			"Persistent profile:        %s\n"+
 			"Persistent Second Brain:   %s\n"+

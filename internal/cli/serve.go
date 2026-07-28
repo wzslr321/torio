@@ -20,8 +20,8 @@ func newServeCmd(a *app) *cobra.Command {
 		Long: "Install and control the Hermes backend (`hermes serve`) as a custom user " +
 			"systemd service on the Torio VM. It binds guest loopback only " +
 			"(127.0.0.1:9119) using the existing /home/hermes/.hermes profile; the Mac " +
-			"reaches it through an operator-controlled SSH tunnel (docs/contracts/service-lifecycle.md). " +
-			"This is the Desktop backend, NOT `torio gateway` (messaging).",
+			"reaches it through an operator-controlled SSH tunnel (docs/contracts/cli.md). " +
+			"Torio adds no tunnel of its own.",
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return usageError("no subcommand given; run 'torio serve --help'")
