@@ -53,6 +53,36 @@ func (a *Adapter) Start(ctx context.Context) error {
 	if !ok || vst != StateRunning {
 		return &Error{Op: op, Kind: KindPostconditionFailed, Err: fmt.Errorf("instance %q is %q after start, want running", InstanceName, verified.Status)}
 	}
+	return a.refreshSession(ctx, op)
+}
+
+// refreshSession replaces the multiplexed ssh session `limactl start` leaves
+// behind.
+//
+// Provisioning runs over that very session, and its user stage adds the Lima
+// login user to TorioProjectsGroup — after the session authenticated. Lima's
+// generated ssh.config sets ControlMaster auto with ControlPersist yes, so every
+// later `limactl shell` and `limactl copy` multiplexes over the same master and
+// inherits the identity the login had *before* the group existed. The operator
+// then cannot traverse HermesHome, which is 0710 root of the shared group, and
+// `torio brain import` failed inside rsync with "cannot stat destination" on a
+// guest where the group was correctly configured. Bootstrap read the group
+// database and reported the operator a member, because it was: only the live
+// session disagreed.
+//
+// Start is the one step after which the login identity can change, so the stale
+// master is dropped here. Only after a real start: the idempotent path opened no
+// new session, and tearing the master down under a running `torio project shell`
+// would take the operator's own session with it.
+func (a *Adapter) refreshSession(ctx context.Context, op string) error {
+	args := append([]string{"shell", "--reconnect"}, guestShellArgs[1:]...)
+	res, err := a.runRaw(ctx, append(args, "true")...)
+	if err != nil {
+		return classifyRunErr(op, err)
+	}
+	if res.ExitCode != 0 {
+		return &Error{Op: op, Kind: KindPostconditionFailed, Err: fmt.Errorf("instance %q started but no guest session could be established", InstanceName)}
+	}
 	return nil
 }
 

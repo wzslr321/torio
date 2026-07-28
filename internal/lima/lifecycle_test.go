@@ -29,14 +29,15 @@ func TestStartFromStopped(t *testing.T) {
 		{result: stdoutResult(fixtureInstanceJSON(InstanceName, "Stopped"))},
 		{result: exitResult(0, "", "")},
 		{result: stdoutResult(fixtureInstanceJSON(InstanceName, "Running"))}, // postcondition re-query
+		{result: exitResult(0, "", "")},                                      // session refresh
 	}}
 	a := New(fr)
 
 	if err := a.Start(context.Background()); err != nil {
 		t.Fatalf("Start: unexpected error: %v", err)
 	}
-	if fr.callCount() != 3 {
-		t.Fatalf("callCount = %d, want 3 (pre-check, start, postcondition re-query)", fr.callCount())
+	if fr.callCount() != 4 {
+		t.Fatalf("callCount = %d, want 4 (pre-check, start, postcondition re-query, session refresh)", fr.callCount())
 	}
 	got := fr.callArgs(1)
 	want := []string{"start", InstanceName, "--tty=false"}
@@ -289,4 +290,70 @@ func TestStopFailsClosedWhenCommandExitsZeroButStillRunning(t *testing.T) {
 	if lerr.Kind != KindPostconditionFailed {
 		t.Fatalf("Kind = %v, want %v", lerr.Kind, KindPostconditionFailed)
 	}
+}
+
+// TestStartDropsTheStaleMultiplexedSession pins the reconnect that makes a
+// freshly created machine usable.
+//
+// Provisioning adds the Lima login user to TorioProjectsGroup over the very ssh
+// session `limactl start` opened, and that session is multiplexed and persistent
+// — so every later guest command inherits a login that predates the group.
+// `torio brain import` failed inside rsync with "cannot stat destination"
+// because the operator could not traverse HermesHome, on a guest whose group
+// database was correct. Bootstrap agreed with the database and passed.
+func TestStartDropsTheStaleMultiplexedSession(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{
+		{result: stdoutResult(fixtureInstanceJSON(InstanceName, "Stopped"))},
+		{result: exitResult(0, "", "")},
+		{result: stdoutResult(fixtureInstanceJSON(InstanceName, "Running"))},
+		{result: exitResult(0, "", "")},
+	}}
+	a := New(fr)
+
+	if err := a.Start(context.Background()); err != nil {
+		t.Fatalf("Start: unexpected error: %v", err)
+	}
+	got := fr.callArgs(3)
+	want := []string{"shell", "--reconnect", "--tty=false", "--workdir", "/", InstanceName, "--", "true"}
+	if !equalArgs(got, want) {
+		t.Fatalf("refresh argv = %v, want %v", got, want)
+	}
+}
+
+// TestStartAlreadyRunningLeavesTheSessionAlone keeps the reconnect on the one
+// path where the login identity can have changed. Tearing the multiplexed master
+// down under a running `torio project shell` would take the operator's own
+// session with it, and an idempotent Start provisioned nothing.
+func TestStartAlreadyRunningLeavesTheSessionAlone(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{
+		{result: stdoutResult(fixtureInstanceJSON(InstanceName, "Running"))},
+	}}
+	a := New(fr)
+
+	if err := a.Start(context.Background()); err != nil {
+		t.Fatalf("Start: unexpected error: %v", err)
+	}
+	for i := 0; i < fr.callCount(); i++ {
+		for _, arg := range fr.callArgs(i) {
+			if arg == "--reconnect" {
+				t.Fatalf("call %d dropped the session on the idempotent path: %v", i, fr.callArgs(i))
+			}
+		}
+	}
+}
+
+// TestStartFailsClosedWhenNoGuestSessionCanBeEstablished treats an instance that
+// reports Running but cannot be entered as a failed start rather than a success
+// the next command discovers.
+func TestStartFailsClosedWhenNoGuestSessionCanBeEstablished(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{
+		{result: stdoutResult(fixtureInstanceJSON(InstanceName, "Stopped"))},
+		{result: exitResult(0, "", "")},
+		{result: stdoutResult(fixtureInstanceJSON(InstanceName, "Running"))},
+		{result: exitResult(255, "", "ssh: connect to host 127.0.0.1 port 60022: Connection refused")},
+	}}
+	a := New(fr)
+
+	err := a.Start(context.Background())
+	assertKind(t, err, KindPostconditionFailed)
 }

@@ -231,9 +231,30 @@ func (m *Manager) prepareGuestImport(ctx context.Context, op, hostPayload string
 		rootExec("rm", "-rf", "--", importStagingPath, importCandidatePath)); err != nil {
 		return err
 	}
+	// The payload arrives over `limactl copy`, which is rsync running as the Lima
+	// login user — never as hermes. Staging private to hermes could not receive
+	// it at all: rsync stopped at "cannot stat destination" before writing a
+	// byte, so no import ever completed. Group-writable is still not enough,
+	// because rsync sets times on the destination root and only its owner may do
+	// that: the transfer then lands every file and still exits 23. So the payload
+	// directory belongs to whoever the guest session actually is, and
+	// adoptGuestPayload hands it back to hermes before anything reads it.
+	//
+	// The staging root above it stays hermes-owned and not operator-writable: it
+	// holds the manifest that verification checks the payload against, and the
+	// side supplying the payload must not be able to rewrite its own reference.
+	transportUser, err := m.guestSessionUser(ctx, op)
+	if err != nil {
+		return err
+	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "create private import staging",
-		rootExec("install", "-d", "-o", lima.HermesUser, "-g", lima.HermesUser, "-m", "0700",
-			importStagingPath, importPayloadPath)); err != nil {
+		rootExec("install", "-d", "-o", lima.HermesUser, "-g", lima.TorioProjectsGroup, "-m", "0750",
+			importStagingPath)); err != nil {
+		return err
+	}
+	if err := m.mustRun(ctx, op, KindGuestCommand, "create private import payload staging",
+		rootExec("install", "-d", "-o", transportUser, "-g", lima.TorioProjectsGroup, "-m", "2770",
+			importPayloadPath)); err != nil {
 		return err
 	}
 	checksums, err := manifest.ChecksumFile(importPayloadPath)
@@ -247,10 +268,50 @@ func (m *Manager) prepareGuestImport(ctx context.Context, op, hostPayload string
 	if err := m.guest.CopyToGuest(ctx, hostPayload, importPayloadPath); err != nil {
 		return fromGuestErr(op, err)
 	}
+	if err := m.adoptGuestPayload(ctx, op); err != nil {
+		return err
+	}
 	if err := m.verifyGuestPayload(ctx, op, manifest); err != nil {
 		return err
 	}
 	return nil
+}
+
+// guestSessionUser reads back the identity guest commands actually run as, which
+// is the identity `limactl copy` writes as. It is a guest-supplied value that
+// becomes an argv element, so it is validated as a login name before use rather
+// than trusted because of where it came from.
+func (m *Manager) guestSessionUser(ctx context.Context, op string) (string, error) {
+	res, err := m.run(ctx, op, []string{"id", "-un"})
+	if err != nil {
+		return "", err
+	}
+	if res.ExitCode != 0 {
+		return "", commandError(op, KindGuestCommand, "read the guest session identity", res.ExitCode)
+	}
+	user := strings.TrimSpace(string(res.Stdout))
+	if err := lima.ValidateOperatorUser(user); err != nil {
+		return "", &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("the guest session identity is not a usable login name")}
+	}
+	return user, nil
+}
+
+// adoptGuestPayload hands the copied tree from the operator to hermes.
+//
+// rsync lands the payload owned by the Lima login user, carrying the host
+// staging modes — 0700 directories, which hermes cannot even enter. Verification
+// runs as hermes and the Brain is hermes-owned throughout, so ownership and
+// modes are normalized here, between the copy and the first read: hermes:hermes,
+// 0750 on directories and 0640 on files, the same shape the canonical Brain
+// keeps. Doing it before verification also means the checked bytes are the bytes
+// that will be moved into place, with nothing rewritten afterwards.
+func (m *Manager) adoptGuestPayload(ctx context.Context, op string) error {
+	if err := m.mustRun(ctx, op, KindGuestCommand, "adopt the copied payload",
+		rootExec("chown", "-R", "--", lima.HermesUser+":"+lima.HermesUser, importPayloadPath)); err != nil {
+		return err
+	}
+	return m.mustRun(ctx, op, KindGuestCommand, "normalize copied payload permissions",
+		rootExec("chmod", "-R", "u=rwX,g=rX,o=", "--", importPayloadPath))
 }
 
 func (m *Manager) verifyGuestPayload(ctx context.Context, op string, manifest *transfer.Manifest) error {

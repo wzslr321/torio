@@ -159,6 +159,11 @@ const (
 	HermesBrainPath = "/home/hermes/brain"
 	// HermesWorkspacePath is the persistent shared workspace directory.
 	HermesWorkspacePath = "/home/hermes/projects"
+	// TorioProjectsGroup is the shared guest group that lets the operator and
+	// hermes reach the same directories without either becoming the other. It
+	// is the only guest authority the two identities have in common, so any
+	// staging directory both must touch is grouped here.
+	TorioProjectsGroup = "torio-projects"
 )
 
 // The fixed, repository-controlled reconcile targets. These are constants (not
@@ -166,7 +171,6 @@ const (
 // general remote-script transport.
 const (
 	dockerGroup             = "docker"
-	torioProjectsGroup      = "torio-projects"
 	requiredArch            = "aarch64"
 	hermesAgentDir          = "/home/hermes/hermes-agent"
 	hermesTarget            = "/home/hermes/hermes-agent/venv/bin/hermes" // pinned launcher (owned by hermes)
@@ -193,10 +197,10 @@ type bootstrapPathSpec struct {
 // on the VM's native Linux filesystem with the V1 layout (ADR-0015 / Gate 0
 // FINDINGS). Owned paths are inspected via sudo.
 var bootstrapRequiredPaths = []bootstrapPathSpec{
-	{path: HermesHome, owner: HermesUser, group: torioProjectsGroup, modes: []string{"710", "0710"}},
+	{path: HermesHome, owner: HermesUser, group: TorioProjectsGroup, modes: []string{"710", "0710"}},
 	{path: HermesProfilePath, owner: HermesUser, group: HermesUser, modes: []string{"750", "0750"}, allowStricter: true},
 	{path: HermesBrainPath, owner: HermesUser, group: HermesUser, modes: []string{"750", "0750"}, allowStricter: true},
-	{path: HermesWorkspacePath, owner: HermesUser, group: torioProjectsGroup, modes: []string{"2770"}, setgid: true},
+	{path: HermesWorkspacePath, owner: HermesUser, group: TorioProjectsGroup, modes: []string{"2770"}, setgid: true},
 }
 
 // operatorShellHelperSpec is the required guest state of the operator shell
@@ -430,7 +434,7 @@ func (a *Adapter) verifyHermesUser(ctx context.Context, rep *BootstrapReport) er
 
 func (a *Adapter) verifyTorioProjectsGroup(ctx context.Context, rep *BootstrapReport) error {
 	const name = "torio_projects_group"
-	res, err := a.guestProbe(ctx, rep, name, "getent", "group", torioProjectsGroup)
+	res, err := a.guestProbe(ctx, rep, name, "getent", "group", TorioProjectsGroup)
 	if err != nil {
 		return err
 	}
@@ -438,7 +442,7 @@ func (a *Adapter) verifyTorioProjectsGroup(ctx context.Context, rep *BootstrapRe
 	if res.ExitCode != 0 || line == "" {
 		return a.verifyFailed(rep, name, "group torio-projects not found", "create the torio-projects group on the guest")
 	}
-	rep.record(name, true, torioProjectsGroup)
+	rep.record(name, true, TorioProjectsGroup)
 	return nil
 }
 
@@ -451,24 +455,49 @@ func (a *Adapter) verifyHermesInTorioProjects(ctx context.Context, rep *Bootstra
 	if res.ExitCode != 0 {
 		return a.verifyFailed(rep, name, "cannot read hermes group membership", "confirm the hermes user exists on the guest")
 	}
-	if !hasGroup(string(res.Stdout), torioProjectsGroup) {
+	if !hasGroup(string(res.Stdout), TorioProjectsGroup) {
 		return a.verifyFailed(rep, name, "hermes is not in torio-projects", "add hermes to the torio-projects group on the guest")
 	}
 	rep.record(name, true, "member")
 	return nil
 }
 
+// verifyOperatorInTorioProjects asks the guest session about itself rather than
+// asking the group database about a name.
+//
+// `id -nG <operator>` answers from /etc/group, and the property that decides
+// whether the product works is what the *session* carries. Lima multiplexes
+// every guest command over one persistent ssh master, and a master that
+// authenticated before the operator joined the group keeps serving commands
+// without it. That is not hypothetical: provisioning adds the group over the
+// session `limactl start` opened, so the master is stale by construction on
+// every freshly created machine. This check reported "member" — correctly, from
+// the database — while rsync could not traverse HermesHome and `torio brain
+// import` failed on a guest that was configured exactly right.
 func (a *Adapter) verifyOperatorInTorioProjects(ctx context.Context, rep *BootstrapReport, operator string) error {
 	const name = "operator_torio_projects"
-	res, err := a.guestProbe(ctx, rep, name, "id", "-nG", operator)
+	who, err := a.guestProbe(ctx, rep, name, "id", "-un")
+	if err != nil {
+		return err
+	}
+	if who.ExitCode != 0 {
+		return a.verifyFailed(rep, name, "cannot read the guest session identity", "confirm the Lima login user exists on the guest")
+	}
+	if session := strings.TrimSpace(string(who.Stdout)); session != operator {
+		return a.verifyFailed(rep, name,
+			fmt.Sprintf("guest session runs as %q, configured operator is %q", session, operator),
+			"reconcile the configured operator with the Lima login user")
+	}
+	res, err := a.guestProbe(ctx, rep, name, "id", "-nG")
 	if err != nil {
 		return err
 	}
 	if res.ExitCode != 0 {
 		return a.verifyFailed(rep, name, "cannot read operator group membership", "confirm the Lima login user exists on the guest")
 	}
-	if !hasGroup(string(res.Stdout), torioProjectsGroup) {
-		return a.verifyFailed(rep, name, "operator is not in torio-projects", "add the Lima login user to torio-projects on the guest")
+	if !hasGroup(string(res.Stdout), TorioProjectsGroup) {
+		return a.verifyFailed(rep, name, "the guest session is not in torio-projects",
+			"add the Lima login user to torio-projects on the guest, then run `torio vm stop` and `torio vm start` so the guest session picks the group up")
 	}
 	rep.record(name, true, "member")
 	return nil
