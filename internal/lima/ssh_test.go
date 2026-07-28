@@ -18,7 +18,7 @@ func TestSSHExactArgvNoCommand(t *testing.T) {
 		t.Fatalf("SSH: unexpected error: %v", err)
 	}
 	got := fr.callArgs(0)
-	want := []string{"shell", "--tty=false", InstanceName, "--"}
+	want := []string{"shell", "--tty=false", "--workdir", "/", InstanceName, "--"}
 	if !equalArgs(got, want) {
 		t.Fatalf("argv = %v, want %v", got, want)
 	}
@@ -39,9 +39,67 @@ func TestSSHExactArgvWithCommand(t *testing.T) {
 	}
 
 	got := fr.callArgs(0)
-	want := []string{"shell", "--tty=false", InstanceName, "--", "echo", "hello world", "--looks-like-a-flag"}
+	want := []string{"shell", "--tty=false", "--workdir", "/", InstanceName, "--", "echo", "hello world", "--looks-like-a-flag"}
 	if !equalArgs(got, want) {
 		t.Fatalf("argv = %v, want %v", got, want)
+	}
+}
+
+// TestSSHPinsTheGuestWorkingDirectory guards the flag that keeps guest commands
+// out of the Lima login user's home.
+//
+// Without it `limactl shell` falls back to that home whenever the host's working
+// directory does not exist on the guest — which is always, since the V1 template
+// mounts nothing. Torio runs its guest commands as hermes, which cannot enter
+// the operator's home, so a command that restores its initial directory before
+// exiting fails there after producing correct output: GNU find exits 1 with
+// "Failed to restore initial working directory", and `torio brain init` reported
+// a failed guest command on a healthy machine.
+func TestSSHPinsTheGuestWorkingDirectory(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		call func(a *Adapter) error
+	}{
+		{"SSH", func(a *Adapter) error {
+			_, err := a.SSH(context.Background(), []string{"find", "/home/hermes/brain"})
+			return err
+		}},
+		{"SSHInput", func(a *Adapter) error {
+			_, err := a.SSHInput(context.Background(), []byte("x"), []string{"tee", "/tmp/x"})
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fr := &fakeRunner{script: []scriptedResponse{{result: exitResult(0, "", "")}}}
+			a := New(fr)
+			if err := tc.call(a); err != nil {
+				t.Fatalf("%s: unexpected error: %v", tc.name, err)
+			}
+			got := fr.callArgs(0)
+			at := -1
+			for i, arg := range got {
+				if arg == "--workdir" {
+					at = i
+					break
+				}
+			}
+			if at < 0 || at+1 >= len(got) {
+				t.Fatalf("argv = %v, want a --workdir flag", got)
+			}
+			if got[at+1] != "/" {
+				t.Fatalf("--workdir = %q, want %q", got[at+1], "/")
+			}
+			// limactl parses its own flags before the instance name; a --workdir
+			// after it would be handed to the remote command instead.
+			for i, arg := range got {
+				if arg == InstanceName {
+					if i < at {
+						t.Fatalf("argv = %v, want --workdir before the instance name", got)
+					}
+					break
+				}
+			}
+		})
 	}
 }
 
@@ -75,7 +133,7 @@ func TestSSHInputExactArgvAndStdin(t *testing.T) {
 		t.Fatalf("ExitCode = %d, want 0", res.ExitCode)
 	}
 	got := fr.callArgs(0)
-	want := []string{"shell", "--tty=false", InstanceName, "--", "tee", "/tmp/x"}
+	want := []string{"shell", "--tty=false", "--workdir", "/", InstanceName, "--", "tee", "/tmp/x"}
 	if !equalArgs(got, want) {
 		t.Fatalf("argv = %v, want %v", got, want)
 	}

@@ -72,7 +72,7 @@ func TestBootstrapHappyPathAllChecksPass(t *testing.T) {
 	}
 
 	got := fr.callArgs(11)
-	want := []string{"shell", "--tty=false", InstanceName, "--", "sudo", "-n", "-u", HermesUser, "--", "hermes", "--version"}
+	want := []string{"shell", "--tty=false", "--workdir", "/", InstanceName, "--", "sudo", "-n", "-u", HermesUser, "--", "hermes", "--version"}
 	if !equalArgs(got, want) {
 		t.Fatalf("hermes stable-path argv = %v, want %v", got, want)
 	}
@@ -155,7 +155,7 @@ func TestBootstrapReconcilesHermesShim(t *testing.T) {
 	if fr.callCount() != 29 {
 		t.Fatalf("callCount = %d, want 29 (ln reconcile step present)", fr.callCount())
 	}
-	if got, want := fr.callArgs(10), []string{"shell", "--tty=false", InstanceName, "--", "sudo", "-n", "ln", "-sfn", hermesTarget, hermesShimPath}; !equalArgs(got, want) {
+	if got, want := fr.callArgs(10), []string{"shell", "--tty=false", "--workdir", "/", InstanceName, "--", "sudo", "-n", "ln", "-sfn", hermesTarget, hermesShimPath}; !equalArgs(got, want) {
 		t.Fatalf("ln argv = %v, want %v", got, want)
 	}
 	if !checkOK(rep, "hermes_shim") {
@@ -383,10 +383,10 @@ func TestBootstrapVerifiesTheOperatorShellHelper(t *testing.T) {
 	if !checkOK(rep, "operator_shell_helper") {
 		t.Fatalf("bootstrap did not verify the operator shell helper: %+v", rep.Checks)
 	}
-	if got, want := fr.callArgs(26), []string{"shell", "--tty=false", InstanceName, "--", "stat", "-c", "%F", OperatorShellHelper}; !equalArgs(got, want) {
+	if got, want := fr.callArgs(26), []string{"shell", "--tty=false", "--workdir", "/", InstanceName, "--", "stat", "-c", "%F", OperatorShellHelper}; !equalArgs(got, want) {
 		t.Fatalf("helper type probe argv = %v, want %v", got, want)
 	}
-	if got, want := fr.callArgs(27), []string{"shell", "--tty=false", InstanceName, "--", "stat", "-c", "%U:%G %a", OperatorShellHelper}; !equalArgs(got, want) {
+	if got, want := fr.callArgs(27), []string{"shell", "--tty=false", "--workdir", "/", InstanceName, "--", "stat", "-c", "%U:%G %a", OperatorShellHelper}; !equalArgs(got, want) {
 		t.Fatalf("helper ownership probe argv = %v, want %v", got, want)
 	}
 	if got := checkDetail(rep, "operator_shell_helper"); !strings.Contains(got, "root:root") {
@@ -543,4 +543,68 @@ func checkDetail(rep BootstrapReport, name string) string {
 		}
 	}
 	return ""
+}
+
+// TestModeMatchesAcceptsAStricterModeOnlyWhereNobodyElseNeedsThePermission
+// pins the asymmetry that made a first-use machine unbootstrappable.
+//
+// Hermes tightens /home/hermes/.hermes to 0700 the moment it stores provider
+// credentials there. Bootstrap compared modes for equality, so that ordinary
+// first use turned every later verified command into a fail-closed precondition
+// error. Loosening must still fail, and so must tightening a path whose group
+// or world permission the operator depends on.
+func TestModeMatchesAcceptsAStricterModeOnlyWhereNobodyElseNeedsThePermission(t *testing.T) {
+	private := bootstrapPathSpec{modes: []string{"750", "0750"}, allowStricter: true}
+	shared := bootstrapPathSpec{modes: []string{"710", "0710"}}
+	helper := operatorShellHelperSpec
+
+	cases := []struct {
+		name string
+		spec bootstrapPathSpec
+		mode string
+		want bool
+	}{
+		{"private exact", private, "750", true},
+		{"private zero-padded", private, "0750", true},
+		{"private tightened by hermes", private, "700", true},
+		{"private tightened, zero-padded", private, "0700", true},
+		{"private loosened to group-writable", private, "770", false},
+		{"private loosened to world-readable", private, "755", false},
+		{"private owner locked out", private, "050", false},
+		{"private setuid smuggled in", private, "4750", false},
+		{"shared path keeps its traversal bit", shared, "700", false},
+		{"shared path exact", shared, "710", true},
+		{"helper stays executable by all", helper, "700", false},
+		{"helper exact", helper, "755", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := modeMatches(tc.spec, tc.mode); got != tc.want {
+				t.Errorf("modeMatches(%v, %q) = %v, want %v", tc.spec.modes, tc.mode, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBootstrapRequiredPathsOptInToStrictnessDeliberately keeps the exemption
+// from spreading: only the two directories private to hermes may be tightened,
+// because their group is hermes itself. HermesHome and HermesWorkspacePath
+// carry torio-projects permissions the operator's own session uses.
+func TestBootstrapRequiredPathsOptInToStrictnessDeliberately(t *testing.T) {
+	want := map[string]bool{
+		HermesHome:          false,
+		HermesProfilePath:   true,
+		HermesBrainPath:     true,
+		HermesWorkspacePath: false,
+	}
+	for _, spec := range bootstrapRequiredPaths {
+		expected, known := want[spec.path]
+		if !known {
+			t.Errorf("unexpected required path %q: decide whether a stricter mode is drift or hardening", spec.path)
+			continue
+		}
+		if spec.allowStricter != expected {
+			t.Errorf("%s allowStricter = %v, want %v", spec.path, spec.allowStricter, expected)
+		}
+	}
 }
