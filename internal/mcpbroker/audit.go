@@ -139,7 +139,7 @@ func WriteAudit(w io.Writer, rec AuditRecord) error {
 // token, never to free text.
 func auditReason(r Reason) string {
 	switch r {
-	case ReasonUnknownService, ReasonToolNotGranted, ReasonGranted:
+	case ReasonUnknownService, ReasonToolNotGranted, ReasonGranted, ReasonWriteWindowClosed:
 		return r.String()
 	default:
 		return "unknown"

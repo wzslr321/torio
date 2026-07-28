@@ -48,6 +48,12 @@ const (
 	ReasonToolNotGranted
 	// ReasonGranted allows a tool the service's policy lists by name.
 	ReasonGranted
+	// ReasonWriteWindowClosed is a tool that IS granted being refused because no
+	// operator write window is open for its service. It is distinct from
+	// ReasonToolNotGranted because the remedies have nothing in common: one is an
+	// operator editing a policy file, the other is an operator opening a window
+	// for the next few minutes.
+	ReasonWriteWindowClosed
 )
 
 func (r Reason) String() string {
@@ -58,6 +64,8 @@ func (r Reason) String() string {
 		return "tool_not_granted"
 	case ReasonGranted:
 		return "granted"
+	case ReasonWriteWindowClosed:
+		return "write_window_closed"
 	default:
 		return "invalid"
 	}

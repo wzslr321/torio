@@ -206,3 +206,45 @@ func TestMCPInstallHumanOutputNamesTheRestartStep(t *testing.T) {
 		t.Errorf("human output does not tell the operator to restart the backend: %q", stdout)
 	}
 }
+
+func TestMCPAllowWriteDefaultsToFifteenMinutes(t *testing.T) {
+	fr := &fakeLimaRunner{script: []scriptedResp{{}, {}, {}}}
+	code, stdout, stderr := runVMWithFake(t, []string{"mcp", "allow-write", "atlassian", "--json"}, fr)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q stdout=%q", code, stderr, stdout)
+	}
+	env := decodeOneEnvelope(t, stdout)
+	if env["command"] != "mcp.allow-write" || env["ok"] != true {
+		t.Fatalf("unexpected envelope: %v", env)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data["service"] != "atlassian" {
+		t.Errorf("data.service = %v, want atlassian", data["service"])
+	}
+	if data["minutes"] != float64(15) {
+		t.Errorf("data.minutes = %v, want 15 (the default window)", data["minutes"])
+	}
+}
+
+// TestMCPAllowWriteRejectsAnUnboundedWindow: a window with no end is a
+// permanent grant wearing the word "window", which is the arrangement this
+// command exists to replace.
+func TestMCPAllowWriteRejectsAnUnboundedWindow(t *testing.T) {
+	for _, bad := range []string{"0s", "-5m", "0"} {
+		fr := &fakeLimaRunner{script: []scriptedResp{{}, {}, {}}}
+		code, _, _ := runVMWithFake(t, []string{"mcp", "allow-write", "atlassian", "--for", bad}, fr)
+		if code != int(ExitUsage) {
+			t.Errorf("--for %s: exit = %d, want %d (usage)", bad, code, int(ExitUsage))
+		}
+		if fr.calls != nil {
+			t.Errorf("--for %s reached the guest", bad)
+		}
+	}
+}
+
+func TestMCPAllowWriteNeedsAService(t *testing.T) {
+	code, _, _ := runVMWithFake(t, []string{"mcp", "allow-write"}, &fakeLimaRunner{})
+	if code != int(ExitUsage) {
+		t.Fatalf("exit = %d, want %d (usage)", code, int(ExitUsage))
+	}
+}

@@ -273,6 +273,7 @@ torio project shell <id>
 
 ```text
 torio mcp install
+torio mcp allow-write <service> [--for DURATION]
 torio mcp status
 ```
 
@@ -294,6 +295,18 @@ granicę i dowodzi, że trzyma.
 - Gdy `hermes` dopiero co dołączył do grupy klientów, `install` raportuje `restart_required` i mówi
   o tym wprost. Długo żyjący proces nie nabywa grupy dlatego, że zmieniła się pod nim baza grup —
   backend trzyma to, z czym wystartował, aż do `torio serve restart`.
+- `allow-write` otwiera **ograniczone w czasie okno zapisu** dla jednej usługi. Narzędzia
+  oznaczone w policy jako zapisujące są odmawiane, dopóki okno nie jest otwarte; okno zamyka się
+  samo i nic nie trzeba uruchamiać, żeby je zakończyć. Domyślnie **15 minut** — dość długo, by nie
+  walczyć z narzędziem w trakcie pracy, dość krótko, by instrukcja wstrzyknięta później trafiła w
+  zamknięte drzwi. `--for` bez dodatniej wartości jest usage error (exit 2): okno bez końca to
+  trwały grant udający okno.
+- To jest ten sam kształt, który `project shell` daje gitowi: zdolność zapisu pojawia się, bo
+  poprosił o nią człowiek, jest ograniczona w czasie i kończy się bez pamiętania o niej. **Agent nie
+  może otworzyć ani przedłużyć okna** — leży ono w home brokera, do którego jego tożsamość nie ma
+  wstępu, a sudo nie ma w ogóle.
+- `allow-write` **nie przyznaje narzędzi.** Odblokowuje wyłącznie te, które policy już wymienia jako
+  zapisujące. Przyznanie narzędzia pozostaje edycją pliku policy przez roota.
 - `status` **dowodzi i raportuje; niczego nie naprawia.** Weryfikuje, że tożsamość brokera istnieje,
   że jego magazyn credentiali nie jest czytelny dla nikogo poza nim, że `hermes` może otworzyć socket
   brokera, ale **nie** należy do grupy samego brokera, oraz że pod profilem Hermesa nie pojawił się
