@@ -234,7 +234,7 @@ func (a *app) emitBrainInit(report brain.InitReport) error {
 			Created:         report.Created,
 			SkillUpdated:    report.SkillUpdated,
 			brainStatusData: brainData(report.Status),
-		}, nil))
+		}))
 	}
 	action := "unchanged"
 	if report.Created {
@@ -281,7 +281,7 @@ func brainTransferDetails(report brain.TransferReport) map[string]any {
 
 func (a *app) emitBrainTransfer(command string, report brain.TransferReport) error {
 	if a.jsonOut {
-		return writeJSON(a.stdout, successEnvelope(command, transferData(report), nil))
+		return writeJSON(a.stdout, successEnvelope(command, transferData(report)))
 	}
 	action := "completed"
 	if report.DryRun {
@@ -331,7 +331,7 @@ func brainSkillNotes(state brain.SkillState, updated bool) []string {
 
 func (a *app) emitBrainStatus(command string, report brain.StatusReport, extra []string) error {
 	if a.jsonOut {
-		return writeJSON(a.stdout, successEnvelope(command, brainData(report), nil))
+		return writeJSON(a.stdout, successEnvelope(command, brainData(report)))
 	}
 	project := "not_registered"
 	if report.ProjectRegistered {

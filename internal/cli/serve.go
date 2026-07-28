@@ -242,7 +242,7 @@ func (a *app) emitServeInstall(rep serve.InstallReport) error {
 			Validated:     rep.Validated,
 			Enabled:       rep.Enabled,
 		}
-		return writeJSON(a.stdout, successEnvelope("serve.install", data, nil))
+		return writeJSON(a.stdout, successEnvelope("serve.install", data))
 	}
 	state := "unchanged"
 	if rep.Changed {
@@ -261,7 +261,7 @@ func (a *app) emitServeInstall(rep serve.InstallReport) error {
 
 func (a *app) emitServeStatus(command string, rep serve.StatusReport) error {
 	if a.jsonOut {
-		return writeJSON(a.stdout, successEnvelope(command, statusData(rep), nil))
+		return writeJSON(a.stdout, successEnvelope(command, statusData(rep)))
 	}
 	_, err := fmt.Fprintf(a.stdout,
 		"Backend ready on %s\n"+
@@ -274,7 +274,7 @@ func (a *app) emitServeStatus(command string, rep serve.StatusReport) error {
 
 func (a *app) emitServeStop(rep serve.StopReport) error {
 	if a.jsonOut {
-		return writeJSON(a.stdout, successEnvelope("serve.stop", serveStopData{Active: rep.Active, ActiveState: rep.ActiveState}, nil))
+		return writeJSON(a.stdout, successEnvelope("serve.stop", serveStopData{Active: rep.Active, ActiveState: rep.ActiveState}))
 	}
 	_, err := fmt.Fprintf(a.stdout, "Backend %s stopped (state=%s).\n", serve.UnitName, rep.ActiveState)
 	return err
@@ -282,7 +282,7 @@ func (a *app) emitServeStop(rep serve.StopReport) error {
 
 func (a *app) emitServeLogs(rep serve.LogsReport) error {
 	if a.jsonOut {
-		return writeJSON(a.stdout, successEnvelope("serve.logs", serveLogsData{Unit: rep.Unit, Lines: rep.Lines, Text: rep.Text}, nil))
+		return writeJSON(a.stdout, successEnvelope("serve.logs", serveLogsData{Unit: rep.Unit, Lines: rep.Lines, Text: rep.Text}))
 	}
 	// Human mode: write the (bounded, redacted) log text verbatim to stdout.
 	_, err := a.stdout.Write([]byte(rep.Text))

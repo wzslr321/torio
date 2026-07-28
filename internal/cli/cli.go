@@ -224,6 +224,11 @@ func (a *app) opContext(cmd *cobra.Command) (context.Context, context.CancelFunc
 // wantsJSON reports whether args request JSON output, used only to render an
 // error envelope when a flag/parse error prevents normal flag binding.
 //
+// It recognizes exactly the spellings pflag accepts for a long bool flag, so
+// this fallback and normal binding never disagree about what was asked for. A
+// single-dash `-json` is not one of them: pflag reads it as a cluster of short
+// flags, so it could never have bound the flag it looks like.
+//
 // The scan stops at the first bare `--`: everything from there on is the
 // operator's payload for a remote command (`torio vm ssh -- echo --json`), not
 // a request for torio's own output mode. Only flags the operator gave to torio
@@ -234,7 +239,7 @@ func wantsJSON(args []string) bool {
 			return false
 		}
 		switch a {
-		case "--json", "-json", "--json=true", "-json=true":
+		case "--json", "--json=true":
 			return true
 		}
 	}

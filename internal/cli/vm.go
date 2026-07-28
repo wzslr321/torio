@@ -136,7 +136,7 @@ func (a *app) emitVMInit(res lima.InitResult) error {
 			ImageDigest:   res.ImageDigest,
 			NextStep:      next,
 		}
-		return writeJSON(a.stdout, successEnvelope("vm.init", data, nil))
+		return writeJSON(a.stdout, successEnvelope("vm.init", data))
 	}
 	if res.Created {
 		_, err := fmt.Fprintf(a.stdout, "%s: created\nnext: %s\n", lima.InstanceName, next)
@@ -279,7 +279,7 @@ func newVMSSHCmd(a *app) *cobra.Command {
 func (a *app) emitVMState(command string, state lima.State) error {
 	if a.jsonOut {
 		data := vmStateData{Name: lima.InstanceName, State: string(state)}
-		return writeJSON(a.stdout, successEnvelope(command, data, nil))
+		return writeJSON(a.stdout, successEnvelope(command, data))
 	}
 	_, err := fmt.Fprintf(a.stdout, "%s: %s\n", lima.InstanceName, state)
 	return err
@@ -342,7 +342,7 @@ func bootstrapReportDetails(rep lima.BootstrapReport) map[string]any {
 // stable command path). The post-bootstrap action to reach Hermes stays operator-controlled.
 func (a *app) emitVMBootstrap(rep lima.BootstrapReport) error {
 	if a.jsonOut {
-		return writeJSON(a.stdout, successEnvelope("vm.bootstrap", bootstrapData(rep), nil))
+		return writeJSON(a.stdout, successEnvelope("vm.bootstrap", bootstrapData(rep)))
 	}
 	for _, c := range rep.Checks {
 		mark := "ok"
@@ -372,7 +372,7 @@ func (a *app) emitVMSSH(res execx.Result) error {
 		if res.ExitCode != 0 {
 			return sshCommandFailed(res)
 		}
-		return writeJSON(a.stdout, successEnvelope("vm.ssh", sshData(res), nil))
+		return writeJSON(a.stdout, successEnvelope("vm.ssh", sshData(res)))
 	}
 	// Human mode: route the remote streams to our own streams verbatim, keeping
 	// stdout free of anything but the remote command's stdout.

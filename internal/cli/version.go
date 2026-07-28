@@ -68,7 +68,7 @@ func runVersion(ctx context.Context, stdout io.Writer, jsonOut bool, build Build
 		return err
 	}
 	if jsonOut {
-		return writeJSON(stdout, successEnvelope("version", build.data(), nil))
+		return writeJSON(stdout, successEnvelope("version", build.data()))
 	}
 	if _, err := fmt.Fprintf(stdout, "torio %s (commit %s, built %s)\n", build.Version, build.Commit, build.BuildDate); err != nil {
 		return err

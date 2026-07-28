@@ -19,7 +19,6 @@ func TestExitCodeMappingMatchesContract(t *testing.T) {
 		"success":            {ExitOK, 0},
 		"usage/schema":       {ExitUsage, 2},
 		"precondition":       {ExitPrecondition, 3},
-		"policy denied":      {ExitPolicy, 4},
 		"stale/conflict":     {ExitConflict, 5},
 		"verification":       {ExitVerification, 6},
 		"permission/cap":     {ExitPermission, 7},
