@@ -1,7 +1,7 @@
 # Config contract (D2)
 
 Ten dokument opisuje typowaną konfigurację hosta oraz version-lock manifest wprowadzone w D2
-(patrz [`../plans/02-demo-a.md`](../plans/02-demo-a.md) § D2). Implementacja: `internal/config/`.
+(patrz `archive/pre-v1:docs/plans/02-demo-a.md` § D2). Implementacja: `internal/config/`.
 Konfiguracja jest **non-secret** (AGENTS §6): materiał o kształcie sekretu jest odrzucany.
 
 ## Lokalizacje (XDG)
@@ -108,7 +108,9 @@ Przykład (poprawny V2):
 
 Registry jest **niesekretnym** źródłem prawdy o podpiętych projektach
 ([ADR-0015](../adr/0015-torio-v1-onboarding-projects-and-operator-push.md)).
-Legacy [`project-config.md`](project-config.md) i `schemas/project.schema.json` **nie** obowiązują.
+Legacy `archive/pre-v1:docs/contracts/project-config.md` i
+`archive/pre-v1:schemas/project.schema.json` **nie** obowiązują i nie są już w drzewie
+([ADR-0017](../adr/0017-pre-v1-exploration-leaves-the-working-tree.md)).
 
 **Workspace path nie jest polem.** Jest wyprowadzany z `id` (`/home/hermes/projects/<id>`) przez
 warstwę projektów, więc config nie może wskazać projektu na dowolną ścieżkę w guest. Obiekt projektu

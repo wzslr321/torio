@@ -123,11 +123,12 @@ make validate     # fail if any generated file drifted from its source
 Generated files are committed, so serving the site still needs no build step.
 Edit the sources, never the outputs — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-## Legacy architecture
+## Earlier exploration
 
-An earlier, broader exploration (Demo A / Demo B, worker/control-plane,
-registry, verifier, and evidence-pipeline plans) predates V0 and is **superseded**.
-It is retained for historical context only and is **not** the current
-implementation plan. See [`docs/legacy-architecture.md`](docs/legacy-architecture.md)
-for what that material is and where it lives. Do not use it as an onboarding or
-task path.
+A broader design exploration (Demo A / Demo B, worker/control-plane, registry,
+verifier, evidence pipeline) predates V0, was never delivered, and is
+**superseded**. It no longer ships in the working tree; it is kept under the
+annotated tag `archive/pre-v1` and read with
+`git show archive/pre-v1:<path>`. See
+[`docs/adr/0017-pre-v1-exploration-leaves-the-working-tree.md`](docs/adr/0017-pre-v1-exploration-leaves-the-working-tree.md).
+Do not use it as an onboarding or task path.

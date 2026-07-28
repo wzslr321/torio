@@ -3,7 +3,7 @@
 ## Przed zmianą
 
 1. Przeczytaj `AGENTS.md`.
-2. Ustal etap z `docs/plans/00-roadmap.md`.
+2. Ustal task z planu V1 w `.hermes/plans/`.
 3. Przeczytaj odpowiedni ADR i kontrakt.
 4. Sprawdź, czy wymagany spike gate jest zamknięty.
 

@@ -2,15 +2,18 @@
 
 > **STATUS (częściowo superseded — czytaj razem z ADR-0015).** Ten kontrakt powstał dla
 > platformy **pre-V0** i opisuje command surface, którego dostarczona binarka nie ma:
-> `doctor`, `status`, `reconcile`, `vm logs`, `gateway`, `project`, `task` i `admin` **nie
+> `doctor`, `status`, `reconcile`, `vm logs`, `gateway`, `task` i `admin` **nie
 > istnieją** w CLI. Zaimplementowane są `version`, `vm` (`init`, `status`, `start`, `stop`,
-> `bootstrap`, `ssh`), `serve` i `brain`. Normatywne i aktualne pozostają: nazwa binarki, JSON envelope,
+> `bootstrap`, `ssh`), `serve`, `brain` i `project` — to ostatnie w kształcie z ADR-0015
+> (`add`, `list`, `show`, `use`, `remove`, `shell`), nie w opisanym niżej pre-V0.
+> Normatywne i aktualne pozostają: nazwa binarki, JSON envelope,
 > tabela exit codes, reguła „jeden envelope na stdout" oraz opisane niżej postconditions
 > `vm bootstrap` i `serve`. Tam, gdzie ten dokument jest sprzeczny z
 > [ADR-0015](../adr/0015-torio-v1-onboarding-projects-and-operator-push.md), **wygrywa ADR** —
-> mimo kolejności z `AGENTS.md` §3, bo ADR-0015 jawnie supersedes zakres tej platformy
-> (patrz [`legacy-architecture.md`](../legacy-architecture.md)). Superseded treść jest
-> zachowana celowo jako kontekst historyczny; nie implementuj jej.
+> mimo kolejności z `AGENTS.md` §3, bo ADR-0015 jawnie supersedes zakres tej platformy.
+> Superseded treść jest zachowana celowo jako kontekst historyczny; nie implementuj jej.
+> Pre-V1 eksploracja, z której pochodzi, jest pod tagiem `archive/pre-v1`
+> ([ADR-0017](../adr/0017-pre-v1-exploration-leaves-the-working-tree.md)).
 >
 > Ten dokument jest **normatywny**, nie archiwalny: rozjazd z dostarczonym zachowaniem jest
 > defektem do naprawy, a nie zapisem do zachowania — patrz
@@ -228,7 +231,7 @@ Wymagania:
 
 Adapter `torio → hermes kanban` NIE MOŻE traktować exit code procesu Hermesa jako wystarczającego
 postcondition security-relevant mutacji stanu. Ustalenie ze spike'u: `hermes kanban claim` przy
-konflikcie **wypisuje odmowę, ale kończy się exit `0`** (patrz [spike-results/03-kanban-worker.md](../spike-results/03-kanban-worker.md)).
+konflikcie **wypisuje odmowę, ale kończy się exit `0`** (patrz `archive/pre-v1:docs/spike-results/03-kanban-worker.md`).
 
 Reguła (dotyczy `claim` i każdej innej security-relevant mutacji, np. `reclaim`, `complete`):
 

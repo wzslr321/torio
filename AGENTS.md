@@ -23,27 +23,16 @@ oraz plan
 > nie mogą się rozjechać. Nie edytuj plików wygenerowanych — zmień źródło i
 > uruchom `make docs`. `make validate` zawodzi, gdy output odbiega od źródła.
 
-- Opisane niżej w tym pliku **platformowe** obowiązki i inwarianty Torio —
-  w szczególności sekcje **4–5** (legacy project registry / admission control,
-  per-task isolation, fresh verifier, approval/integration/push oraz
-  worker/container/worktree invariants) — a także starsze `docs/plans/`,
-  `docs/contracts/`, ADR-y 0001–0014 jako historia platformy, `prompts/` i
-  starsze `docs/spike-results/`, opisują **superseded / pre-V0** eksplorację.
-  Są zachowane **wyłącznie jako kontekst historyczny** (patrz
-  [`docs/legacy-architecture.md`](docs/legacy-architecture.md)) i **NIE MOGĄ być
-  implementowane ani traktowane jako następny task** w Torio V0 ani V1.
-  ADR-0015 i plan V1 **nie** reaktywują tej platformy.
-- Dyscyplina inżynierska i bezpieczeństwa z sekcji **6–10** (TDD, jeden wąski
-  behavior slice na raz, `scripts/validate_artifacts.py`, typed adaptery i
-  timeouty, redakcja sekretów jako `[REDACTED]`, wymóg evidence, brak sekretów w
-  output/logach) **pozostaje w mocy** — o ile nie wymaga zarchiwizowanej platformy
-  workerów/registry/verifiera.
-- **Precedens dla pracy implementacyjnej Torio V1:** gdy sekcje platformowe tego
-  pliku, legacy plany/kontrakty/ADR-y 0001–0014, prompty lub spike material są
-  sprzeczne z ADR-0015 albo planem V1, autorytetem są **ADR-0015 i plan V1**.
-  Gdy ADR-0015 / plan V1 są sprzeczne z `README.md` lub runbookami V0, rozbieżność
-  jest **oczekiwana** w trakcie implementacji: README/runbooki opisują dostarczone
-  V0 do release; nie traktuj ich jako stop-the-work konfliktu blokującego taski V1.
+- Pre-V1 eksploracja (platforma workerów, admission control, per-task isolation,
+  fresh verifier, approval/integration/push, staged roadmap Demo A / Demo B)
+  **nie jest już w drzewie roboczym**. Leży pod tagiem `archive/pre-v1` —
+  [ADR-0017](docs/adr/0017-pre-v1-exploration-leaves-the-working-tree.md).
+  Nie reaktywuj jej i nie traktuj jako następnego taska.
+- **Precedens dla pracy implementacyjnej Torio V1:** gdy cokolwiek jest sprzeczne
+  z ADR-0015 albo planem V1, autorytetem są **ADR-0015 i plan V1**. Gdy ADR-0015 /
+  plan V1 są sprzeczne z `README.md` lub runbookami V0, rozbieżność jest
+  **oczekiwana** w trakcie implementacji: README/runbooki opisują dostarczone V0
+  do release; nie traktuj ich jako stop-the-work konfliktu blokującego taski V1.
   Zakaz cichej zmiany ADR-ów (sekcja 9) dotyczy nowych decyzji — ADR-0015 jest
   jawnym, superseding zapisem granic V1.
 
@@ -64,64 +53,55 @@ Kolejność ważności:
 
 1. `AGENTS.md`.
 2. Przyjęte ADR-y w `docs/adr/`.
-3. Kontrakty w `docs/contracts/` i schematy w `schemas/`.
-4. Threat model i architektura.
-5. Plan aktualnego etapu.
-6. Prompty pomocnicze.
+3. Kontrakty w `docs/contracts/`.
+4. [`docs/03-architecture.md`](docs/03-architecture.md).
+5. Plan V1 w `.hermes/plans/`.
 
 Aktualna dokumentacja i kod Hermes Agent są źródłem prawdy o Hermesie. Nie używaj pamięci modelu do odgadywania komend, portów, opcji, paths ani lifecycle.
 
 ## 4. Niezmienne granice
 
+Zakres i uzasadnienie: [ADR-0015](docs/adr/0015-torio-v1-onboarding-projects-and-operator-push.md)
+oraz [`docs/03-architecture.md`](docs/03-architecture.md).
+
 ### Hermes Agent jest ownerem
 
 - model execution,
 - profili, sesji i pamięci,
-- messaging gateway,
-- Kanban queue,
-- dispatch, claims, retries i heartbeats,
-- procesów workerów i task events.
+- rejestru projektów po stronie agenta,
+- Kanbana, dispatchu i retry.
 
 ### Torio jest ownerem
 
-- Lima lifecycle i provisioning,
-- project registry i admission control,
-- effective policy,
-- execution specification,
-- per-task isolation guarantees,
-- security-sensitive Git operations,
-- fresh sandboxed verification,
-- review evidence,
-- approval, integration i push.
+- Lima lifecycle, provisioning i weryfikacji gościa,
+- niesekretnej deklaracji podpiętych projektów (`config.json` V2),
+- wyprowadzania ścieżek workspace'ów i vaulta,
+- krótkotrwałej sesji operatora, która jest jedynym nośnikiem write capability.
 
 ### Torio NIE MOŻE implementować
 
-- alternatywnego agent loop,
-- drugiego Kanbana,
-- własnego dispatchera lub retry engine,
-- autonomicznego merge/push,
-- dowolnego wykonywania `devcontainer.json` z task branch,
-- sekret managera klasy Vault w PoC,
-- domenowego network allowlistu w PoC.
+- alternatywnego agent loop ani drugiego Kanbana,
+- własnego dispatchera, queue lub retry engine,
+- autonomicznego merge/push/release,
+- per-task workerów ani verifier platformy,
+- secret managera klasy Vault ani domenowego network allowlistu.
 
 ## 5. Security invariants
 
 Każda implementacja MUSI zachować:
 
-1. Repozytoria i state znajdują się na Linux filesystemie VM, nie na szerokim mountcie macOS.
-2. Profile Hermesa nie są traktowane jako sandbox.
-3. Jeden task ma świeży workload container albo równoważną osobną granicę wykonania.
-4. Worker nie ma `/var/run/docker.sock`, członkostwa w grupie Docker wewnątrz workloadu ani hostowego Docker CLI.
-5. Worker nie ma używalnego `.git`, push credentials ani admin capability.
-6. Worker nie ma pamięci, sesji, credentials ani skills Braina.
-7. Worker policy obejmuje host-side tools, MCP-y, skills i implicit credential/env passthrough.
-8. Config/policy są czytane z trusted registry/base revision, nigdy z task branch jako authority.
-9. Worker zostaje zatrzymany i traci write access przed snapshotem.
-10. Weryfikacja candidate code odbywa się w świeżym verifier sandboxie, nigdy na hoście VM.
-11. Approval jest związany z exact object IDs i hashami evidence.
-12. Integracja PoC jest fast-forward-only i wymaga `target HEAD == approved base_commit`.
-13. Push jest osobną, human-only operacją.
-14. Brain nie może uzyskać capability `approve`, `integrate` ani `push` przez własny terminal.
+1. Repozytoria, Brain i state leżą na natywnym filesystemie VM, nigdy na szerokim mountcie macOS.
+2. Profil Hermesa nie jest sandboxem; granicą jest brzeg VM.
+3. Tożsamość serwisowa `hermes` NIE MOŻE należeć do grupy `docker` ani mieć dostępu do `docker.sock`.
+4. `/home/hermes/.hermes` (profil) i `/home/hermes/brain` (vault) są rozróżniane w kodzie i docs.
+5. Workspace path jest wyprowadzany z id projektu, nigdy podawany przez użytkownika.
+6. Git remote NIE MOŻE zawierać hasła, tokenu, query ani fragmentu.
+7. Persistentny `hermes` ma do origin wyłącznie read; `ssh.forwardAgent` jest globalnie wyłączone.
+8. Write capability pochodzi wyłącznie z sesji `torio project shell` i kończy się razem z nią.
+9. Guest helper sesji operatora jest `root:root 0755`; drift jest raportowany, nie naprawiany.
+10. Push, merge i release są osobnymi, human-only operacjami poza CLI.
+11. Transport Braina jest jednorazowy i ograniczony; treść payloadu nie trafia do stdout, logów ani evidence.
+12. Brain nie jest wstrzykiwany do promptu — dostęp cross-project idzie przez retrieval skill.
 
 ## 6. Zasady implementacji
 

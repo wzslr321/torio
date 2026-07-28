@@ -14,7 +14,7 @@
 # session is fixed here rather than passed in: the operator's own identity under
 # the shared project group, never sudo and never root, matching the promoted
 # Gate-0 evidence in
-# docs/spike-results/v1-operator-shell-20260727T132420Z/FINDINGS.md.
+# archive/pre-v1:docs/spike-results/v1-operator-shell-20260727T132420Z/FINDINGS.md.
 set -euo pipefail
 
 workspace='/home/hermes/projects'

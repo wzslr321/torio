@@ -26,7 +26,7 @@ const (
 	workspaceRoot = lima.HermesWorkspacePath
 	// sharedGroup is the group the operator and `hermes` both belong to. The
 	// promoted Gate-0 operator-shell spike
-	// (docs/spike-results/v1-operator-shell-20260727T132420Z) established it as
+	// (archive/pre-v1:docs/spike-results/v1-operator-shell-20260727T132420Z) established it as
 	// the only way both identities can work one checkout without sudo — and
 	// established just as firmly that `hermes` must never be in the docker group.
 	sharedGroup = "torio-projects"

@@ -112,7 +112,7 @@ plane with a project registry and admission control, per-task worker isolation,
 fresh sandboxed verification, and an evidence and review pipeline. None of that
 is what Torio V0 delivers.
 
-That material is retained only for historical context and must not be treated as
-an onboarding or next-task path. See
-[the legacy-architecture note](https://github.com/wzslr321/torio/blob/main/docs/legacy-architecture.md)
-in the repository for what it is and where it lives.
+That material is not part of the product and must not be treated as an
+onboarding or next-task path. It no longer ships in the repository's working
+tree; it is kept under the annotated tag `archive/pre-v1` and read with
+`git show archive/pre-v1:<path>`.

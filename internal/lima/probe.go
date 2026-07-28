@@ -9,7 +9,7 @@ import (
 
 // versionPattern matches limactl's real `--version` output, verified against
 // an installed Lima 2.2.0 on darwin/arm64: "limactl version 2.2.0\n"
-// (docs/spike-results/evidence/etap-0d-lima-adapter/limactl-version.txt).
+// (archive/pre-v1:docs/spike-results/evidence/etap-0d-lima-adapter/limactl-version.txt).
 //
 // The captured group is a semver version — a "MAJOR.MINOR.PATCH" core with
 // the standard optional pre-release ("-…") and build ("+…") metadata — not an
