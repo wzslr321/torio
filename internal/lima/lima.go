@@ -11,13 +11,23 @@ package lima
 import (
 	"context"
 
+	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
 )
 
-// InstanceName is the single Lima VM instance Torio manages. ADR-0003
-// places exactly one Linux arm64 VM as the trust boundary for Demo A; torio
-// does not manage multiple named instances.
-const InstanceName = "torio"
+// InstanceName is the Lima VM instance this invocation manages.
+//
+// ADR-0003 still holds: exactly one Linux arm64 VM is the trust boundary, and
+// Torio never manages several at once. What ADR-0021 changed is that the
+// operator chooses which one, so a test run and a day's work do not share a
+// Brain.
+//
+// It is a variable rather than a constant for exactly one reason: internal/cli
+// assigns it once during startup, from a value internal/config has already
+// validated, before any command runs and before anything touches a VM. Nothing
+// else may write it. Read it freely — by the time any command executes it is
+// fixed for the life of the process.
+var InstanceName = config.DefaultInstance
 
 // bin is the default limactl executable name, resolved via PATH.
 const bin = "limactl"

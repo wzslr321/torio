@@ -22,8 +22,11 @@ const operatorShellOp = "project_shell"
 // argv instead of a caller-supplied command string.
 const OperatorShellHelper = "/usr/local/bin/torio-project-shell"
 
-// sshHostAlias is the host entry Lima writes into the instance ssh config.
-const sshHostAlias = "lima-" + InstanceName
+// sshHostAlias is the host entry Lima writes into the instance ssh config. It
+// follows the selected instance because Lima derives the alias from the
+// instance name (ADR-0021); a fixed alias would point an operator shell at the
+// wrong VM.
+func sshHostAlias() string { return "lima-" + InstanceName }
 
 // projectIDPattern is the strict allowlist for the single path segment below
 // the guest workspace. It admits ordinary repository names and nothing that
@@ -106,7 +109,7 @@ func OperatorShellSpec(projectPath string) (execx.InteractiveCommand, error) {
 			"-o", "ForwardAgent=yes",
 			"-A",
 			"-t",
-			sshHostAlias,
+			sshHostAlias(),
 			OperatorShellHelper,
 			projectPath,
 		},

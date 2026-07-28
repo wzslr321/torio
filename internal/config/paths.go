@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -14,7 +15,47 @@ const (
 	appDir = "torio"
 	// configFileName is the default config document within the config dir.
 	configFileName = "config.json"
+	// instancesDir groups the config of every non-default instance. It sits
+	// inside the trusted config dir, so ADR-0013's path rules cover it without
+	// a second boundary to reason about.
+	instancesDir = "instances"
+
+	// DefaultInstance is the Lima instance Torio manages when the operator
+	// selects none. It is also the only place the literal is allowed to appear
+	// in production code (ADR-0021).
+	DefaultInstance = "torio"
+	// InstanceEnvKey selects the managed instance. It is not a credential: it
+	// picks which VM this invocation talks to, and is available to anyone who
+	// can already run `torio` with arbitrary arguments.
+	InstanceEnvKey = "TORIO_INSTANCE"
 )
+
+// instancePattern is the project-ID rule reused deliberately. An instance name
+// reaches both a `limactl` argv element and a config path segment, so the
+// conservative slug that already guards project identifiers is exactly the
+// right shape: no separators, no leading or trailing dash, nothing that could
+// traverse a path or be read as a flag.
+var instancePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`)
+
+// ResolveInstance returns the managed instance name for this invocation.
+//
+// Unset gives DefaultInstance, which is the pre-ADR-0021 behaviour exactly. A
+// set-but-malformed value is an error rather than a silent fall back to the
+// default: falling back would send a command meant for a test VM to the
+// operator's daily one, which is the failure this whole mechanism exists to
+// prevent. The error states the rule and never echoes the value.
+func ResolveInstance(opts Options) (string, error) {
+	raw := strings.TrimSpace(opts.getenv(InstanceEnvKey))
+	if raw == "" {
+		return DefaultInstance, nil
+	}
+	if !instancePattern.MatchString(raw) {
+		return "", fmt.Errorf(
+			"%s must be 1-64 characters of lowercase letters, digits and dashes, starting and ending alphanumeric",
+			InstanceEnvKey)
+	}
+	return raw, nil
+}
 
 // errNoHome is returned when the home directory is required (XDG unset) but
 // cannot be determined. Callers fail closed rather than guessing a location.
@@ -54,6 +95,10 @@ func (o Options) homeDir() (string, error) {
 // one that existed served the version-lock manifest, which was never wired and
 // is gone (ADR-0019).
 type Paths struct {
+	// Instance is the managed Lima instance this invocation targets. It is
+	// resolved here because this is where trusted inputs are resolved, and
+	// because the config location depends on it.
+	Instance string
 	// ConfigDir is the trusted directory holding the config document.
 	ConfigDir string
 	// ConfigFile is the resolved config document path. It defaults to
@@ -80,6 +125,14 @@ type Paths struct {
 func ResolvePaths(opts Options) (Paths, error) {
 	var p Paths
 
+	// Resolved first: a malformed instance name must stop the invocation before
+	// any location is derived from it.
+	instance, err := ResolveInstance(opts)
+	if err != nil {
+		return Paths{}, err
+	}
+	p.Instance = instance
+
 	// Config file (and its trusted directory): explicit override bypasses XDG.
 	// With an explicit --config, the trusted config directory is the file's
 	// parent, so anything contained in the config dir resolves alongside it.
@@ -97,6 +150,25 @@ func ResolvePaths(opts Options) (Paths, error) {
 			return Paths{}, err
 		}
 		p.ConfigDir = filepath.Join(configHome, appDir)
+		// A named instance gets its own registry. Sharing one would let
+		// `project list` show the daily projects while talking to a test VM,
+		// and `project add` write a test project into the real registry — so
+		// the separation is derived, never something to remember (ADR-0021).
+		if instance != DefaultInstance {
+			// One contained segment at a time: containedJoin validates a single
+			// file name, which is exactly the guarantee wanted here — the
+			// instance name must not be able to introduce a separator even if
+			// the pattern above were ever loosened.
+			group, err := containedJoin(p.ConfigDir, instancesDir)
+			if err != nil {
+				return Paths{}, err
+			}
+			dir, err := containedJoin(group, instance)
+			if err != nil {
+				return Paths{}, err
+			}
+			p.ConfigDir = dir
+		}
 		cf, err := containedJoin(p.ConfigDir, configFileName)
 		if err != nil {
 			return Paths{}, err

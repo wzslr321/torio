@@ -115,6 +115,18 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 	if a.lookupOperatorUser == nil {
 		a.lookupOperatorUser = defaultLookupOperatorUser
 	}
+	// The managed instance is fixed here, once, before the command tree runs and
+	// before anything can touch a VM or a config path (ADR-0021). It comes from
+	// the environment rather than a flag, so it does not depend on flag parsing
+	// and cannot be forgotten on an individual invocation. A malformed name is a
+	// usage error: falling back to the default would send a command meant for a
+	// test VM to the operator's daily one.
+	instance, err := config.ResolveInstance(config.Options{})
+	if err != nil {
+		return fail(a.stdout, a.stderr, firstNonFlag(args), a.jsonOut || wantsJSON(args), usageError(err.Error()))
+	}
+	lima.InstanceName = instance
+
 	root := newRootCmd(a)
 	root.SetArgs(args)
 
