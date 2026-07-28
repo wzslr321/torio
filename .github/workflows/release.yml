@@ -83,6 +83,24 @@ jobs:
             --license LICENSE \
             --out dist
 
+      # A manual dispatch validates, builds and packages without creating a tag
+      # or a release — the publish step below is push-only. Without this the run
+      # then throws the tarball away, which makes the dry run test a build
+      # rather than an asset: `make package-release` builds natively on a Mac,
+      # this job cross-compiles from Linux, and the cross-compiled bytes are
+      # what a tester installs. Keep the retention short; these are not
+      # published artifacts and must not read as a release.
+      - name: Upload dry-run artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: torio-${{ steps.meta.outputs.version }}-darwin-arm64-dryrun
+          path: |
+            dist/torio_${{ steps.meta.outputs.version }}_darwin_arm64.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload release assets
         if: github.event_name == 'push'
         env:

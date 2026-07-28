@@ -9,7 +9,16 @@
 # Never modifies shell rc files; prints the exact PATH step instead.
 set -euo pipefail
 
-REPO_DEFAULT="wzslr321/torio"
+# The repository holding the release assets. Overridable because the slug is the
+# one thing that changes when the repository moves to an organization, and a
+# hardcoded one sends the installer to a repository that no longer has them.
+#
+# This is a location, not a credential. install.sh authenticates to nothing: on
+# a private repository the asset URLs answer 404 and `gh release download` is
+# the documented way in. Teaching it to carry a token would put Torio in the
+# business of transporting credentials, which is the boundary the product is
+# built around.
+REPO_DEFAULT="${TORIO_REPO:-wzslr321/torio}"
 PREFIX_DEFAULT="${HOME}/.local/bin"
 VERSION=""
 PREFIX="$PREFIX_DEFAULT"
@@ -27,8 +36,23 @@ modify shell startup files.
 Options:
   --version X.Y.Z   Install this version (without leading v). Default: latest stable release.
   --prefix DIR      Install directory (default: ~/.local/bin)
+  --base-url URL    Read the assets and SHA256SUMS from here instead of the
+                    release download URL. Accepts file:// for assets already on
+                    disk. Requires --version.
   --dry-run         Resolve, download to a temp dir, verify checksums; do not install
   -h, --help        Show help
+
+Environment:
+  TORIO_REPO        owner/name of the repository holding the assets.
+
+This installer authenticates to nothing. Where the repository is not public,
+fetch the assets with a tool that does hold your credentials and point the
+installer at them:
+
+  gh release download vX.Y.Z -D /tmp/torio-rel
+  install.sh --version X.Y.Z --base-url file:///tmp/torio-rel
+
+Checksum verification is identical on both paths.
 EOF
 }
 
@@ -79,7 +103,10 @@ parse_args() {
         shift
         ;;
       --base-url)
-        # Undocumented test hook: directory or URL prefix containing assets + SHA256SUMS
+        # Directory or URL prefix containing the assets and SHA256SUMS. Used by
+        # the tests, and by anyone installing from assets they already fetched
+        # themselves — the supported route for a repository this installer
+        # cannot read anonymously.
         [[ $# -ge 2 ]] || die "--base-url requires an argument"
         BASE_URL="$2"
         shift 2
@@ -106,7 +133,7 @@ resolve_version() {
   # No python3 dependency: parse GitHub Releases JSON with sed.
   local payload tag
   payload="$(curl -fsSL "https://api.github.com/repos/${REPO_DEFAULT}/releases/latest")" \
-    || die "failed to fetch latest release metadata"
+    || die "failed to fetch latest release metadata for ${REPO_DEFAULT}; a repository this installer cannot read anonymously answers 404 here — fetch the assets yourself (gh release download) and pass --version with --base-url file://…"
   tag="$(printf '%s\n' "$payload" \
     | sed -n 's/^[[:space:]]*"tag_name"[[:space:]]*:[[:space:]]*"\(v[^"]*\)".*/\1/p' \
     | head -n1)"

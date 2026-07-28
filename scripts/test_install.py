@@ -157,6 +157,30 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertIn("--dry-run", proc.stdout)
 
+    def _source_lib(self, script: str, env_extra: dict[str, str] | None = None):
+        """Run a snippet with install.sh sourced, so its functions can be called
+        without invoking main()."""
+        env = self._env()
+        env["TORIO_INSTALL_LIB"] = "1"
+        env.update(env_extra or {})
+        return run(["bash", "-c", f"source {INSTALL_SH}\n{script}"], env=env)
+
+    def test_repository_defaults_to_the_upstream_slug(self):
+        proc = self._source_lib('asset_urls 1.2.3')
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("wzslr321/torio/releases/download/v1.2.3", proc.stdout)
+
+    def test_repository_can_be_overridden_by_environment(self):
+        # The slug is the one thing that changes when the repository moves to
+        # an organization. Without an override the installer resolves assets
+        # from a repository that no longer holds them.
+        proc = self._source_lib(
+            "asset_urls 1.2.3", {"TORIO_REPO": "an-org/torio"}
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("an-org/torio/releases/download/v1.2.3", proc.stdout)
+        self.assertNotIn("wzslr321", proc.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
