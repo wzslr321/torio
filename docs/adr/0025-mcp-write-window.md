@@ -85,6 +85,58 @@ zapisu dla tej usługi.**
    w trakcie pracy, i dość krótkie, żeby instrukcja wstrzyknięta później trafiła
    w zamknięte drzwi.
 
+## Dlaczego oznaczenie zapisu jest ręczne i musi takie zostać
+
+Okno czyni oznaczenie `writes` w policy nośnym: przed tą decyzją mark tylko
+zasilał liczbę w raporcie, teraz bramkuje zdolność. Trzeba więc zapisać, skąd on
+pochodzi — i dlaczego nie może pochodzić z serwera.
+
+**Protokół MCP nie daje weryfikowalnego sposobu, by serwer zadeklarował
+narzędzie jako zapisujące.** Definicja `Tool` to `name`, `title`,
+`description`, `icons`, `inputSchema`, `outputSchema`, opcjonalne `annotations`
+i opcjonalne `_meta`. Wszystkie właściwości `ToolAnnotations` —
+`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint` — są
+normatywnie **hintami**. Serwer może podać `readOnlyHint: true` i kasować dane;
+protokół nie ma czym tego wykryć. Sama specyfikacja mówi klientom, że muszą
+traktować adnotacje jako niezaufane, dopóki nie pochodzą z serwera, który klient
+uznał za zaufany.
+
+**Właściwe zdanie to „protokół nie daje weryfikowalności", nigdy „specyfikacja
+zabrania".** Różnica jest nośna: spec zostawia furtkę dla serwera, któremu
+klient postanowił zaufać, więc mocniejsza forma byłaby nadinterpretacją, a
+decyzja stojąca na nadinterpretacji upada razem z nią. Wolno powiedzieć, że
+zaufanie do adnotacji jest decyzją po stronie klienta — i że my jej nie
+podejmujemy.
+
+Defaulty adnotacji są pesymistyczne (`readOnlyHint: false`,
+`destructiveHint: true`, `openWorldHint: true`), więc narzędzie bez adnotacji
+jest z definicji „potencjalnie destrukcyjne". To potwierdza kształt deny-by-
+default z wyliczeniem nazw, ale **nie skraca pracy operatora**: brak adnotacji i
+`readOnlyHint: false` są nierozróżnialne, a oba wymagają decyzji człowieka. Te
+defaulty są przy tym komentarzem w schemacie, nie słowem kluczowym `default`
+egzekwowanym przez walidację — konwencja interpretacyjna, nie mechanizm.
+
+Z tego wynikają dwa zakazy, mocniejsze niż samo „oznaczamy ręcznie":
+
+1. **Adnotacja nie może być fallbackiem** dla narzędzia nieoznaczonego w policy.
+   Przeniosłoby to decyzję o oknie zapisu na stronę, której kernel nie
+   uwierzytelnia — czyli dokładnie odwrotnie niż ADR-0022, który cały opiera się
+   na tożsamości ustalanej przez kernel, a nie na okazanym twierdzeniu.
+2. **Generator policy z adnotacji nie ma sensu nawet jako pomoc.** Pokrycie
+   adnotacji w ekosystemie jest nierówne i wiele serwerów produkcyjnych nie
+   wysyła ich wcale, więc generator wyprodukowałby albo pusty plik, albo
+   wszystko oznaczone jako zapis. Nie oszczędza pracy tam, gdzie miał.
+
+Jedyne dopuszczalne zastosowanie adnotacji jest **detektorem rozjazdu**:
+upstream mówi `readOnlyHint: false`, a policy przyznaje to narzędzie jako
+odczyt → alert do operatora. Nigdy automatyczna zmiana decyzji.
+
+Ustalone na tekście specyfikacji i schematu 2026-07-29; brzmienie o niezaufanych
+adnotacjach jest identyczne w każdej sprawdzonej rewizji, więc twierdzenie nie
+jest przypięte do jednej. **Pozostała powierzchnia klienta MCP w brokerze nie
+była przy tej okazji weryfikowana** i może być zaprojektowana wobec starszego
+kształtu protokołu — patrz `HANDOFF-mcp-broker.md`.
+
 ## Co to zmienia w ADR-0022
 
 ADR-0022 stwierdzał, że wstrzyknięta instrukcja może użyć każdego przyznanego

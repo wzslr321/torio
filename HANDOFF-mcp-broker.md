@@ -128,6 +128,25 @@ Closed this session (`30d03c9`, `424841f`), each with a failing test first:
   `Grant`/`ServiceGrant`/`ToolGrant`/`WriteTools` are exported for exactly this
   and still have no consumer. `AGENTS.md` §5.8a's "jawny, wyliczalny i
   weryfikowany" is not delivered.
+
+  **This item is bigger than it reads, and research (2026-07-29) said why.** The
+  upstream tool set is not fixed: it may change during a session, and MCP has a
+  list-changed notification precisely because of that. So a renderer that reads
+  only `policy.d/` renders our half of a comparison and calls it the scope.
+  Three requirements the earlier framing did not carry:
+
+  1. it must fetch `tools/list` **at render time** — a tool can appear upstream
+     after the policy was last audited;
+  2. without subscribing to list-changed, the drift between upstream and
+     `policy.d/` is **silent**, so rendering on demand is not a convenience but
+     the only signal there is;
+  3. if the visible set depends on the credential the broker presents, the
+     renderer must ask over the same credential, or it shows a scope that is not
+     the reachable one. Any cache has to be bypassed or its age shown.
+
+  Requirement 3 and the exact notification mechanics rest on the 2026-07-28 spec
+  revision, which **we have not verified ourselves** (see below). Requirements 1
+  and 2 hold regardless.
 - Nothing checks `torio-mcp` stayed out of `torio-projects`. The installer is
   asserted not to do it; `status` never looks. The symmetric check for `hermes`
   exists.
@@ -243,6 +262,27 @@ Verified in Hermes source or on the live guest:
 - `meta skuid` works on this kernel (6.8.0-134); `nft --check` is a kernel
   round-trip, not a parse. `hermes` has no sudo, no capability, no usable
   userns (AppArmor), and owns no file on a privileged execution path.
+- **What that uid actually is**, read in `net/netfilter/nft_meta.c` at tag
+  `v6.8`: `nft_meta_get_eval_skugid()` compares `sock->file->f_cred->fsuid` —
+  the fsuid of whoever *created the socket*, not the sender and not euid.
+  `f_cred` is set once in `init_file()` and never recomputed. Orphaned sockets,
+  TIME_WAIT, request sockets and kernel sockets have no `struct file`
+  (`sock_orphan()` clears `sk_set_socket`), so the rule does not match them —
+  which makes fail-closed a property of `policy drop` plus a positive pass, not
+  of the mechanism. A negated match (`! --uid-owner N`) *does* match an orphaned
+  socket, so the inverse construction leaks exactly what it exists to catch.
+  Reference `nft_meta_get_eval_skugid()`, not `xt_owner` and not the LKML
+  thread: the semantics carry over from iptables, the proof for nftables is in
+  that one function.
+- **`SCM_RIGHTS` is the one way around the uid rule from the agent's uid.** The
+  uid belongs to the open file description, and passing an fd shares it
+  (`fd_install(new_fd, get_file(f))`), so a socket the broker created and handed
+  over still carries `skuid torio-mcp`. Netfilter cannot close this; only the
+  broker's design can. Recorded as ADR-0024 Decision 6.
+- **`socket uid` / `socket gid` in nftables does not exist and is not coming.**
+  The 2022 patchset sits at `changes-requested` and was declined on purpose in
+  favour of making `meta skuid` usable everywhere. Do not design around a
+  future selector.
 - **There is no host-side enforcement point.** `192.168.5.0/24` is on no macOS
   interface; the guest's TCP/IP terminates inside `limactl hostagent` running as
   the operator's uid, so a pf `user 501` rule would match all of the operator's
@@ -253,9 +293,32 @@ Verified in Hermes source or on the live guest:
 - The inference endpoint is written down **nowhere machine-readable** —
   `model.base_url` is empty; the host is only discoverable by grepping Hermes.
 
-Unverified, and recorded as such: `meta skuid` behaviour on orphaned sockets on
-this host; whether pf is enabled on the Mac; whether Lima 2.2.0 exposes any
-usernet egress knob; PyPI/npm/uv-python hostnames.
+Unverified, and recorded as such: whether pf is enabled on the Mac; whether Lima
+2.2.0 exposes any usernet egress knob; PyPI/npm/uv-python hostnames; how much
+teardown traffic actually dies once `policy drop` is in force on this guest.
+
+**The largest unverified item is not on that list, because it may not be a
+detail.** Research (2026-07-29) reports an MCP specification revision dated
+2026-07-28 that it calls the biggest protocol change since launch — a stateless
+core, `Mcp-Session-Id` removed, `server/discover` and `subscriptions/listen`
+added, Roots/Sampling/Logging deprecated, JSON Schema 2020-12. Only the
+annotation claims (ADR-0025) were checked against primary sources; the rest of
+the client surface was not. **If that revision is real, the broker's protocol
+surface is designed against an older shape** — `ungovernedMethod` currently
+refuses every method except `tools/list` and `tools/call`, which would mean
+refusing calls a current client makes as a matter of course. Verify the revision
+before writing anything else about the MCP surface, and before treating that
+refusal as correct.
+
+Also unresearched, and for a bad reason: **the upstream direction of Hermes
+Agent**. It was dropped as "read the local sources instead", but the sources in
+the guest say what Hermes does today, not where it is going. Hermes Agent is
+public — repo, issues, pull requests and changelog are exactly the material to
+read — and this is the single question that can invalidate ADR-0023 outright,
+since that whole decision rests on "Hermes accepts nothing but http(s)", a
+sentence resting only on our own reading. Highest-leverage next research
+question; higher than systemd unit hardening, which we can settle from
+`systemd.exec(5)` without help.
 
 ---
 
@@ -274,6 +337,13 @@ usernet egress knob; PyPI/npm/uv-python hostnames.
 5. Contract drift (§4, last block) as one sweep, including
    `docs/03-architecture.md` and the threat model from §6.
 6. ADR-0026 stays blocked. Do not start it; ask the operator about §4 first.
+
+Two of these are gated on a check, not on effort. **Verify the 2026-07-28 MCP
+revision before item 2** — a duplicate-key fix written against the wrong
+protocol shape is work done twice. And **ADR-0023 should not be implemented
+before the upstream-Hermes question is answered**, because a transport other
+than http(s) collapses that decision back into ADR-0022's shape and its custody
+half is already known not to be the obstacle.
 
 The upstream HTTP transport, OAuth, and the Atlassian migration come after the
 unit slice, because none of them is observable until the daemon starts.

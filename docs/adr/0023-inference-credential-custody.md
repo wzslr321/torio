@@ -31,7 +31,7 @@ refresh token was already consumed by another client"* i `relogin_required`.
 Refresh jest wywoływany także **reaktywnie, w trakcie tury, na HTTP 401**, i
 bezwarunkowo zapisuje wynik do `auth.json`.
 
-Z tego wynikają dwie rzeczy, które przesądzają całą decyzję:
+Z tego wynikają dwie rzeczy:
 
 1. **Custody „tylko do odczytu" nie istnieje dla tego credentialu.** Cokolwiek
    go trzyma, musi umieć zapisać zrotowaną wartość. To jest różnica wobec
@@ -40,10 +40,26 @@ Z tego wynikają dwie rzeczy, które przesądzają całą decyzję:
    dostanie `refresh_token_reused` i wymuszenie ponownego logowania. Migracja
    musi być **przeniesieniem**, nigdy kopią.
 
-Druga przeszkoda dotyczy transportu. `model.base_url` jest URL-em http(s)
-podawanym do SDK OpenAI; Hermes nie ma żadnej powierzchni konfiguracyjnej na
-transport po unix sockecie. **Kształt z ADR-0022 — tożsamość rozmówcy ustalana
-przez kernel — nie przenosi się na ścieżkę inferencji.**
+**Żadna z nich nie jest przeszkodą dla kształtu z ADR-0022 — obie są za nim.**
+Wcześniejsza wersja tego ADR-u sklejała je z problemem transportu w jedno
+„nie da się powtórzyć ADR-0022" i to była nadinterpretacja. Niewykonalna jest
+tylko custody, w której agent dostaje plik do odczytu. **Custody delegowana
+zostaje wykonalna**: jedynym posiadaczem `auth.json` jest proces pod osobnym uid,
+a agent nie widzi tego pliku wcale. Jednorazowość refresh tokena jest wtedy
+argumentem *za* takim kształtem — jeden pisarz pod blokadą pliku rozwiązuje
+dokładnie ten wyścig, który u wielu posiadaczy kończy się
+`refresh_token_reused`. Dokumentacja Codeksa mówi to samo z drugiej strony:
+odtwarzanie `auth.json` z oryginalnego sekretu przy każdym uruchomieniu niszczy
+świeżo zrotowane tokeny.
+
+**Twarda przeszkoda jest jedna i dotyczy transportu.** `model.base_url` jest
+URL-em http(s) podawanym do SDK OpenAI; Hermes nie ma żadnej powierzchni
+konfiguracyjnej na transport po unix sockecie. **To — i tylko to — sprawia, że
+kształt z ADR-0022, w którym tożsamość rozmówcy ustala kernel, nie przenosi się
+na ścieżkę inferencji.** Rozdzielenie tych dwóch rzeczy ma znaczenie
+praktyczne: gdyby upstream Hermesa kiedykolwiek przyjął transport inny niż
+http(s), ta decyzja upada w całości i wraca kształt ADR-0022. Custody nie stoi
+niczemu na drodze.
 
 Jedno ustalenie działa na naszą korzyść. Dla `provider: custom` z base URL-em na
 loopbacku Hermes rozwiązuje klucz do literału `"no-key-required"`

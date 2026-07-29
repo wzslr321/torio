@@ -59,6 +59,22 @@ odmawia, userns jest ograniczony przez AppArmor, i nie posiada żadnego pliku na
 uprzywilejowanej ścieżce wykonania. **Nie ma prymitywu, którym mógłby ten
 ruleset przeczytać, zmienić ani ominąć.**
 
+**Czym dokładnie jest ten uid, bo od tego zależy, dlaczego granica trzyma.**
+`nft_meta_get_eval_skugid()` porównuje `sock->file->f_cred->fsuid` — **fsuid
+procesu, który utworzył gniazdo**, nie uid nadawcy pakietu i nie euid.
+`f_cred` jest ustawiane raz, w `init_file()` z `current_cred()`, i później nigdy
+nie jest przeliczane. Proces może wybrać sobie fsuid przez `setfsuid(2)` przed
+`socket(2)`, ale bez `CAP_SETUID` wolno mu wyłącznie własne uid/euid/suid, więc
+nieuprzywilejowany `hermes` nie podszyje się pod `torio-mcp`. To ta różnica —
+twórca gniazda, nie nadawca — czyni z reguły granicę, i dlatego jest zapisana,
+a nie zostawiona jako „czyta uid".
+
+**`meta skuid` nie jest ograniczone do `output`.** Walidacja nie przypina go do
+hooka; działa wszędzie, gdzie `skb_to_full_sk()` zwróci fullsock — czyli także
+`postrouting`. Wybór hooka jest więc naszą decyzją, nie ograniczeniem
+mechanizmu. Dla ruchu wychodzącego z `hermes` obie ścieżki dają ten sam wynik,
+ale nie wolno opisywać `output` jako jedynego dostępnego miejsca.
+
 **Po stronie hosta nie ma gdzie tego egzekwować.** Podsieć gościa
 `192.168.5.0/24` nie istnieje na żadnym interfejsie macOS; stos TCP/IP gościa
 kończy się **wewnątrz procesu `limactl hostagent`**, działającego jako uid
@@ -73,13 +89,26 @@ w gościu albo nigdzie.**
 uid, we własnej tabeli nftables Torio.**
 
 1. **Default-deny, nie default-accept z regułami drop.** To nie jest kwestia
-   stylu. `meta skuid` czyta uid z gniazda i **nie dopasowuje pakietów gniazd
-   osieroconych** — zamkniętych z danymi w buforze, TIME_WAIT, retransmisji.
-   Polityka „accept, a `hermes` drop" jest więc omijalna sekwencją
-   połącz-wyślij-zamknij. Przy `policy drop` pakiet nieprzypisywalny nie pasuje
-   do niczego i ginie. Semantyka gniazd osieroconych jest **niezweryfikowana na
-   tym hoście** (wynika z kodu upstreamu) — ale kształt fail-closed nic nie
-   kosztuje, a alternatywa jest nieuzasadniona.
+   stylu, i nie jest już domysłem.
+
+   `nft_meta_get_eval_skugid()` wymaga trzech rzeczy naraz: niezerowego `sk`,
+   `sk_fullsock(sk)` oraz `sock && sock->file`. Brak którejkolwiek to `goto err`
+   i `NFT_BREAK` — **reguła nie dopasowuje**. Gniazdo osierocone, TIME_WAIT,
+   request socket i gniazdo kernelowe nie mają `struct file`, bo `sock_orphan()`
+   robi `sk_set_socket(sk, NULL)` i łańcuch do pliku faktycznie się rwie.
+
+   Stąd wniosek, który wcześniej stał na lekturze upstreamu, a teraz stoi na
+   kodzie tagu `v6.8` — dokładnie kernela tego gościa: polityka „accept, a
+   `hermes` drop" jest omijalna sekwencją połącz-wyślij-zamknij, bo pakiet
+   teardownu nie dopasuje **także** reguły `drop`. Przy `policy drop` pakiet
+   nieprzypisywalny nie pasuje do niczego i ginie.
+
+   **Fail-closed jest więc własnością kształtu rulesetu, nie mechanizmu.**
+   Dodatnia przepustka po uid przy domyślnym DROP zamyka się sama; każda
+   konstrukcja odwrotna nie. Zanegowane dopasowanie jest jeszcze gorsze —
+   `xt_owner` pokazuje, że przy `! --uid-owner N` gniazdo osierocone **dopasuje**
+   regułę, więc reguła „wszystko poza `hermes`" przepuściłaby dokładnie ten ruch,
+   który miała złapać.
 
 2. **Własna tabela, nigdy `nft flush ruleset`.** Lima instaluje w gościu własne
    `table ip nat` z hookami `LIMADNS`; globalny flush skasowałby jej DNS.
@@ -101,7 +130,20 @@ uid, we własnej tabeli nftables Torio.**
    nazwa w internecie — §4 mówi o czym innym. To jest zarazem jedyny powód, dla
    którego ADR-0023 może zostać przyjęty bez ADR-0026.
 
-6. **Weryfikacja czyta treść rulesetu, nie jego obecność.** Załadowana, ale
+6. **Żaden proces z przepustką nie przekazuje deskryptora gniazda agentowi.**
+   To wynika wprost z tego, czym jest dopasowanie: uid jest przypisany do
+   **otwartego pliku gniazda**, a nie do procesu, który przez niego pisze.
+   `SCM_RIGHTS` przenosi referencję do tej samej open file description
+   (`fd_install(new_fd, get_file(f))`), więc gniazdo utworzone przez brokera i
+   wręczone agentowi nadal niesie `skuid torio-mcp` — ruch agenta przechodziłby
+   przez przepustkę brokera, wyglądając w rulesecie na ruch brokera.
+
+   Jest to jedyna znana droga ominięcia tej reguły z uid agenta i **nie da się
+   jej zamknąć w netfilterze**. Zamyka ją wyłącznie projekt brokera: broker nie
+   ma powierzchni, która przekazuje fd, i musi tego dowodzić w kodzie, a nie
+   dziedziczyć przez to, że nikt takiej powierzchni nie napisał.
+
+7. **Weryfikacja czyta treść rulesetu, nie jego obecność.** Załadowana, ale
    opróżniona tabela przechodzi każdy test pliku i nie egzekwuje niczego — ten
    sam argument, którym ADR-0022 odrzuca obecny-lecz-martwy socket. Kontrola musi
    udowodnić politykę łańcucha i zestaw reguł, oraz że unit jest **enabled i
@@ -173,6 +215,13 @@ legalny. Kontrola po uid **przenosi** ten kanał, a nie go zamyka.
 - Pakiet instalujący w przyszłości binarkę setuid-root albo z `cap_net_raw`
   wybije dziurę bez ostrzeżenia, bo jej gniazda niosłyby `skuid 0`. `bootstrap`
   powinien dowodzić inwentarza setuid/getcap tak, jak dowodzi trybów plików.
+- **Ruch teardownu będzie cicho dropowany, i to jest skutek operacyjny, nie
+  luka.** Retransmisje po `close()`, FIN/ACK z TIME_WAIT i część ICMP nie mają
+  przypisywalnego uid, więc przy `policy drop` giną. W rulesecie z
+  `ct state established,related accept` przed regułami uid większość z nich
+  zostaje zaakceptowana wcześniej i nigdy do nich nie dociera — ale ta kolejność
+  musi być w rulesecie **świadomie**, a nie wyjść przypadkiem. Ile tego zostaje
+  na tym konkretnym gościu, nie było mierzone.
 - Sprzężenie z historią obrazu — `vm bootstrap` pobierający `install.sh` i
   wykonujący `apt-get` po zwykłym HTTP — **nie jest już ograniczeniem
   kolejności prac dla tej decyzji**, bo obie operacje biegną pod uid z
@@ -191,7 +240,17 @@ legalny. Kontrola po uid **przenosi** ten kanał, a nie go zamyka.
   użytkowniku w pf na współczesnym macOS jest niezweryfikowane. Wsparta ścieżka
   Apple'a to filtr Network Extension per-proces, którego w tym repo nie ma.
 - **Polityka `accept` z regułami `drop` dla wybranych uid.** Omijalna przez
-  gniazda osierocone (patrz Decision 1).
+  gniazda osierocone (patrz Decision 1). Odrzucona na podstawie kodu, nie
+  ostrożności.
+- **Reguła zanegowana („wszystko poza `hermes`").** Gorsza niż powyższa:
+  osierocone gniazdo **dopasuje** zanegowany warunek, więc reguła przepuszcza
+  dokładnie ten ruch, dla którego istnieje.
+- **Czekanie na `socket uid` / `socket gid` w nftables.** Patchset z 2022-04-20
+  ma w patchworku stan `changes-requested` i nigdy nie został scalony; `enum
+  nft_socket_keys` w gałęzi master nadal go nie zawiera. Maintainer odrzucił
+  kierunek świadomie, argumentując, że lepiej uczynić `meta skuid` użytecznym
+  wszędzie niż dodawać nowy selektor. Cztery lata bez ruchu — nie ma na co
+  czekać i nie ma lepszej prymitywy w drodze.
 - **Globalny `nft flush ruleset` przed instalacją własnych reguł.** Kasuje hooki
   DNS Limy i psuje rozwiązywanie nazw w całym gościu.
 - **Zaniechanie, bo po zawężeniu zostało niewiele.** Zostały trzy rzeczy z
@@ -201,6 +260,15 @@ legalny. Kontrola po uid **przenosi** ten kanał, a nie go zamyka.
 
 ## Niezweryfikowane
 
-Zapisane, żeby nikt nie wziął ich za ustalone: zachowanie `meta skuid` wobec
-gniazd osieroconych na tym hoście; czy pf jest na tym Macu w ogóle włączone; czy
-Lima 2.2.0 wystawia jakikolwiek własny knob na ograniczenie egressu usernetu.
+Zapisane, żeby nikt nie wziął ich za ustalone: czy pf jest na tym Macu w ogóle
+włączone; czy Lima 2.2.0 wystawia jakikolwiek własny knob na ograniczenie
+egressu usernetu; ile ruchu teardownu faktycznie ginie na tym gościu po
+wprowadzeniu `policy drop`.
+
+Zachowanie `meta skuid` wobec gniazd osieroconych **przestało tu być** —
+mechanizm jest sprawdzony w `net/netfilter/nft_meta.c` na tagu `v6.8`, czyli w
+kernelu tego gościa (patrz Decision 1). Odnośnikiem jest
+`nft_meta_get_eval_skugid()`, nie `xt_owner` i nie wątek na LKML: semantyka
+przenosi się z iptables, ale dowód dla nftables leży w tej jednej funkcji. W
+gałęzi master funkcja jest przepisana na RCU, a warunek dopasowania jest
+identyczny.
