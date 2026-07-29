@@ -321,9 +321,11 @@ granicę i dowodzi, że trzyma.
 - **Zakres narzędzi jest jawny, sekrety nie.** Policy leży w `/etc/torio-mcp/policy.d/<usługa>.json`
   jako `root:root 0644` — czytelna dla agenta i niezapisywalna przez niego. Domyślnie deny; przechodzą
   wyłącznie narzędzia wymienione z nazwy, bez wnioskowania z nazw i bez wzorców.
-- Broker **nie broni przed confused deputy**: wstrzyknięta instrukcja może użyć każdego przyznanego
-  narzędzia wobec każdego dozwolonego celu. Przyznanie zapisu jest dopuszczalne i bywa uzasadnione —
-  ma być decyzją, którą ktoś podjął i którą widać, a nie skutkiem ubocznym instalacji.
+- Broker **nie broni przed confused deputy w pełni**: wstrzyknięta instrukcja może użyć każdego
+  narzędzia odczytu wobec każdego dozwolonego celu, a narzędzia zapisu — w otwartym oknie. Okno
+  zawęża to zdanie, ale go nie unieważnia: agent prowadzony poza swój zakres w trakcie okna, które
+  operator właśnie otworzył, zrobi to, co mu kazano. Przyznanie zapisu ma być decyzją, którą ktoś
+  podjął i którą widać, a nie skutkiem ubocznym instalacji.
 
 ## Idempotency
 

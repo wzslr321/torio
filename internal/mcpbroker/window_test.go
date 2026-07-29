@@ -97,3 +97,35 @@ func TestWriteWindowReasonIsDistinct(t *testing.T) {
 		t.Errorf("String() = %q, want write_window_closed", got)
 	}
 }
+
+// TestAllowReportsWhetherTheToolWrites is what makes the write window
+// enforceable. Without it the daemon has no way to tell a write tool from a
+// read one at decision time, and the window is a file nobody reads.
+func TestAllowReportsWhetherTheToolWrites(t *testing.T) {
+	dir := t.TempDir()
+	doc := `{"schema_version":"1","service":"atlassian",
+	 "upstream_endpoint":"https://api.atlassian.com/v1/mcp",
+	 "tools":[{"name":"getJiraIssue","writes":false},{"name":"createJiraIssue","writes":true}]}`
+	if err := os.WriteFile(filepath.Join(dir, "atlassian.json"), []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	set, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	read := set.Allow("atlassian", "getJiraIssue")
+	if !read.Allowed || read.Writes {
+		t.Errorf("read tool: %+v, want allowed and Writes=false", read)
+	}
+	write := set.Allow("atlassian", "createJiraIssue")
+	if !write.Allowed || !write.Writes {
+		t.Errorf("write tool: %+v, want allowed and Writes=true", write)
+	}
+	// A denial must not claim the tool writes: nothing is known about a tool
+	// that is not in the document, and a caller gating on Writes must not read
+	// the zero value as a fact.
+	if d := set.Allow("atlassian", "deleteEverything"); d.Allowed || d.Writes {
+		t.Errorf("ungranted tool: %+v, want denied and Writes=false", d)
+	}
+}
