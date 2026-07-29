@@ -27,7 +27,9 @@ func freshInstallScript() []scriptedResponse {
 		{result: stdoutResult("torio-mcp-clients:x:995:hermes\n")},
 		{result: stdoutResult("hermes torio-projects torio-mcp-clients\n")},
 		{result: stdoutResult("hermes torio-projects torio-mcp-clients\n")},
-		{result: stdoutResult("directory\n")},
+		// Two lines: the verification probe names statControlPath first, so a
+		// present path answers with the control line and its own.
+		{result: stdoutResult("directory\ndirectory\n")},
 		{result: stdoutResult("torio-mcp:torio-mcp 700\n")},
 	}
 }
@@ -47,7 +49,7 @@ func settledInstallScript() []scriptedResponse {
 		{result: stdoutResult("torio-mcp-clients:x:995:hermes\n")},
 		{result: stdoutResult("hermes torio-projects torio-mcp-clients\n")},
 		{result: stdoutResult("hermes torio-projects torio-mcp-clients\n")},
-		{result: stdoutResult("directory\n")},
+		{result: stdoutResult("directory\ndirectory\n")},
 		{result: stdoutResult("torio-mcp:torio-mcp 700\n")},
 	}
 }

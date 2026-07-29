@@ -23,6 +23,11 @@ var (
 	socketDirModes = map[string]bool{"750": true, "0750": true, "755": true, "0755": true}
 )
 
+// socketDirModeList renders the accepted directory modes for a failure message.
+// A drift report that names the wrong value without naming the right one leaves
+// the operator to go and look it up.
+const socketDirModeList = "0750 or 0755"
+
 // verifyBrokerSockets proves that every published socket is both correctly
 // owned and actually served.
 //
@@ -36,18 +41,21 @@ var (
 func (a *Adapter) verifyBrokerSockets(ctx context.Context, rep *MCPBrokerReport) error {
 	const name = "broker_sockets"
 
-	st, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%F", TorioMCPSocketDir)
+	st, kind, err := a.statPath(ctx, rep, name, TorioMCPSocketDir)
 	if err != nil {
 		return err
 	}
-	if st.exit != 0 {
+	if st == pathUnprovable {
+		return a.probeUnusable(rep, name, "the broker socket directory")
+	}
+	if st == pathAbsent {
 		// The daemon is a separate install from the identity boundary. A guest
 		// that has the boundary and no daemon is not drifted, and calling it
 		// drift would spend the word on a machine that is merely incomplete.
 		rep.record(name, true, "absent (no broker daemon installed)")
 		return nil
 	}
-	if st.trimmed() != "directory" {
+	if kind != "directory" {
 		return a.brokerFailed(rep, name, TorioMCPSocketDir+" is not a directory",
 			"inspect the guest by hand; this path is runtime state owned by the broker unit")
 	}
@@ -60,10 +68,17 @@ func (a *Adapter) verifyBrokerSockets(ctx context.Context, rep *MCPBrokerReport)
 	if dirOG.exit != 0 || !ok {
 		return a.brokerFailed(rep, name, "could not read socket directory ownership/mode", "verify "+TorioMCPSocketDir+" on the guest")
 	}
-	if owner != socketOwner || !socketDirModes[mode] {
+	// The group is compared, not merely reported. At 0750 the directory's group
+	// is the only thing that lets the agent identity traverse to the socket, so
+	// torio-mcp:torio-mcp 0750 satisfies owner and mode while every connect from
+	// hermes fails — and this check would have said the boundary holds on a guest
+	// where MCP cannot work at all.
+	if owner != socketOwner || group != socketGroup || !socketDirModes[mode] {
 		return a.brokerFailed(rep, name,
-			fmt.Sprintf("socket directory is %s:%s %s", owner, group, mode),
-			"the broker unit must own its runtime directory; reinstall the unit rather than fixing it by hand")
+			fmt.Sprintf("socket directory is %s:%s %s, want %s:%s with a mode of %s",
+				owner, group, mode, socketOwner, socketGroup, socketDirModeList),
+			"the broker unit must own its runtime directory and hand it to "+socketGroup+
+				", which is what lets the agent identity reach the socket at all; reinstall the unit rather than fixing it by hand")
 	}
 
 	// One line per socket, carrying everything the check needs, so the number of

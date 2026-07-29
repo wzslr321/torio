@@ -12,14 +12,17 @@ import (
 func okMCPScript() []scriptedResp {
 	out := func(s string) scriptedResp { return scriptedResp{res: execx.Result{Stdout: []byte(s)}} }
 	return []scriptedResp{
-		out("997\n"),                                                     // id -u torio-mcp
-		out("torio-mcp-clients:x:995:hermes\n"),                          // getent group
-		out("hermes torio-projects torio-mcp-clients\n"),                 // id -nG hermes (client)
-		out("hermes torio-projects torio-mcp-clients\n"),                 // id -nG hermes (not owner)
-		out("directory\n"),                                               // stat %F broker home
-		out("torio-mcp:torio-mcp 700\n"),                                 // stat %U:%G %a broker home
-		{res: execx.Result{ExitCode: 1, Stderr: []byte("no such file")}}, // stat mcp-tokens: absent
-		{res: execx.Result{ExitCode: 1, Stderr: []byte("no such file")}}, // stat /run/torio-mcp: no daemon yet
+		out("997\n"),                                     // id -u torio-mcp
+		out("torio-mcp-clients:x:995:hermes\n"),          // getent group
+		out("hermes torio-projects torio-mcp-clients\n"), // id -nG hermes (client)
+		out("hermes torio-projects torio-mcp-clients\n"), // id -nG hermes (not owner)
+		// Each `stat %F` probe names a control path first, so a present path
+		// answers with two lines and an absent one with the control line alone.
+		// An empty reply means the probe never ran, which fails closed.
+		out("directory\ndirectory\n"),    // stat %F broker home
+		out("torio-mcp:torio-mcp 700\n"), // stat %U:%G %a broker home
+		{res: execx.Result{ExitCode: 1, Stdout: []byte("directory\n"), Stderr: []byte("no such file")}}, // stat mcp-tokens: absent
+		{res: execx.Result{ExitCode: 1, Stdout: []byte("directory\n"), Stderr: []byte("no such file")}}, // stat /run/torio-mcp: no daemon
 	}
 }
 
@@ -114,7 +117,7 @@ func TestMCPStatusBrokenCustodyIsVerification(t *testing.T) {
 // are never printed.
 func TestMCPStatusLeftoverTokensReportsCountNotNames(t *testing.T) {
 	script := okMCPScript()
-	script[6] = scriptedResp{res: execx.Result{Stdout: []byte("directory\n")}}
+	script[6] = scriptedResp{res: execx.Result{Stdout: []byte("directory\ndirectory\n")}}
 	// Spliced, not appended: the socket probe follows the token probes, so an
 	// extra reply at the end would be consumed by the wrong check.
 	script = append(script[:7], append([]scriptedResp{{res: execx.Result{Stdout: []byte("xxx")}}}, script[7:]...)...)
@@ -172,7 +175,7 @@ func freshMCPInstallScript() []scriptedResp {
 		out("torio-mcp-clients:x:995:hermes\n"),
 		out("hermes torio-projects torio-mcp-clients\n"),
 		out("hermes torio-projects torio-mcp-clients\n"),
-		out("directory\n"),
+		out("directory\ndirectory\n"),
 		out("torio-mcp:torio-mcp 700\n"),
 	}
 }

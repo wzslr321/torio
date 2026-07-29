@@ -117,6 +117,77 @@ type result struct {
 
 func (r result) trimmed() string { return strings.TrimSpace(r.out) }
 
+// statControlPath is a second operand every privileged stat probe carries so
+// that the probe establishes its own premise instead of assuming it.
+//
+// `sudo -n stat <path>` exiting non-zero says nothing on its own: the exit is
+// the same whether the path is absent, sudo wants a password, sudo is not
+// installed, or stat is not installed. Reading that as "absent" is a security
+// control reporting OK precisely when it cannot tell — and one sudoers change
+// would turn every drift check green on a guest where nothing holds.
+//
+// stat prints one line per operand it could read and sends the rest to stderr,
+// so naming a path that must exist answers both questions in a single round
+// trip: no line at all means stat never ran, and exactly one line means it ran
+// and the path under test was not there.
+const statControlPath = "/"
+
+// pathState is what a privileged stat probe managed to establish about a path.
+// The zero value is the one that is not an answer about the path at all, so a
+// caller that forgets to switch on it fails closed rather than open.
+type pathState int
+
+const (
+	pathUnprovable pathState = iota
+	pathAbsent
+	pathPresent
+)
+
+// statPath probes path as root, reporting what was established and the file
+// type stat gave when the path is there.
+func (a *Adapter) statPath(ctx context.Context, rep *MCPBrokerReport, name, path string) (pathState, string, error) {
+	res, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%F", statControlPath, path)
+	if err != nil {
+		return pathUnprovable, "", err
+	}
+
+	// Split on lines rather than fields: a file type is words ("regular file",
+	// "symbolic link"), and one line is one operand's answer.
+	var lines []string
+	for _, l := range strings.Split(res.out, "\n") {
+		if s := strings.TrimSpace(l); s != "" {
+			lines = append(lines, s)
+		}
+	}
+
+	// The control path is a directory on every guest this runs on. Anything else
+	// in that slot means the reply did not come from the command this probe
+	// believes it ran, which is not a fact about the path under test.
+	if len(lines) == 0 || lines[0] != "directory" {
+		return pathUnprovable, "", nil
+	}
+	switch len(lines) {
+	case 1:
+		return pathAbsent, "", nil
+	case 2:
+		return pathPresent, lines[1], nil
+	default:
+		return pathUnprovable, "", nil
+	}
+}
+
+// probeUnusable is the failure for a root probe that never ran.
+//
+// It is recorded as drift rather than as a missing precondition, and the
+// difference is deliberate: "not provisioned" is a claim about the guest, and
+// nothing about the guest was established. Classifying it would be the same
+// guess these probes exist to stop making.
+func (a *Adapter) probeUnusable(rep *MCPBrokerReport, name, subject string) *Error {
+	return a.brokerFailed(rep, name,
+		"could not establish whether "+subject+" exists",
+		"this check reads the guest as root; confirm passwordless sudo still works for the operator identity and that `stat` is present")
+}
+
 // brokerFailed records drift: the broker is there, but a boundary this decision
 // depends on does not hold. It fails closed as a verification failure.
 func (a *Adapter) brokerFailed(rep *MCPBrokerReport, name, detail, remediation string) *Error {
@@ -203,11 +274,14 @@ func (a *Adapter) verifyHermesNotBrokerOwner(ctx context.Context, rep *MCPBroker
 func (a *Adapter) verifyBrokerHome(ctx context.Context, rep *MCPBrokerReport) error {
 	name := "path:" + torioMCPHomeSpec.path
 
-	st, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%F", torioMCPHomeSpec.path)
+	st, kind, err := a.statPath(ctx, rep, name, torioMCPHomeSpec.path)
 	if err != nil {
 		return err
 	}
-	if st.exit != 0 || st.trimmed() != "directory" {
+	if st == pathUnprovable {
+		return a.probeUnusable(rep, name, "the broker credential store")
+	}
+	if st == pathAbsent || kind != "directory" {
 		return a.brokerMissing(rep, name, "not a directory", "run `torio mcp install` to provision the broker credential store")
 	}
 
@@ -248,17 +322,18 @@ func (a *Adapter) verifyBrokerHome(ctx context.Context, rep *MCPBrokerReport) er
 func (a *Adapter) verifyNoHermesMCPTokens(ctx context.Context, rep *MCPBrokerReport) error {
 	const name = "hermes_mcp_tokens"
 
-	st, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%F", HermesMCPTokensPath)
+	st, kind, err := a.statPath(ctx, rep, name, HermesMCPTokensPath)
 	if err != nil {
 		return err
 	}
-	if st.exit != 0 {
-		// As root the only ordinary reason stat fails here is that the path is
-		// not there, which is the desired end state.
+	if st == pathUnprovable {
+		return a.probeUnusable(rep, name, "the Hermes MCP token store")
+	}
+	if st == pathAbsent {
 		rep.record(name, true, "absent")
 		return nil
 	}
-	if st.trimmed() != "directory" {
+	if kind != "directory" {
 		return a.brokerFailed(rep, name, "mcp-tokens exists and is not a directory",
 			"inspect the guest by hand; this path is managed by Hermes and should be a directory or absent")
 	}

@@ -18,16 +18,21 @@ func brokerProbeArgs(command ...string) []string {
 
 // okBrokerScript is the probe-by-probe happy path: every invariant of ADR-0022
 // holds on the guest.
+//
+// Every `stat -c %F` probe names statControlPath first, so its reply carries one
+// line for the control path and one more only if the path under test is there.
+// An absent path is therefore a one-line reply, never an empty one — an empty
+// reply means the probe did not run, which is a different answer.
 func okBrokerScript() []scriptedResponse {
 	return []scriptedResponse{
-		{result: stdoutResult("997\n")},                                       // id -u torio-mcp
-		{result: stdoutResult("torio-mcp-clients:x:995:hermes\n")},            // getent group
-		{result: stdoutResult("hermes torio-projects torio-mcp-clients\n")},   // id -nG hermes (client)
-		{result: stdoutResult("hermes torio-projects torio-mcp-clients\n")},   // id -nG hermes (not owner)
-		{result: stdoutResult("directory\n")},                                 // stat -c %F home
-		{result: stdoutResult("torio-mcp:torio-mcp 700\n")},                   // stat -c %U:%G %a home
-		{result: exitResult(1, "", "stat: cannot statx '...': No such file")}, // stat mcp-tokens: absent
-		{result: exitResult(1, "", "no such file")},                           // stat /run/torio-mcp: no daemon yet
+		{result: stdoutResult("997\n")},                                                  // id -u torio-mcp
+		{result: stdoutResult("torio-mcp-clients:x:995:hermes\n")},                       // getent group
+		{result: stdoutResult("hermes torio-projects torio-mcp-clients\n")},              // id -nG hermes (client)
+		{result: stdoutResult("hermes torio-projects torio-mcp-clients\n")},              // id -nG hermes (not owner)
+		{result: stdoutResult("directory\ndirectory\n")},                                 // stat -c %F home: present
+		{result: stdoutResult("torio-mcp:torio-mcp 700\n")},                              // stat -c %U:%G %a home
+		{result: exitResult(1, "directory\n", "stat: cannot statx '...': No such file")}, // stat mcp-tokens: absent
+		{result: exitResult(1, "directory\n", "no such file")},                           // stat /run/torio-mcp: no daemon yet
 	}
 }
 
@@ -45,10 +50,10 @@ func TestVerifyMCPBrokerHappyPath(t *testing.T) {
 		brokerProbeArgs("getent", "group", TorioMCPClientsGroup),
 		brokerProbeArgs("id", "-nG", HermesUser),
 		brokerProbeArgs("id", "-nG", HermesUser),
-		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", TorioMCPHome),
+		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", statControlPath, TorioMCPHome),
 		brokerProbeArgs("sudo", "-n", "stat", "-c", "%U:%G %a", TorioMCPHome),
-		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", HermesMCPTokensPath),
-		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", TorioMCPSocketDir),
+		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", statControlPath, HermesMCPTokensPath),
+		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", statControlPath, TorioMCPSocketDir),
 	}
 	if fr.callCount() != len(wantArgs) {
 		t.Fatalf("probe count = %d, want %d", fr.callCount(), len(wantArgs))
@@ -165,7 +170,7 @@ func TestVerifyMCPBrokerHomeIsGroupReadable(t *testing.T) {
 // under the agent's own identity, which is exactly what ADR-0022 removes.
 func TestVerifyMCPBrokerLeftoverTokens(t *testing.T) {
 	script := okBrokerScript()
-	script[6] = scriptedResponse{result: stdoutResult("directory\n")}
+	script[6] = scriptedResponse{result: stdoutResult("directory\ndirectory\n")}
 	script = insertAt(script, 7, scriptedResponse{result: stdoutResult("xx")})
 	fr := &fakeRunner{script: script}
 	a := New(fr)
@@ -194,7 +199,7 @@ func TestVerifyMCPBrokerLeftoverTokens(t *testing.T) {
 // directory on its own, so its mere presence cannot be the finding.
 func TestVerifyMCPBrokerEmptyTokensDirIsClean(t *testing.T) {
 	script := okBrokerScript()
-	script[6] = scriptedResponse{result: stdoutResult("directory\n")}
+	script[6] = scriptedResponse{result: stdoutResult("directory\ndirectory\n")}
 	script = insertAt(script, 7, scriptedResponse{result: stdoutResult("")})
 	fr := &fakeRunner{script: script}
 	a := New(fr)
@@ -208,6 +213,26 @@ func TestVerifyMCPBrokerEmptyTokensDirIsClean(t *testing.T) {
 			t.Errorf("empty mcp-tokens directory reported as drift: %s", c.Detail)
 		}
 	}
+}
+
+// TestVerifyMCPBrokerTokenProbeUnusableIsNotAbsence is the same fail-open shape
+// as the socket probe, on the check that matters most: this one is the only
+// thing that notices a credential put back under the agent's own identity.
+//
+// The comment this replaces reasoned "as root the only ordinary reason stat
+// fails is that the path is not there" — but running as root is exactly what a
+// failed `sudo -n` has not established. One sudoers change and the check goes
+// green on a guest with live tokens sitting under $HERMES_HOME.
+func TestVerifyMCPBrokerTokenProbeUnusableIsNotAbsence(t *testing.T) {
+	script := okBrokerScript()
+	script[6] = scriptedResponse{result: exitResult(1, "", "sudo: a password is required")}
+	fr := &fakeRunner{script: script}
+
+	rep, err := New(fr).VerifyMCPBroker(context.Background())
+	if err == nil {
+		t.Fatal("unusable root probe accepted as an empty token store; expected the check to fail closed")
+	}
+	assertFailedCheck(t, rep, "hermes_mcp_tokens")
 }
 
 // assertFailedCheck asserts that name is the check the report failed on, and
