@@ -22,6 +22,11 @@ func okMCPScript() []scriptedResp {
 		out("directory\ndirectory\n"),    // stat %F broker home
 		out("torio-mcp:torio-mcp 700\n"), // stat %U:%G %a broker home
 		{res: execx.Result{ExitCode: 1, Stdout: []byte("directory\n"), Stderr: []byte("no such file")}}, // stat mcp-tokens: absent
+		out("directory\ndirectory\n"),           // stat %F policy dir
+		out("root:root 755\n"),                  // stat %U:%G %a policy dir
+		out("atlassian.json root root 644 f\n"), // find policy documents
+		out("directory\nregular file\n"),        // stat %F hermes config.yaml
+		out("mcp_servers:\n  atlassian:\n    command: /usr/local/bin/torio-mcp-connect\n"),              // cat config.yaml
 		{res: execx.Result{ExitCode: 1, Stdout: []byte("directory\n"), Stderr: []byte("no such file")}}, // stat /run/torio-mcp: no daemon
 	}
 }

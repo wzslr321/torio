@@ -312,6 +312,17 @@ granicę i dowodzi, że trzyma.
   że jego magazyn credentiali nie jest czytelny dla nikogo poza nim, że `hermes` może otworzyć socket
   brokera, ale **nie** należy do grupy samego brokera, oraz że pod profilem Hermesa nie pojawił się
   żaden credential MCP. Nie uruchamia żadnej komendy mutującej.
+- Do tego weryfikuje **dwa dokumenty, które przesądzają, po co ta custody w ogóle jest**. Pliki
+  policy muszą być `root:root 0644`, zwykłymi plikami (nigdy dowiązaniami) w katalogu, do którego
+  nikt poza rootem nie pisze — dokument policy zapisywalny przez agenta unieważnia decyzję,
+  zostawiając wszystkie pozostałe checki zielone. A `mcp_servers` w `config.yaml` musi wskazywać
+  wyłącznie na przekaźnik: ten plik jest zapisywalny przez agenta, więc wpis wskazujący gdzie
+  indziej to serwer MCP, którego broker nigdy nie zobaczy — bez policy, bez audytu, bez okna.
+- Kontrola `mcp_servers` czyta **jeden kształt YAML-a i odmawia reszty**. Blok w składni inline, z
+  kotwicą, aliasem, merge key, tabulacją albo w drugim dokumencie jest raportowany jako drift, a nie
+  zgadywany. Nie jest to granica i nie wolno jej tak opisywać: plik należy do tożsamości, którą
+  kontrola ogranicza. Wykrywa rozjazd i `hermes mcp add` uruchomiony ręcznie — nie przeciwnika
+  piszącego pod różnicę parserów.
 - Gość, na którym broker nigdy nie był provisionowany, to **niespełniony precondition (exit 3)**, a
   nie drift. Granica, która przestała trzymać, to **verification failed (exit 6)**. Rozróżnienie jest
   częścią kontraktu: operator, który po prostu nie uruchomił jeszcze instalatora, nie może dostać

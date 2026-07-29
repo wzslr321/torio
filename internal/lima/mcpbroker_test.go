@@ -32,9 +32,24 @@ func okBrokerScript() []scriptedResponse {
 		{result: stdoutResult("directory\ndirectory\n")},                                 // stat -c %F home: present
 		{result: stdoutResult("torio-mcp:torio-mcp 700\n")},                              // stat -c %U:%G %a home
 		{result: exitResult(1, "directory\n", "stat: cannot statx '...': No such file")}, // stat mcp-tokens: absent
+		{result: stdoutResult("directory\ndirectory\n")},                                 // stat %F policy dir
+		{result: stdoutResult("root:root 755\n")},                                        // stat %U:%G %a policy dir
+		{result: stdoutResult("atlassian.json root root 644 f\n")},                       // find policy documents
+		{result: stdoutResult("directory\nregular file\n")},                              // stat %F hermes config.yaml
+		{result: stdoutResult(relayOnlyConfig)},                                          // cat config.yaml
 		{result: exitResult(1, "directory\n", "no such file")},                           // stat /run/torio-mcp: no daemon yet
 	}
 }
+
+// relayOnlyConfig is a Hermes config whose every MCP server goes through the
+// broker relay — the shape ADR-0022 §3 prescribes.
+const relayOnlyConfig = `model:
+  provider: custom
+mcp_servers:
+  atlassian:
+    command: /usr/local/bin/torio-mcp-connect
+    args: ["atlassian"]
+`
 
 func TestVerifyMCPBrokerHappyPath(t *testing.T) {
 	fr := &fakeRunner{script: okBrokerScript()}
@@ -53,6 +68,11 @@ func TestVerifyMCPBrokerHappyPath(t *testing.T) {
 		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", statControlPath, TorioMCPHome),
 		brokerProbeArgs("sudo", "-n", "stat", "-c", "%U:%G %a", TorioMCPHome),
 		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", statControlPath, HermesMCPTokensPath),
+		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", statControlPath, TorioMCPPolicyDir),
+		brokerProbeArgs("sudo", "-n", "stat", "-c", "%U:%G %a", TorioMCPPolicyDir),
+		brokerProbeArgs("sudo", "-n", "find", TorioMCPPolicyDir, "-mindepth", "1", "-maxdepth", "1", "-printf", `%f %u %g %m %y\n`),
+		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", statControlPath, HermesConfigPath),
+		brokerProbeArgs("sudo", "-n", "cat", HermesConfigPath),
 		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", statControlPath, TorioMCPSocketDir),
 	}
 	if fr.callCount() != len(wantArgs) {

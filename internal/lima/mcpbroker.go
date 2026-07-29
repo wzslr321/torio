@@ -69,7 +69,16 @@ func (r *MCPBrokerReport) record(name string, ok bool, detail string) {
 func (a *Adapter) VerifyMCPBroker(ctx context.Context) (MCPBrokerReport, error) {
 	rep := MCPBrokerReport{Instance: InstanceName}
 
-	steps := append(brokerIdentitySteps(a), a.verifyNoHermesMCPTokens, a.verifyBrokerSockets)
+	// Order is custody first, then the two documents that decide what the
+	// custody is for, then liveness. A guest whose policy is agent-writable has
+	// a broken boundary whether or not anything is listening, so the socket
+	// check is not what an operator should hear about first.
+	steps := append(brokerIdentitySteps(a),
+		a.verifyNoHermesMCPTokens,
+		a.verifyPolicyDocuments,
+		a.verifyHermesMCPServers,
+		a.verifyBrokerSockets,
+	)
 	for _, step := range steps {
 		if err := step(ctx, &rep); err != nil {
 			return rep, err
