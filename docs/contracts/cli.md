@@ -295,7 +295,8 @@ granicę i dowodzi, że trzyma.
 - Gdy `hermes` dopiero co dołączył do grupy klientów, `install` raportuje `restart_required` i mówi
   o tym wprost. Długo żyjący proces nie nabywa grupy dlatego, że zmieniła się pod nim baza grup —
   backend trzyma to, z czym wystartował, aż do `torio serve restart`.
-- `allow-write` otwiera **ograniczone w czasie okno zapisu** dla jednej usługi. Narzędzia
+- `allow-write` otwiera **ograniczone w czasie okno zapisu** dla jednej usługi
+  ([ADR-0025](../adr/0025-mcp-write-window.md)). Narzędzia
   oznaczone w policy jako zapisujące są odmawiane, dopóki okno nie jest otwarte; okno zamyka się
   samo i nic nie trzeba uruchamiać, żeby je zakończyć. Domyślnie **15 minut** — dość długo, by nie
   walczyć z narzędziem w trakcie pracy, dość krótko, by instrukcja wstrzyknięta później trafiła w
@@ -329,7 +330,8 @@ granicę i dowodzi, że trzyma.
 
 ## Idempotency
 
-Każda komenda zmieniająca stan jest idempotentna, a idempotentny sukces to exit 0:
+Każda komenda zmieniająca stan jest idempotentna, a idempotentny sukces to exit 0 — z jednym
+jawnym wyjątkiem, wymienionym na końcu tej listy:
 
 - `vm init` — zgodna istniejąca instancja: `created:false`. Niezgodna: fail-closed, nigdy recreate.
 - `vm start`/`stop`, `serve start`/`stop`/`restart` — pożądany stan jest **re-query'owany** po
@@ -338,3 +340,8 @@ Każda komenda zmieniająca stan jest idempotentna, a idempotentny sukces to exi
 - `brain init` — pasujący managed state jest sukcesem bez akcji.
 - `project add` — rerun po błędzie dokańcza pracę, bo nic nie jest cofane ani czyszczone.
 - `project remove` — brakujący albo już zarchiwizowany Hermes Project nie jest błędem.
+- `mcp install` — rerun bez zmiany daje `changed:false`, tak jak `serve install`.
+- `mcp allow-write` — **jedyna komenda mutująca, która idempotentna nie jest, i nie da się taką
+  uczynić.** Każde uruchomienie przesuwa termin zamknięcia okna, bo to odnowienie zdolności, a nie
+  stan do uzgodnienia; komenda „która nic nie zmienia, bo okno już jest otwarte" zostawiałaby
+  operatora bez sposobu na przedłużenie pracy ([ADR-0025](../adr/0025-mcp-write-window.md)).

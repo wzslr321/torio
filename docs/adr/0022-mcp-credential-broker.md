@@ -6,8 +6,11 @@ AI-Provenance:
 
 # ADR-0022: MCP przez brokera pod osobną tożsamością gościa
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-29
+- Częściowo superseded przez [ADR-0025](0025-mcp-write-window.md): sekcja „Co ta
+  decyzja rozstrzyga o write accessie" jest zawężona o okno zapisu. Reszta
+  obowiązuje.
 - Dotyczy: `internal/lima`, `internal/cli`, nowy komponent gościa `torio-mcp`
 - Powiązane: [ADR-0003](0003-lima-trust-boundary.md) (granica zaufania to brzeg
   VM), [ADR-0015](0015-torio-v1-onboarding-projects-and-operator-push.md)
@@ -168,6 +171,11 @@ serwerami MCP wyłącznie przez brokera działającego pod osobnym uid.**
 Broker nie broni przed confused deputy. Wstrzyknięta instrukcja może użyć każdego
 przyznanego narzędzia wobec każdego dozwolonego celu — i żadna ilość weryfikacji
 tego nie zmieni, bo z punktu widzenia brokera to poprawne wywołanie.
+
+> **Zawężone przez [ADR-0025](0025-mcp-write-window.md).** Zdanie powyżej
+> obowiązuje bez zmian dla narzędzi odczytu. Narzędzia zapisu wymagają dodatkowo
+> okna otwartego przez operatora i wygasającego samo, więc wstrzyknięta
+> instrukcja sięga po nie wyłącznie w oknie, które ktoś właśnie otworzył.
 
 Wartość leży gdzie indziej: w każdej chwili wiadomo czarno na białym, co jest
 przyznane. Zakres jest wyliczalny, maszynowo czytelny i zweryfikowany, a nie

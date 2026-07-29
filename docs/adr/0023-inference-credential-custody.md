@@ -107,6 +107,12 @@ agenta. Połączenia na loopback przechodzą przez `OUTPUT`, więc ten sam mecha
 który obsłuży kontrolę egressu, obsłuży i to. **Ta decyzja jest z nią sprzężona i
 bez niej jest niepełna.**
 
+Zapisane jako [ADR-0024](0024-guest-egress-control.md) pkt 5. Warto odnotować,
+czego ta zależność **nie** obejmuje: ADR-0024 został zawężony do reguł po uid,
+a allowlista celów wyszła do wstrzymanego
+[ADR-0026](0026-egress-destination-allowlist.md). Domknięcie potrzebne tutaj
+jest po stronie uid, więc ta decyzja nie czeka na rozstrzygnięcie o §4.
+
 ## Consequences
 
 - Torio dostaje drugiego brokera. Dzieli z ADR-0022 wzorzec separacji
