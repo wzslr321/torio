@@ -8,50 +8,50 @@ AI-Provenance:
 
 Session notes, not canonical. Everything normative lives in `docs/adr/` and
 `docs/contracts/`. This file exists so the next session does not re-derive what
-this one established, and does not re-discover the open items the hard way.
+earlier ones established, and does not re-discover the open items the hard way.
 
-Date: 2026-07-29. Branch: `feat/mcp-broker-daemon` (PR #78). PR #77 merged.
-
----
-
-## 1. One decision is blocking, and it is not mine to take
-
-`AGENTS.md` §4 lists, under "Torio NIE MOŻE implementować":
-
-> secret managera klasy Vault ani **domenowego network allowlistu**
-
-ADR-0024 proposes exactly a domain/destination allowlist. `AGENTS.md:3` says a
-contradiction between it and anything else means **stop work and report the
-conflict** — it outranks every ADR. ADR-0024 cites `docs/03-architecture.md`'s
-matching "out of scope" entry and reverses it, but never mentions §4.
-
-**Nothing further should be built on ADR-0024 until this is resolved.** Either
-§4 is amended (the operator's call) or ADR-0024 is withdrawn. ADR-0023 declares
-itself incomplete without ADR-0024, so this blocks the inference-credential work
-too.
-
-A second, smaller governance item: **ADR-0022 is still `Status: Proposed`**, yet
-`AGENTS.md` §5 invariant 8/8a and the normative `docs/contracts/cli.md` were
-rewritten on its authority. `AGENTS.md:63` ranks only *accepted* ADRs as a
-source of truth. Accept it or mark the dependents provisional.
-
-And a third: **the write window is a new architectural decision with no ADR.**
-It contradicts ADR-0022's "wstrzyknięta instrukcja może użyć każdego przyznanego
-narzędzia". `cli.md` was narrowed; ADR-0022 was not. Needs ADR-0025 superseding
-that passage.
+Updated 2026-07-29 (second session). Branch: `feat/mcp-broker-daemon` (PR #78).
+PR #77 merged.
 
 ---
 
-## 2. What shipped, and what state the guest is actually in
+## 1. Governance: settled
+
+**The `AGENTS.md` §4 conflict is resolved.** ADR-0024 proposed a domain
+allowlist, which §4 forbids. The operator resolved it as a **split**, not an
+amendment:
+
+- ADR-0024 keeps only the uid-keyed part. An allowlist of identities is not an
+  allowlist of domains, so §4 does not reach it — and it is the whole of what
+  ADR-0023 needs to close its loopback broker (ADR-0024 §5).
+- The destination allowlist is now **ADR-0026**, `Proposed` and explicitly
+  **blocked** until the operator decides on §4. Nothing may be built on it.
+
+The narrowing costs real coverage: `hermes` keeps an unrestricted set of
+destinations, so ADR-0024 does not close data exfiltration. That is stated in
+its Context and in a "what this buys and what it does not" section, not in a
+footnote.
+
+**ADR-0022 is Accepted.** `AGENTS.md` §5 invariant 8/8a and `cli.md` were
+rewritten on its authority, and §3 ranks only accepted ADRs as a source of truth.
+
+**ADR-0025 covers the write window**, superseding ADR-0022's "wstrzyknięta
+instrukcja może użyć każdego przyznanego narzędzia". ADR-0022 carries the
+pointer at the superseded passage. `cli.md` now records that `mcp allow-write`
+is the one non-idempotent mutating command, with the reason.
+
+---
+
+## 2. What state the guest is actually in
 
 Merged (PR #77): ADR-0022, guest-side boundary verification, `torio mcp status`,
 `torio mcp install`, live-run evidence, the relay, the policy engine + audit.
 
 On the branch (PR #78): the daemon, write windows, the dead-socket drift check,
-ADR-0023, ADR-0024.
+ADR-0023, ADR-0024, ADR-0025, ADR-0026, the verification work below.
 
-**The daemon cannot start on the live guest.** Four independent reasons, all
-verified:
+**The daemon still cannot start on the live guest.** Four independent reasons,
+all verified and none addressed yet:
 
 1. `torio-mcp` is not in `torio-mcp-clients`, so it cannot `chgrp` its own
    socket — EPERM, exit 7. One `usermod -aG` in `InstallMCPBroker` fixes it.
@@ -64,7 +64,11 @@ verified:
 4. `pendingUpstream.roundTrip` always errors — the real HTTP transport is the
    deliberate next slice.
 
-Three error strings currently send an operator to `torio mcp install` *on the
+Note for the unit: `verifyBrokerSockets` now requires `/run/torio-mcp` to be
+`torio-mcp:torio-mcp-clients`, so the unit needs `RuntimeDirectoryMode=0750`
+and the right group, not systemd's default.
+
+Three error strings still send an operator to `torio mcp install` *on the
 guest*; `torio` is a host binary. Fix the wording with the unit slice.
 
 The live instance still has **3 Atlassian credential files under
@@ -74,45 +78,31 @@ upstream. That is the documented state, not a defect.
 
 ---
 
-## 3. Defects found by audit, still open
+## 3. Defects: what is closed
 
-Two read-only audits ran over the whole body of work. The critical one — the
-write window was never enforced — is fixed in `eade5f5`. These are not:
+Closed this session (`30d03c9`, `424841f`), each with a failing test first:
 
-**Fail-open checks (highest priority; they are security controls that report OK
-when they cannot tell):**
+- The socket directory's **group is now compared**, not just printed.
+  `torio-mcp:torio-mcp 0750` used to pass owner and mode while the agent could
+  not traverse to the socket at all.
+- Both `sudo -n stat` **fail-open probes are gone**. Every privileged stat now
+  names a control path that must exist, so one round trip separates "the probe
+  never ran" from "the path is absent" — no line, one line, two lines. The
+  unprovable case is drift, not "not installed".
+- `torio-mcp-connect` no longer asserts one cause for EACCES; it names both the
+  client group and the directory above the socket.
+- **Policy documents are verified**: directory `root:root` and unwritable by
+  anyone else, every entry a regular file (never a symlink) with the `.json`
+  suffix the loader requires, each `root:root 0644`.
+- **`mcp_servers` is verified** against the relay path, with a reader that
+  models one shape of block YAML and reports everything else as drift rather
+  than guessing.
 
-- `internal/lima/mcpsocket.go:63` parses the socket directory's **group**,
-  prints it in the failure message, and never compares it. `torio-mcp:torio-mcp
-  0750` passes every check while the agent has no `+x` and can reach no socket.
-  `status` then prints "Broker boundary holds" on a guest where MCP cannot work.
-  Compounding it, `cmd/torio-mcp-connect` maps the resulting EACCES to a
-  confident, wrong diagnosis about group membership.
-- `internal/lima/mcpbroker.go:255` and `internal/lima/mcpsocket.go:43` treat
-  **any** non-zero exit from `sudo -n stat` as "absent, all good". That covers
-  sudo requiring a password, sudo missing, stat missing. One sudoers change and
-  both drift checks go green on a guest with live tokens and a dead broker. The
-  comment's premise ("as root") is exactly what the probe has not established.
-  Contrast `internal/lima/status.go:117`, which refuses to treat an unusable
-  probe as ground truth.
+---
 
-**Missing verification ADR-0022 §6 requires:**
+## 4. Defects: still open
 
-- No check that `mcp_servers` in `$HERMES_HOME/config.yaml` points only at the
-  relay. **This is the one entry the agent can rewrite to bypass the broker
-  entirely** — `config.yaml` is agent-writable, which is the ADR's own premise.
-- No check on policy document ownership or mode, though ADR §4 and `cli.md`
-  both assert `root:root 0644`. An agent-writable policy document voids the
-  decision with every existing check green.
-- Nothing renders the granted scope, so nothing verifies it matches the files.
-  `Grant`/`ServiceGrant`/`ToolGrant`/`WriteTools` are exported for exactly this
-  and have no consumer. `AGENTS.md` §5.8a's "jawny, wyliczalny i weryfikowany"
-  is not delivered.
-- Nothing checks `torio-mcp` stayed out of `torio-projects`. The installer is
-  asserted not to do it; `status` never looks. The symmetric check for `hermes`
-  exists.
-
-**Correctness:**
+**Correctness in the broker (all in `cmd/torio-mcp-broker`):**
 
 - **Duplicate JSON keys.** `toolName` uses `json.Unmarshal` (last key wins);
   `forward` sends the original bytes verbatim and `json.Compact` preserves both
@@ -120,9 +110,10 @@ when they cannot tell):**
   `getJiraIssue` and a first-wins upstream executes `deleteJiraIssue`. Latent
   only because no transport carries traffic yet; it goes live with the HTTP
   slice. The fix must be duplicate-key rejection at parse time, not a re-encode.
-- `filterToolsList` returns early on any `error` member, so a reply carrying
-  both `error` and `result` is passed through **unfiltered** and without even
-  being confirmed as JSON-RPC 2.0. Every other branch there fails closed.
+- `filterToolsList` returns early on any `error` member (`server.go:388`), so a
+  reply carrying both `error` and `result` is passed through **unfiltered** and
+  without even being confirmed as JSON-RPC 2.0. Every other branch there fails
+  closed.
 - The parse-error path echoes a caller-authored `id`: Go populates decoded
   fields before a type error, so `isScalarID` runs too late. Output goes back to
   the same client only, but the invariant the comment asserts does not hold.
@@ -131,14 +122,25 @@ when they cannot tell):**
 - No cap on concurrent connections; anything running as `hermes` can exhaust
   the broker's descriptors.
 
+**Verification still missing:**
+
+- Nothing renders the granted scope, so nothing verifies it matches the files.
+  `Grant`/`ServiceGrant`/`ToolGrant`/`WriteTools` are exported for exactly this
+  and still have no consumer. `AGENTS.md` §5.8a's "jawny, wyliczalny i
+  weryfikowany" is not delivered.
+- Nothing checks `torio-mcp` stayed out of `torio-projects`. The installer is
+  asserted not to do it; `status` never looks. The symmetric check for `hermes`
+  exists.
+- `internal/lima/mcpinstall.go` still reads a failed `sudo -n stat` as "the path
+  is missing" in `ensureBrokerHome` and `ensurePolicyDir`. Both fail closed, so
+  this is a wrong diagnosis rather than a hole — but it is the same shape the
+  verification path just shed, and `statPath` is right there.
+
 **Contract drift:**
 
 - `cli.md:75` justifies the unused exit code 4 with "V1 nie ma silnika policy" —
   V1 now ships one whose whole job is denial. The conclusion (4 stays unused) is
   still right; the reason is false. Duplicated in `internal/cli/exit.go:26`.
-- `cli.md:330` says every state-changing command is idempotent. `mcp
-  allow-write` is not — it moves the deadline every run. Neither `mcp install`
-  nor `mcp allow-write` is in the list below it.
 - Exit code 1 is used by three binaries and defined in no table; the two guest
   binaries claim to follow `cli.md` and do not appear in it.
 - Error envelopes carry the parent command (`"mcp"`) rather than the full name
@@ -151,13 +153,15 @@ when they cannot tell):**
 - `docs/03-architecture.md` is untouched by any of this work, though
   `docs/adr/README.md` requires security-boundary changes to update it. The
   trust boundary now has a third guest identity, a policy directory and a socket.
+  Its "domenowy egress allowlist" out-of-scope entry is **still correct** after
+  the split — do not remove it while ADR-0026 is blocked.
 - `docs/v1-evidence/FINDINGS-mcp-broker-boundary.md` says "ADR-0022 stands as
   written" (it was amended after) and "the broker daemon does not exist yet"
   (it does; nothing deploys it). Evidence must not be silently falsified by
   later work — correct it or add a dated successor.
-- ADR-0024's Context says `hermes` has "no primitive to read, change or bypass"
-  the ruleset; its own Precondition section describes exactly such a primitive.
-  The Precondition is right.
+- ADR-0024's Context no longer claims `hermes` has "no primitive to read, change
+  or bypass" the ruleset in a way its own Precondition contradicts, but check
+  the wording again when the ruleset actually ships.
 - ADR-0023 rejects `hermes proxy` partly for authenticating nobody over loopback
   TCP — which its own chosen design also does. The valid distinguishing reason
   (no `openai-codex` adapter) stands alone; the authentication clause should go.
@@ -166,7 +170,7 @@ when they cannot tell):**
 
 ---
 
-## 4. The shim: a live one-step path from the agent to root
+## 5. The shim: a live one-step path from the agent to root
 
 Independent of everything above, and cheap to fix:
 
@@ -188,7 +192,7 @@ writable by `hermes`. Recorded as a precondition in ADR-0024.
 
 ---
 
-## 5. Threat model — decided this session, not yet written into the docs
+## 6. Threat model — decided, still not in the architecture doc
 
 These decisions are scoped to **prompt injection and a confused agent**:
 realistic, frequent, the daily risk. They are **not** scoped to a deliberately
@@ -206,13 +210,17 @@ usability and pay off only against the threat we are not claiming to stop. DNS
 remains an uncontrolled covert channel (every query leaves as uid 991,
 `systemd-resolved`, never as the agent) and that is accepted, not overlooked.
 
-**This belongs in `docs/03-architecture.md` and is not there yet.**
+The new `mcp_servers` check is deliberately built to this model and says so in
+its own comment: the file belongs to the identity the check constrains, so it is
+a drift detector, not a boundary.
+
+**This belongs in `docs/03-architecture.md` and is still not there.**
 
 ---
 
-## 6. Facts worth not re-deriving
+## 7. Facts worth not re-deriving
 
-Verified in Hermes source or on the live guest this session:
+Verified in Hermes source or on the live guest:
 
 - `agent/file_safety.py` states its own read denylist "is **NOT** a security
   boundary" — the terminal tool runs as the same uid and can `cat auth.json`.
@@ -241,7 +249,7 @@ Verified in Hermes source or on the live guest this session:
   own traffic.
 - A validated git remote always yields a host token, but it may be an **SSH
   config alias**, not a DNS name. A mechanically derived allowlist needs an
-  explicit answer for that.
+  explicit answer for that (now recorded in ADR-0026).
 - The inference endpoint is written down **nowhere machine-readable** —
   `model.base_url` is empty; the host is only discoverable by grepping Hermes.
 
@@ -251,20 +259,21 @@ usernet egress knob; PyPI/npm/uv-python hostnames.
 
 ---
 
-## 7. Suggested order for tomorrow
+## 8. Suggested order for next session
 
-1. **Resolve the `AGENTS.md` §4 conflict.** Blocks ADR-0024 and therefore
-   ADR-0023. Operator decision.
-2. **ADR-0025 for the write window**, superseding the relevant ADR-0022 passage.
-   Accept ADR-0022 while there.
-3. **The three fail-open checks** (§3) — small, tested, and they are the
-   difference between a control and a claim.
-4. **`mcp_servers` verification** — the one bypass an agent can perform alone.
-5. **The unit slice**: `usermod -aG`, `/run/torio-mcp`, a systemd unit validated
-   before activation, packaging for the guest binaries. This is what makes the
-   daemon run at all.
-6. The shim fix (§4) — independent, cheap, and it gates any later egress work.
-7. Contract drift (§3, last block) as one sweep.
+1. **The unit slice**: `usermod -aG`, `/run/torio-mcp` with the client group and
+   `RuntimeDirectoryMode=0750`, a systemd unit validated before activation,
+   packaging for the guest binaries. This is what makes the daemon run at all,
+   and nothing downstream is observable until it does.
+2. **The broker correctness defects** (§4, first block) — duplicate JSON keys
+   first, because it goes live with the HTTP transport and silently executes a
+   different tool than the one audited.
+3. **The remaining verification gaps** (§4, second block) — the granted-scope
+   renderer is the one `AGENTS.md` §5.8a asks for by name.
+4. The shim fix (§5) — independent, cheap, and it gates any later egress work.
+5. Contract drift (§4, last block) as one sweep, including
+   `docs/03-architecture.md` and the threat model from §6.
+6. ADR-0026 stays blocked. Do not start it; ask the operator about §4 first.
 
 The upstream HTTP transport, OAuth, and the Atlassian migration come after the
 unit slice, because none of them is observable until the daemon starts.
