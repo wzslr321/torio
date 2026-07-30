@@ -19,7 +19,9 @@ With lazy.nvim from a Torio checkout:
 Neovim 0.10 or newer, `torio`, and `curl` are required. The Hermes session view
 also requires an active Torio tunnel and a session token. By default the token is
 read from `HERMES_SESSION_TOKEN`; it is passed to curl through stdin, never as a
-process argument.
+process argument or inherited child environment. Session API requests bypass
+configured proxies and connect directly so the authentication header cannot be
+forwarded to a proxy.
 
 For a keychain-backed token, return it from a callback rather than writing it in
 this repository:

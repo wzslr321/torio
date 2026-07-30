@@ -201,6 +201,13 @@ local function curl_config(token)
   return 'header = "X-Hermes-Session-Token: ' .. token .. '"\n'
 end
 
+local function curl_environment()
+  local env = vim.fn.environ()
+  env.HERMES_SESSION_TOKEN = nil
+  env.HERMES_DASHBOARD_SESSION_TOKEN = nil
+  return env
+end
+
 local function fetch_sessions(project, callback)
   local provider = config.session_token
   local token = type(provider) == "function" and provider() or nil
@@ -213,11 +220,17 @@ local function fetch_sessions(project, callback)
   local args = command(config.curl_cmd, {
     "--config", "-",
     "--fail", "--silent", "--show-error",
+    "--noproxy", "*",
     "--get", config.api_url .. "/api/sessions",
     "--data-urlencode", "cwd_prefix=" .. project.path,
     "--data-urlencode", "limit=50",
   })
-  vim.system(args, { text = true, stdin = stdin }, function(result)
+  vim.system(args, {
+    text = true,
+    stdin = stdin,
+    env = curl_environment(),
+    clear_env = true,
+  }, function(result)
     vim.schedule(function()
       if result.code ~= 0 then
         notify("Hermes sessions request failed (exit " .. result.code .. ")", vim.log.levels.ERROR)

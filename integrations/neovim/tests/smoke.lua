@@ -7,6 +7,7 @@ local torio = tmp .. "/torio"
 local curl = tmp .. "/curl"
 local curl_args = tmp .. "/curl.args"
 local curl_stdin = tmp .. "/curl.stdin"
+local curl_env = tmp .. "/curl.env"
 
 vim.fn.writefile({
   "#!/bin/sh",
@@ -20,11 +21,14 @@ vim.fn.writefile({
 vim.fn.writefile({
   "#!/bin/sh",
   "printf '%s\\n' \"$@\" > " .. vim.fn.shellescape(curl_args),
+  "printf '%s' \"${HERMES_SESSION_TOKEN-unset}\" > " .. vim.fn.shellescape(curl_env),
   "cat > " .. vim.fn.shellescape(curl_stdin),
   "printf '%s\\n' '{\"sessions\":[{\"id\":\"session-1\",\"title\":\"Neovim\\nsmoke session\",\"is_active\":true,\"updated_at\":\"2026-07-30\"}]}'",
 }, curl)
 vim.fn.setfperm(torio, "rwx------")
 vim.fn.setfperm(curl, "rwx------")
+vim.env.HERMES_SESSION_TOKEN = "inherited-secret"
+vim.env.ALL_PROXY = "http://proxy.invalid:8080"
 
 local plugin = require("torio")
 plugin.setup({
@@ -49,8 +53,11 @@ end), "session panel did not render")
 
 local args = table.concat(vim.fn.readfile(curl_args), "\n")
 local stdin = table.concat(vim.fn.readfile(curl_stdin), "\n")
+local child_token = table.concat(vim.fn.readfile(curl_env), "\n")
 assert(not args:find("smoke-secret", 1, true), "session token leaked into curl argv")
 assert(stdin:find("X-Hermes-Session-Token: smoke-secret", 1, true), "session token was not sent through stdin")
 assert(args:find("cwd_prefix=/home/hermes/projects/torio", 1, true), "workspace scope missing from sessions request")
+assert(args:find("--noproxy\n%*", 1) ~= nil, "curl does not bypass inherited proxies")
+assert(child_token == "unset", "curl inherited HERMES_SESSION_TOKEN")
 
 vim.cmd("qa!")
