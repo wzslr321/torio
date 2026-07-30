@@ -168,6 +168,9 @@ func TestRunReportsMissingSocket(t *testing.T) {
 	if msg := stderr.String(); !strings.Contains(msg, "no broker socket") {
 		t.Errorf("stderr = %q, want it to name the missing socket", msg)
 	}
+	if msg := stderr.String(); !strings.Contains(msg, "on the host") || strings.Contains(msg, "on the guest") {
+		t.Errorf("stderr = %q, want the torio mcp install remedy on the host", msg)
+	}
 }
 
 func TestRunReportsPermissionDenied(t *testing.T) {
@@ -198,6 +201,41 @@ func TestRunReportsPermissionDenied(t *testing.T) {
 	}
 	if msg := stderr.String(); !strings.Contains(msg, "torio-mcp-clients") {
 		t.Errorf("stderr = %q, want it to name the group that grants access", msg)
+	}
+}
+
+// TestPermissionDeniedNamesBothCauses: EACCES on this path has two causes, and
+// the relay cannot tell them apart from where it stands.
+//
+// One is the socket's own 0660 torio-mcp:torio-mcp-clients — this identity is
+// outside the group. The other is the directory above it: at 0750 the socket is
+// reachable only by traversing /run/torio-mcp, so a directory handed to the
+// wrong group denies a caller who *is* a member. Naming only the first sends an
+// operator to check a group that is already correct.
+func TestPermissionDeniedNamesBothCauses(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the socket mode, so the denial under test cannot happen")
+	}
+	dir := tempSocketDir(t)
+	path := filepath.Join(dir, "atlassian.sock")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	run(context.Background(), []string{"atlassian"}, dir, strings.NewReader(""), &stdout, &stderr)
+
+	msg := stderr.String()
+	if !strings.Contains(msg, "torio-mcp-clients") {
+		t.Errorf("stderr = %q, want it to name the group that grants access", msg)
+	}
+	if !strings.Contains(msg, socketDir) {
+		t.Errorf("stderr = %q, want it to name %s, the other thing that produces this error", msg, socketDir)
 	}
 }
 

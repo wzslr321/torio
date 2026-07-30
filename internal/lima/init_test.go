@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/wzslr321/torio/internal/execx"
 )
@@ -338,6 +337,8 @@ func TestInitDefaultsResources(t *testing.T) {
 }
 
 func TestInitInterruptedCreateLeavesNoTemplate(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
 	ctx, cancel := context.WithCancel(context.Background())
 	fr := &fakeRunner{respond: func(ctx context.Context, cmd execx.Command) (execx.Result, error) {
 		if cmd.Args[0] == "list" {
@@ -353,17 +354,11 @@ func TestInitInterruptedCreateLeavesNoTemplate(t *testing.T) {
 	if !errors.As(err, &lerr) || lerr.Kind != KindCancelled {
 		t.Fatalf("want KindCancelled, got %v", err)
 	}
-	// Best-effort: any leftover torio-lima-*.yaml in temp would be a leak;
-	// scan a short window of the process temp dir created during this test.
-	matches, _ := filepath.Glob(filepath.Join(os.TempDir(), "torio-lima-*.yaml"))
-	for _, m := range matches {
-		info, err := os.Stat(m)
-		if err != nil {
-			continue
-		}
-		if time.Since(info.ModTime()) < 2*time.Second {
-			t.Fatalf("leaked template file %q", m)
-		}
+	// This test owns its temp directory, so any match belongs to this Init call.
+	// A global age-based scan races with concurrent Go test processes.
+	matches, _ := filepath.Glob(filepath.Join(tmp, "torio-lima-*.yaml"))
+	if len(matches) != 0 {
+		t.Fatalf("leaked template files: %v", matches)
 	}
 }
 

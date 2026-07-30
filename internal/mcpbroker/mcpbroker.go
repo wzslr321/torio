@@ -10,7 +10,12 @@
 // write.
 package mcpbroker
 
-import "sort"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"sort"
+)
 
 // Set is the effective policy of the whole broker: every service it will speak
 // for, and the tools granted on each.
@@ -72,6 +77,15 @@ type Decision struct {
 	Allowed bool
 	// Reason explains the verdict.
 	Reason Reason
+	// Writes reports that the granted tool is one the policy document marks as
+	// writing. It is meaningful only when Allowed is true: nothing is known
+	// about a tool that was never granted, so a denial reports false rather than
+	// letting a caller read the zero value as a fact.
+	//
+	// It exists so a caller can gate write tools on something Allow itself does
+	// not know about — an operator's time-bounded window. Without it that gate
+	// has no way to tell a write from a read at decision time.
+	Writes bool
 }
 
 // Allow reports whether service may invoke tool.
@@ -90,10 +104,11 @@ func (s Set) Allow(service, tool string) Decision {
 	if !ok {
 		return Decision{Reason: ReasonUnknownService}
 	}
-	if _, granted := svc.tools[tool]; !granted {
+	writes, granted := svc.tools[tool]
+	if !granted {
 		return Decision{Reason: ReasonToolNotGranted}
 	}
-	return Decision{Allowed: true, Reason: ReasonGranted}
+	return Decision{Allowed: true, Reason: ReasonGranted, Writes: writes}
 }
 
 // Grant is the complete effective grant of a Set, in a form a caller can render
@@ -157,4 +172,20 @@ func (s Set) Grants() Grant {
 	}
 	sort.Slice(g.Services, func(i, j int) bool { return g.Services[i].Name < g.Services[j].Name })
 	return g
+}
+
+// Digest identifies the complete effective grant, independent of policy-file
+// formatting and tool order. A running broker publishes this value so the
+// control plane can prove that the process enforcing policy loaded the same
+// grant that status just parsed from disk.
+func (s Set) Digest() string {
+	body, err := json.Marshal(s.Grants())
+	if err != nil {
+		// Grant contains only strings, booleans, integers and slices. A marshal
+		// failure would mean a programmer changed that invariant without changing
+		// this method; it is not an operator-controlled policy error.
+		panic("marshal effective MCP policy: " + err.Error())
+	}
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
 }

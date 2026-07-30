@@ -156,6 +156,7 @@ class InstallerTests(unittest.TestCase):
         proc = run(["bash", str(INSTALL_SH), "--help"])
         self.assertEqual(proc.returncode, 0)
         self.assertIn("--dry-run", proc.stdout)
+        self.assertIn("--base-url URL", proc.stdout)
 
     def _source_lib(self, script: str, env_extra: dict[str, str] | None = None):
         """Run a snippet with install.sh sourced, so its functions can be called

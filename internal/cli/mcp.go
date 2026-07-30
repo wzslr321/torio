@@ -14,11 +14,11 @@ import (
 func newMCPCmd(a *app) *cobra.Command {
 	m := &cobra.Command{
 		Use:   "mcp",
-		Short: "Inspect the MCP credential broker boundary",
-		Long: "MCP servers are reached through a broker running under its own guest identity " +
-			"(" + lima.TorioMCPUser + "), so no upstream credential exists under the identity the " +
-			"agent has a shell as. Torio never handles those credentials itself: it provisions the " +
-			"boundary and proves it holds (ADR-0022).",
+		Short: "Provision and inspect the MCP credential boundary",
+		Long: "Provision the dedicated " + lima.TorioMCPUser + " identity, client group, private " +
+			"credential store, and root-owned policy boundary. The broker daemon is not installed or " +
+			"activated until its OAuth and upstream transport have an accepted contract. Torio accepts " +
+			"no MCP credentials through this CLI (ADR-0027).",
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return usageError("no subcommand given; run 'torio mcp --help'")
@@ -137,17 +137,17 @@ func (a *app) emitMCPStatus(rep lima.MCPBrokerReport) error {
 func newMCPInstallCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "install",
-		Short: "Provision the broker identity and its credential store",
+		Short: "Provision and verify the MCP credential boundary",
 		Long: "Create the unprivileged " + lima.TorioMCPUser + " identity, its 0700 credential store, " +
-			"the " + lima.TorioMCPClientsGroup + " group, and the root-owned policy directory; then prove " +
-			"the result instead of trusting the exit codes that produced it. Idempotent: a re-run that " +
-			"changes nothing reports changed:false. Grants nothing beyond the client-group membership " +
-			"hermes needs to open the broker socket, and accepts no secrets.",
+			"the " + lima.TorioMCPClientsGroup + " group, and the root-owned policy directory, then prove " +
+			"the identity and policy boundaries. The daemon is not installed or activated until its OAuth " +
+			"and upstream transport have an accepted contract. Idempotent: a re-run that changes nothing " +
+			"reports changed:false. Accepts no secrets.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := a.opContext(cmd)
 			defer cancel()
-			rep, err := a.newLima().InstallMCPBroker(ctx)
+			rep, err := a.newLima().ProvisionMCPBroker(ctx)
 			if err != nil {
 				ce := mapLimaError("mcp.install", err)
 				ce.Details = mcpInstallDetails(rep)

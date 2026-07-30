@@ -78,17 +78,25 @@ func dial(path string) (*net.UnixConn, error) {
 		return nil, &dialError{
 			exit: exitNoBroker,
 			msg: fmt.Sprintf("no broker socket at %s: the MCP broker is not installed on this guest, "+
-				"or it has never started (run `torio mcp install`, then check the broker unit)", path),
+				"or it has never started (run `torio mcp install` on the host, then check the broker unit)", path),
 		}
 	case errors.Is(err, fs.ErrPermission):
 		// The socket is 0660 torio-mcp:torio-mcp-clients (ADR-0022 §3), so this
 		// is the boundary doing its job, not a malfunction. The group name is
 		// repeated from internal/lima.TorioMCPClientsGroup, which stays the
 		// source of truth; a guest binary must not pull in the host adapter.
+		//
+		// Two different faults produce this errno and the relay cannot tell them
+		// apart from here: this identity being outside the group, or the
+		// directory above the socket being handed to some other group, which
+		// denies a caller who is a member. Naming only the first would send an
+		// operator to check something that is already correct — so both are
+		// named, and neither is asserted as the cause.
 		return nil, &dialError{
 			exit: exitDenied,
-			msg: fmt.Sprintf("permission denied opening %s: this identity is not in the broker's client group "+
-				"(torio-mcp-clients); membership is the whole privilege the agent identity is granted", path),
+			msg: fmt.Sprintf("permission denied opening %s: either this identity is not in the broker's client group "+
+				"(torio-mcp-clients), which is the whole privilege the agent identity is granted, or %s is not traversable "+
+				"by that group — `torio mcp status` distinguishes the two", path, socketDir),
 		}
 	case errors.Is(err, syscall.ECONNREFUSED):
 		return nil, &dialError{

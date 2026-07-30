@@ -276,18 +276,29 @@ torio mcp install
 torio mcp status
 ```
 
-Serwery MCP są osiągane przez brokera działającego pod własną tożsamością gościa `torio-mcp`, więc
-żaden credential upstreamu nie istnieje pod tożsamością, pod którą agent ma powłokę
-([ADR-0022](../adr/0022-mcp-credential-broker.md)). Torio nie dotyka tych credentiali: stawia
-granicę i dowodzi, że trzyma.
+Docelowo serwery MCP będą osiągane przez brokera działającego pod własną tożsamością gościa
+`torio-mcp`, aby credential upstreamu nie istniał pod tożsamością, pod którą agent ma powłokę
+([ADR-0022](../adr/0022-mcp-credential-broker.md)). Obecnie Torio provisionuje i weryfikuje granicę
+custody potrzebną temu brokerowi, ale nie dostarcza jeszcze daemona ani transportu upstream
+([ADR-0027](../adr/0027-mcp-boundary-before-daemon-delivery.md)).
 
 - `install` tworzy nieuprzywilejowaną tożsamość `torio-mcp`, jej magazyn credentiali `0700`, grupę
   `torio-mcp-clients` oraz root-owned katalog policy — po czym **dowodzi** wyniku zamiast ufać exit
   code'om komend, które go wyprodukowały. Idempotentne (`changed:false` przy przebiegu bez zmian),
   nie przyjmuje sekretów i **nie przyznaje niczego** poza członkostwem w grupie klientów, którego
-  `hermes` potrzebuje, by otworzyć socket. `torio-mcp` nigdy nie trafia do `torio-projects`, a
-  `hermes` nigdy do grupy `torio-mcp`; to dwie pomyłki, które unieważniłyby decyzję, zostawiając
-  wszystkie pozostałe checki zielone.
+  `hermes` potrzebuje, by otworzyć socket, oraz którego `torio-mcp` potrzebuje, by przekazać grupie
+  własny socket. `torio-mcp` nigdy nie trafia do `torio-projects`, a `hermes` nigdy do grupy
+  `torio-mcp`; to dwie pomyłki, które unieważniłyby decyzję, zostawiając wszystkie pozostałe checki
+  zielone.
+- `install` **nie instaluje ani nie aktywuje daemona**. Transport upstream i lifecycle OAuth wymagają
+  osobnego zaakceptowanego kontraktu; dopóki go nie ma, release nie publikuje binariów brokera ani
+  przekaźnika. Publiczna komenda provisionuje wyłącznie granicę custody, której potrzebuje przyszły
+  daemon.
+- Policy jest jawnym grantem operatora, więc `install` nie generuje jej ani nie zgaduje. Na świeżym
+  gościu pierwszy przebieg może utworzyć root-owned katalog policy i zakończyć się precondition
+  z `changed:true`; operator zapisuje co najmniej jeden
+  `/etc/torio-mcp/policy.d/<service>.json` jako `root:root 0644`, po czym ponawia `install`.
+  Pusta albo niepoprawna policy nie daje pozornie zdrowej granicy z pustym grantem.
 - `install` **nie blokuje się** na credentialach zalegających pod profilem Hermesa. Są dokładnie
   tym, co broker ma zlikwidować, ale odmowa instalacji przy ich obecności to zakleszczenie: operator
   nie może zbudować rzeczy, do której ma migrować. Ten ciągły invariant należy do `status`.
@@ -296,8 +307,26 @@ granicę i dowodzi, że trzyma.
   backend trzyma to, z czym wystartował, aż do `torio serve restart`.
 - `status` **dowodzi i raportuje; niczego nie naprawia.** Weryfikuje, że tożsamość brokera istnieje,
   że jego magazyn credentiali nie jest czytelny dla nikogo poza nim, że `hermes` może otworzyć socket
-  brokera, ale **nie** należy do grupy samego brokera, oraz że pod profilem Hermesa nie pojawił się
-  żaden credential MCP. Nie uruchamia żadnej komendy mutującej.
+  brokera, ale **nie** należy do grupy samego brokera, nie ma sudo ani grup spoza zarządzanego zestawu
+  `hermes`, `torio-projects`, `torio-mcp-clients`, oraz że pod profilem Hermesa nie pojawił się żaden
+  credential MCP. Nie uruchamia żadnej komendy mutującej.
+- Do tego weryfikuje **dwa dokumenty, które przesądzają, po co ta custody w ogóle jest**. Pliki
+  policy muszą być `root:root 0644`, zwykłymi plikami (nigdy dowiązaniami) w katalogu, do którego
+  nikt poza rootem nie pisze — dokument policy zapisywalny przez agenta unieważnia decyzję,
+  zostawiając wszystkie pozostałe checki zielone. Ich zawartość przechodzi ten sam ścisły parser
+  co broker. Brak runtime jest poprawnym stanem niezależnie od obecności dormant unit. To obecność
+  `/run/torio-mcp`, a nie pliku unit, uruchamia weryfikację daemona. Gdy runtime istnieje, musi istnieć
+  również dokładny, aktywny trusted unit; zbiór usług musi być dokładnie równy zbiorowi zwykłych,
+  nasłuchujących socketów, a digest policy działającego procesu musi odpowiadać zweryfikowanym
+  dokumentom.
+  A `mcp_servers` w `config.yaml` musi wskazywać
+  wyłącznie na przekaźnik: ten plik jest zapisywalny przez agenta, więc wpis wskazujący gdzie
+  indziej to serwer MCP, którego broker nigdy nie zobaczy — bez policy i bez audytu.
+- Kontrola `mcp_servers` czyta **jeden kształt YAML-a i odmawia reszty**. Blok w składni inline, z
+  kotwicą, aliasem, merge key, tabulacją albo w drugim dokumencie jest raportowany jako drift, a nie
+  zgadywany. Nie jest to granica i nie wolno jej tak opisywać: plik należy do tożsamości, którą
+  kontrola ogranicza. Wykrywa rozjazd i `hermes mcp add` uruchomiony ręcznie — nie przeciwnika
+  piszącego pod różnicę parserów.
 - Gość, na którym broker nigdy nie był provisionowany, to **niespełniony precondition (exit 3)**, a
   nie drift. Granica, która przestała trzymać, to **verification failed (exit 6)**. Rozróżnienie jest
   częścią kontraktu: operator, który po prostu nie uruchomił jeszcze instalatora, nie może dostać
@@ -308,9 +337,10 @@ granicę i dowodzi, że trzyma.
 - **Zakres narzędzi jest jawny, sekrety nie.** Policy leży w `/etc/torio-mcp/policy.d/<usługa>.json`
   jako `root:root 0644` — czytelna dla agenta i niezapisywalna przez niego. Domyślnie deny; przechodzą
   wyłącznie narzędzia wymienione z nazwy, bez wnioskowania z nazw i bez wzorców.
-- Broker **nie broni przed confused deputy**: wstrzyknięta instrukcja może użyć każdego przyznanego
-  narzędzia wobec każdego dozwolonego celu. Przyznanie zapisu jest dopuszczalne i bywa uzasadnione —
-  ma być decyzją, którą ktoś podjął i którą widać, a nie skutkiem ubocznym instalacji.
+- Broker **nie broni przed confused deputy w pełni**: wstrzyknięta instrukcja może użyć każdego
+  narzędzia przyznanego w policy, także zapisującego, wobec każdego dozwolonego celu. Przyznanie
+  zapisu pozostaje jawną decyzją operatora zapisaną w root-owned policy, a nie skutkiem ubocznym
+  instalacji.
 
 ## Idempotency
 
@@ -323,3 +353,4 @@ Każda komenda zmieniająca stan jest idempotentna, a idempotentny sukces to exi
 - `brain init` — pasujący managed state jest sukcesem bez akcji.
 - `project add` — rerun po błędzie dokańcza pracę, bo nic nie jest cofane ani czyszczone.
 - `project remove` — brakujący albo już zarchiwizowany Hermes Project nie jest błędem.
+- `mcp install` — rerun bez zmiany daje `changed:false`, tak jak `serve install`.

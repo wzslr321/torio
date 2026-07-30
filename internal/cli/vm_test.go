@@ -5,13 +5,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
+)
+
+const (
+	cliTestMCPBrokerBinary = "broker-linux-arm64"
+	cliTestMCPRelayBinary  = "relay-linux-arm64"
 )
 
 // scriptedResp is one canned (Result, error) pair for the fake runner.
@@ -34,7 +42,7 @@ func (f *fakeLimaRunner) Run(_ context.Context, cmd execx.Command) (execx.Result
 	if i < len(f.script) {
 		return f.script[i].res, f.script[i].err
 	}
-	return execx.Result{}, nil
+	return execx.Result{}, fmt.Errorf("unexpected fake Lima call %d: %s %v", i, cmd.Name, cmd.Args)
 }
 
 // runVMWithFake runs `torio <args>` with isolated XDG dirs and the given fake
@@ -51,12 +59,25 @@ func runVMWithFake(t *testing.T, args []string, fake execx.Runner) (int, string,
 func runVMWithFakeBoundJSON(t *testing.T, args []string, fake execx.Runner) (int, string, string, bool) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	mcpArtifacts := t.TempDir()
+	for name, body := range map[string]string{
+		lima.TorioMCPBrokerArtifact: cliTestMCPBrokerBinary,
+		lima.TorioMCPRelayArtifact:  cliTestMCPRelayBinary,
+	} {
+		if err := os.WriteFile(filepath.Join(mcpArtifacts, name), []byte(body), 0o755); err != nil {
+			t.Fatalf("write MCP guest fixture %s: %v", name, err)
+		}
+	}
 	var stdout, stderr bytes.Buffer
 	a := &app{
-		stdout:             &stdout,
-		stderr:             &stderr,
-		build:              testBuild(),
-		newLima:            func() *lima.Adapter { return lima.New(fake) },
+		stdout: &stdout,
+		stderr: &stderr,
+		build:  testBuild(),
+		newLima: func() *lima.Adapter {
+			adapter := lima.New(fake)
+			adapter.MCPGuestBinaryDir = mcpArtifacts
+			return adapter
+		},
 		lookupOperatorUser: func() (string, error) { return "testop", nil },
 	}
 	code := runWithApp(context.Background(), a, args)
@@ -227,6 +248,7 @@ func TestVMStartSuccessHumanAndJSON(t *testing.T) {
 		{res: listJSON("torio", "Stopped")},
 		{res: execx.Result{ExitCode: 0}},
 		{res: listJSON("torio", "Running")},
+		{res: execx.Result{ExitCode: 0}}, // guest readiness probe
 	}}
 	code, stdout, stderr := runVMWithFake(t, []string{"vm", "start"}, fake)
 	if code != int(ExitOK) {
@@ -241,6 +263,7 @@ func TestVMStartSuccessHumanAndJSON(t *testing.T) {
 		{res: listJSON("torio", "Stopped")},
 		{res: execx.Result{ExitCode: 0}},
 		{res: listJSON("torio", "Running")},
+		{res: execx.Result{ExitCode: 0}}, // guest readiness probe
 	}}
 	code, stdout, _ = runVMWithFake(t, []string{"vm", "start", "--json"}, fake)
 	if code != int(ExitOK) {

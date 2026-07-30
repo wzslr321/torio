@@ -39,24 +39,10 @@ func (r *MCPBrokerInstallReport) record(name string, ok bool, detail string) {
 	r.Checks = append(r.Checks, CheckResult{Name: name, OK: ok, Detail: boundDetail(detail)})
 }
 
-// InstallMCPBroker provisions the guest identities and directories the broker
-// boundary is made of, then proves the result rather than trusting the exit
-// codes of the commands that produced it.
-//
-// It is narrow by construction. It creates one unprivileged identity, one client
-// group, one 0700 home and one root-owned policy directory — and it grants
-// nothing else. It never adds torio-mcp to TorioProjectsGroup (that would put
-// the credential owner inside the project workspace) and never adds hermes to
-// the torio-mcp group (that would hand the agent the credentials). Those are the
-// two mistakes that would leave every other check green while voiding the
-// decision, so they are absent here and asserted against in tests.
-//
-// It deliberately does NOT gate on credentials still sitting under the Hermes
-// profile. They are exactly what the broker exists to end, but refusing to
-// install while they are there is a deadlock: the operator cannot build the
-// thing they are supposed to migrate to. That ongoing invariant belongs to
-// `mcp status`.
-func (a *Adapter) InstallMCPBroker(ctx context.Context) (MCPBrokerInstallReport, error) {
+// ProvisionMCPBroker installs and verifies only the credential-custody
+// boundary. The daemon is deliberately not installed or activated until its
+// upstream transport and OAuth lifecycle have their own accepted contract.
+func (a *Adapter) ProvisionMCPBroker(ctx context.Context) (MCPBrokerInstallReport, error) {
 	rep := MCPBrokerInstallReport{Instance: InstanceName}
 
 	groupChanged, err := a.ensureBrokerClientsGroup(ctx, &rep)
@@ -64,6 +50,10 @@ func (a *Adapter) InstallMCPBroker(ctx context.Context) (MCPBrokerInstallReport,
 		return rep, err
 	}
 	userChanged, err := a.ensureBrokerUser(ctx, &rep)
+	if err != nil {
+		return rep, err
+	}
+	brokerClientChanged, err := a.ensureBrokerIsClient(ctx, &rep)
 	if err != nil {
 		return rep, err
 	}
@@ -80,11 +70,9 @@ func (a *Adapter) InstallMCPBroker(ctx context.Context) (MCPBrokerInstallReport,
 		return rep, err
 	}
 
-	rep.Changed = groupChanged || userChanged || homeChanged || clientChanged || policyChanged
+	rep.Changed = groupChanged || userChanged || brokerClientChanged || homeChanged || clientChanged || policyChanged
 	rep.RestartRequired = clientChanged
 
-	// Prove the boundary rather than trusting the reconcile. A clean exit from
-	// useradd is not evidence that the resulting home is unreadable.
 	verify := MCPBrokerReport{Instance: InstanceName}
 	for _, step := range brokerIdentitySteps(a) {
 		if err := step(ctx, &verify); err != nil {
@@ -92,7 +80,114 @@ func (a *Adapter) InstallMCPBroker(ctx context.Context) (MCPBrokerInstallReport,
 			return rep, err
 		}
 	}
+	if err := a.verifyPolicyDocuments(ctx, &verify); err != nil {
+		rep.Checks = append(rep.Checks, verify.Checks...)
+		return rep, err
+	}
 	rep.Checks = append(rep.Checks, verify.Checks...)
+	return rep, nil
+}
+
+// InstallMCPBroker provisions the guest identities and directories the broker
+// boundary is made of, then proves the result rather than trusting the exit
+// codes of the commands that produced it.
+//
+// It creates one unprivileged identity, one client group, one 0700 home, one
+// root-owned policy directory, two root-owned guest binaries and one validated
+// system unit. It grants nothing beyond the client group. It never adds
+// torio-mcp to TorioProjectsGroup (that would put the credential owner inside
+// the project workspace) and never adds hermes to the torio-mcp group (that
+// would hand the agent the credentials). Those are the two mistakes that would
+// leave every other check green while voiding the decision, so they are absent
+// here and asserted against in tests.
+//
+// It deliberately does NOT gate on credentials still sitting under the Hermes
+// profile. They are exactly what the broker exists to end, but refusing to
+// install while they are there is a deadlock: the operator cannot build the
+// thing they are supposed to migrate to. That ongoing invariant belongs to
+// `mcp status`.
+func (a *Adapter) InstallMCPBroker(ctx context.Context) (MCPBrokerInstallReport, error) {
+	rep := MCPBrokerInstallReport{Instance: InstanceName}
+	binaries, err := a.loadMCPGuestBinaries()
+	if err != nil {
+		return rep, err
+	}
+
+	groupChanged, err := a.ensureBrokerClientsGroup(ctx, &rep)
+	if err != nil {
+		return rep, err
+	}
+	rep.Changed = rep.Changed || groupChanged
+	userChanged, err := a.ensureBrokerUser(ctx, &rep)
+	if err != nil {
+		return rep, err
+	}
+	rep.Changed = rep.Changed || userChanged
+	brokerClientChanged, err := a.ensureBrokerIsClient(ctx, &rep)
+	if err != nil {
+		return rep, err
+	}
+	rep.Changed = rep.Changed || brokerClientChanged
+	homeChanged, err := a.ensureBrokerHome(ctx, &rep)
+	if err != nil {
+		return rep, err
+	}
+	rep.Changed = rep.Changed || homeChanged
+	clientChanged, err := a.ensureHermesIsClient(ctx, &rep)
+	if err != nil {
+		return rep, err
+	}
+	rep.Changed = rep.Changed || clientChanged
+	rep.RestartRequired = rep.RestartRequired || clientChanged
+	policyChanged, err := a.ensurePolicyDir(ctx, &rep)
+	if err != nil {
+		return rep, err
+	}
+	rep.Changed = rep.Changed || policyChanged
+	binariesChanged := false
+	brokerDigest := ""
+	for _, bin := range binaries {
+		if bin.target == TorioMCPBrokerPath {
+			brokerDigest = bin.digest
+		}
+		changed, err := a.ensureMCPGuestBinary(ctx, &rep, bin)
+		if err != nil {
+			return rep, err
+		}
+		binariesChanged = binariesChanged || changed
+		rep.Changed = rep.Changed || changed
+	}
+
+	// Prove the identity boundary before activating the service. A clean exit
+	// from useradd is not evidence that the resulting home is unreadable, and a
+	// daemon must not start on an unverified custody boundary.
+	verify := MCPBrokerReport{Instance: InstanceName}
+	for _, step := range brokerIdentitySteps(a) {
+		if err := step(ctx, &verify); err != nil {
+			rep.Checks = append(rep.Checks, verify.Checks...)
+			return rep, err
+		}
+	}
+	if err := a.verifyPolicyDocuments(ctx, &verify); err != nil {
+		rep.Checks = append(rep.Checks, verify.Checks...)
+		return rep, err
+	}
+	rep.Checks = append(rep.Checks, verify.Checks...)
+
+	unitChanged, err := a.ensureMCPBrokerUnit(ctx, &rep, brokerDigest, verify.policyDigest)
+	if err != nil {
+		return rep, err
+	}
+	rep.Changed = rep.Changed || unitChanged
+	socketReport := MCPBrokerReport{Instance: InstanceName, policyServices: verify.policyServices, policyDigest: verify.policyDigest}
+	if err := a.verifyBrokerSockets(ctx, &socketReport); err != nil {
+		rep.Checks = append(rep.Checks, socketReport.Checks...)
+		return rep, err
+	}
+	rep.Checks = append(rep.Checks, socketReport.Checks...)
+
+	rep.Changed = rep.Changed || groupChanged || userChanged || brokerClientChanged || homeChanged || clientChanged || policyChanged || binariesChanged || unitChanged
+	rep.RestartRequired = rep.RestartRequired || clientChanged
 	return rep, nil
 }
 
@@ -154,11 +249,47 @@ func (a *Adapter) ensureBrokerUser(ctx context.Context, rep *MCPBrokerInstallRep
 	// --system: this is a service identity, not a person. No supplementary
 	// groups are passed at all, so the account starts with exactly its own.
 	if err := a.installMutate(ctx, rep, name, "useradd",
-		"sudo", "-n", "useradd", "--system", "--create-home",
+		"sudo", "-n", "useradd", "--system", "--user-group", "--create-home",
 		"--home-dir", TorioMCPHome, "--shell", brokerLoginShell, TorioMCPUser); err != nil {
 		return false, err
 	}
 	rep.record(name, true, "created")
+	return true, nil
+}
+
+// ensureBrokerIsClient lets the broker hand each socket to the client group.
+// chown(2) rejects a target group outside the creating process's memberships,
+// even when the process owns the socket, so omitting this membership leaves the
+// daemon unable to publish its first service.
+func (a *Adapter) ensureBrokerIsClient(ctx context.Context, rep *MCPBrokerInstallReport) (bool, error) {
+	const name = "install:broker_client"
+	res, err := a.installProbe(ctx, "id", "-nG", TorioMCPUser)
+	if err != nil {
+		return false, err
+	}
+	if res.exit != 0 {
+		rep.record(name, false, "cannot read broker group membership")
+		return false, &Error{Op: mcpInstallOp, Kind: KindVerificationFailed,
+			Err: fmt.Errorf("%s: cannot read broker group membership", name)}
+	}
+	if hasGroup(res.out, TorioMCPClientsGroup) {
+		rep.record(name, true, "member")
+		return false, nil
+	}
+	if err := a.installMutate(ctx, rep, name, "usermod",
+		"sudo", "-n", "usermod", "-aG", TorioMCPClientsGroup, TorioMCPUser); err != nil {
+		return false, err
+	}
+	verified, err := a.installProbe(ctx, "id", "-nG", TorioMCPUser)
+	if err != nil {
+		return false, err
+	}
+	if verified.exit != 0 || !hasGroup(verified.out, TorioMCPClientsGroup) {
+		rep.record(name, false, "membership missing after usermod")
+		return false, &Error{Op: mcpInstallOp, Kind: KindVerificationFailed,
+			Err: fmt.Errorf("%s: broker is not in the client group after usermod", name)}
+	}
+	rep.record(name, true, "added")
 	return true, nil
 }
 

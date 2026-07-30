@@ -24,7 +24,7 @@ type fakeRunner struct {
 	calls []recordedCall
 
 	// script supplies one response per call, consumed in order. If it is
-	// shorter than the number of calls, respond is used for the remainder.
+	// shorter than the number of calls, respond must handle the remainder.
 	script []scriptedResponse
 	// respond, if set, computes a response for any call not covered by
 	// script. Useful for context/timeout tests that need to inspect ctx.
@@ -49,7 +49,7 @@ func (f *fakeRunner) Run(ctx context.Context, cmd execx.Command) (execx.Result, 
 	if f.respond != nil {
 		return f.respond(ctx, cmd)
 	}
-	return execx.Result{}, nil
+	return execx.Result{}, fmt.Errorf("unexpected fake runner call %d: %s %v", idx, cmd.Name, cmd.Args)
 }
 
 func (f *fakeRunner) callArgs(i int) []string {

@@ -57,6 +57,48 @@ func TestLoadReadsAServicePolicy(t *testing.T) {
 	}
 }
 
+func TestParseDocumentsUsesTheSameStrictPolicyContractAsLoad(t *testing.T) {
+	set, err := ParseDocuments(map[string][]byte{"atlassian.json": []byte(atlassianPolicy)})
+	if err != nil {
+		t.Fatalf("ParseDocuments: %v", err)
+	}
+	grants := set.Grants()
+	if len(grants.Services) != 1 || grants.Services[0].Name != "atlassian" || grants.Services[0].WriteTools != 1 {
+		t.Fatalf("unexpected grants: %+v", grants)
+	}
+	if _, err := ParseDocuments(map[string][]byte{"atlassian.json": []byte(`{"schema_version":"1","service":"atlassian","upstream_endpoint":"https://api.atlassian.com/v1/mcp","tools":[],"unknown":true}`)}); err == nil {
+		t.Fatal("ParseDocuments accepted a policy with an unknown field")
+	}
+}
+
+func TestPolicyDigestTracksTheEffectiveGrantNotJSONFormatting(t *testing.T) {
+	first, err := ParseDocuments(map[string][]byte{
+		"atlassian.json": []byte(`{"schema_version":"1","service":"atlassian","upstream_endpoint":"https://api.atlassian.com/v1/mcp","tools":[{"name":"read","writes":false},{"name":"write","writes":true}]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reformatted, err := ParseDocuments(map[string][]byte{
+		"atlassian.json": []byte("{\n  \"tools\": [{\"writes\": true, \"name\": \"write\"}, {\"writes\": false, \"name\": \"read\"}],\n  \"upstream_endpoint\": \"https://api.atlassian.com/v1/mcp\",\n  \"service\": \"atlassian\",\n  \"schema_version\": \"1\"\n}"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := ParseDocuments(map[string][]byte{
+		"atlassian.json": []byte(`{"schema_version":"1","service":"atlassian","upstream_endpoint":"https://api.atlassian.com/v1/mcp","tools":[{"name":"read","writes":false}]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if first.Digest() != reformatted.Digest() {
+		t.Fatal("formatting or tool order changed the effective-policy digest")
+	}
+	if first.Digest() == changed.Digest() {
+		t.Fatal("removing a granted tool did not change the effective-policy digest")
+	}
+}
+
 // TestLoadRejectsUnknownField locks the fail-closed decoder. A field the loader
 // does not understand is a grant somebody believes they wrote; accepting the
 // document while ignoring the field would make the policy report a lie.
