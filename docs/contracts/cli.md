@@ -236,6 +236,7 @@ torio project list
 torio project show <id>
 torio project use <id>
 torio project remove <id>
+torio project enter <id>
 torio project shell <id>
 ```
 
@@ -256,6 +257,10 @@ torio project shell <id>
   outputu Gita.
 - `remove` archiwizuje Hermes Project i usuwa wpis z configu. Katalog checkoutu **nigdy** nie jest
   kasowany, a output mówi wprost, gdzie nadal jest. V1 nie ma `--delete`.
+- `enter` otwiera zwykłą interaktywną sesję w checkoucie z wyłączonym agent forwarding oraz
+  multiplexingiem SSH. Sesja może edytować i commitować lokalnie, ale nie dostaje od Torio write
+  capability wobec remote'u. Jest preflightowana tak samo jak workspace shella, z wyjątkiem
+  lokalnego agenta SSH, którego nie sprawdza ani nie odczytuje.
 - `shell` otwiera efemeryczną sesję operatora w checkoucie z forwardowanym agentem SSH. **To jedyna
   droga, którą write capability wobec remote'ów Gita dociera do gościa**, i żyje dokładnie do
   wyjścia z sesji; persistent Hermes ma wobec origin wyłącznie read. Zdanie było kiedyś napisane
@@ -266,7 +271,7 @@ torio project shell <id>
   agent trzyma tożsamość do forwardu), ale Torio **nigdy nie robi testowego pusha**, żeby cokolwiek
   udowodnić. Sesja nie jest ograniczana `--timeout`: kończy ją operator.
   Po jej zakończeniu Torio nie twierdzi, czego dotyczył push — sprawdź remote sam.
-- `shell` jest interaktywne i **nie wspiera `--json`**: nie ma dokumentu do wyemitowania, więc
+- `enter` i `shell` są interaktywne i **nie wspierają `--json`**: nie ma dokumentu do wyemitowania, więc
   `--json` jest usage error (exit 2), a nie po cichu zignorowaną flagą.
 
 ### MCP

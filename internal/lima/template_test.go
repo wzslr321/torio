@@ -63,6 +63,31 @@ func TestRenderTemplateInstallsTheOperatorShellHelper(t *testing.T) {
 	}
 }
 
+func TestRenderTemplateInstallsTheProjectEnterHelper(t *testing.T) {
+	body, err := renderTemplate(InitOptions{OperatorUser: "operator"})
+	if err != nil {
+		t.Fatalf("renderTemplate: %v", err)
+	}
+	text := string(body)
+	at := strings.Index(text, "path: "+ProjectEnterHelper)
+	if at < 0 {
+		t.Fatalf("rendered template does not provision %s", ProjectEnterHelper)
+	}
+	section := text[at:]
+	for _, want := range []string{`owner: "root:root"`, `permissions: "0755"`, "overwrite: true"} {
+		if !strings.Contains(section, want) {
+			t.Errorf("project enter helper section is missing %q", want)
+		}
+	}
+	block, ok := blockScalarAfter(section, "content: |")
+	if !ok {
+		t.Fatal("project enter helper has no content block")
+	}
+	if block != string(embeddedProjectEnter) {
+		t.Errorf("provisioned enter helper differs from the tested helper")
+	}
+}
+
 // TestRenderedTemplateAddsTheOperatorToTorioProjects runs the user-mode
 // provision script the way the guest runs it, with the commands it calls
 // stubbed out.

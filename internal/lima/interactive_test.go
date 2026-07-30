@@ -58,6 +58,38 @@ func TestOperatorShellSpecBuildsThePromotedArgv(t *testing.T) {
 	}
 }
 
+// TestProjectEnterSpecBuildsAnInteractiveSessionWithoutAgentForwarding pins the
+// ordinary workspace-session boundary: it gets a TTY and the fixed enter
+// helper, but explicitly disables agent forwarding and multiplexing so it
+// cannot reuse a push-capable operator-shell connection.
+func TestProjectEnterSpecBuildsAnInteractiveSessionWithoutAgentForwarding(t *testing.T) {
+	home := operatorShellHost(t)
+	t.Setenv("SSH_AUTH_SOCK", "")
+
+	spec, err := ProjectEnterSpec(HermesWorkspacePath + "/demo")
+	if err != nil {
+		t.Fatalf("ProjectEnterSpec: unexpected error: %v", err)
+	}
+
+	want := []string{
+		"-F", filepath.Join(home, ".lima", InstanceName, "ssh.config"),
+		"-o", "ControlMaster=no",
+		"-o", "ControlPath=none",
+		"-o", "ForwardAgent=no",
+		"-a",
+		"-t",
+		"lima-" + InstanceName,
+		ProjectEnterHelper,
+		HermesWorkspacePath + "/demo",
+	}
+	if spec.Name != "ssh" || !equalArgs(spec.Args, want) {
+		t.Fatalf("command = %s %v, want ssh %v", spec.Name, spec.Args, want)
+	}
+	if spec.Env != nil {
+		t.Fatalf("Env = %v, want nil", spec.Env)
+	}
+}
+
 // TestOperatorShellSpecPutsOverridesAfterTheConfigFlag pins the ordering rule
 // the spike had to discover: -F first, every -o after it. Lima's generated
 // ssh.config enables ControlMaster/ControlPersist, so an override placed before

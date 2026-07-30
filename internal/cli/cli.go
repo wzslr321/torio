@@ -59,10 +59,11 @@ type app struct {
 	// registry. Same test seam pattern as newBrain.
 	newProjects func(*lima.Adapter, lima.BootstrapOptions) projectService
 
-	// newShellSpec builds the operator shell argv for a project path, and
-	// newInteractive the runner that executes it. They are separate seams
+	// newEnterSpec and newShellSpec build the ordinary and push-capable SSH argv
+	// for a project path; newInteractive executes either command. They are seams
 	// because the production spec reads host state (the Lima ssh config, the
 	// SSH agent) that a test must not depend on.
+	newEnterSpec   func(projectPath string) (execx.InteractiveCommand, error)
 	newShellSpec   func(projectPath string) (execx.InteractiveCommand, error)
 	newInteractive func() execx.InteractiveRunner
 
@@ -108,6 +109,9 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 	}
 	if a.newShellSpec == nil {
 		a.newShellSpec = lima.OperatorShellSpec
+	}
+	if a.newEnterSpec == nil {
+		a.newEnterSpec = lima.ProjectEnterSpec
 	}
 	if a.newInteractive == nil {
 		a.newInteractive = func() execx.InteractiveRunner { return &execx.InteractiveExecRunner{} }

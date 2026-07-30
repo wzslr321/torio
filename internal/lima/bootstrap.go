@@ -137,6 +137,9 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 	if err := a.verifyOperatorShellHelper(ctx, &rep); err != nil {
 		return rep, err
 	}
+	if err := a.verifyProjectEnterHelper(ctx, &rep); err != nil {
+		return rep, err
+	}
 
 	return rep, nil
 }
@@ -214,9 +217,30 @@ var operatorShellHelperSpec = bootstrapPathSpec{
 	modes: []string{"755", "0755"},
 }
 
+var projectEnterHelperSpec = bootstrapPathSpec{
+	path:  ProjectEnterHelper,
+	owner: "root",
+	group: "root",
+	modes: []string{"755", "0755"},
+}
+
 // operatorShellHelperRemediation is the one repair for every helper drift: the
 // pinned template re-materializes the file, root-owned and 0755, on boot.
 const operatorShellHelperRemediation = "restart the VM so provisioning reinstalls " + OperatorShellHelper + " as root:root 0755"
+
+const projectEnterHelperRemediation = "restart the VM so provisioning reinstalls " + ProjectEnterHelper + " as root:root 0755"
+
+const projectEnterInstallScript = `
+tmp="$(mktemp /usr/local/bin/.torio-project-enter.XXXXXX)"
+trap 'rm -f -- "$tmp"' EXIT
+cat >"$tmp"
+chown root:root "$tmp"
+chmod 0755 "$tmp"
+sync -f "$tmp"
+mv -T -- "$tmp" /usr/local/bin/torio-project-enter
+sync -f /usr/local/bin
+trap - EXIT
+`
 
 // hostShareFSTypes is the findmnt -t filter for macOS host-share filesystems. A
 // broad host mount over the guest is an ADR-0003 violation and fails closed.
@@ -697,6 +721,82 @@ func (a *Adapter) verifyOperatorShellHelper(ctx context.Context, rep *BootstrapR
 	}
 	if !modeMatches(spec, mode) {
 		return a.verifyFailed(rep, name, fmt.Sprintf("helper mode %s, want one of %v", mode, spec.modes), operatorShellHelperRemediation)
+	}
+
+	rep.record(name, true, fmt.Sprintf("%s:%s %s", owner, group, mode))
+	return nil
+}
+
+// verifyProjectEnterHelper proves the ordinary workspace-session helper is the
+// root-owned regular file provisioned by the Lima template. A helper absent
+// from a VM created by an older Torio is installed from the current embedded
+// bytes. Any existing but drifted path is reported and never overwritten.
+func (a *Adapter) verifyProjectEnterHelper(ctx context.Context, rep *BootstrapReport) error {
+	const name = "project_enter_helper"
+	spec := projectEnterHelperSpec
+
+	st, err := a.guestProbe(ctx, rep, name, "stat", "-c", "%F", spec.path)
+	if err != nil {
+		return err
+	}
+	kind := strings.TrimSpace(string(st.Stdout))
+	if st.ExitCode == 1 && kind == "" {
+		absent, err := a.guestProbe(ctx, rep, name, "test", "!", "-e", spec.path)
+		if err != nil {
+			return err
+		}
+		if absent.ExitCode != 0 {
+			return a.verifyFailed(rep, name, "could not prove the helper path is absent", projectEnterHelperRemediation)
+		}
+		installed, err := a.SSHInput(ctx, embeddedProjectEnter,
+			[]string{"sudo", "-n", "/bin/bash", "-ceu", projectEnterInstallScript})
+		if err != nil {
+			return err
+		}
+		if installed.ExitCode != 0 || installed.StdoutTruncated || installed.StderrTruncated {
+			return a.verifyFailed(rep, name, "could not install the missing project enter helper", "confirm passwordless root provisioning is intact and re-run bootstrap")
+		}
+		rep.record(name+"_installed", true, "installed embedded helper atomically")
+		st, err = a.guestProbe(ctx, rep, name, "stat", "-c", "%F", spec.path)
+		if err != nil {
+			return err
+		}
+		kind = strings.TrimSpace(string(st.Stdout))
+	}
+	if st.ExitCode != 0 || kind == "" {
+		return a.verifyFailed(rep, name, "no project enter helper at "+spec.path, projectEnterHelperRemediation)
+	}
+	if kind != "regular file" {
+		return a.verifyFailed(rep, name, fmt.Sprintf("helper is a %s, want a regular file", kind), projectEnterHelperRemediation)
+	}
+
+	og, err := a.guestProbe(ctx, rep, name, "stat", "-c", "%U:%G %a", spec.path)
+	if err != nil {
+		return err
+	}
+	if og.ExitCode != 0 {
+		return a.verifyFailed(rep, name, "could not read helper ownership/mode", projectEnterHelperRemediation)
+	}
+	owner, group, mode, ok := parseStatOwnership(string(og.Stdout))
+	if !ok {
+		return a.verifyFailed(rep, name, "unparseable helper ownership/mode", projectEnterHelperRemediation)
+	}
+	if owner != spec.owner || group != spec.group {
+		return a.verifyFailed(rep, name,
+			fmt.Sprintf("helper owner:group %s:%s, want %s:%s", owner, group, spec.owner, spec.group),
+			"a helper the operator or hermes owns can be rewritten between sessions; "+projectEnterHelperRemediation)
+	}
+	writable, parsed := modeGrantsForeignWrite(mode)
+	if !parsed {
+		return a.verifyFailed(rep, name, "unparseable helper mode "+mode, projectEnterHelperRemediation)
+	}
+	if writable {
+		return a.verifyFailed(rep, name,
+			fmt.Sprintf("helper mode %s is group- or world-writable", mode),
+			"a writable helper could replace the command run in an operator-controlled workspace session; "+projectEnterHelperRemediation)
+	}
+	if !modeMatches(spec, mode) {
+		return a.verifyFailed(rep, name, fmt.Sprintf("helper mode %s, want one of %v", mode, spec.modes), projectEnterHelperRemediation)
 	}
 
 	rep.record(name, true, fmt.Sprintf("%s:%s %s", owner, group, mode))

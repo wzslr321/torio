@@ -83,6 +83,16 @@ provision:
     content: |
       __TORIO_PROJECT_SHELL__
 
+  # Ordinary project terminal. It is separate from the operator shell helper
+  # because its SSH transport explicitly disables agent forwarding.
+  - mode: data
+    path: __TORIO_PROJECT_ENTER_PATH__
+    owner: "root:root"
+    permissions: "0755"
+    overwrite: true
+    content: |
+      __TORIO_PROJECT_ENTER__
+
   # Lima login user exists by the time user-mode provision runs.
   - mode: user
     script: |

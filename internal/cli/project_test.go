@@ -36,6 +36,10 @@ type fakeProjectService struct {
 	removeReport projects.RemoveReport
 	removeErr    error
 
+	enterID      string
+	enterSession projects.EnterSession
+	enterErr     error
+
 	shellID      string
 	shellSession projects.ShellSession
 	shellErr     error
@@ -65,6 +69,11 @@ func (f *fakeProjectService) Use(_ context.Context, id string) (projects.UseRepo
 func (f *fakeProjectService) Remove(_ context.Context, id string) (projects.RemoveReport, error) {
 	f.removeID = id
 	return f.removeReport, f.removeErr
+}
+
+func (f *fakeProjectService) EnterPreflight(_ context.Context, id string) (projects.EnterSession, error) {
+	f.enterID = id
+	return f.enterSession, f.enterErr
 }
 
 func (f *fakeProjectService) ShellPreflight(_ context.Context, id string) (projects.ShellSession, error) {
@@ -204,8 +213,8 @@ func TestProjectAddIDOverrideAndUse(t *testing.T) {
 	if !reflect.DeepEqual(service.addReq, want) {
 		t.Fatalf("add request = %+v, want %+v", service.addReq, want)
 	}
-	if !strings.Contains(stdout, "next: torio project shell torio") {
-		t.Errorf("an activated project must hand off to the shell: %q", stdout)
+	if !strings.Contains(stdout, "next: torio project enter torio") {
+		t.Errorf("an activated project must hand off to the ordinary terminal: %q", stdout)
 	}
 }
 
@@ -342,10 +351,10 @@ func TestProjectShowHumanReportsDriftAndItsNextStep(t *testing.T) {
 		issues   []string
 		wantNext string
 	}{
-		{"dirty worktree", []string{"worktree_dirty"}, "next: torio project shell torio"},
+		{"dirty worktree", []string{"worktree_dirty"}, "next: torio project enter torio"},
 		{"absent checkout", []string{"checkout_absent"}, `next: torio project add "Torio" git@github.com:wzslr321/torio.git --id torio`},
 		{"hermes only", []string{"hermes_project_archived"}, `next: torio project add "Torio" git@github.com:wzslr321/torio.git --id torio`},
-		{"none", nil, "next: torio project shell torio"},
+		{"none", nil, "next: torio project enter torio"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			service := &fakeProjectService{showReport: projects.ShowReport{
@@ -389,7 +398,7 @@ func TestProjectUseJSONEnvelope(t *testing.T) {
 	if data["active"] != true || data["id"] != "torio" {
 		t.Fatalf("data = %+v", data)
 	}
-	if data["next_step"] != "torio project shell torio" {
+	if data["next_step"] != "torio project enter torio" {
 		t.Fatalf("next_step = %v", data["next_step"])
 	}
 }
@@ -457,6 +466,62 @@ func shellSession() projects.ShellSession {
 			OperatorUser: "testop",
 		},
 		Verified: []string{"vm_running", "checkout_present", "origin_matches", "operator_ssh_agent"},
+	}
+}
+
+func enterSession() projects.EnterSession {
+	return projects.EnterSession{
+		EnterSpec: projects.EnterSpec{
+			Project:      sampleProject(),
+			Group:        "torio-projects",
+			Instance:     lima.InstanceName,
+			OperatorUser: "testop",
+		},
+		Verified: []string{"vm_running", "project_enter_helper", "checkout_present", "origin_matches"},
+	}
+}
+
+func TestProjectEnterRejectsJSONBeforePreflight(t *testing.T) {
+	service := &fakeProjectService{enterSession: enterSession()}
+	runner := &fakeInteractiveRunner{}
+	code, _, _ := runProjectCLI(t, []string{"project", "enter", "torio", "--json"}, service,
+		func(a *app) { a.newInteractive = func() execx.InteractiveRunner { return runner } })
+	if code != int(ExitUsage) {
+		t.Fatalf("exit = %d, want %d", code, ExitUsage)
+	}
+	if service.enterID != "" || len(runner.cmds) != 0 {
+		t.Fatalf("rejected invocation preflighted %q or ran %+v", service.enterID, runner.cmds)
+	}
+}
+
+func TestProjectEnterPreflightsThenRunsWithoutPushCapability(t *testing.T) {
+	service := &fakeProjectService{enterSession: enterSession()}
+	runner := &fakeInteractiveRunner{}
+	want := execx.InteractiveCommand{Name: "ssh", Args: []string{"-a", "-t", "lima-torio", "enter-helper", lima.HermesWorkspacePath + "/torio"}}
+	var gotPath string
+
+	code, stdout, stderr := runProjectCLI(t, []string{"project", "enter", "torio"}, service,
+		func(a *app) {
+			a.newInteractive = func() execx.InteractiveRunner { return runner }
+			a.newEnterSpec = func(projectPath string) (execx.InteractiveCommand, error) {
+				gotPath = projectPath
+				return want, nil
+			}
+		})
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	if service.enterID != "torio" || gotPath != lima.HermesWorkspacePath+"/torio" {
+		t.Fatalf("preflight id = %q, enter spec path = %q", service.enterID, gotPath)
+	}
+	if len(runner.cmds) != 1 || !reflect.DeepEqual(runner.cmds[0], want) {
+		t.Fatalf("interactive command = %+v, want exactly %+v", runner.cmds, want)
+	}
+	if !strings.Contains(stdout, "without SSH agent forwarding") || !strings.Contains(stdout, "session ended") {
+		t.Errorf("ordinary session boundary is unclear: %q", stdout)
+	}
+	if service.serviceEnvCalls != 0 {
+		t.Errorf("ordinary session ran push-capability post-check %d times", service.serviceEnvCalls)
 	}
 }
 

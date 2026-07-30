@@ -22,6 +22,7 @@ type projectService interface {
 	Show(context.Context, string) (projects.ShowReport, error)
 	Use(context.Context, string) (projects.UseReport, error)
 	Remove(context.Context, string) (projects.RemoveReport, error)
+	EnterPreflight(context.Context, string) (projects.EnterSession, error)
 	ShellPreflight(context.Context, string) (projects.ShellSession, error)
 	CheckServiceEnv(context.Context) (projects.ServiceEnvCheck, error)
 }
@@ -48,6 +49,7 @@ func newProjectCmd(a *app) *cobra.Command {
 	cmd.AddCommand(newProjectShowCmd(a))
 	cmd.AddCommand(newProjectUseCmd(a))
 	cmd.AddCommand(newProjectRemoveCmd(a))
+	cmd.AddCommand(newProjectEnterCmd(a))
 	cmd.AddCommand(newProjectShellCmd(a))
 	return cmd
 }
@@ -183,6 +185,60 @@ func newProjectRemoveCmd(a *app) *cobra.Command {
 				return cliErr
 			}
 			return a.emitProjectRemove(report)
+		},
+	}
+}
+
+// newProjectEnterCmd opens an ordinary interactive project session. The SSH
+// transport disables agent forwarding; project shell remains the explicit
+// push-capable boundary.
+func newProjectEnterCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "enter <id>",
+		Short: "Open a project terminal without Git remote write capability",
+		Long: "Open an interactive terminal in the project checkout without forwarding the " +
+			"operator's SSH agent. The session can edit and commit locally, but it does not " +
+			"receive Git remote write capability. Use `torio project shell <id>` only when an " +
+			"operator intentionally needs to push. This command is interactive and does not " +
+			"support --json.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if a.jsonOut {
+				return &CLIError{
+					Exit:    ExitUsage,
+					Code:    "USAGE",
+					Command: "project.enter",
+					Message: "project enter is interactive and has no machine output; drop --json",
+				}
+			}
+			service, err := a.projectService("project.enter")
+			if err != nil {
+				return err
+			}
+			ctx, cancel := a.opContext(cmd)
+			session, err := service.EnterPreflight(ctx, args[0])
+			cancel()
+			if err != nil {
+				return mapProjectError("project.enter", err)
+			}
+			enterCmd, err := a.newEnterSpec(session.Project.Path)
+			if err != nil {
+				return mapLimaError("project.enter", err)
+			}
+			if _, err := fmt.Fprintf(a.stdout,
+				"%s: opening a project session in %s without SSH agent forwarding\n"+
+					"  Git remote write capability is not enabled; use `torio project shell %s` only when you intend to push\n",
+				session.Project.ID, session.Project.Path, session.Project.ID); err != nil {
+				return err
+			}
+			runErr := a.newInteractive().RunInteractive(cmd.Context(), enterCmd)
+			if _, err := fmt.Fprintf(a.stdout, "%s: project session ended\n", session.Project.ID); err != nil {
+				return err
+			}
+			if runErr != nil {
+				return mapInteractiveSessionError("project.enter", "project session", runErr)
+			}
+			return nil
 		},
 	}
 }
@@ -389,7 +445,7 @@ func projectView(p projects.Project) projectData {
 func (a *app) emitProjectAdd(report projects.AddReport) error {
 	next := "torio project use " + report.Project.ID
 	if report.Activated {
-		next = "torio project shell " + report.Project.ID
+		next = "torio project enter " + report.Project.ID
 	}
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("project.add", projectAddData{
@@ -489,7 +545,7 @@ func (a *app) emitProjectShow(report projects.ShowReport) error {
 }
 
 func (a *app) emitProjectUse(report projects.UseReport) error {
-	next := "torio project shell " + report.Project.ID
+	next := "torio project enter " + report.Project.ID
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("project.use", projectUseData{
 			projectData: projectView(report.Project),
@@ -543,13 +599,13 @@ func (a *app) emitProjectRemove(report projects.RemoveReport) error {
 // tree, so only a human can.
 func showNextStep(report projects.ShowReport) string {
 	if len(report.Issues) == 0 {
-		return "torio project shell " + report.Project.ID
+		return "torio project enter " + report.Project.ID
 	}
 	for _, issue := range report.Issues {
 		if strings.HasPrefix(issue, "hermes_") || issue == "checkout_absent" {
 			continue
 		}
-		return "torio project shell " + report.Project.ID
+		return "torio project enter " + report.Project.ID
 	}
 	return fmt.Sprintf("torio project add %q %s --id %s",
 		report.Project.DisplayName, report.Project.Remote, report.Project.ID)
@@ -640,19 +696,23 @@ func serviceEnvState(check projects.ServiceEnvCheck) string {
 // travels in the message, never as torio's own exit code, so the contract table
 // stays closed.
 func mapOperatorShellError(err error) *CLIError {
+	return mapInteractiveSessionError("project.shell", "operator session", err)
+}
+
+func mapInteractiveSessionError(command, label string, err error) *CLIError {
 	var exitErr *execx.ExitError
 	if errors.As(err, &exitErr) {
 		return &CLIError{
 			Exit:    ExitExternal,
 			Code:    "COMMAND_FAILED",
-			Command: "project.shell",
-			Message: fmt.Sprintf("operator session exited %d", exitErr.Code),
+			Command: command,
+			Message: fmt.Sprintf("%s exited %d", label, exitErr.Code),
 		}
 	}
 	return &CLIError{
 		Exit:    ExitExternal,
 		Code:    "COMMAND_FAILED",
-		Command: "project.shell",
+		Command: command,
 		Message: err.Error(),
 	}
 }
