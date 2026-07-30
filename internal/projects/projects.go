@@ -222,6 +222,33 @@ type UseReport struct {
 	Project Project
 }
 
+// EnterSpec is the data an ordinary interactive project session needs. It is
+// deliberately separate from ShellSpec: this session never carries the
+// operator's SSH agent or Git remote write capability.
+type EnterSpec struct {
+	Project       Project
+	Group         string
+	Instance      string
+	OperatorUser  string
+	Preconditions []string
+}
+
+var enterPreconditions = []string{
+	"vm_running",
+	"project_enter_helper",
+	"shared_group_membership",
+	"checkout_present",
+	"origin_matches",
+	"shared_permissions",
+}
+
+// EnterSession is an ordinary workspace session whose preconditions were
+// proven without inspecting or forwarding the host SSH agent.
+type EnterSession struct {
+	EnterSpec
+	Verified []string
+}
+
 // ShellSpec is the data an interactive operator shell needs, and nothing more.
 //
 // It executes nothing — no guest command, no SSH, no transport of any kind.

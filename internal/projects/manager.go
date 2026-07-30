@@ -346,8 +346,57 @@ func (m *Manager) Remove(ctx context.Context, id string) (RemoveReport, error) {
 	return report, nil
 }
 
-// shellOp names the operator-shell operations in errors.
-const shellOp = "shell"
+const (
+	// shellOp names the push-capable operator-shell operations in errors.
+	shellOp = "shell"
+	// enterOp names ordinary workspace-session operations in errors.
+	enterOp = "enter"
+)
+
+// EnterPreflight proves that an ordinary project workspace session may be
+// opened. It verifies the same checkout and shared-permission boundary as the
+// push-capable shell, but never inspects the host SSH agent.
+func (m *Manager) EnterPreflight(ctx context.Context, id string) (EnterSession, error) {
+	const op = enterOp
+	entry, workspace, err := m.resolve(op, id)
+	if err != nil {
+		return EnterSession{}, err
+	}
+	if err := m.requireOperatorUser(op); err != nil {
+		return EnterSession{}, err
+	}
+	session := EnterSession{EnterSpec: EnterSpec{
+		Project:       view(entry, workspace),
+		Group:         sharedGroup,
+		Instance:      lima.InstanceName,
+		OperatorUser:  m.bootstrapOpts.OperatorUser,
+		Preconditions: slices.Clone(enterPreconditions),
+	}}
+
+	if err := m.requirePrepared(ctx, op); err != nil {
+		return EnterSession{}, err
+	}
+	session.Verified = append(session.Verified, "vm_running", "project_enter_helper", "shared_group_membership")
+
+	checkout, err := m.inspectCheckout(ctx, op, session.Project.Path, session.Project.Remote)
+	if err != nil {
+		return EnterSession{}, err
+	}
+	if !checkout.PathExists || checkout.Symlink || !checkout.Directory || !checkout.Repository {
+		return EnterSession{}, sessionDriftError(op, id, checkout)
+	}
+	session.Verified = append(session.Verified, "checkout_present")
+	if !checkout.OriginMatches {
+		return EnterSession{}, sessionDriftError(op, id, checkout)
+	}
+	session.Verified = append(session.Verified, "origin_matches")
+	if !checkout.SharedPermissions {
+		return EnterSession{}, sessionDriftError(op, id, checkout)
+	}
+	session.Verified = append(session.Verified, "shared_permissions")
+
+	return session, nil
+}
 
 // ShellPreflight proves that an ephemeral operator session may be opened for
 // id, and returns the data that session needs.
@@ -435,8 +484,12 @@ func (m *Manager) shellSpec(op, id string) (ShellSpec, error) {
 // guest says is not. It names the stable markers and nothing else — a rerun of
 // `project add` is the remedy for all of them.
 func shellDriftError(id string, checkout CheckoutStatus) error {
+	return sessionDriftError(shellOp, id, checkout)
+}
+
+func sessionDriftError(op, id string, checkout CheckoutStatus) error {
 	return &Error{
-		Op:   shellOp,
+		Op:   op,
 		Kind: KindVerification,
 		Err: fmt.Errorf("the checkout for %q is not in a state a session can be opened in (%s); re-run `torio project add` to reconcile it",
 			id, strings.Join(checkout.issues(), ", ")),

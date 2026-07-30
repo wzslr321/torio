@@ -219,7 +219,7 @@ hermes auth add &lt;provider&gt;</code></pre></div>
 <p>Which provider and credential to use is the operator's judgement. The secret never enters the repository, its evidence, or any pull request or comment.</p>
 <h3 id="everyday-loop">Step 11 — Learn the everyday loop</h3>
 <p>Once the VM and backend are up, the day-to-day loop is the same whichever editor or interface you use:</p>
-<ol><li>Work in a checkout — from a Desktop session, your own editor, or a shell.</li><li>Edit, or let your AI tool edit, files there.</li><li>Run a check that reads rather than writes.</li><li>Review what changed: <code>git diff</code> and <code>git status</code>.</li><li>Decide whether any of it should leave the VM.</li><li>If it should: <code>torio project shell &lt;id&gt;</code>, commit, push, exit.</li></ol>
+<ol><li>Work in a checkout — from a Desktop session, your own editor, or <code>torio project enter &lt;id&gt;</code>.</li><li>Edit, or let your AI tool edit, files there.</li><li>Run a check that reads rather than writes.</li><li>Review what changed: <code>git diff</code> and <code>git status</code>.</li><li>Decide whether any of it should leave the VM.</li><li>If it should: <code>torio project shell &lt;id&gt;</code>, commit, push, exit.</li></ol>
 <p>Steps 5 and 6 are the whole point of the split. Torio automates no part of either. The persistent backend cannot push at all — write capability exists only inside a session you opened, and ends when you exit it.</p>
 <h3 id="step-end">Step 12 — Leave a clean end state</h3>
 <p>Leave the VM and the backend <strong>running</strong>. Nothing you did here committed, pushed, merged, or deleted anything — that is the intended shape of the loop.</p>

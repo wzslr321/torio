@@ -48,6 +48,13 @@ var embeddedTemplate []byte
 //go:embed templates/torio-project-shell.sh
 var embeddedProjectShell []byte
 
+// embeddedProjectEnter is the guest entry point of an ordinary project
+// session. It is provisioned separately from the push-capable shell helper so
+// the guest prompt and the transport cannot confuse the two capabilities.
+//
+//go:embed templates/torio-project-enter.sh
+var embeddedProjectEnter []byte
+
 const (
 	placeholderOperator = "__TORIO_OPERATOR_USER__"
 	placeholderCPUs     = "__TORIO_CPUS__"
@@ -58,6 +65,8 @@ const (
 	// guest file and the remote argv can never drift apart.
 	placeholderShellPath    = "__TORIO_PROJECT_SHELL_PATH__"
 	placeholderShellContent = "__TORIO_PROJECT_SHELL__"
+	placeholderEnterPath    = "__TORIO_PROJECT_ENTER_PATH__"
+	placeholderEnterContent = "__TORIO_PROJECT_ENTER__"
 )
 
 // InitOptions configures torio vm init. Zero values select documented defaults.
@@ -129,6 +138,7 @@ func renderTemplate(opts InitOptions) ([]byte, error) {
 		placeholderMemory, opts.Memory,
 		placeholderDisk, opts.Disk,
 		placeholderShellPath, OperatorShellHelper,
+		placeholderEnterPath, ProjectEnterHelper,
 	)
 	text = replacer.Replace(text)
 	// The helper is injected after every other substitution, so the bytes that
@@ -138,15 +148,23 @@ func renderTemplate(opts InitOptions) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	text, err = injectProjectEnter(text)
+	if err != nil {
+		return nil, err
+	}
 	if strings.Contains(text, placeholderOperator) ||
 		strings.Contains(text, placeholderCPUs) ||
 		strings.Contains(text, placeholderMemory) ||
 		strings.Contains(text, placeholderDisk) ||
-		strings.Contains(text, placeholderShellPath) {
+		strings.Contains(text, placeholderShellPath) ||
+		strings.Contains(text, placeholderEnterPath) {
 		return nil, fmt.Errorf("template placeholder left unsubstituted")
 	}
 	if !strings.Contains(text, "path: "+OperatorShellHelper) {
 		return nil, fmt.Errorf("embedded template invariant broken: operator shell helper is not provisioned")
+	}
+	if !strings.Contains(text, "path: "+ProjectEnterHelper) {
+		return nil, fmt.Errorf("embedded template invariant broken: project enter helper is not provisioned")
 	}
 	if !strings.Contains(text, "mounts: []") {
 		return nil, fmt.Errorf("embedded template invariant broken: mounts must be empty")
@@ -163,29 +181,37 @@ func renderTemplate(opts InitOptions) ([]byte, error) {
 // block well-formed, and a placeholder sharing a line with anything else would
 // silently produce a template that no longer describes the helper.
 func injectProjectShell(text string) (string, error) {
+	return injectProjectHelper(text, placeholderShellContent, embeddedProjectShell, "operator shell")
+}
+
+func injectProjectEnter(text string) (string, error) {
+	return injectProjectHelper(text, placeholderEnterContent, embeddedProjectEnter, "project enter")
+}
+
+func injectProjectHelper(text, placeholder string, content []byte, label string) (string, error) {
 	lines := strings.Split(text, "\n")
 	at := -1
 	for i, line := range lines {
-		if !strings.Contains(line, placeholderShellContent) {
+		if !strings.Contains(line, placeholder) {
 			continue
 		}
-		if strings.TrimLeft(line, " ") != placeholderShellContent {
-			return "", fmt.Errorf("%s must be alone on its line", placeholderShellContent)
+		if strings.TrimLeft(line, " ") != placeholder {
+			return "", fmt.Errorf("%s must be alone on its line", placeholder)
 		}
 		if at >= 0 {
-			return "", fmt.Errorf("%s appears more than once", placeholderShellContent)
+			return "", fmt.Errorf("%s appears more than once", placeholder)
 		}
 		at = i
 	}
 	if at < 0 {
-		return "", fmt.Errorf("embedded template invariant broken: %s placeholder missing", placeholderShellContent)
+		return "", fmt.Errorf("embedded template invariant broken: %s placeholder missing", placeholder)
 	}
 
-	script := strings.TrimRight(string(embeddedProjectShell), "\n")
+	script := strings.TrimRight(string(content), "\n")
 	if strings.TrimSpace(script) == "" {
-		return "", fmt.Errorf("embedded operator shell helper is empty")
+		return "", fmt.Errorf("embedded %s helper is empty", label)
 	}
-	indent := strings.TrimSuffix(lines[at], placeholderShellContent)
+	indent := strings.TrimSuffix(lines[at], placeholder)
 	block := strings.Split(script, "\n")
 	for i, line := range block {
 		if line == "" {

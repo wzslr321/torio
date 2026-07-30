@@ -11,8 +11,12 @@ import (
 	"github.com/wzslr321/torio/internal/execx"
 )
 
-// operatorShellOp names this adapter operation in errors.
-const operatorShellOp = "project_shell"
+const (
+	// operatorShellOp names the push-capable operator session in errors.
+	operatorShellOp = "project_shell"
+	// projectEnterOp names the ordinary workspace session in errors.
+	projectEnterOp = "project_enter"
+)
 
 // OperatorShellHelper is the fixed guest entry point of an operator session.
 // It is the guest-side counterpart of the promoted spike's
@@ -21,6 +25,10 @@ const operatorShellOp = "project_shell"
 // project group. Keeping it a constant is what makes the remote side a fixed
 // argv instead of a caller-supplied command string.
 const OperatorShellHelper = "/usr/local/bin/torio-project-shell"
+
+// ProjectEnterHelper is the fixed guest entry point of an ordinary workspace
+// session. Its SSH transport never forwards the operator's agent.
+const ProjectEnterHelper = "/usr/local/bin/torio-project-enter"
 
 // sshHostAlias is the host entry Lima writes into the instance ssh config. It
 // follows the selected instance because Lima derives the alias from the
@@ -111,6 +119,43 @@ func OperatorShellSpec(projectPath string) (execx.InteractiveCommand, error) {
 			"-t",
 			sshHostAlias(),
 			OperatorShellHelper,
+			projectPath,
+		},
+	}, nil
+}
+
+// ProjectEnterSpec builds an interactive SSH command for ordinary project work
+// without forwarding the operator's SSH agent. Multiplexing is disabled so the
+// session cannot reuse a push-capable operator-shell connection.
+func ProjectEnterSpec(projectPath string) (execx.InteractiveCommand, error) {
+	if err := validateProjectPath(projectPath); err != nil {
+		return execx.InteractiveCommand{}, &Error{Op: projectEnterOp, Kind: KindVerificationFailed, Err: err}
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return execx.InteractiveCommand{}, &Error{Op: projectEnterOp, Kind: KindNotFound, Err: err}
+	}
+	sshConfig := filepath.Join(home, ".lima", InstanceName, "ssh.config")
+	if _, statErr := os.Stat(sshConfig); statErr != nil {
+		return execx.InteractiveCommand{}, &Error{
+			Op:   projectEnterOp,
+			Kind: KindNotFound,
+			Err:  fmt.Errorf("no lima ssh config at %s; run `torio vm start` first", sshConfig),
+		}
+	}
+
+	return execx.InteractiveCommand{
+		Name: "ssh",
+		Args: []string{
+			"-F", sshConfig,
+			"-o", "ControlMaster=no",
+			"-o", "ControlPath=none",
+			"-o", "ForwardAgent=no",
+			"-a",
+			"-t",
+			sshHostAlias(),
+			ProjectEnterHelper,
 			projectPath,
 		},
 	}, nil

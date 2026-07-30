@@ -14,6 +14,11 @@ validate: docs-check
 
 test: validate
 	@if command -v go >/dev/null 2>&1; then go test ./...; else echo "go not installed; documentation validation completed"; fi
+	@if command -v nvim >/dev/null 2>&1; then \
+		TORIO_NVIM_ROOT="$(CURDIR)/integrations/neovim" nvim --headless -u NONE -l integrations/neovim/tests/smoke.lua; \
+	else \
+		echo "nvim not installed; Neovim integration smoke test skipped"; \
+	fi
 
 fmt:
 	@if command -v go >/dev/null 2>&1; then gofmt -w $$(find . -name '*.go' -not -path './.worktrees/*'); fi

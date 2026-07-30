@@ -3,7 +3,7 @@
 Once the VM and backend are up, the day-to-day loop is the same whichever editor
 or interface you use:
 
-1. Work in a checkout — from a Desktop session, your own editor, or a shell.
+1. Work in a checkout — from a Desktop session, your own editor, or `torio project enter <id>`.
 2. Edit, or let your AI tool edit, files there.
 3. Run a check that reads rather than writes.
 4. Review what changed: `git diff` and `git status`.

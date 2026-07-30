@@ -45,6 +45,8 @@ func bootstrapHappyScript() []scriptedResponse {
 		{result: exitResult(1, "", "")},                                      // 26 findmnt host-shares
 		{result: stdoutResult("regular file\n")},                             // 27 stat helper type
 		{result: stdoutResult("root:root 755\n")},                            // 28 stat helper owner/mode
+		{result: stdoutResult("regular file\n")},                             // 29 stat enter helper type
+		{result: stdoutResult("root:root 755\n")},                            // 30 stat enter helper owner/mode
 	}
 }
 
@@ -68,8 +70,8 @@ func TestBootstrapHappyPathAllChecksPass(t *testing.T) {
 			t.Errorf("check %q not OK: %s", c.Name, c.Detail)
 		}
 	}
-	if fr.callCount() != 29 {
-		t.Fatalf("callCount = %d, want 29 (no install/shim mutating steps when reconciled)", fr.callCount())
+	if fr.callCount() != 31 {
+		t.Fatalf("callCount = %d, want 31 (no install/shim mutating steps when reconciled)", fr.callCount())
 	}
 
 	got := fr.callArgs(12)
@@ -153,8 +155,8 @@ func TestBootstrapReconcilesHermesShim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Bootstrap: unexpected error: %v", err)
 	}
-	if fr.callCount() != 30 {
-		t.Fatalf("callCount = %d, want 30 (ln reconcile step present)", fr.callCount())
+	if fr.callCount() != 32 {
+		t.Fatalf("callCount = %d, want 32 (ln reconcile step present)", fr.callCount())
 	}
 	if got, want := fr.callArgs(11), []string{"shell", "--tty=false", "--workdir", "/", InstanceName, "--", "sudo", "-n", "ln", "-sfn", hermesTarget, hermesShimPath}; !equalArgs(got, want) {
 		t.Fatalf("ln argv = %v, want %v", got, want)
@@ -392,6 +394,53 @@ func TestBootstrapVerifiesTheOperatorShellHelper(t *testing.T) {
 	}
 	if got := checkDetail(rep, "operator_shell_helper"); !strings.Contains(got, "root:root") {
 		t.Errorf("operator_shell_helper detail = %q, want the observed ownership", got)
+	}
+}
+
+func TestBootstrapVerifiesTheProjectEnterHelper(t *testing.T) {
+	fr := &fakeRunner{script: bootstrapHappyScript()}
+	a := New(fr)
+
+	rep, err := a.Bootstrap(context.Background(), bootstrapOpts())
+	if err != nil {
+		t.Fatalf("Bootstrap: unexpected error: %v", err)
+	}
+	if !checkOK(rep, "project_enter_helper") {
+		t.Fatalf("bootstrap did not verify the project enter helper: %+v", rep.Checks)
+	}
+	if got, want := fr.callArgs(29), []string{"shell", "--tty=false", "--workdir", "/", InstanceName, "--", "stat", "-c", "%F", ProjectEnterHelper}; !equalArgs(got, want) {
+		t.Fatalf("enter helper type probe argv = %v, want %v", got, want)
+	}
+	if got, want := fr.callArgs(30), []string{"shell", "--tty=false", "--workdir", "/", InstanceName, "--", "stat", "-c", "%U:%G %a", ProjectEnterHelper}; !equalArgs(got, want) {
+		t.Fatalf("enter helper ownership probe argv = %v, want %v", got, want)
+	}
+}
+
+func TestBootstrapInstallsAMissingProjectEnterHelperForExistingVMs(t *testing.T) {
+	script := bootstrapHappyScript()
+	script[29] = scriptedResponse{result: exitResult(1, "", "")}
+	script = append(script[:30],
+		scriptedResponse{result: exitResult(0, "", "")},
+		scriptedResponse{result: exitResult(0, "", "")},
+		scriptedResponse{result: exitResult(0, "regular file\n", "")},
+		scriptedResponse{result: exitResult(0, "root:root 755\n", "")},
+	)
+	fr := &fakeRunner{script: script}
+	a := New(fr)
+
+	rep, err := a.Bootstrap(context.Background(), bootstrapOpts())
+	if err != nil {
+		t.Fatalf("Bootstrap: unexpected error: %v", err)
+	}
+	if !checkOK(rep, "project_enter_helper_installed") || !checkOK(rep, "project_enter_helper") {
+		t.Fatalf("bootstrap did not install and verify the helper: %+v", rep.Checks)
+	}
+	want := []string{"shell", "--tty=false", "--workdir", "/", InstanceName, "--", "sudo", "-n", "/bin/bash", "-ceu", projectEnterInstallScript}
+	if got := fr.callArgs(31); !equalArgs(got, want) {
+		t.Fatalf("install argv = %v, want %v", got, want)
+	}
+	if got := fr.callStdin(31); string(got) != string(embeddedProjectEnter) {
+		t.Fatal("install stdin does not match the embedded project enter helper")
 	}
 }
 

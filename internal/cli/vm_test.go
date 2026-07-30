@@ -600,6 +600,8 @@ func bootstrapHappyResp() []scriptedResp {
 		{res: execx.Result{ExitCode: 1}},                          // findmnt host-shares (none)
 		{res: out("regular file\n")},                              // stat operator shell helper type
 		{res: out("root:root 755\n")},                             // stat operator shell helper og/mode
+		{res: out("regular file\n")},                              // stat project enter helper type
+		{res: out("root:root 755\n")},                             // stat project enter helper og/mode
 	}
 }
 

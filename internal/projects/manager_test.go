@@ -811,6 +811,28 @@ func shellFake() *fakeGuest {
 	return f
 }
 
+func TestEnterPreflightVerifiesTheWorkspaceWithoutInspectingTheHostAgent(t *testing.T) {
+	g := shellFake()
+	agent := &fakeAgent{err: errors.New("agent must not be inspected")}
+	m := newTestManager(g, registryWith(testProject()))
+	m.agent = agent
+
+	session, err := m.EnterPreflight(context.Background(), testID)
+	if err != nil {
+		t.Fatalf("EnterPreflight() error = %v", err)
+	}
+	if session.Project.Path != testPath || session.Group != sharedGroup ||
+		session.Instance != lima.InstanceName || session.OperatorUser != testOwner {
+		t.Fatalf("session = %#v", session)
+	}
+	if !slices.Equal(session.Verified, enterPreconditions) {
+		t.Errorf("verified = %v, want %v", session.Verified, enterPreconditions)
+	}
+	if agent.calls != 0 {
+		t.Errorf("ordinary project enter queried the host agent %d times, want 0", agent.calls)
+	}
+}
+
 func TestShellPreflightVerifiesEveryPreconditionAndOpensNothing(t *testing.T) {
 	g := shellFake()
 	agent := &fakeAgent{socket: testAgentSocket, identities: 2}
