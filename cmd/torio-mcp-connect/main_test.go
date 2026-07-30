@@ -168,6 +168,9 @@ func TestRunReportsMissingSocket(t *testing.T) {
 	if msg := stderr.String(); !strings.Contains(msg, "no broker socket") {
 		t.Errorf("stderr = %q, want it to name the missing socket", msg)
 	}
+	if msg := stderr.String(); !strings.Contains(msg, "on the host") || strings.Contains(msg, "on the guest") {
+		t.Errorf("stderr = %q, want the torio mcp install remedy on the host", msg)
+	}
 }
 
 func TestRunReportsPermissionDenied(t *testing.T) {

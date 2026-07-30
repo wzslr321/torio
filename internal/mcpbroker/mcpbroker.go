@@ -10,7 +10,12 @@
 // write.
 package mcpbroker
 
-import "sort"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"sort"
+)
 
 // Set is the effective policy of the whole broker: every service it will speak
 // for, and the tools granted on each.
@@ -48,12 +53,6 @@ const (
 	ReasonToolNotGranted
 	// ReasonGranted allows a tool the service's policy lists by name.
 	ReasonGranted
-	// ReasonWriteWindowClosed is a tool that IS granted being refused because no
-	// operator write window is open for its service. It is distinct from
-	// ReasonToolNotGranted because the remedies have nothing in common: one is an
-	// operator editing a policy file, the other is an operator opening a window
-	// for the next few minutes.
-	ReasonWriteWindowClosed
 )
 
 func (r Reason) String() string {
@@ -64,8 +63,6 @@ func (r Reason) String() string {
 		return "tool_not_granted"
 	case ReasonGranted:
 		return "granted"
-	case ReasonWriteWindowClosed:
-		return "write_window_closed"
 	default:
 		return "invalid"
 	}
@@ -175,4 +172,20 @@ func (s Set) Grants() Grant {
 	}
 	sort.Slice(g.Services, func(i, j int) bool { return g.Services[i].Name < g.Services[j].Name })
 	return g
+}
+
+// Digest identifies the complete effective grant, independent of policy-file
+// formatting and tool order. A running broker publishes this value so the
+// control plane can prove that the process enforcing policy loaded the same
+// grant that status just parsed from disk.
+func (s Set) Digest() string {
+	body, err := json.Marshal(s.Grants())
+	if err != nil {
+		// Grant contains only strings, booleans, integers and slices. A marshal
+		// failure would mean a programmer changed that invariant without changing
+		// this method; it is not an operator-controlled policy error.
+		panic("marshal effective MCP policy: " + err.Error())
+	}
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
 }

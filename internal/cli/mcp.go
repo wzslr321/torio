@@ -3,12 +3,9 @@ package cli
 import (
 	"fmt"
 
-	"time"
-
 	"github.com/spf13/cobra"
 
 	"github.com/wzslr321/torio/internal/lima"
-	"github.com/wzslr321/torio/internal/mcpbroker"
 )
 
 // newMCPCmd builds the `torio mcp` parent (ADR-0022). Like `torio vm` and
@@ -17,11 +14,11 @@ import (
 func newMCPCmd(a *app) *cobra.Command {
 	m := &cobra.Command{
 		Use:   "mcp",
-		Short: "Inspect the MCP credential broker boundary",
-		Long: "MCP servers are reached through a broker running under its own guest identity " +
-			"(" + lima.TorioMCPUser + "), so no upstream credential exists under the identity the " +
-			"agent has a shell as. Torio never handles those credentials itself: it provisions the " +
-			"boundary and proves it holds (ADR-0022).",
+		Short: "Provision and inspect the MCP credential boundary",
+		Long: "Provision the dedicated " + lima.TorioMCPUser + " identity, client group, private " +
+			"credential store, and root-owned policy boundary. The broker daemon is not installed or " +
+			"activated until its OAuth and upstream transport have an accepted contract. Torio accepts " +
+			"no MCP credentials through this CLI (ADR-0027).",
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return usageError("no subcommand given; run 'torio mcp --help'")
@@ -30,7 +27,6 @@ func newMCPCmd(a *app) *cobra.Command {
 		},
 	}
 	m.AddCommand(newMCPInstallCmd(a))
-	m.AddCommand(newMCPAllowWriteCmd(a))
 	m.AddCommand(newMCPStatusCmd(a))
 	return m
 }
@@ -141,17 +137,17 @@ func (a *app) emitMCPStatus(rep lima.MCPBrokerReport) error {
 func newMCPInstallCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "install",
-		Short: "Provision the broker identity and its credential store",
+		Short: "Provision and verify the MCP credential boundary",
 		Long: "Create the unprivileged " + lima.TorioMCPUser + " identity, its 0700 credential store, " +
-			"the " + lima.TorioMCPClientsGroup + " group, and the root-owned policy directory; then prove " +
-			"the result instead of trusting the exit codes that produced it. Idempotent: a re-run that " +
-			"changes nothing reports changed:false. Grants nothing beyond the client-group membership " +
-			"hermes needs to open the broker socket, and accepts no secrets.",
+			"the " + lima.TorioMCPClientsGroup + " group, and the root-owned policy directory, then prove " +
+			"the identity and policy boundaries. The daemon is not installed or activated until its OAuth " +
+			"and upstream transport have an accepted contract. Idempotent: a re-run that changes nothing " +
+			"reports changed:false. Accepts no secrets.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := a.opContext(cmd)
 			defer cancel()
-			rep, err := a.newLima().InstallMCPBroker(ctx)
+			rep, err := a.newLima().ProvisionMCPBroker(ctx)
 			if err != nil {
 				ce := mapLimaError("mcp.install", err)
 				ce.Details = mcpInstallDetails(rep)
@@ -235,62 +231,4 @@ func (a *app) emitMCPInstall(rep lima.MCPBrokerInstallReport) error {
 		}
 	}
 	return nil
-}
-
-func newMCPAllowWriteCmd(a *app) *cobra.Command {
-	var window time.Duration
-	c := &cobra.Command{
-		Use:   "allow-write SERVICE",
-		Short: "Open a time-bounded write window for one MCP service",
-		Long: "Write-classified tools are refused unless the operator has opened a window for that " +
-			"service, and windows close by themselves. This is the shape `torio project shell` already " +
-			"gives Git: capability appears because a human asked for it, is bounded in time, and ends " +
-			"without anyone remembering to close it. Nothing the agent can do opens or extends one — " +
-			"the window lives inside the broker's own home, which the agent identity cannot enter.",
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if window <= 0 {
-				// A window with no end is a permanent grant wearing the word
-				// "window" — the arrangement this command exists to replace.
-				return usageError("--for must be a positive duration (e.g. --for 15m)")
-			}
-			ctx, cancel := a.opContext(cmd)
-			defer cancel()
-			rep, err := a.newLima().OpenWriteWindow(ctx, args[0], time.Now().Add(window))
-			if err != nil {
-				return mapLimaError("mcp.allow-write", err)
-			}
-			return a.emitMCPAllowWrite(rep, window)
-		},
-	}
-	c.Flags().DurationVar(&window, "for", mcpbroker.DefaultWriteWindow,
-		"how long the window stays open (default is short on purpose)")
-	return c
-}
-
-// mcpAllowWriteData is the `data` object of `mcp allow-write`. Minutes is
-// carried alongside the instant because a machine caller deciding whether to
-// re-open should not have to parse a timestamp to learn the size of the grant.
-type mcpAllowWriteData struct {
-	Instance string `json:"instance"`
-	Service  string `json:"service"`
-	Until    string `json:"until"`
-	Minutes  int    `json:"minutes"`
-}
-
-func (a *app) emitMCPAllowWrite(rep lima.WriteWindowReport, window time.Duration) error {
-	if a.jsonOut {
-		return writeJSON(a.stdout, successEnvelope("mcp.allow-write", mcpAllowWriteData{
-			Instance: rep.Instance,
-			Service:  rep.Service,
-			Until:    rep.Until.UTC().Format(time.RFC3339),
-			Minutes:  int(window.Minutes()),
-		}))
-	}
-	_, err := fmt.Fprintf(a.stdout,
-		"Write window open for %q until %s (%s).\n"+
-			"It closes on its own; nothing needs to be run to end it.\n"+
-			"Tools not marked as writing in the policy are unaffected — this grants only what is already granted.\n",
-		rep.Service, rep.Until.UTC().Format(time.RFC3339), window)
-	return err
 }

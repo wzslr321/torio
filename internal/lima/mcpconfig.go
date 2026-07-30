@@ -14,7 +14,7 @@ import (
 //
 // The same writability is a bypass: an entry naming any command other than the
 // relay is an MCP server the broker never sees. No policy decides it, no audit
-// line records it, no write window bounds it.
+// line records it.
 const HermesConfigPath = HermesProfilePath + "/config.yaml"
 
 // TorioMCPRelayPath is the only command an mcp_servers entry may name on a
@@ -75,7 +75,7 @@ func (a *Adapter) verifyHermesMCPServers(ctx context.Context, rep *MCPBrokerRepo
 	if scan.Foreign > 0 {
 		return a.brokerFailed(rep, name,
 			fmt.Sprintf("%d of %d MCP server entries do not go through the broker relay", scan.Foreign, scan.Services),
-			"every entry must run "+TorioMCPRelayPath+"; an entry naming anything else reaches its upstream with no policy, no audit and no write window")
+			"every entry must run "+TorioMCPRelayPath+"; an entry naming anything else reaches its upstream with no policy or audit")
 	}
 
 	rep.record(name, true, fmt.Sprintf("%d entr(ies), all through the relay", scan.Services))

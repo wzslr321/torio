@@ -8,9 +8,10 @@ import (
 
 // TorioMCPSocketDir is where the broker publishes one socket per service. It is
 // runtime state, not persistent state: the directory is created by the running
-// unit and vanishes with it, which is why its absence means "no daemon" rather
-// than "something was removed".
+// unit and vanishes with it.
 const TorioMCPSocketDir = "/run/torio-mcp"
+
+const torioMCPPolicyDigestPath = TorioMCPSocketDir + "/.policy.sha256"
 
 // The socket's own owner, group and mode ARE the access control (ADR-0022 §3):
 // only members of the client group may connect at all. Nothing else stands
@@ -20,13 +21,38 @@ var (
 	socketOwner    = TorioMCPUser
 	socketGroup    = TorioMCPClientsGroup
 	socketModes    = map[string]bool{"660": true, "0660": true}
-	socketDirModes = map[string]bool{"750": true, "0750": true, "755": true, "0755": true}
+	socketDirModes = map[string]bool{"750": true, "0750": true}
 )
 
 // socketDirModeList renders the accepted directory modes for a failure message.
 // A drift report that names the wrong value without naming the right one leaves
 // the operator to go and look it up.
-const socketDirModeList = "0750 or 0755"
+const socketDirModeList = "0750"
+
+// probeMCPRuntimePresence decides whether status must verify a daemon. Runtime,
+// not an installed unit file, drives this branch: a dormant unit is harmless
+// before daemon delivery, while sockets without a trusted unit must not be
+// skipped. verifyBrokerSockets probes the path again after unit verification so
+// disappearance during the check fails closed as active-unit drift.
+func (a *Adapter) probeMCPRuntimePresence(ctx context.Context, rep *MCPBrokerReport) (bool, error) {
+	const name = "broker_sockets"
+	st, kind, err := a.statPath(ctx, rep, name, TorioMCPSocketDir)
+	if err != nil {
+		return false, err
+	}
+	if st == pathUnprovable {
+		return false, a.probeUnusable(rep, name, "the broker socket directory")
+	}
+	if st == pathAbsent {
+		rep.record(name, true, "absent (broker daemon not running)")
+		return false, nil
+	}
+	if kind != "directory" {
+		return false, a.brokerFailed(rep, name, TorioMCPSocketDir+" is not a directory",
+			"inspect the guest by hand; this path is reserved for broker runtime state")
+	}
+	return true, nil
+}
 
 // verifyBrokerSockets proves that every published socket is both correctly
 // owned and actually served.
@@ -49,11 +75,8 @@ func (a *Adapter) verifyBrokerSockets(ctx context.Context, rep *MCPBrokerReport)
 		return a.probeUnusable(rep, name, "the broker socket directory")
 	}
 	if st == pathAbsent {
-		// The daemon is a separate install from the identity boundary. A guest
-		// that has the boundary and no daemon is not drifted, and calling it
-		// drift would spend the word on a machine that is merely incomplete.
-		rep.record(name, true, "absent (no broker daemon installed)")
-		return nil
+		return a.brokerFailed(rep, name, "broker runtime directory is absent",
+			"the broker unit is active but did not publish its runtime; inspect service logs")
 	}
 	if kind != "directory" {
 		return a.brokerFailed(rep, name, TorioMCPSocketDir+" is not a directory",
@@ -93,8 +116,8 @@ func (a *Adapter) verifyBrokerSockets(ctx context.Context, rep *MCPBrokerReport)
 	}
 	sockets := strings.Fields(strings.TrimSpace(listing.out))
 	if len(sockets) == 0 {
-		rep.record(name, true, "no sockets published")
-		return nil
+		return a.brokerFailed(rep, name, "broker runtime directory contains no service sockets",
+			"the broker unit is stopped, starting, or rejected its policy; inspect its service logs")
 	}
 
 	listening, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "ss", "-lxH")
@@ -106,6 +129,7 @@ func (a *Adapter) verifyBrokerSockets(ctx context.Context, rep *MCPBrokerReport)
 	}
 
 	served := make([]string, 0, 4)
+	published := make(map[string]struct{})
 	for _, line := range strings.Split(strings.TrimSpace(listing.out), "\n") {
 		f := strings.Fields(line)
 		if len(f) != 4 {
@@ -129,7 +153,27 @@ func (a *Adapter) verifyBrokerSockets(ctx context.Context, rep *MCPBrokerReport)
 				fmt.Sprintf("socket %s exists but nothing is listening on it", service),
 				"the broker unit is stopped or crashed; restart it — the file alone proves nothing")
 		}
+		published[service] = struct{}{}
 		served = append(served, service)
+	}
+	if len(rep.policyServices) == 0 || len(published) != len(rep.policyServices) {
+		return a.brokerFailed(rep, name, "published service sockets do not match the parsed policy set",
+			"restart the broker after repairing its root-owned policy documents")
+	}
+	for service := range rep.policyServices {
+		if _, ok := published[service]; !ok {
+			return a.brokerFailed(rep, name, "published service sockets do not match the parsed policy set",
+				"restart the broker after repairing its root-owned policy documents")
+		}
+	}
+	loaded, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "cat", torioMCPPolicyDigestPath)
+	if err != nil {
+		return err
+	}
+	if loaded.exit != 0 || len(rep.policyDigest) != 64 || loaded.trimmed() != rep.policyDigest {
+		return a.brokerFailed(rep, name,
+			"running broker policy generation differs from the verified policy documents",
+			"run `torio mcp install` on the host to restart the broker on the current policy")
 	}
 
 	rep.record(name, true, "serving "+strings.Join(served, ","))

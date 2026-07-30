@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/wzslr321/torio/internal/mcpbroker"
 )
 
 // ownGroupName is a group the test process really belongs to, so the group
@@ -97,6 +99,74 @@ func startDaemon(t *testing.T, policyDir string) *daemonFixture {
 	return f
 }
 
+func TestRunNotifiesSystemdOnlyAfterPublishingSockets(t *testing.T) {
+	policyDir := t.TempDir()
+	writeDocument(t, policyDir, "atlassian.json", policyDocument)
+	socketDir := shortTempDir(t)
+	notifyPath := filepath.Join(shortTempDir(t), "notify.sock")
+	notifyListener, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: notifyPath, Net: "unixgram"})
+	if err != nil {
+		t.Fatalf("listen for systemd readiness: %v", err)
+	}
+	defer notifyListener.Close()
+	t.Setenv("NOTIFY_SOCKET", notifyPath)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	clientGroup := ownGroupName(t)
+	go func() {
+		done <- run(ctx, nil, daemonConfig{
+			policyDir:   policyDir,
+			socketDir:   socketDir,
+			clientGroup: clientGroup,
+			peerUID:     func(*net.UnixConn) (uint32, error) { return testUID, nil },
+			stdout:      &syncBuffer{},
+			stderr:      &syncBuffer{},
+		})
+	}()
+
+	if err := notifyListener.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("set readiness deadline: %v", err)
+	}
+	buf := make([]byte, 64)
+	n, _, err := notifyListener.ReadFromUnix(buf)
+	if err != nil {
+		cancel()
+		t.Fatalf("read systemd readiness: %v", err)
+	}
+	if string(buf[:n]) != "READY=1" {
+		cancel()
+		t.Fatalf("readiness payload = %q, want READY=1", buf[:n])
+	}
+	if _, err := os.Lstat(filepath.Join(socketDir, "atlassian.sock")); err != nil {
+		cancel()
+		t.Fatalf("readiness arrived before the service socket existed: %v", err)
+	}
+	loaded, err := mcpbroker.Load(policyDir)
+	if err != nil {
+		cancel()
+		t.Fatalf("load expected policy: %v", err)
+	}
+	digest, err := os.ReadFile(filepath.Join(socketDir, policyDigestFile))
+	if err != nil {
+		cancel()
+		t.Fatalf("read published policy digest: %v", err)
+	}
+	if got, want := string(digest), loaded.Digest()+"\n"; got != want {
+		cancel()
+		t.Fatalf("published policy digest = %q, want %q", got, want)
+	}
+	cancel()
+	select {
+	case code := <-done:
+		if code != exitOK {
+			t.Fatalf("run exit = %d, want %d", code, exitOK)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("run did not return after cancellation")
+	}
+}
+
 // The broker must not start without a policy it could load. A broker that came
 // up "granting nothing" would look healthy — the unit is active, the socket is
 // there, the mode is right — and every call would be denied for a reason nobody
@@ -177,16 +247,37 @@ func TestRunRefusesToStartWithoutALoadablePolicy(t *testing.T) {
 func TestRunRefusesToStartWithoutTheClientGroup(t *testing.T) {
 	dir := t.TempDir()
 	writeDocument(t, dir, "atlassian.json", policyDocument)
+	stderr := &syncBuffer{}
 
 	exit := run(context.Background(), nil, daemonConfig{
 		policyDir:   dir,
 		socketDir:   shortTempDir(t),
 		clientGroup: "torio-mcp-clients-that-does-not-exist",
 		stdout:      &syncBuffer{},
-		stderr:      &syncBuffer{},
+		stderr:      stderr,
 	})
 	if exit != exitPrecondition {
 		t.Errorf("exit = %d, want %d", exit, exitPrecondition)
+	}
+	if msg := stderr.String(); !strings.Contains(msg, "on the host") || strings.Contains(msg, "on the guest") {
+		t.Errorf("stderr = %q, want the torio mcp install remedy on the host", msg)
+	}
+}
+
+func TestRunMissingPolicyRemedyInvokesHostCLI(t *testing.T) {
+	stderr := &syncBuffer{}
+	exit := run(context.Background(), nil, daemonConfig{
+		policyDir:   filepath.Join(t.TempDir(), "absent"),
+		socketDir:   shortTempDir(t),
+		clientGroup: ownGroupName(t),
+		stdout:      &syncBuffer{},
+		stderr:      stderr,
+	})
+	if exit != exitPrecondition {
+		t.Fatalf("exit = %d, want %d", exit, exitPrecondition)
+	}
+	if msg := stderr.String(); !strings.Contains(msg, "on the host") || strings.Contains(msg, "on the guest") {
+		t.Errorf("stderr = %q, want the torio mcp install remedy on the host", msg)
 	}
 }
 
@@ -237,8 +328,18 @@ func TestRunServesEveryServiceAndCleansUpAfterItself(t *testing.T) {
 
 	// The startup report states what each service was granted, including how many
 	// of those tools write.
+	wants := []string{"atlassian", "slack", "https://mcp.example.invalid/v1", "write"}
+	waitFor(t, func() bool {
+		said := f.stderr.String()
+		for _, want := range wants {
+			if !strings.Contains(said, want) {
+				return false
+			}
+		}
+		return true
+	})
 	said := f.stderr.String()
-	for _, want := range []string{"atlassian", "slack", "https://mcp.example.invalid/v1", "write"} {
+	for _, want := range wants {
 		if !strings.Contains(said, want) {
 			t.Errorf("startup report %q does not mention %q", said, want)
 		}

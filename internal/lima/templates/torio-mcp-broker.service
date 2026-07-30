@@ -1,0 +1,22 @@
+[Unit]
+Description=Torio MCP credential broker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=torio-mcp
+Group=torio-mcp-clients
+UMask=0077
+RuntimeDirectory=torio-mcp
+RuntimeDirectoryMode=0750
+ExecStart=/usr/local/bin/torio-mcp-broker
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/home/torio-mcp
+
+[Install]
+WantedBy=multi-user.target

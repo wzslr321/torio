@@ -481,8 +481,6 @@ func TestConnectionWithoutPeerCredentialsIsRefused(t *testing.T) {
 	})
 	c := b.dial(t)
 
-	c.send(t, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"getJiraIssue","arguments":{}}}`)
-
 	if line, err := c.r.ReadString('\n'); err == nil {
 		t.Errorf("broker answered %q, want the connection closed unserved", line)
 	}

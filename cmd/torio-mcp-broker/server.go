@@ -83,11 +83,6 @@ type serverConfig struct {
 	log *slog.Logger
 	// callTimeout bounds one upstream call.
 	callTimeout time.Duration
-	// windowDir holds one file per service with an open operator write window.
-	// It is read on every write-classified call rather than cached: a window
-	// that expires while the broker runs must close without anything asking it
-	// to, and a cache would be a window that outlives its own deadline.
-	windowDir string
 }
 
 // server is one service's broker.
@@ -461,21 +456,6 @@ func (s *server) handleToolsCall(ctx context.Context, conn *net.UnixConn, uid ui
 
 	decision := s.cfg.policy.Allow(s.cfg.service, name)
 
-	// A grant is not enough for a tool that writes: the operator must also have a
-	// window open. The window is read from disk on every call, because a window
-	// expiring is not an event anybody sends us — it is a deadline passing.
-	//
-	// It is folded into the decision BEFORE anything is recorded, so one call
-	// produces one line. Auditing the policy verdict and then the window verdict
-	// would write "allow" immediately followed by "deny" for a single refused
-	// call, and a log that contradicts itself is worse than no log: whoever reads
-	// it later has to work out which half was real.
-	if decision.Allowed && decision.Writes {
-		if w := mcpbroker.ReadWriteWindow(s.cfg.windowDir, s.cfg.service, time.Now()); !w.Open {
-			decision = mcpbroker.Decision{Reason: mcpbroker.ReasonWriteWindowClosed}
-		}
-	}
-
 	// The record is written before the call is carried out, and a call that
 	// cannot be recorded is not carried out at all. An audit trail assembled after
 	// the fact is missing exactly the calls that crashed the process, and those
@@ -495,28 +475,12 @@ func (s *server) handleToolsCall(ctx context.Context, conn *net.UnixConn, uid ui
 	}
 
 	if !decision.Allowed {
-		msg := s.denialMessage(name)
-		if decision.Reason == mcpbroker.ReasonWriteWindowClosed {
-			msg = s.windowClosedMessage(name)
-		}
 		return s.write(conn, func(w io.Writer) error {
-			return writeError(w, req.ID, codeDenied, msg)
+			return writeError(w, req.ID, codeDenied, s.denialMessage(name))
 		})
 	}
 
 	return s.forward(ctx, conn, req, line)
-}
-
-// windowClosedMessage explains a refusal an operator can act on in one step.
-// It is deliberately different from the ungranted-tool message: the remedies
-// have nothing in common, and a refusal that sends somebody to edit a policy
-// file when they only needed to open a window costs them the afternoon the
-// denial message was supposed to save.
-func (s *server) windowClosedMessage(tool string) string {
-	return fmt.Sprintf("tool %q writes, and no write window is open for the %q MCP service: "+
-		"a granted write tool runs only inside a window an operator opened "+
-		"(torio mcp allow-write %s), and windows close by themselves",
-		boundToolName(tool), s.cfg.service, s.cfg.service)
 }
 
 // forward carries one message upstream and returns the reply unchanged.

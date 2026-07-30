@@ -3,7 +3,10 @@ package lima
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
+
+	"github.com/wzslr321/torio/internal/mcpbroker"
 )
 
 // The policy document is the grant. ADR-0022 §4 puts it at `root:root 0644` and
@@ -80,11 +83,11 @@ func (a *Adapter) verifyPolicyDocuments(ctx context.Context, rep *MCPBrokerRepor
 			"verify "+TorioMCPPolicyDir+" on the guest")
 	}
 	if strings.TrimSpace(listing.out) == "" {
-		rep.record(name, true, "no policy documents")
-		return nil
+		return a.brokerMissing(rep, name, "policy directory holds no service documents",
+			"write /etc/torio-mcp/policy.d/<service>.json as root, then rerun `torio mcp install`")
 	}
 
-	granted := 0
+	documents := make(map[string][]byte)
 	for _, line := range strings.Split(strings.TrimSpace(listing.out), "\n") {
 		f := strings.Fields(line)
 		if len(f) != 5 {
@@ -118,9 +121,29 @@ func (a *Adapter) verifyPolicyDocuments(ctx context.Context, rep *MCPBrokerRepor
 				fmt.Sprintf("a policy document is %s:%s %s, want %s:%s 0644", fOwner, fGroup, fMode, policyDocOwner, policyDocGroup),
 				"the grant must be readable by the agent and writable only by root (ADR-0022 §4)")
 		}
-		granted++
+		content, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "cat", "--", path.Join(TorioMCPPolicyDir, file))
+		if err != nil {
+			return err
+		}
+		if content.exit != 0 {
+			return a.brokerFailed(rep, name, "could not read a policy document", "verify the root-owned policy files on the guest")
+		}
+		documents[file] = []byte(content.out)
 	}
 
-	rep.record(name, true, fmt.Sprintf("%d document(s), root-owned and agent-readable", granted))
+	set, err := mcpbroker.ParseDocuments(documents)
+	if err != nil {
+		return a.brokerFailed(rep, name, "policy documents do not satisfy the strict broker schema", "repair the root-owned policy documents; the broker refuses a partially valid policy set")
+	}
+	grants := set.Grants()
+	rep.policyServices = make(map[string]struct{}, len(grants.Services))
+	rep.policyDigest = set.Digest()
+	tools, writeTools := 0, 0
+	for _, service := range grants.Services {
+		rep.policyServices[service.Name] = struct{}{}
+		tools += len(service.Tools)
+		writeTools += service.WriteTools
+	}
+	rep.record(name, true, fmt.Sprintf("%d service(s), %d tool(s), %d write tool(s); strict schema valid", len(grants.Services), tools, writeTools))
 	return nil
 }

@@ -105,6 +105,21 @@ Torio nie przechowuje credentiali Git write, nie automatyzuje push, merge ani
 release, i nie wykonuje test-pusha, żeby cokolwiek udowodnić. Remote z wbudowanym
 hasłem, tokenem, query albo fragmentem jest odrzucany.
 
+## Granica custody dla MCP
+
+Credentiale MCP docelowo należą do osobnej, nieuprzywilejowanej tożsamości
+`torio-mcp`, której home `/home/torio-mcp` ma `0700`. `hermes` nie należy do
+grupy właściciela i nie może odczytać tego katalogu; dostaje wyłącznie
+członkostwo w `torio-mcp-clients`, potrzebne do przyszłego połączenia z unix
+socketem brokera. Jawny grant narzędzi leży poza profilem agenta w root-owned
+`/etc/torio-mcp/policy.d`.
+
+V1 provisionuje i weryfikuje tę granicę, ale nie publikuje ani nie aktywuje
+daemona. Transport Streamable HTTP, callback logowania OAuth, refresh i format
+magazynu credentiali wymagają osobnej zaakceptowanej decyzji. Brak runtime
+brokera jest więc poprawnym stanem provisionowanej granicy, nie dowodem
+readiness usługi ([ADR-0027](adr/0027-mcp-boundary-before-daemon-delivery.md)).
+
 ## Second Brain w projektach
 
 Brain jest osobnym Hermes Project do bezpośredniej pracy. Dostęp z pozostałych

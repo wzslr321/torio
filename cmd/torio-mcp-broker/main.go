@@ -62,6 +62,11 @@ const policyDir = "/etc/torio-mcp/policy.d"
 // may pull in the others.
 const clientGroup = "torio-mcp-clients"
 
+// policyDigestFile is published beside the sockets before readiness. It lets
+// the control plane distinguish "these service names are listening" from "the
+// running process loaded this exact effective grant".
+const policyDigestFile = ".policy.sha256"
+
 // Exit codes follow the table in docs/contracts/cli.md, so an operator debugging
 // a guest reads one mapping rather than two. Only the classes this binary can
 // reach are named.
@@ -139,7 +144,7 @@ func run(ctx context.Context, args []string, cfg daemonConfig) int {
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			log.Error("the policy directory is missing; the broker has nothing to enforce",
-				"dir", cfg.policyDir, "remedy", "run `torio mcp install` on the guest", "error", err)
+				"dir", cfg.policyDir, "remedy", "run `torio mcp install` on the host", "error", err)
 			return exitPrecondition
 		}
 		// A document that does not validate is not a broker that grants less. It is
@@ -160,7 +165,7 @@ func run(ctx context.Context, args []string, cfg daemonConfig) int {
 	gid, err := groupID(cfg.clientGroup)
 	if err != nil {
 		log.Error("the broker's client group does not exist; there is nobody to hand a socket to",
-			"group", cfg.clientGroup, "remedy", "run `torio mcp install` on the guest", "error", err)
+			"group", cfg.clientGroup, "remedy", "run `torio mcp install` on the host", "error", err)
 		return exitPrecondition
 	}
 
@@ -168,8 +173,69 @@ func run(ctx context.Context, args []string, cfg daemonConfig) int {
 	if code != exitOK {
 		return code
 	}
+	digestPath := filepath.Join(cfg.socketDir, policyDigestFile)
+	if err := publishPolicyDigest(digestPath, policy.Digest()); err != nil {
+		log.Error("published sockets but could not publish the loaded policy generation", "error", err)
+		closeAll(servers)
+		return exitInternal
+	}
+	defer os.Remove(digestPath)
+	if err := notifySystemdReady(); err != nil {
+		log.Error("published sockets but could not notify the service manager", "error", err)
+		closeAll(servers)
+		return exitInternal
+	}
 
 	return serveAll(ctx, servers, log)
+}
+
+func publishPolicyDigest(path, digest string) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".policy.sha256.tmp-")
+	if err != nil {
+		return fmt.Errorf("create policy digest: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return fmt.Errorf("chmod policy digest: %w", err)
+	}
+	if _, err := io.WriteString(tmp, digest+"\n"); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write policy digest: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("sync policy digest: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close policy digest: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("publish policy digest: %w", err)
+	}
+	return nil
+}
+
+func notifySystemdReady() error {
+	socket := os.Getenv("NOTIFY_SOCKET")
+	if socket == "" {
+		return nil
+	}
+	if socket[0] == '@' {
+		socket = "\x00" + socket[1:]
+	}
+	conn, err := net.DialUnix("unixgram", nil, &net.UnixAddr{Name: socket, Net: "unixgram"})
+	if err != nil {
+		return fmt.Errorf("connect NOTIFY_SOCKET: %w", err)
+	}
+	defer conn.Close()
+	if _, err := conn.Write([]byte("READY=1")); err != nil {
+		return fmt.Errorf("write NOTIFY_SOCKET: %w", err)
+	}
+	return nil
 }
 
 // publishedService is one service the daemon serves: its socket and the server

@@ -78,7 +78,7 @@ func dial(path string) (*net.UnixConn, error) {
 		return nil, &dialError{
 			exit: exitNoBroker,
 			msg: fmt.Sprintf("no broker socket at %s: the MCP broker is not installed on this guest, "+
-				"or it has never started (run `torio mcp install`, then check the broker unit)", path),
+				"or it has never started (run `torio mcp install` on the host, then check the broker unit)", path),
 		}
 	case errors.Is(err, fs.ErrPermission):
 		// The socket is 0660 torio-mcp:torio-mcp-clients (ADR-0022 §3), so this

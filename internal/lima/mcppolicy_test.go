@@ -11,9 +11,22 @@ import (
 // rather than searched for: the checks run in a fixed order and a test that
 // guessed would feed its reply to a different check.
 const (
-	policyProbeIndex = 7
-	configProbeIndex = 10
+	policyProbeIndex = 13
+	configProbeIndex = 17
 )
+
+func TestVerifyPolicyDocumentsRejectsAnEmptyGrant(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{
+		{result: stdoutResult("directory\ndirectory\n")},
+		{result: stdoutResult("root:root 755\n")},
+		{result: stdoutResult("")},
+	}}
+	rep := &MCPBrokerReport{}
+
+	if err := New(fr).verifyPolicyDocuments(context.Background(), rep); err == nil {
+		t.Fatal("an empty policy directory was accepted even though the broker cannot start without a service document")
+	}
+}
 
 // TestVerifyPolicyDocumentsAgentWritableIsDrift is the check ADR-0022 §6
 // requires and PR #78 shipped without.
@@ -62,6 +75,19 @@ func TestVerifyPolicyDocumentsSymlinkIsDrift(t *testing.T) {
 		t.Fatal("symlinked policy document accepted; expected drift")
 	}
 	assertFailedCheck(t, rep, "policy_documents")
+}
+
+func TestVerifyPolicyDocumentsRejectsMalformedPolicyContent(t *testing.T) {
+	script := okBrokerScript()
+	script[policyProbeIndex+3] = scriptedResponse{result: stdoutResult(`{"schema_version":"1","service":"atlassian","tools":[]}`)}
+
+	rep, err := New(&fakeRunner{script: script}).VerifyMCPBroker(context.Background())
+	if err == nil {
+		t.Fatal("malformed policy content was accepted")
+	}
+	if c := findCheck(t, rep, "policy_documents"); c.OK {
+		t.Fatalf("malformed policy content recorded as OK: %+v", c)
+	}
 }
 
 // TestVerifyPolicyDirectoryWritableIsDrift: a correct document inside a

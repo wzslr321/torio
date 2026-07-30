@@ -3,6 +3,7 @@ package lima
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -56,6 +57,9 @@ var torioMCPHomeSpec = bootstrapPathSpec{
 type MCPBrokerReport struct {
 	Instance string
 	Checks   []CheckResult
+
+	policyServices map[string]struct{}
+	policyDigest   string
 }
 
 func (r *MCPBrokerReport) record(name string, ok bool, detail string) {
@@ -77,12 +81,24 @@ func (a *Adapter) VerifyMCPBroker(ctx context.Context) (MCPBrokerReport, error) 
 		a.verifyNoHermesMCPTokens,
 		a.verifyPolicyDocuments,
 		a.verifyHermesMCPServers,
-		a.verifyBrokerSockets,
 	)
 	for _, step := range steps {
 		if err := step(ctx, &rep); err != nil {
 			return rep, err
 		}
+	}
+	runtimePresent, err := a.probeMCPRuntimePresence(ctx, &rep)
+	if err != nil {
+		return rep, err
+	}
+	if !runtimePresent {
+		return rep, nil
+	}
+	if err := a.verifyMCPBrokerUnit(ctx, &rep); err != nil {
+		return rep, err
+	}
+	if err := a.verifyBrokerSockets(ctx, &rep); err != nil {
+		return rep, err
 	}
 	return rep, nil
 }
@@ -224,7 +240,74 @@ func (a *Adapter) verifyBrokerUser(ctx context.Context, rep *MCPBrokerReport) er
 	if res.exit != 0 || uid == "" {
 		return a.brokerMissing(rep, name, "torio-mcp user not found", "run `torio mcp install` to provision the broker identity")
 	}
-	rep.record(name, true, "uid="+uid)
+
+	passwd, err := a.brokerProbe(ctx, rep, name, "getent", "passwd", TorioMCPUser)
+	if err != nil {
+		return err
+	}
+	fields := strings.Split(passwd.trimmed(), ":")
+	if passwd.exit != 0 || len(fields) != 7 || fields[0] != TorioMCPUser || fields[5] != TorioMCPHome || fields[6] != brokerLoginShell {
+		return a.brokerFailed(rep, name, "passwd entry does not match the broker identity contract",
+			"restore torio-mcp with home /home/torio-mcp and shell /usr/sbin/nologin")
+	}
+	numericUID, uidErr := strconv.Atoi(fields[2])
+	numericGID, gidErr := strconv.Atoi(fields[3])
+	if uidErr != nil || gidErr != nil || fields[2] != uid || numericUID <= 0 || numericGID <= 0 {
+		return a.brokerFailed(rep, name, "broker uid or primary gid is privileged or inconsistent",
+			"restore torio-mcp as a dedicated non-root system identity")
+	}
+
+	primary, err := a.brokerProbe(ctx, rep, name, "id", "-gn", TorioMCPUser)
+	if err != nil {
+		return err
+	}
+	if primary.exit != 0 || primary.trimmed() != TorioMCPUser {
+		return a.brokerFailed(rep, name, "primary group is not torio-mcp", "restore the broker's dedicated primary group")
+	}
+
+	groups, err := a.brokerProbe(ctx, rep, name, "id", "-nG", TorioMCPUser)
+	if err != nil {
+		return err
+	}
+	if groups.exit != 0 {
+		return a.brokerFailed(rep, name, "cannot read broker group membership", "inspect the torio-mcp identity on the guest")
+	}
+	seenClient := false
+	for _, group := range strings.Fields(groups.out) {
+		switch group {
+		case TorioMCPUser:
+		case TorioMCPClientsGroup:
+			seenClient = true
+		default:
+			return a.brokerFailed(rep, name, "broker has an unexpected supplementary group",
+				"remove every torio-mcp membership except torio-mcp and torio-mcp-clients")
+		}
+	}
+	if !seenClient {
+		return a.brokerFailed(rep, name, "broker is not in torio-mcp-clients",
+			"add only torio-mcp-clients so the broker can publish its socket")
+	}
+
+	sudo, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "-l", "-U", TorioMCPUser)
+	if err != nil {
+		return err
+	}
+	if sudo.exit == 0 {
+		return a.brokerFailed(rep, name, "broker has sudo authority", "remove every sudoers grant for torio-mcp")
+	}
+	if sudo.exit != 1 {
+		return a.brokerFailed(rep, name, "could not prove the absence of sudo authority", "inspect sudoers and retry")
+	}
+	hermesUID, err := a.brokerProbe(ctx, rep, name, "id", "-u", HermesUser)
+	if err != nil {
+		return err
+	}
+	if hermesUID.exit != 0 || hermesUID.trimmed() == "" || hermesUID.trimmed() == uid {
+		return a.brokerFailed(rep, name, "broker identity does not have a uid distinct from hermes",
+			"restore torio-mcp and hermes as separate non-root identities")
+	}
+
+	rep.record(name, true, "uid="+uid+" dedicated unprivileged identity")
 	return nil
 }
 
@@ -257,12 +340,11 @@ func (a *Adapter) verifyHermesIsBrokerClient(ctx context.Context, rep *MCPBroker
 	return nil
 }
 
-// verifyHermesNotBrokerOwner is the custody invariant. Membership in the
-// torio-mcp group would make the broker's home reachable by the identity the
-// agent has a shell as, which is precisely the arrangement ADR-0022 exists to
-// end. It is checked separately from the client-group membership so the two
-// failures are never confused: one means the boundary is broken, the other only
-// that the plumbing is.
+// verifyHermesNotBrokerOwner is the custody invariant. It rejects direct owner
+// membership and indirect privilege escalation: sudo or any group outside the
+// managed guest set could bypass the broker home's 0700 mode. It is checked
+// separately from client-group membership so a broken security boundary is not
+// confused with missing socket plumbing.
 func (a *Adapter) verifyHermesNotBrokerOwner(ctx context.Context, rep *MCPBrokerReport) error {
 	const name = "hermes_not_broker_owner"
 	res, err := a.brokerProbe(ctx, rep, name, "id", "-nG", HermesUser)
@@ -272,11 +354,36 @@ func (a *Adapter) verifyHermesNotBrokerOwner(ctx context.Context, rep *MCPBroker
 	if res.exit != 0 {
 		return a.brokerFailed(rep, name, "cannot read hermes group membership", "confirm the hermes user exists on the guest")
 	}
-	if hasGroup(res.out, TorioMCPUser) {
-		return a.brokerFailed(rep, name, "hermes is in the torio-mcp group",
-			"remove hermes from torio-mcp; membership makes every broker credential readable by the agent identity (ADR-0022)")
+	seen := map[string]bool{}
+	for _, group := range strings.Fields(res.out) {
+		switch group {
+		case HermesUser, TorioProjectsGroup, TorioMCPClientsGroup:
+			seen[group] = true
+		case TorioMCPUser:
+			return a.brokerFailed(rep, name, "hermes is in the torio-mcp group",
+				"remove hermes from torio-mcp; membership makes every broker credential readable by the agent identity (ADR-0022)")
+		default:
+			return a.brokerFailed(rep, name, "hermes has an unexpected supplementary group",
+				"remove groups outside hermes, torio-projects, and torio-mcp-clients; privileged groups bypass credential custody")
+		}
 	}
-	rep.record(name, true, "not a member")
+	for _, required := range []string{HermesUser, TorioProjectsGroup, TorioMCPClientsGroup} {
+		if !seen[required] {
+			return a.brokerFailed(rep, name, "hermes group membership does not match the managed guest contract",
+				"restore hermes membership in hermes, torio-projects, and torio-mcp-clients only")
+		}
+	}
+	sudo, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "-l", "-U", HermesUser)
+	if err != nil {
+		return err
+	}
+	if sudo.exit == 0 {
+		return a.brokerFailed(rep, name, "hermes has sudo authority", "remove every sudoers grant for hermes")
+	}
+	if sudo.exit != 1 {
+		return a.brokerFailed(rep, name, "could not prove the absence of hermes sudo authority", "inspect sudoers and retry")
+	}
+	rep.record(name, true, "managed groups only; no sudo authority")
 	return nil
 }
 
@@ -316,6 +423,56 @@ func (a *Adapter) verifyBrokerHome(ctx context.Context, rep *MCPBrokerReport) er
 			"the broker credential store must not be readable outside torio-mcp (ADR-0022)")
 	}
 	rep.record(name, true, fmt.Sprintf("%s:%s %s", owner, group, mode))
+	return nil
+}
+
+func (a *Adapter) verifyMCPBrokerUnit(ctx context.Context, rep *MCPBrokerReport) error {
+	const name = "broker_unit"
+	metadata, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%F %U:%G %a", "/etc/systemd/system", TorioMCPBrokerUnitPath)
+	if err != nil {
+		return err
+	}
+	lines := nonEmptyLines(metadata.out)
+	if len(lines) == 0 || lines[0] != "directory root:root 755" {
+		return a.brokerFailed(rep, name, "system unit directory is not trusted", "restore /etc/systemd/system to root:root 0755")
+	}
+	if len(lines) == 1 {
+		return a.brokerFailed(rep, name, "broker runtime exists without the trusted system unit",
+			"stop the unauthorized runtime and remove its sockets; the daemon is not delivered yet")
+	}
+	if len(lines) != 2 || lines[1] != "regular file root:root 644" {
+		return a.brokerFailed(rep, name, "broker system unit ownership or mode drift", "reinstall the broker unit")
+	}
+
+	enabled, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "systemctl", "is-enabled", TorioMCPBrokerUnitName)
+	if err != nil {
+		return err
+	}
+	if enabled.exit != 0 || enabled.trimmed() != "enabled" {
+		return a.brokerFailed(rep, name, "broker system unit is not enabled", "run `torio mcp install` on the host")
+	}
+	active, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "systemctl", "is-active", TorioMCPBrokerUnitName)
+	if err != nil {
+		return err
+	}
+	if active.exit != 0 || active.trimmed() != "active" {
+		return a.brokerFailed(rep, name, "broker system unit is not active", "inspect service logs, then run `torio mcp install` on the host")
+	}
+	content, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "cat", TorioMCPBrokerUnitPath)
+	if err != nil {
+		return err
+	}
+	if content.exit != 0 || content.out != string(mcpBrokerUnit()) {
+		return a.brokerFailed(rep, name, "broker system unit content drift", "run `torio mcp install` on the host")
+	}
+	effective, err := a.brokerProbe(ctx, rep, name, mcpBrokerEffectiveUnitShowArgs()...)
+	if err != nil {
+		return err
+	}
+	if effective.exit != 0 || !effectiveMCPBrokerUnitExact(effective.out) {
+		return a.brokerFailed(rep, name, "effective broker system unit drift", "remove systemd drop-ins or runtime overrides, then run `torio mcp install` on the host")
+	}
+	rep.record(name, true, "enabled and active")
 	return nil
 }
 

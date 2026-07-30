@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -126,7 +127,7 @@ func Load(dir string) (Set, error) {
 		return Set{}, fmt.Errorf("read policy directory: %w", err)
 	}
 
-	set := Set{services: make(map[string]service, len(entries))}
+	documents := make(map[string][]byte, len(entries))
 	for _, entry := range entries {
 		name := entry.Name()
 		if !entry.Type().IsRegular() {
@@ -144,18 +145,40 @@ func Load(dir string) (Set, error) {
 			// makes the directory unreadable as a statement of what is granted.
 			return Set{}, fmt.Errorf("policy %s: every file in the policy directory must be a %s policy document", name, policyFileExt)
 		}
-		stem := strings.TrimSuffix(name, policyFileExt)
-
-		if len(set.services) == maxServices {
-			return Set{}, fmt.Errorf("policy directory holds more than the maximum %d services", maxServices)
-		}
-
 		data, err := readBounded(filepath.Join(dir, name))
 		if err != nil {
 			// An unreadable document is never treated as one that grants nothing:
 			// that would let whoever can break a read choose which policies apply.
 			return Set{}, fmt.Errorf("read policy %s: %w", name, err)
 		}
+		documents[name] = data
+	}
+	return ParseDocuments(documents)
+}
+
+// ParseDocuments validates an in-memory policy directory using the exact same
+// schema and bounds as Load. It exists for control planes that retrieve bounded
+// documents from another trust domain and must not recreate the broker's parser.
+func ParseDocuments(documents map[string][]byte) (Set, error) {
+	if len(documents) > maxServices {
+		return Set{}, fmt.Errorf("policy directory holds more than the maximum %d services", maxServices)
+	}
+	names := make([]string, 0, len(documents))
+	for name := range documents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	set := Set{services: make(map[string]service, len(documents))}
+	for _, name := range names {
+		if !strings.HasSuffix(name, policyFileExt) {
+			return Set{}, fmt.Errorf("policy %s: every file in the policy directory must be a %s policy document", name, policyFileExt)
+		}
+		data := documents[name]
+		if len(data) > maxDocumentBytes {
+			return Set{}, fmt.Errorf("policy %s: document is larger than the maximum %d bytes", name, maxDocumentBytes)
+		}
+		stem := strings.TrimSuffix(name, policyFileExt)
 		svc, err := parseDocument(data, stem)
 		if err != nil {
 			// One bad document fails the whole load. A half-applied policy set is a

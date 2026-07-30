@@ -10,24 +10,86 @@ import (
 // tests exercise the check in the position status actually runs it.
 func socketScript(extra ...scriptedResponse) []scriptedResponse {
 	base := okBrokerScript()
-	// Drop the default socket probe: each test supplies its own socket story.
-	return append(base[:len(base)-1], extra...)
+	// Drop the default socket probes: each test supplies its own socket story.
+	return append(base[:len(base)-5], extra...)
 }
 
-// TestVerifySocketsAbsentDirIsNotDrift: the daemon is a separate install. A
-// guest that has the custody boundary but no daemon yet is not drifted, and
-// saying so would train the operator to ignore the word.
-func TestVerifySocketsAbsentDirIsNotDrift(t *testing.T) {
+func TestVerifyMCPBrokerStoppedUnitIsDrift(t *testing.T) {
+	base := okBrokerScript()
+	script := append([]scriptedResponse{}, base[:len(base)-10]...)
+	script = append(script,
+		scriptedResponse{result: stdoutResult("directory root:root 755\nregular file root:root 644\n")},
+		scriptedResponse{result: stdoutResult("enabled\n")},
+		scriptedResponse{result: exitResult(3, "inactive\n", "")},
+	)
+
+	rep, err := New(&fakeRunner{script: script}).VerifyMCPBroker(context.Background())
+	if err == nil {
+		t.Fatal("stopped broker unit was accepted")
+	}
+	if c := findCheck(t, rep, "broker_unit"); c.OK {
+		t.Fatal("stopped broker unit recorded as OK")
+	}
+}
+
+func TestVerifyMCPBrokerAcceptsAbsentRuntimeWithAnInactiveDormantUnit(t *testing.T) {
+	base := okBrokerScript()
+	script := append([]scriptedResponse{}, base[:len(base)-11]...)
+	script = append(script, scriptedResponse{result: exitResult(1, "directory\n", "no such file")})
+
+	rep, err := New(&fakeRunner{script: script}).VerifyMCPBroker(context.Background())
+	if err != nil {
+		t.Fatalf("absent runtime should be valid before daemon delivery: %v", err)
+	}
+	check := findCheck(t, rep, "broker_sockets")
+	if !check.OK || !strings.Contains(check.Detail, "absent") {
+		t.Fatalf("runtime check = %+v, want explicit absent success", check)
+	}
+}
+
+func TestVerifyMCPBrokerRejectsRuntimeWithoutATrustedUnit(t *testing.T) {
+	base := okBrokerScript()
+	script := append([]scriptedResponse{}, base[:len(base)-11]...)
+	script = append(script,
+		scriptedResponse{result: stdoutResult("directory\ndirectory\n")},
+		scriptedResponse{result: stdoutResult("directory root:root 755\n")},
+	)
+
+	rep, err := New(&fakeRunner{script: script}).VerifyMCPBroker(context.Background())
+	if err == nil {
+		t.Fatal("runtime sockets without the trusted system unit were accepted")
+	}
+	if check := findCheck(t, rep, "broker_unit"); check.OK {
+		t.Fatalf("missing trusted unit recorded as OK: %+v", check)
+	}
+}
+
+func TestVerifySocketsAbsentRuntimeIsDriftForAnActiveUnit(t *testing.T) {
 	fr := &fakeRunner{script: socketScript(
 		scriptedResponse{result: exitResult(1, "directory\n", "no such file")}, // stat /run/torio-mcp
 	)}
 	rep, err := New(fr).VerifyMCPBroker(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("active broker with no runtime directory was accepted")
 	}
 	c := findCheck(t, rep, "broker_sockets")
-	if !c.OK || !strings.Contains(c.Detail, "absent") {
-		t.Errorf("check = %+v, want OK naming the absence", c)
+	if c.OK || !strings.Contains(c.Detail, "absent") {
+		t.Errorf("check = %+v, want failed check naming the absent runtime", c)
+	}
+}
+
+func TestVerifySocketsRejectsAnEmptyRuntimeDirectory(t *testing.T) {
+	fr := &fakeRunner{script: socketScript(
+		scriptedResponse{result: stdoutResult("directory\ndirectory\n")},
+		scriptedResponse{result: stdoutResult("torio-mcp:torio-mcp-clients 750\n")},
+		scriptedResponse{result: stdoutResult("")},
+	)}
+	rep, err := New(fr).VerifyMCPBroker(context.Background())
+	if err == nil {
+		t.Fatal("an empty runtime directory was accepted even though the broker published no services")
+	}
+	if c := findCheck(t, rep, "broker_sockets"); c.OK {
+		t.Fatal("empty runtime directory recorded as OK")
 	}
 }
 
@@ -61,6 +123,7 @@ func TestVerifySocketsLiveSocketPasses(t *testing.T) {
 		scriptedResponse{result: stdoutResult("torio-mcp:torio-mcp-clients 750\n")},
 		scriptedResponse{result: stdoutResult("atlassian.sock torio-mcp torio-mcp-clients 660\n")},
 		scriptedResponse{result: stdoutResult("u_str LISTEN 0 4096 /run/torio-mcp/atlassian.sock 9 * 0\n")},
+		scriptedResponse{result: stdoutResult(validGuestPolicyDigest() + "\n")},
 	)}
 	rep, err := New(fr).VerifyMCPBroker(context.Background())
 	if err != nil {
@@ -69,6 +132,33 @@ func TestVerifySocketsLiveSocketPasses(t *testing.T) {
 	c := findCheck(t, rep, "broker_sockets")
 	if !c.OK || !strings.Contains(c.Detail, "atlassian") {
 		t.Errorf("check = %+v, want OK naming the listening service", c)
+	}
+}
+
+func TestVerifySocketsRejectsAStalePolicyGeneration(t *testing.T) {
+	script := okBrokerScript()
+	script[len(script)-1] = scriptedResponse{result: stdoutResult(strings.Repeat("0", 64) + "\n")}
+	rep, err := New(&fakeRunner{script: script}).VerifyMCPBroker(context.Background())
+	if err == nil {
+		t.Fatal("running broker with a stale effective-policy digest was accepted")
+	}
+	c := findCheck(t, rep, "broker_sockets")
+	if c.OK || !strings.Contains(c.Detail, "policy generation") {
+		t.Fatalf("check = %+v, want stale policy generation", c)
+	}
+}
+
+func TestVerifySocketsRejectsAServiceSetDifferentFromParsedPolicy(t *testing.T) {
+	script := okBrokerScript()
+	script[len(script)-3] = scriptedResponse{result: stdoutResult("slack.sock torio-mcp torio-mcp-clients 660\n")}
+	script[len(script)-2] = scriptedResponse{result: stdoutResult("u_str LISTEN 0 4096 /run/torio-mcp/slack.sock 9 * 0\n")}
+
+	rep, err := New(&fakeRunner{script: script}).VerifyMCPBroker(context.Background())
+	if err == nil {
+		t.Fatal("listening socket set different from parsed policy was accepted")
+	}
+	if c := findCheck(t, rep, "broker_sockets"); c.OK {
+		t.Fatalf("mismatched socket service set recorded as OK: %+v", c)
 	}
 }
 
@@ -116,6 +206,23 @@ func TestVerifySocketsWrongDirGroupIsDrift(t *testing.T) {
 	}
 	if !strings.Contains(c.Detail, TorioMCPClientsGroup) {
 		t.Errorf("detail %q should name the group the directory is missing", c.Detail)
+	}
+}
+
+func TestVerifySocketsWorldTraversableDirectoryIsDrift(t *testing.T) {
+	fr := &fakeRunner{script: socketScript(
+		scriptedResponse{result: stdoutResult("directory\ndirectory\n")},
+		scriptedResponse{result: stdoutResult("torio-mcp:torio-mcp-clients 755\n")},
+		scriptedResponse{result: stdoutResult("atlassian.sock torio-mcp torio-mcp-clients 660\n")},
+		scriptedResponse{result: stdoutResult("u_str LISTEN 0 4096 /run/torio-mcp/atlassian.sock 9 * 0\n")},
+		scriptedResponse{result: stdoutResult(validGuestPolicyDigest() + "\n")},
+	)}
+	rep, err := New(fr).VerifyMCPBroker(context.Background())
+	if err == nil {
+		t.Fatal("world-traversable broker runtime directory was accepted")
+	}
+	if c := findCheck(t, rep, "broker_sockets"); c.OK {
+		t.Fatalf("world-traversable runtime directory recorded as OK: %+v", c)
 	}
 }
 

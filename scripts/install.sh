@@ -27,7 +27,7 @@ BASE_URL="" # override for tests, e.g. file:///tmp/assets
 
 usage() {
   cat <<'EOF'
-Usage: install.sh [--version X.Y.Z] [--prefix DIR] [--dry-run]
+Usage: install.sh [--version X.Y.Z] [--prefix DIR] [--base-url URL] [--dry-run]
 
 Installs Torio for Darwin/arm64 into a user-writable prefix (default: ~/.local/bin).
 Verifies SHA256SUMS before copying the binary. Does not use sudo and does not

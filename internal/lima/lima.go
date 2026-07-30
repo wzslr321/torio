@@ -40,6 +40,10 @@ type Adapter struct {
 	Runner execx.Runner
 	// Bin overrides the limactl executable name/path. Empty uses "limactl".
 	Bin string
+	// MCPGuestBinaryDir is the directory containing the two Linux arm64 MCP
+	// payloads shipped beside the host CLI. Empty resolves beside the running
+	// executable. Tests set it to a private fixture directory.
+	MCPGuestBinaryDir string
 }
 
 // New returns an Adapter backed by runner.
