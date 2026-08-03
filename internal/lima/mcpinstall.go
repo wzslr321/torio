@@ -46,32 +46,36 @@ func (a *Adapter) ProvisionMCPBroker(ctx context.Context) (MCPBrokerInstallRepor
 	rep := MCPBrokerInstallReport{Instance: InstanceName}
 
 	groupChanged, err := a.ensureBrokerClientsGroup(ctx, &rep)
+	rep.Changed = rep.Changed || groupChanged
 	if err != nil {
 		return rep, err
 	}
 	userChanged, err := a.ensureBrokerUser(ctx, &rep)
+	rep.Changed = rep.Changed || userChanged
 	if err != nil {
 		return rep, err
 	}
 	brokerClientChanged, err := a.ensureBrokerIsClient(ctx, &rep)
+	rep.Changed = rep.Changed || brokerClientChanged
 	if err != nil {
 		return rep, err
 	}
 	homeChanged, err := a.ensureBrokerHome(ctx, &rep)
+	rep.Changed = rep.Changed || homeChanged
 	if err != nil {
 		return rep, err
 	}
 	clientChanged, err := a.ensureHermesIsClient(ctx, &rep)
+	rep.Changed = rep.Changed || clientChanged
+	rep.RestartRequired = rep.RestartRequired || clientChanged
 	if err != nil {
 		return rep, err
 	}
 	policyChanged, err := a.ensurePolicyDir(ctx, &rep)
+	rep.Changed = rep.Changed || policyChanged
 	if err != nil {
 		return rep, err
 	}
-
-	rep.Changed = groupChanged || userChanged || brokerClientChanged || homeChanged || clientChanged || policyChanged
-	rep.RestartRequired = clientChanged
 
 	verify := MCPBrokerReport{Instance: InstanceName}
 	for _, step := range brokerIdentitySteps(a) {
@@ -114,36 +118,36 @@ func (a *Adapter) InstallMCPBroker(ctx context.Context) (MCPBrokerInstallReport,
 	}
 
 	groupChanged, err := a.ensureBrokerClientsGroup(ctx, &rep)
-	if err != nil {
-		return rep, err
-	}
 	rep.Changed = rep.Changed || groupChanged
+	if err != nil {
+		return rep, err
+	}
 	userChanged, err := a.ensureBrokerUser(ctx, &rep)
-	if err != nil {
-		return rep, err
-	}
 	rep.Changed = rep.Changed || userChanged
+	if err != nil {
+		return rep, err
+	}
 	brokerClientChanged, err := a.ensureBrokerIsClient(ctx, &rep)
-	if err != nil {
-		return rep, err
-	}
 	rep.Changed = rep.Changed || brokerClientChanged
+	if err != nil {
+		return rep, err
+	}
 	homeChanged, err := a.ensureBrokerHome(ctx, &rep)
-	if err != nil {
-		return rep, err
-	}
 	rep.Changed = rep.Changed || homeChanged
-	clientChanged, err := a.ensureHermesIsClient(ctx, &rep)
 	if err != nil {
 		return rep, err
 	}
+	clientChanged, err := a.ensureHermesIsClient(ctx, &rep)
 	rep.Changed = rep.Changed || clientChanged
 	rep.RestartRequired = rep.RestartRequired || clientChanged
-	policyChanged, err := a.ensurePolicyDir(ctx, &rep)
 	if err != nil {
 		return rep, err
 	}
+	policyChanged, err := a.ensurePolicyDir(ctx, &rep)
 	rep.Changed = rep.Changed || policyChanged
+	if err != nil {
+		return rep, err
+	}
 	binariesChanged := false
 	brokerDigest := ""
 	for _, bin := range binaries {
@@ -282,11 +286,11 @@ func (a *Adapter) ensureBrokerIsClient(ctx context.Context, rep *MCPBrokerInstal
 	}
 	verified, err := a.installProbe(ctx, "id", "-nG", TorioMCPUser)
 	if err != nil {
-		return false, err
+		return true, err
 	}
 	if verified.exit != 0 || !hasGroup(verified.out, TorioMCPClientsGroup) {
 		rep.record(name, false, "membership missing after usermod")
-		return false, &Error{Op: mcpInstallOp, Kind: KindVerificationFailed,
+		return true, &Error{Op: mcpInstallOp, Kind: KindVerificationFailed,
 			Err: fmt.Errorf("%s: broker is not in the client group after usermod", name)}
 	}
 	rep.record(name, true, "added")
@@ -324,14 +328,14 @@ func (a *Adapter) ensureBrokerHome(ctx context.Context, rep *MCPBrokerInstallRep
 	if owner != TorioMCPUser || group != TorioMCPUser {
 		if err := a.installMutate(ctx, rep, name, "chown",
 			"sudo", "-n", "chown", TorioMCPUser+":"+TorioMCPUser, TorioMCPHome); err != nil {
-			return false, err
+			return changed, err
 		}
 		changed = true
 	}
 	if !modeMatches(torioMCPHomeSpec, mode) {
 		if err := a.installMutate(ctx, rep, name, "chmod",
 			"sudo", "-n", "chmod", "700", TorioMCPHome); err != nil {
-			return false, err
+			return changed, err
 		}
 		changed = true
 	}

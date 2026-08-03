@@ -711,6 +711,96 @@ func TestInstallMCPBrokerReportsPartialChangesWhenPolicyIsStillEmpty(t *testing.
 	}
 }
 
+func TestProvisionMCPBrokerReportsPartialChangesWhenALaterStepFails(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{
+		{result: exitResult(2, "", "")}, // client group is absent
+		{result: stdoutResult("")},      // groupadd succeeds
+		{err: fmt.Errorf("probe broker user: unavailable")},
+	}}
+
+	rep, err := installTestAdapter(t, fr).ProvisionMCPBroker(context.Background())
+	if err == nil {
+		t.Fatal("later provisioning failure was accepted")
+	}
+	if !rep.Changed {
+		t.Fatal("provisioning mutated the guest before failing but reported Changed=false")
+	}
+}
+
+func TestProvisionMCPBrokerReportsBrokerMembershipMutationWhenVerificationFails(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{
+		{result: stdoutResult("torio-mcp-clients:x:995:hermes\n")},
+		{result: stdoutResult("997\n")},
+		{result: stdoutResult("torio-mcp\n")}, // broker is not a client yet
+		{result: stdoutResult("")},            // usermod succeeds
+		{result: stdoutResult("torio-mcp\n")}, // verification still misses the group
+	}}
+
+	rep, err := installTestAdapter(t, fr).ProvisionMCPBroker(context.Background())
+	if err == nil {
+		t.Fatal("missing broker membership after usermod was accepted")
+	}
+	if !rep.Changed {
+		t.Fatal("usermod succeeded before verification failed but Changed=false")
+	}
+}
+
+func TestInstallMCPBrokerReportsBrokerMembershipMutationWhenVerificationFails(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{
+		{result: stdoutResult("torio-mcp-clients:x:995:hermes\n")},
+		{result: stdoutResult("997\n")},
+		{result: stdoutResult("torio-mcp\n")}, // broker is not a client yet
+		{result: stdoutResult("")},            // usermod succeeds
+		{result: stdoutResult("torio-mcp\n")}, // verification still misses the group
+	}}
+
+	rep, err := installTestAdapter(t, fr).InstallMCPBroker(context.Background())
+	if err == nil {
+		t.Fatal("missing broker membership after usermod was accepted")
+	}
+	if !rep.Changed {
+		t.Fatal("dormant installer lost a known identity mutation before returning the verification failure")
+	}
+}
+
+func TestProvisionMCPBrokerReportsHomeMutationWhenLaterReconcileFails(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{
+		{result: stdoutResult("torio-mcp-clients:x:995:hermes\n")},
+		{result: stdoutResult("997\n")},
+		{result: stdoutResult("torio-mcp torio-mcp-clients\n")},
+		{result: stdoutResult("directory\n")},
+		{result: stdoutResult("root:root 755\n")},
+		{result: stdoutResult("")},             // chown succeeds
+		{result: exitResult(1, "", "refused")}, // chmod fails
+	}}
+
+	rep, err := installTestAdapter(t, fr).ProvisionMCPBroker(context.Background())
+	if err == nil {
+		t.Fatal("failed home reconcile was accepted")
+	}
+	if !rep.Changed {
+		t.Fatal("chown succeeded before chmod failed but Changed=false")
+	}
+}
+
+func TestProvisionMCPBrokerReportsRestartRequiredWhenPolicyIsStillEmpty(t *testing.T) {
+	script := append([]scriptedResponse{}, freshInstallScript()[:13]...)
+	script = append(script, identityVerificationScript()...)
+	script = append(script,
+		scriptedResponse{result: stdoutResult("directory\ndirectory\n")},
+		scriptedResponse{result: stdoutResult("root:root 755\n")},
+		scriptedResponse{result: stdoutResult("")}, // policy directory is empty
+	)
+
+	rep, err := installTestAdapter(t, &fakeRunner{script: script}).ProvisionMCPBroker(context.Background())
+	if err == nil {
+		t.Fatal("empty policy directory was accepted")
+	}
+	if !rep.RestartRequired {
+		t.Fatal("hermes joined the client group before failure but RestartRequired=false")
+	}
+}
+
 // TestInstallMCPBrokerReportsRestartRequired: a long-running process does not
 // gain a group by having the group database change under it. The always-on
 // backend keeps the credentials it started with until it is restarted, so an

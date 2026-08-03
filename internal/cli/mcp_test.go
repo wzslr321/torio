@@ -269,6 +269,12 @@ func freshMCPInstallScript() []scriptedResp {
 	}
 }
 
+func mcpInstallEmptyPolicyScript() []scriptedResp {
+	script := append([]scriptedResp{}, freshMCPInstallScript()[:28]...)
+	script[27] = scriptedResp{res: execx.Result{}} // policy directory has no documents
+	return script
+}
+
 func TestMCPInstallFreshReportsChangeAndRestart(t *testing.T) {
 	code, stdout, stderr := runVMWithFake(t, []string{"mcp", "install", "--json"}, &fakeLimaRunner{script: freshMCPInstallScript()})
 	if code != int(ExitOK) {
@@ -284,6 +290,40 @@ func TestMCPInstallFreshReportsChangeAndRestart(t *testing.T) {
 	}
 	if data["restart_required"] != true {
 		t.Errorf("data.restart_required = %v, want true: hermes only just joined the client group", data["restart_required"])
+	}
+}
+
+func TestMCPInstallJSONErrorReportsPartialChangeAndRestart(t *testing.T) {
+	code, stdout, stderr := runVMWithFake(t, []string{"mcp", "install", "--json"}, &fakeLimaRunner{script: mcpInstallEmptyPolicyScript()})
+	if code != int(ExitPrecondition) {
+		t.Fatalf("exit = %d, want %d; stderr=%q stdout=%q", code, int(ExitPrecondition), stderr, stdout)
+	}
+	env := decodeOneEnvelope(t, stdout)
+	errObj, _ := env["error"].(map[string]any)
+	if errObj["code"] != "NOT_FOUND" {
+		t.Fatalf("error.code = %v, want NOT_FOUND", errObj["code"])
+	}
+	details, _ := errObj["details"].(map[string]any)
+	if details["changed"] != true {
+		t.Errorf("error.details.changed = %v, want true", details["changed"])
+	}
+	if details["restart_required"] != true {
+		t.Errorf("error.details.restart_required = %v, want true", details["restart_required"])
+	}
+}
+
+func TestMCPInstallHumanErrorReportsPartialChangeAndRestart(t *testing.T) {
+	code, stdout, stderr := runVMWithFake(t, []string{"mcp", "install"}, &fakeLimaRunner{script: mcpInstallEmptyPolicyScript()})
+	if code != int(ExitPrecondition) {
+		t.Fatalf("exit = %d, want %d; stderr=%q", code, int(ExitPrecondition), stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty human error output", stdout)
+	}
+	for _, want := range []string{"guest was partially changed", "torio serve restart", "daemon was not installed or activated"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr does not contain %q: %q", want, stderr)
+		}
 	}
 }
 

@@ -151,6 +151,12 @@ func newMCPInstallCmd(a *app) *cobra.Command {
 			if err != nil {
 				ce := mapLimaError("mcp.install", err)
 				ce.Details = mcpInstallDetails(rep)
+				if rep.Changed {
+					ce.Message += "; guest was partially changed; the MCP daemon was not installed or activated"
+				}
+				if rep.RestartRequired {
+					ce.Message += "; run `torio serve restart` before expecting the backend to use its new client-group membership"
+				}
 				return ce
 			}
 			return a.emitMCPInstall(rep)
@@ -195,7 +201,12 @@ func mcpInstallDetails(rep lima.MCPBrokerInstallReport) map[string]any {
 	for _, c := range rep.Checks {
 		checks = append(checks, map[string]any{"name": c.Name, "ok": c.OK, "detail": c.Detail})
 	}
-	return map[string]any{"instance": rep.Instance, "checks": checks}
+	return map[string]any{
+		"instance":         rep.Instance,
+		"changed":          rep.Changed,
+		"restart_required": rep.RestartRequired,
+		"checks":           checks,
+	}
 }
 
 // emitMCPInstall renders a completed provisioning. The restart line is not a
