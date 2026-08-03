@@ -23,7 +23,9 @@ const (
 	PromotedImageDigest = "sha256:7df0201546f75b8bcc1044594c806c35749421ad3c9bc1be2a3ab806cfae39cc"
 	// PromotedHermesCommit is the Hermes Agent pin from Gate 0. Init embeds it
 	// for callers/docs; guest Hermes install is reconciled in bootstrap (Task 9).
-	PromotedHermesCommit = "91546b8337068891cc0a6b834d89d0d9270fb3ec"
+	// Re-promoted 2026-08-03: wzslr321/hermes-agent 0a62610 (descendant of the
+	// Gate 0 pin 91546b8; picks up the openclaw EXDEV fsync fix).
+	PromotedHermesCommit = "0a62610f10cc34d696b2239b2c69fa1ba0f1ca63"
 )
 
 // Default VM resources for torio vm init (FINDINGS: product disk SHOULD be 60GiB).
