@@ -99,6 +99,33 @@ class PackageArchiveTests(unittest.TestCase):
                     out_dir=out,
                 )
 
+    def test_archive_member_modes_are_deterministic(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            binary = root / "torio"
+            self._touch_binary(binary)
+            license_path = root / "LICENSE"
+            readme = root / "README.md"
+            license_path.write_text("L\n", encoding="utf-8")
+            license_path.chmod(0o664)
+            readme.write_text("R\n", encoding="utf-8")
+            readme.chmod(0o600)
+
+            archive, _ = pr.build_archive(
+                version="0.0.3",
+                binary=binary,
+                license_path=license_path,
+                readme_path=readme,
+                out_dir=root / "dist",
+            )
+
+            with tarfile.open(archive, "r:gz") as tf:
+                modes = {member.name: member.mode & 0o777 for member in tf.getmembers()}
+            self.assertEqual(
+                modes,
+                {"torio": 0o755, "LICENSE": 0o644, "README.md": 0o644},
+            )
+
     def test_rejects_secret_shaped_filename(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

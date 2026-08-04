@@ -3,7 +3,7 @@ output: site/reference.html
 nav: Reference
 order: 4
 title: Reference — command surface and boundaries · Torio
-description: The complete torio command surface — vm, serve, brain, project, and version — plus readiness and exit semantics, the fixed boundaries of Torio, and deployment status.
+description: The complete torio command surface, including the MCP custody boundary, plus readiness and exit semantics, Torio's fixed boundaries, and deployment status.
 kicker: Reference
 scope_notice: "Lookup material, grounded in the current CLI. For an ordered first run, see [Get started](tutorials.html#get-started)."
 ---
@@ -30,6 +30,8 @@ the repository root also works, but then every command needs the prefix.
 <!-- include: cmd-brain -->
 
 <!-- include: cmd-project -->
+
+<!-- include: cmd-mcp -->
 
 <!-- include: cmd-version -->
 

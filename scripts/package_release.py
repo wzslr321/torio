@@ -82,8 +82,12 @@ def build_archive(
         staged_bin = stage / "torio"
         shutil.copy2(binary, staged_bin)
         os.chmod(staged_bin, 0o755)
-        shutil.copy2(license_path, stage / "LICENSE")
-        shutil.copy2(readme_path, stage / "README.md")
+        staged_license = stage / "LICENSE"
+        staged_readme = stage / "README.md"
+        shutil.copy2(license_path, staged_license)
+        shutil.copy2(readme_path, staged_readme)
+        os.chmod(staged_license, 0o644)
+        os.chmod(staged_readme, 0o644)
 
         with tarfile.open(archive_path, "w:gz") as tf:
             for member in REQUIRED_MEMBERS:

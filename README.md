@@ -1,6 +1,7 @@
 # Torio
 
-Project website: [torio.dev](https://torio.dev)
+Documentation source: [`site/`](site/). The public deployment and domain are
+not configured yet.
 
 > Torio is a thin, trusted control plane for running an AI second brain and your
 > coding projects on a Linux VM on Apple Silicon Macs.
@@ -24,6 +25,10 @@ brings those three into a known-good state and then gets out of the way.
   from its id, gets shared access for you and the service identity, and is
   registered with Hermes. The model sees the projects you registered and no
   others.
+- **Prepares a separate MCP credential boundary.** `torio mcp install`
+  provisions a dedicated guest identity, private credential home, client group,
+  and root-owned policy directory. `torio mcp status` verifies that boundary
+  without repairing it.
 
 ## What Torio does not do
 
@@ -45,6 +50,11 @@ brings those three into a known-good state and then gets out of the way.
   project leaves its checkout on disk.
 - **It is not an agent platform.** No task queue, no dispatcher, no autonomous
   workers.
+- **It does not broker MCP traffic yet.** The released CLI provisions custody
+  only. It does not install or activate the dormant broker, run OAuth, or send
+  requests to an upstream MCP service. The multi-service Atlassian work under
+  [`spikes/001-multi-mcp-write-window/`](spikes/001-multi-mcp-write-window/)
+  remains an isolated spike with a `PARTIAL` verdict.
 
 ## Prerequisites
 
@@ -55,8 +65,19 @@ brings those three into a known-good state and then gets out of the way.
 
 ## Getting started
 
-Build the CLI and put it on your `PATH`, so every documented command works as
-written:
+From a repository checkout, install a published release asset with a client
+that already has access to the repository:
+
+```bash
+gh release download vX.Y.Z -D /tmp/torio-rel
+scripts/install.sh --version X.Y.Z --base-url file:///tmp/torio-rel
+```
+
+The installer verifies `SHA256SUMS` before replacing the binary. Torio never
+receives the GitHub credential used by `gh`.
+
+To build from source instead, put the resulting binary on your `PATH` so every
+documented command works as written:
 
 ```bash
 go build -o torio ./cmd/torio
@@ -77,6 +98,9 @@ python3 scripts/validate_artifacts.py
 The operational surface is this file plus
 [`docs/runbooks/first-run.md`](docs/runbooks/first-run.md). Normative
 engineering rules for contributors and agents live in [`AGENTS.md`](AGENTS.md).
+Release-level changes are summarized in [`CHANGELOG.md`](CHANGELOG.md), with
+detailed notes for the current candidate in
+[`docs/releases/v0.2.0.md`](docs/releases/v0.2.0.md).
 
 A static, Diátaxis-organised documentation site lives in [`site/`](site/) —
 plain HTML and one CSS file, no runtime dependency. The complete first run is on
