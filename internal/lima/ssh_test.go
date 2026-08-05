@@ -45,6 +45,37 @@ func TestSSHExactArgvWithCommand(t *testing.T) {
 	}
 }
 
+func TestSSHUsesInstanceSelectedAfterPackageInitialization(t *testing.T) {
+	previous := InstanceName
+	InstanceName = "torio-e2e"
+	t.Cleanup(func() { InstanceName = previous })
+
+	for _, tc := range []struct {
+		name string
+		call func(*Adapter) error
+	}{
+		{name: "SSH", call: func(a *Adapter) error {
+			_, err := a.SSH(context.Background(), []string{"true"})
+			return err
+		}},
+		{name: "SSHInput", call: func(a *Adapter) error {
+			_, err := a.SSHInput(context.Background(), []byte("payload"), []string{"tee", "/tmp/x"})
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fr := &fakeRunner{script: []scriptedResponse{{result: exitResult(0, "", "")}}}
+			if err := tc.call(New(fr)); err != nil {
+				t.Fatalf("%s: unexpected error: %v", tc.name, err)
+			}
+			got := fr.callArgs(0)
+			if len(got) < 5 || got[4] != "torio-e2e" {
+				t.Fatalf("argv = %v, want selected instance at argv[4]", got)
+			}
+		})
+	}
+}
+
 // TestSSHPinsTheGuestWorkingDirectory guards the flag that keeps guest commands
 // out of the Lima login user's home.
 //

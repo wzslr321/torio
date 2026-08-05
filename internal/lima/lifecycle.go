@@ -75,7 +75,8 @@ func (a *Adapter) Start(ctx context.Context) error {
 // new session, and tearing the master down under a running `torio project shell`
 // would take the operator's own session with it.
 func (a *Adapter) refreshSession(ctx context.Context, op string) error {
-	args := append([]string{"shell", "--reconnect"}, guestShellArgs[1:]...)
+	prefix := guestShellArgs()
+	args := append([]string{"shell", "--reconnect"}, prefix[1:]...)
 	res, err := a.runRaw(ctx, append(args, "true")...)
 	if err != nil {
 		return classifyRunErr(op, err)
@@ -91,7 +92,7 @@ func (a *Adapter) refreshSession(ctx context.Context, op string) error {
 // missing instance is KindNotFound, and an ambiguous state (Broken/Unknown)
 // fails closed rather than being silently mutated. `stop` is graceful — it
 // never passes --force and never removes the instance or its data
-// (docs/contracts/cli.md: "stop removes no VM and no data"). As with Start, a
+// (docs/contracts/cli.md: "stop nie usuwa VM ani danych"). As with Start, a
 // clean exit from `stop` is not accepted as proof: Stop re-queries and requires
 // the observed post-state to be Stopped, else fails closed
 // (KindPostconditionFailed).

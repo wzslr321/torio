@@ -6,7 +6,7 @@ import (
 	"github.com/wzslr321/torio/internal/execx"
 )
 
-// guestShellArgs is the fixed limactl prefix of every guest command.
+// guestShellArgs returns the fixed limactl prefix of every guest command.
 //
 // The working directory is pinned rather than inherited. `limactl shell` starts
 // in the host's working directory when that path also exists on the guest, and
@@ -22,7 +22,13 @@ import (
 // where nothing was wrong. Every guest command addresses absolute paths, so the
 // working directory carries no meaning here; "/" is the one directory every
 // identity on the guest can enter.
-var guestShellArgs = []string{"shell", "--tty=false", "--workdir", "/", InstanceName, "--"}
+//
+// It is built at call time because cli.Run selects InstanceName during process
+// startup. Capturing InstanceName in a package-level slice would permanently
+// retain the default instance and route named-instance commands to the wrong VM.
+func guestShellArgs() []string {
+	return []string{"shell", "--tty=false", "--workdir", "/", InstanceName, "--"}
+}
 
 // SSH runs command inside InstanceName via `limactl shell`. Each element of
 // command is passed as a separate argv entry — never joined into a shell
@@ -34,8 +40,9 @@ var guestShellArgs = []string{"shell", "--tty=false", "--workdir", "/", Instance
 func (a *Adapter) SSH(ctx context.Context, command []string) (execx.Result, error) {
 	const op = "ssh"
 
-	args := make([]string, 0, len(command)+len(guestShellArgs)+1)
-	args = append(args, guestShellArgs...)
+	prefix := guestShellArgs()
+	args := make([]string, 0, len(command)+len(prefix)+1)
+	args = append(args, prefix...)
 	args = append(args, command...)
 
 	res, err := a.runRaw(ctx, args...)
@@ -54,8 +61,9 @@ func (a *Adapter) SSH(ctx context.Context, command []string) (execx.Result, erro
 func (a *Adapter) SSHInput(ctx context.Context, stdin []byte, command []string) (execx.Result, error) {
 	const op = "ssh"
 
-	args := make([]string, 0, len(command)+len(guestShellArgs)+1)
-	args = append(args, guestShellArgs...)
+	prefix := guestShellArgs()
+	args := make([]string, 0, len(command)+len(prefix)+1)
+	args = append(args, prefix...)
 	args = append(args, command...)
 
 	res, err := a.Runner.Run(ctx, execx.Command{Name: a.bin(), Args: args, Stdin: stdin})
