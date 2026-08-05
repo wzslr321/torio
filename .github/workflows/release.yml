@@ -15,8 +15,20 @@ permissions:
   contents: write
 
 jobs:
+  platform-e2e:
+    name: verify on real macOS arm64 / Lima
+    permissions:
+      contents: read
+    uses: ./.github/workflows/platform-e2e.yml
+    with:
+      checkout_ref: ${{ inputs.tag || github.ref }}
+      # Hosted runners cannot boot a guest; the full journey is a manual gate on
+      # real Apple Silicon. See .github/workflows/platform-e2e.yml.
+      stage: host
+
   darwin-arm64:
     name: package darwin/arm64
+    needs: platform-e2e
     # Cross-compile from Linux runner; GOOS/GOARCH produce the macOS arm64 binary.
     runs-on: ubuntu-latest
     steps:
@@ -24,6 +36,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
@@ -33,10 +46,12 @@ jobs:
 
       - name: Resolve version
         id: meta
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            REF="${{ inputs.tag }}"
+            REF="${REQUESTED_TAG}"
           else
             REF="${GITHUB_REF_NAME}"
           fi
@@ -55,6 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           make validate
+          make e2e
           go test ./...
           go vet ./...
 

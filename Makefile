@@ -1,4 +1,4 @@
-.PHONY: validate test fmt vet docs docs-check package-release
+.PHONY: validate test e2e platform-e2e fmt vet docs docs-check package-release
 
 docs:
 	python3 scripts/build_docs.py
@@ -20,11 +20,27 @@ test: validate
 		echo "nvim not installed; Neovim integration smoke test skipped"; \
 	fi
 
+# The e2e suites live in their own module, so every target that touches them
+# runs go with -C. Nothing here reaches into the root module and nothing there
+# reaches in.
+e2e:
+	go test -C e2e -count=1 -tags=e2e ./...
+
 fmt:
 	@if command -v go >/dev/null 2>&1; then gofmt -w $$(find . -name '*.go' -not -path './.worktrees/*'); fi
 
 vet:
 	@if command -v go >/dev/null 2>&1; then go vet ./...; fi
+	@if command -v go >/dev/null 2>&1; then go vet -C e2e -tags=e2e ./...; fi
+	@if command -v go >/dev/null 2>&1; then go vet -C e2e -tags=platform_e2e ./...; fi
+
+platform-e2e:
+	@test -n "$$PLATFORM_E2E_TORIO_BIN" || (echo "PLATFORM_E2E_TORIO_BIN is required" >&2; exit 2)
+	@test -n "$$PLATFORM_E2E_ARTIFACT_DIR" || (echo "PLATFORM_E2E_ARTIFACT_DIR is required" >&2; exit 2)
+	PLATFORM_E2E_RUN=1 go test -C e2e -count=1 -tags=platform_e2e -timeout=33m -v \
+		./platform -ginkgo.v \
+		-ginkgo.label-filter="$$PLATFORM_E2E_LABEL_FILTER" \
+		-ginkgo.junit-report="$(abspath $(PLATFORM_E2E_ARTIFACT_DIR))/ginkgo-junit.xml"
 
 # Build + package a darwin/arm64 release tarball into dist/.
 # Usage: make package-release VERSION=1.0.0

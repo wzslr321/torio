@@ -1,0 +1,326 @@
+//go:build platform_e2e
+
+package platform
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+)
+
+const (
+	defaultFixtureRemote = "https://github.com/octocat/Hello-World.git"
+	defaultFixtureCommit = "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
+)
+
+// The journey splits at the hypervisor boundary. Everything up to and including
+// `torio vm init` is host work — real release tarball, real install, real
+// limactl, real image pin — and runs anywhere macOS/arm64 runs. Everything from
+// `torio vm start` on needs Lima's vz driver to actually boot a guest, which
+// requires a hypervisor the host is allowed to use. GitHub-hosted macOS arm64
+// runners are themselves VMs without nested virtualization, so they can serve
+// the host stage only.
+const (
+	hostStage  = "host"
+	guestStage = "guest"
+)
+
+var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
+	var (
+		torio           *driver
+		workDir         string
+		fixtureDir      string
+		artifactDir     string
+		instanceName    string
+		fixtureRemote   string
+		fixtureCommit   string
+		ownsInstance    bool
+		externalCleanup bool
+		repositoryRoot  string
+	)
+
+	BeforeAll(func(_ SpecContext) {
+		Expect(os.Getenv("PLATFORM_E2E_RUN")).To(Equal("1"), "run through make platform-e2e")
+		Expect(runtime.GOOS).To(Equal("darwin"), "real platform E2E requires macOS")
+		Expect(runtime.GOARCH).To(Equal("arm64"), "real platform E2E requires Apple Silicon")
+		_, err := exec.LookPath("limactl")
+		Expect(err).NotTo(HaveOccurred(), "real limactl is required")
+
+		instanceName = os.Getenv("TORIO_INSTANCE")
+		Expect(instanceName).NotTo(BeEmpty(), "TORIO_INSTANCE is required")
+		artifactDir = os.Getenv("PLATFORM_E2E_ARTIFACT_DIR")
+		Expect(artifactDir).NotTo(BeEmpty(), "PLATFORM_E2E_ARTIFACT_DIR is required")
+		binary := os.Getenv("PLATFORM_E2E_TORIO_BIN")
+		expectedVersion := os.Getenv("PLATFORM_E2E_EXPECTED_VERSION")
+		Expect(expectedVersion).NotTo(BeEmpty(), "PLATFORM_E2E_EXPECTED_VERSION is required")
+
+		workDir, err = os.MkdirTemp("", "torio-platform-e2e-")
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() {
+			Expect(os.RemoveAll(workDir)).To(Succeed())
+		})
+
+		fixtureDir = filepath.Join(workDir, "brain-fixture")
+		Expect(os.MkdirAll(fixtureDir, 0o700)).To(Succeed())
+		Expect(os.WriteFile(
+			filepath.Join(fixtureDir, "README.md"),
+			[]byte("# Torio platform E2E\n\nThis note crossed the real Lima transport.\n"),
+			0o600,
+		)).To(Succeed())
+
+		fixtureRemote = environmentOr("PLATFORM_E2E_REMOTE", defaultFixtureRemote)
+		fixtureCommit = environmentOr("PLATFORM_E2E_FIXTURE_COMMIT", defaultFixtureCommit)
+		repositoryRoot = resolveRepositoryRoot()
+		externalCleanup = os.Getenv("PLATFORM_E2E_EXTERNAL_CLEANUP") == "1"
+		torio = newDriver(binary, artifactDir, filepath.Join(workDir, "xdg"))
+
+		captureTechnicalVersions(artifactDir)
+		exists, listErr := limaInstanceExists(instanceName)
+		Expect(listErr).NotTo(HaveOccurred(), "read Lima instance state")
+		Expect(exists).To(BeFalse(), "refusing to touch pre-existing Lima instance %s", instanceName)
+
+		// The caller owns teardown when it can also collect the Lima host-agent
+		// and serial logs first: deleting the instance destroys them, and they
+		// are the only evidence of why a VM refused to boot. The workflow runs
+		// diagnostics.sh before cleanup.sh; a local run has no such ordering, so
+		// the suite keeps cleaning up after itself there.
+		DeferCleanup(func(specContext SpecContext) {
+			ctx, cancel := context.WithTimeout(specContext, 4*time.Minute)
+			defer cancel()
+			if !ownsInstance || externalCleanup {
+				return
+			}
+			cleanup := exec.CommandContext(ctx, "bash", filepath.Join(repositoryRoot, "e2e/platform/cleanup.sh"))
+			cleanup.Env = os.Environ()
+			output, cleanupErr := cleanup.CombinedOutput()
+			Expect(cleanupErr).NotTo(HaveOccurred(), "cleanup owned Lima instance: %s", output)
+		}, NodeTimeout(5*time.Minute))
+	}, NodeTimeout(2*time.Minute))
+
+	It("installs the expected artifact and provisions a real VM instance", Label(hostStage), func(ctx SpecContext) {
+		torio.setContext(ctx)
+		version := torio.mustRun("torio-version", "version", "version")
+		expectData(version, map[string]any{
+			"os":      "darwin",
+			"arch":    "arm64",
+			"version": os.Getenv("PLATFORM_E2E_EXPECTED_VERSION"),
+		})
+
+		absent := torio.mustRun("vm-status-absent", "vm.status", "vm", "status")
+		expectData(absent, map[string]any{"name": instanceName, "state": "not_found"})
+
+		ownsInstance = true
+		created := torio.mustRun("vm-init", "vm.init", "vm", "init", "--cpus", "2", "--memory", "4GiB", "--disk", "20GiB")
+		expectData(created, map[string]any{"name": instanceName, "created": true, "unchanged": false})
+		unchanged := torio.mustRun("vm-init-idempotent", "vm.init", "vm", "init", "--cpus", "2", "--memory", "4GiB", "--disk", "20GiB")
+		expectData(unchanged, map[string]any{"created": false, "unchanged": true})
+	}, SpecTimeout(10*time.Minute))
+
+	It("starts a real VM", Label(guestStage), func(ctx SpecContext) {
+		torio.setContext(ctx)
+		requireHypervisor()
+
+		started := torio.mustRun("vm-start", "vm.start", "vm", "start")
+		expectData(started, map[string]any{"state": "running"})
+		Eventually(func() (string, error) {
+			status, runErr := torio.run("vm-status-eventually-running", "vm.status", "vm", "status")
+			if runErr != nil {
+				return "", runErr
+			}
+			state, ok := status.Data["state"].(string)
+			if !ok {
+				return "", fmt.Errorf("vm.status data.state is not a string")
+			}
+			return state, nil
+		}).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(Equal("running"))
+	}, SpecTimeout(10*time.Minute))
+
+	It("bootstraps Hermes and imports Brain content into the guest", Label(guestStage), func(ctx SpecContext) {
+		torio.setContext(ctx)
+		torio.mustRun("vm-bootstrap", "vm.bootstrap", "vm", "bootstrap")
+		torio.mustRun("vm-bootstrap-idempotent", "vm.bootstrap", "vm", "bootstrap")
+		hermesVersion := torio.mustRun("hermes-version", "vm.ssh", "vm", "ssh", "--", "sudo", "-u", "hermes", "--", "hermes", "--version")
+		expectData(hermesVersion, map[string]any{"exit_code": float64(0)})
+
+		brainInit := torio.mustRun("brain-init", "brain.init", "brain", "init")
+		expectData(brainInit, map[string]any{"created": true, "state": "initialized"})
+		brainAgain := torio.mustRun("brain-init-idempotent", "brain.init", "brain", "init")
+		expectData(brainAgain, map[string]any{"created": false, "state": "initialized"})
+		brainImport := torio.mustRun("brain-import", "brain.import", "brain", "import", fixtureDir, "--into", "ci-fixture")
+		expectData(brainImport, map[string]any{
+			"dry_run":        false,
+			"files":          float64(1),
+			"markdown_files": float64(1),
+			"conflicts":      float64(0),
+		})
+		// As hermes, not as the Lima login user: `brain init` reports the Brain
+		// as 0750 hermes:hermes, so the login user cannot traverse it and `test`
+		// would report the file missing when it is merely unreadable. The
+		// projects tree is different — 0710 on the shared group — which is why
+		// the checks there need no sudo.
+		present := torio.mustRun("brain-fixture-present", "vm.ssh", "vm", "ssh", "--", "sudo", "-u", "hermes", "--", "test", "-f", "/home/hermes/brain/ci-fixture/README.md")
+		expectData(present, map[string]any{"exit_code": float64(0)})
+		brainStatus := torio.mustRun("brain-status", "brain.status", "brain", "status")
+		expectData(brainStatus, map[string]any{
+			"state":              "initialized",
+			"native_filesystem":  true,
+			"project_registered": true,
+		})
+	}, SpecTimeout(15*time.Minute))
+
+	It("installs and exercises the persistent Hermes backend", Label(guestStage), func(ctx SpecContext) {
+		torio.setContext(ctx)
+		installed := torio.mustRun("serve-install", "serve.install", "serve", "install")
+		expectData(installed, map[string]any{"validated": true, "enabled": true})
+		again := torio.mustRun("serve-install-idempotent", "serve.install", "serve", "install")
+		expectData(again, map[string]any{"changed": false, "validated": true, "enabled": true})
+		started := torio.mustRun("serve-start", "serve.start", "serve", "start")
+		expectData(started, map[string]any{"active": true, "endpoint_ready": true, "ready": true})
+		status := torio.mustRun("serve-status", "serve.status", "serve", "status")
+		expectData(status, map[string]any{"active": true, "endpoint_ready": true, "ready": true})
+		restarted := torio.mustRun("serve-restart", "serve.restart", "serve", "restart")
+		expectData(restarted, map[string]any{"active": true, "endpoint_ready": true, "ready": true})
+	}, SpecTimeout(12*time.Minute))
+
+	It("attaches, verifies and removes a real Git project non-destructively", Label(guestStage), func(ctx SpecContext) {
+		torio.setContext(ctx)
+		added := torio.mustRun("project-add", "project.add", "project", "add", "ci-fixture", fixtureRemote, "--id", "ci-fixture", "--use")
+		expectData(added, map[string]any{"id": "ci-fixture", "cloned": true, "registered": true, "activated": true})
+		listed := torio.mustRun("project-list", "project.list", "project", "list")
+		expectData(listed, map[string]any{"count": float64(1)})
+		shown := torio.mustRun("project-show", "project.show", "project", "show", "ci-fixture")
+		expectData(shown, map[string]any{
+			"checkout.path_exists":          true,
+			"checkout.repository":           true,
+			"checkout.origin_matches":       true,
+			"checkout.full_clone":           true,
+			"checkout.no_credential_helper": true,
+			"checkout.shared_permissions":   true,
+			"hermes.registered":             true,
+			"issues":                        []any{},
+		})
+
+		checkout := torio.mustRun("project-fixture-checkout", "vm.ssh", "vm", "ssh", "--", "sudo", "-u", "hermes", "--", "git", "-C", "/home/hermes/projects/ci-fixture", "checkout", "--detach", fixtureCommit)
+		expectData(checkout, map[string]any{"exit_code": float64(0)})
+		head := torio.mustRun("project-fixture-head", "vm.ssh", "vm", "ssh", "--", "sudo", "-u", "hermes", "--", "git", "-C", "/home/hermes/projects/ci-fixture", "rev-parse", "HEAD")
+		expectData(head, map[string]any{"exit_code": float64(0), "stdout": fixtureCommit + "\n"})
+		used := torio.mustRun("project-use", "project.use", "project", "use", "ci-fixture")
+		expectData(used, map[string]any{"active": true})
+		removed := torio.mustRun("project-remove", "project.remove", "project", "remove", "ci-fixture")
+		expectData(removed, map[string]any{"checkout_retained": true})
+		empty := torio.mustRun("project-list-empty", "project.list", "project", "list")
+		expectData(empty, map[string]any{"count": float64(0)})
+		retained := torio.mustRun("project-checkout-retained", "vm.ssh", "vm", "ssh", "--", "test", "-d", "/home/hermes/projects/ci-fixture")
+		expectData(retained, map[string]any{"exit_code": float64(0)})
+	}, SpecTimeout(12*time.Minute))
+
+	It("stops services and the VM idempotently", Label(guestStage), func(ctx SpecContext) {
+		torio.setContext(ctx)
+		stoppedService := torio.mustRun("serve-stop", "serve.stop", "serve", "stop")
+		expectData(stoppedService, map[string]any{"active": false})
+		stoppedAgain := torio.mustRun("serve-stop-idempotent", "serve.stop", "serve", "stop")
+		expectData(stoppedAgain, map[string]any{"active": false})
+		stoppedVM := torio.mustRun("vm-stop", "vm.stop", "vm", "stop")
+		expectData(stoppedVM, map[string]any{"state": "stopped"})
+		stoppedVMAgain := torio.mustRun("vm-stop-idempotent", "vm.stop", "vm", "stop")
+		expectData(stoppedVMAgain, map[string]any{"state": "stopped"})
+		status := torio.mustRun("vm-status-stopped", "vm.status", "vm", "status")
+		expectData(status, map[string]any{"state": "stopped"})
+	}, SpecTimeout(8*time.Minute))
+})
+
+func environmentOr(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func resolveRepositoryRoot() string {
+	GinkgoHelper()
+	_, source, _, ok := runtime.Caller(0)
+	Expect(ok).To(BeTrue(), "resolve platform E2E source path")
+	return filepath.Clean(filepath.Join(filepath.Dir(source), "..", ".."))
+}
+
+func limaInstanceExists(instanceName string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "limactl", "list", "--quiet")
+	output, err := cmd.Output()
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, name := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if name == instanceName {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// requireHypervisor fails the guest stage before Lima is asked to boot anything.
+// Without it the failure surfaces as `limactl start` exiting after the host
+// agent quits with an empty error list, which says nothing about the cause.
+func requireHypervisor() {
+	GinkgoHelper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	// A host that cannot virtualize reports 0 — and a host that is itself a
+	// guest does not publish the OID at all, which is what GitHub's macOS arm64
+	// runners do. Both mean the same thing here, so neither is an error to
+	// propagate: they are the answer.
+	output, err := exec.CommandContext(ctx, "sysctl", "-n", "kern.hv_support").CombinedOutput()
+	observed := strings.TrimSpace(string(output))
+	if err != nil {
+		observed = fmt.Sprintf("unreadable (%v: %s)", err, observed)
+	}
+	Expect(observed).To(Equal("1"),
+		"kern.hv_support is %s: this host cannot use Apple's Virtualization framework, "+
+			"so Lima's vz driver cannot boot a guest. GitHub-hosted macOS arm64 runners are "+
+			"themselves VMs without nested virtualization; run the guest stage on real "+
+			"Apple Silicon.", observed)
+}
+
+func captureTechnicalVersions(artifactDir string) {
+	GinkgoHelper()
+	commands := []struct {
+		label string
+		name  string
+		args  []string
+		// A host that is itself a guest does not publish kern.hv_support at all,
+		// so sysctl exits non-zero. That output is the diagnostic — recording it
+		// is the point, and failing on it would throw the evidence away.
+		recordFailure bool
+	}{
+		{label: "limactl-version.txt", name: "limactl", args: []string{"--version"}},
+		{label: "macos-version.txt", name: "sw_vers"},
+		{label: "go-version.txt", name: "go", args: []string{"version"}},
+		{label: "hv-support.txt", name: "sysctl", args: []string{"kern.hv_support"}, recordFailure: true},
+	}
+	for _, command := range commands {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		cmd := exec.CommandContext(ctx, command.name, command.args...)
+		var output bytes.Buffer
+		cmd.Stdout = &output
+		cmd.Stderr = &output
+		err := cmd.Run()
+		cancel()
+		if !command.recordFailure {
+			Expect(err).NotTo(HaveOccurred(), "capture %s: %s", command.label, output.String())
+		}
+		Expect(writeArtifact(filepath.Join(artifactDir, command.label), output.Bytes())).To(Succeed())
+	}
+}

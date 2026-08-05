@@ -1,0 +1,149 @@
+name: platform-e2e
+
+# The journey is split at the hypervisor boundary (see e2e/platform/journey_test.go).
+# The `host` stage — release tarball, install.sh, real limactl, `torio vm init`
+# and its image pin — runs on any macOS arm64 machine, so GitHub-hosted runners
+# can gate every PR and every release on it. The `guest` stage boots the VM and
+# needs Apple's Virtualization framework, which hosted runners cannot offer:
+# they are themselves VMs without nested virtualization. Run `full` by hand on
+# real Apple Silicon, or point `runner` at a self-hosted arm64 Mac.
+on:
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: Git ref to verify when called from another workflow
+        required: false
+        type: string
+      stage:
+        description: "host (no hypervisor needed) or full (boots a real VM)"
+        required: false
+        type: string
+        default: host
+      runner:
+        description: Runner label to execute on
+        required: false
+        type: string
+        default: macos-15
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "host (no hypervisor needed) or full (boots a real VM)"
+        required: false
+        type: choice
+        default: host
+        options: [host, full]
+      runner:
+        description: Runner label to execute on (needs real Apple Silicon for full)
+        required: false
+        type: string
+        default: macos-15
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  platform:
+    name: real macOS arm64 / Lima ${{ inputs.stage || 'host' }} stage
+    runs-on: ${{ inputs.runner || 'macos-15' }}
+    timeout-minutes: ${{ inputs.stage == 'full' && 75 || 25 }}
+    env:
+      TORIO_INSTANCE: torio-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      PLATFORM_E2E_STAGE: ${{ inputs.stage || 'host' }}
+    steps:
+      - name: Checkout
+        timeout-minutes: 3
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+
+      - name: Set up Go
+        timeout-minutes: 5
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: "1.26.5"
+          check-latest: false
+
+      - name: Install verified Lima 2.2.0
+        timeout-minutes: 5
+        env:
+          LIMA_ARCHIVE: lima-2.2.0-Darwin-arm64.tar.gz
+          LIMA_SHA256: bbdef91774885a0d05f7b048c4eb89ae2bcf3a0c252ae7ca7934e63df76d93c3
+        run: |
+          set -euo pipefail
+          lima_root="${RUNNER_TEMP}/lima-2.2.0"
+          archive="${RUNNER_TEMP}/${LIMA_ARCHIVE}"
+          mkdir -p "${lima_root}"
+          curl --fail --silent --show-error --location \
+            --retry 3 --retry-all-errors \
+            --output "${archive}" \
+            "https://github.com/lima-vm/lima/releases/download/v2.2.0/${LIMA_ARCHIVE}"
+          printf '%s  %s\n' "${LIMA_SHA256}" "${archive}" | shasum -a 256 -c -
+          tar -xzf "${archive}" -C "${lima_root}"
+          printf '%s/bin\n' "${lima_root}" >> "${GITHUB_PATH}"
+
+      - name: Build and install release-shaped Torio
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          make package-release VERSION=0.0.0
+          bash scripts/install.sh \
+            --version 0.0.0 \
+            --base-url "${PWD}/dist" \
+            --prefix "${RUNNER_TEMP}/torio-e2e-bin"
+
+      - name: Run real product journey
+        timeout-minutes: ${{ inputs.stage == 'full' && 35 || 15 }}
+        env:
+          PLATFORM_E2E_ARTIFACT_DIR: ${{ runner.temp }}/torio-platform-e2e-artifacts
+          PLATFORM_E2E_EXPECTED_VERSION: 0.0.0
+          PLATFORM_E2E_TORIO_BIN: ${{ runner.temp }}/torio-e2e-bin/torio
+          # Diagnostics must read the Lima instance before anything deletes it,
+          # so the two steps below own teardown instead of the suite.
+          PLATFORM_E2E_EXTERNAL_CLEANUP: "1"
+        run: |
+          set -euo pipefail
+          case "${PLATFORM_E2E_STAGE}" in
+            host) export PLATFORM_E2E_LABEL_FILTER='!guest' ;;
+            full) export PLATFORM_E2E_LABEL_FILTER='' ;;
+            *) printf 'unknown stage %s\n' "${PLATFORM_E2E_STAGE}" >&2; exit 2 ;;
+          esac
+          make platform-e2e
+
+      - name: Collect failure diagnostics
+        if: failure() || cancelled()
+        timeout-minutes: 3
+        env:
+          PLATFORM_E2E_ARTIFACT_DIR: ${{ runner.temp }}/torio-platform-e2e-artifacts
+        run: bash e2e/platform/diagnostics.sh
+
+      - name: Remove the E2E VM
+        if: always()
+        timeout-minutes: 5
+        run: bash e2e/platform/cleanup.sh
+
+      - name: Upload Ginkgo JUnit report
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: platform-e2e-junit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/torio-platform-e2e-artifacts/ginkgo-junit.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload failure diagnostics
+        if: failure() || cancelled()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: platform-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/torio-platform-e2e-artifacts
+          if-no-files-found: warn
+          retention-days: 7

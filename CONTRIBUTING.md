@@ -51,13 +51,15 @@ command.
 ## Tests
 
 Every pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on
-pinned Go **1.26.5**: `make validate`, `go test ./...`, `go vet ./...`, and a
-separate `go test -race ./...` job.
+pinned Go **1.26.5**: `make validate`, `go test ./...`, `go vet ./...`, the
+host-free end-to-end suite through `make e2e`, and a separate `go test -race
+./...` job.
 
 Locally:
 
 ```bash
 make validate             # docs --check + link check + artefacts + script tests
+make e2e                  # compiled binary against an in-process limactl fake
 go test ./...
 go test -race ./...       # before reviewing concurrency or state changes
 go vet ./...
@@ -67,9 +69,65 @@ Every new behaviour goes RED → GREEN → REFACTOR. A spike is the only excepti
 it lives in `spikes/`, and its code is either removed or explicitly approved for a
 test-first rewrite — it never graduates into `internal/` unchanged.
 
-The end-to-end harness in `spikes/v1-e2e/` needs a real Apple Silicon Mac, a
-provisioned VM, Hermes Desktop and a human. `make validate` runs only its
-structural assertions, which read the driver as text and never execute it.
+## End-to-end suites
+
+`e2e/` is its own Go module. Both suites drive the compiled `torio` binary as a
+separate process and read its JSON envelopes; neither imports the product code.
+Keeping them out of the root module is what stops a test framework's dependency
+graph from reaching the module that holds the credential boundary — `go test
+./...` at the root does not descend into it, and `go.mod` there stays four
+requirements long.
+
+Both levels use Ginkgo v2 and Gomega, behind build tags, so neither runs unless
+it is asked for.
+
+**`make e2e`** (tag `e2e`) runs the compiled binary against an in-process
+`limactl` fake that keeps state between invocations. It covers binary wiring,
+flag parsing, JSON envelopes, exit codes, idempotence and mutation order. It
+needs no host support and gates every pull request.
+
+**`make platform-e2e`** (tag `platform_e2e`) runs the real product on macOS
+arm64 through [`.github/workflows/platform-e2e.yml`](.github/workflows/platform-e2e.yml).
+It substitutes nothing: real `limactl`, a throwaway instance named after the run
+ID, and a blocking cleanup step that survives cancellation, retries the delete
+and verifies the VM is gone. On failure it keeps technical diagnostics for seven
+days, collected **before** the instance is removed — `limactl delete` takes the
+host-agent and serial console logs with it, and those are the only trace left by
+a VM that refused to start.
+
+The journey is cut at the hypervisor boundary by the Ginkgo labels `host` and
+`guest`:
+
+- **`host`** — release tarball, `scripts/install.sh`, real `limactl`, and
+  `torio vm init` including the image pin and idempotence. Runs on any macOS
+  arm64, so it gates every pull request and every release.
+- **`guest`** — everything from `torio vm start` on: Hermes bootstrap, Brain,
+  backend, project attach/show/remove. Needs Virtualization.framework.
+
+GitHub-hosted macOS arm64 runners are themselves VMs without nested
+virtualization, so `vz` starts no guest there: `kern.hv_support` is `0` and the
+`guest` stage aborts with that message rather than waiting for Lima's host agent
+to exit with an empty error list. Run the full journey by hand — a
+`workflow_dispatch` with `stage: full` and a `runner` pointing at real Apple
+Silicon, or locally:
+
+```bash
+export TORIO_INSTANCE=torio-ci-local
+export PLATFORM_E2E_TORIO_BIN=/path/to/installed/torio
+export PLATFORM_E2E_EXPECTED_VERSION=0.0.0
+export PLATFORM_E2E_ARTIFACT_DIR=/tmp/torio-platform-e2e-artifacts
+make platform-e2e                                     # the whole journey
+PLATFORM_E2E_LABEL_FILTER='!guest' make platform-e2e  # the host stage alone
+```
+
+It refuses to run without a release-shaped binary, off Darwin/arm64, and when the
+instance already exists. If it creates one, it removes it with `limactl delete`
+even on failure. Do not point it at a machine whose state you want to keep.
+
+The harness in `spikes/v1-e2e/` is a different thing again: it needs a real Apple
+Silicon Mac, a provisioned VM, Hermes Desktop and a human. `make validate` runs
+only its structural assertions, which read the driver as text and never execute
+it.
 
 ## Review checklist
 
