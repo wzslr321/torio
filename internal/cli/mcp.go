@@ -72,7 +72,7 @@ type mcpStatusData struct {
 }
 
 // mcpPolicyData is the grant, in the envelope. The checks already say the policy
-// parsed; this says what it grants, in a form a caller can act on. ADR-0022
+// parsed; this says what it grants, in a form a caller can act on. ADR-0004
 // makes that legibility the point of the arrangement, and a count recovered by
 // parsing an English detail line is not legible to anything but a human.
 type mcpPolicyData struct {

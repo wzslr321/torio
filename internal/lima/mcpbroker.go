@@ -66,7 +66,7 @@ type MCPBrokerReport struct {
 // PolicyGrant is what the guest's policy documents grant, in the shape a report
 // renders it: enumerated by service and counted.
 //
-// ADR-0022 §4 requires a report to be able to state how many granted tools carry
+// ADR-0004 §4 requires a report to be able to state how many granted tools carry
 // a write, which is the reason the write flag is mandatory in the document. A
 // caller that has to recover that number by parsing an English detail line
 // cannot state it; so the count is carried as a count.
@@ -84,7 +84,7 @@ type PolicyGrant struct {
 //
 // The tool names themselves stay out. A report answers what is granted and how
 // much of it writes; the question "exactly which tools" is answered by the
-// policy document, which ADR-0022 §4 keeps world-readable precisely so that
+// policy document, which ADR-0004 §4 keeps world-readable precisely so that
 // nobody has to take a summary's word for it.
 type PolicyService struct {
 	Name string

@@ -186,7 +186,7 @@ func TestMCPStatusHappyPathHumanAndJSON(t *testing.T) {
 	}
 }
 
-// TestMCPStatusReportsTheGrantItVerified is the reporting half of ADR-0022 §4.
+// TestMCPStatusReportsTheGrantItVerified is the reporting half of ADR-0004 §4.
 // The command surface is provider-agnostic — a service is a policy document, not
 // a code path — so the answer to "what is granted" has to be enumerated from the
 // documents rather than known in advance, and the count of granted write tools
@@ -248,7 +248,7 @@ func TestMCPStatusHumanOutputNamesEachServiceAndItsUpstream(t *testing.T) {
 // TestMCPStatusReportsNoWriteToolOnTheReleasedSurface pins what the released
 // command may show. Nothing in the shipped policy grants a write, so a report
 // claiming one would either be counting wrong or describing a guest provisioned
-// outside the documented surface. The count exists because ADR-0022 §4 requires
+// outside the documented surface. The count exists because ADR-0004 §4 requires
 // it to; it is not a capability this binary can use.
 func TestMCPStatusReportsNoWriteToolOnTheReleasedSurface(t *testing.T) {
 	code, stdout, _ := runVMWithFake(t, []string{"mcp", "status", "--json"}, &fakeLimaRunner{script: multiServiceMCPScript()})

@@ -104,7 +104,7 @@ func TestVerifyPolicyDirectoryWritableIsDrift(t *testing.T) {
 }
 
 // TestVerifyPolicyDocumentsSummarisesEveryServiceInOrder pins the report half of
-// ADR-0022 §4: the grant is enumerable, and the number of granted write tools is
+// ADR-0004 §4: the grant is enumerable, and the number of granted write tools is
 // a number the report holds rather than a sentence a reader has to interpret.
 //
 // The directory is listed in the order `find` happened to walk it, which is not
