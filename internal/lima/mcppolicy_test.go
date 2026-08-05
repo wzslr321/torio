@@ -103,6 +103,52 @@ func TestVerifyPolicyDirectoryWritableIsDrift(t *testing.T) {
 	assertFailedCheck(t, rep, "policy_documents")
 }
 
+// TestVerifyPolicyDocumentsSummarisesEveryServiceInOrder pins the report half of
+// ADR-0022 §4: the grant is enumerable, and the number of granted write tools is
+// a number the report holds rather than a sentence a reader has to interpret.
+//
+// The directory is listed in the order `find` happened to walk it, which is not
+// sorted. Two runs against one policy must still produce the same report, or the
+// digest that identifies a generation is comparing formatting rather than grant.
+func TestVerifyPolicyDocumentsSummarisesEveryServiceInOrder(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{
+		{result: stdoutResult("directory\ndirectory\n")},
+		{result: stdoutResult("root:root 755\n")},
+		{result: stdoutResult("slack.json root root 644 f\nlinear.json root root 644 f\natlassian.json root root 644 f\n")},
+		{result: stdoutResult(`{"schema_version":"1","service":"slack","upstream_endpoint":"https://slack.com/api/mcp","tools":[{"name":"slack_read_channel","writes":false},{"name":"slack_read_thread","writes":false},{"name":"slack_search_public","writes":false}]}`)},
+		{result: stdoutResult(`{"schema_version":"1","service":"linear","upstream_endpoint":"https://mcp.linear.app/sse","tools":[{"name":"create_issue","writes":true}]}`)},
+		{result: stdoutResult(`{"schema_version":"1","service":"atlassian","upstream_endpoint":"https://api.atlassian.com/v1/mcp","tools":[{"name":"getJiraIssue","writes":false},{"name":"searchConfluenceUsingCql","writes":false}]}`)},
+	}}
+	rep := &MCPBrokerReport{}
+
+	if err := New(fr).verifyPolicyDocuments(context.Background(), rep); err != nil {
+		t.Fatalf("a valid three-service policy was rejected: %v", err)
+	}
+
+	want := []PolicyService{
+		{Name: "atlassian", UpstreamEndpoint: "https://api.atlassian.com/v1/mcp", Tools: 2, WriteTools: 0},
+		{Name: "linear", UpstreamEndpoint: "https://mcp.linear.app/sse", Tools: 1, WriteTools: 1},
+		{Name: "slack", UpstreamEndpoint: "https://slack.com/api/mcp", Tools: 3, WriteTools: 0},
+	}
+	if len(rep.Policy.Services) != len(want) {
+		t.Fatalf("report carries %d services, want %d: %+v", len(rep.Policy.Services), len(want), rep.Policy.Services)
+	}
+	for i, w := range want {
+		if rep.Policy.Services[i] != w {
+			t.Errorf("service %d = %+v, want %+v", i, rep.Policy.Services[i], w)
+		}
+	}
+	// The digest is what verifyBrokerSockets compares against the generation the
+	// running broker published; a summary carrying a short or absent one would
+	// turn that comparison into a check that passes by accident.
+	if len(rep.Policy.Digest) != 64 {
+		t.Errorf("digest = %q, want a 64-character sha256", rep.Policy.Digest)
+	}
+	if c := findCheck(t, *rep, "policy_documents"); !strings.Contains(c.Detail, "3 service(s), 6 tool(s), 1 write tool(s)") {
+		t.Errorf("detail %q does not total the same grant the summary enumerates", c.Detail)
+	}
+}
+
 // TestVerifyMCPServersForeignCommandIsDrift is the one bypass the agent can
 // perform on its own.
 //

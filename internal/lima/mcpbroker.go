@@ -57,9 +57,46 @@ var torioMCPHomeSpec = bootstrapPathSpec{
 type MCPBrokerReport struct {
 	Instance string
 	Checks   []CheckResult
+	// Policy is the grant the verified documents carry. It is populated once
+	// verifyPolicyDocuments has proven and parsed them, and is empty before that
+	// and on every failure that precedes it.
+	Policy PolicyGrant
+}
 
-	policyServices map[string]struct{}
-	policyDigest   string
+// PolicyGrant is what the guest's policy documents grant, in the shape a report
+// renders it: enumerated by service and counted.
+//
+// ADR-0022 §4 requires a report to be able to state how many granted tools carry
+// a write, which is the reason the write flag is mandatory in the document. A
+// caller that has to recover that number by parsing an English detail line
+// cannot state it; so the count is carried as a count.
+type PolicyGrant struct {
+	// Digest identifies the effective grant independent of file formatting and
+	// tool order. It is the same value a running broker publishes and the value
+	// verifyBrokerSockets compares against, so a report and the process enforcing
+	// policy can be shown to be describing one grant rather than two.
+	Digest string
+	// Services is every service the policy speaks for, ordered by name.
+	Services []PolicyService
+}
+
+// PolicyService is one service's grant, summarised.
+//
+// The tool names themselves stay out. A report answers what is granted and how
+// much of it writes; the question "exactly which tools" is answered by the
+// policy document, which ADR-0022 §4 keeps world-readable precisely so that
+// nobody has to take a summary's word for it.
+type PolicyService struct {
+	Name string
+	// UpstreamEndpoint is where this service's traffic goes. An operator asking
+	// what is granted is also asking where the data lands, and the endpoint is
+	// the only place that is written down.
+	UpstreamEndpoint string
+	// Tools is how many tools the service grants, WriteTools how many of those
+	// are write-classified. Both are derived from the same parsed grant, so
+	// neither can drift from the other.
+	Tools      int
+	WriteTools int
 }
 
 func (r *MCPBrokerReport) record(name string, ok bool, detail string) {

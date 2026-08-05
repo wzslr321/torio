@@ -135,15 +135,38 @@ func (a *Adapter) verifyPolicyDocuments(ctx context.Context, rep *MCPBrokerRepor
 	if err != nil {
 		return a.brokerFailed(rep, name, "policy documents do not satisfy the strict broker schema", "repair the root-owned policy documents; the broker refuses a partially valid policy set")
 	}
-	grants := set.Grants()
-	rep.policyServices = make(map[string]struct{}, len(grants.Services))
-	rep.policyDigest = set.Digest()
+	rep.Policy = summarizePolicy(set)
 	tools, writeTools := 0, 0
-	for _, service := range grants.Services {
-		rep.policyServices[service.Name] = struct{}{}
-		tools += len(service.Tools)
+	for _, service := range rep.Policy.Services {
+		tools += service.Tools
 		writeTools += service.WriteTools
 	}
-	rep.record(name, true, fmt.Sprintf("%d service(s), %d tool(s), %d write tool(s); strict schema valid", len(grants.Services), tools, writeTools))
+	rep.record(name, true, fmt.Sprintf("%d service(s), %d tool(s), %d write tool(s); strict schema valid", len(rep.Policy.Services), tools, writeTools))
 	return nil
+}
+
+// summarizePolicy reduces a parsed policy set to what a report carries.
+//
+// It counts rather than re-derives: the write total comes from the broker's own
+// grant, which classified each tool when it validated the document. A summary
+// that recounted the tools itself would be a second implementation of the rule
+// the broker enforces, free to disagree with it.
+//
+// The order is the grant's, which is already sorted by service name, so two
+// reports of one policy are identical without sorting again here.
+func summarizePolicy(set mcpbroker.Set) PolicyGrant {
+	grants := set.Grants()
+	summary := PolicyGrant{
+		Digest:   set.Digest(),
+		Services: make([]PolicyService, 0, len(grants.Services)),
+	}
+	for _, service := range grants.Services {
+		summary.Services = append(summary.Services, PolicyService{
+			Name:             service.Name,
+			UpstreamEndpoint: service.UpstreamEndpoint,
+			Tools:            len(service.Tools),
+			WriteTools:       service.WriteTools,
+		})
+	}
+	return summary
 }

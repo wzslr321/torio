@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `torio mcp status` and `torio mcp install` report the grant they verified:
+  each service in the policy directory, its upstream endpoint, and its tool and
+  write-tool counts, as a `policy` object under `--json` and as a listing in
+  human output. Services are enumerated from the documents, so a second or third
+  provider needs no CLI change.
+
 ## 0.2.0 - 2026-08-04
 
 Detailed notes: [`docs/releases/v0.2.0.md`](docs/releases/v0.2.0.md).

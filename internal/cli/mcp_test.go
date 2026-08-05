@@ -33,10 +33,21 @@ ReadWritePaths=/home/torio-mcp
 WantedBy=multi-user.target
 `
 
-func cliTestPolicyDigest() string {
-	policy, err := brokerpolicy.ParseDocuments(map[string][]byte{
-		"atlassian.json": []byte(`{"schema_version":"1","service":"atlassian","upstream_endpoint":"https://api.atlassian.com/v1/mcp","tools":[{"name":"getJiraIssue","writes":false}]}`),
-	})
+// cliTestPolicyDocs are the policy documents the scripted guest serves. Keyed by
+// filename because that is what the guest hands back and what ParseDocuments
+// takes, so a test's idea of the grant and the broker's cannot diverge.
+var cliTestPolicyDocs = map[string]string{
+	"atlassian.json": `{"schema_version":"1","service":"atlassian","upstream_endpoint":"https://api.atlassian.com/v1/mcp","tools":[{"name":"getJiraIssue","writes":false}]}`,
+	"linear.json":    `{"schema_version":"1","service":"linear","upstream_endpoint":"https://mcp.linear.app/sse","tools":[{"name":"list_issues","writes":false}]}`,
+	"slack.json":     `{"schema_version":"1","service":"slack","upstream_endpoint":"https://slack.com/api/mcp","tools":[{"name":"slack_read_channel","writes":false},{"name":"slack_search_public","writes":false}]}`,
+}
+
+func cliTestPolicyDigest(files ...string) string {
+	documents := make(map[string][]byte, len(files))
+	for _, f := range files {
+		documents[f] = []byte(cliTestPolicyDocs[f])
+	}
+	policy, err := brokerpolicy.ParseDocuments(documents)
 	if err != nil {
 		panic(err)
 	}
@@ -67,7 +78,7 @@ func okMCPScript() []scriptedResp {
 		out("directory\ndirectory\n"),           // stat %F policy dir
 		out("root:root 755\n"),                  // stat %U:%G %a policy dir
 		out("atlassian.json root root 644 f\n"), // find policy documents
-		out(`{"schema_version":"1","service":"atlassian","upstream_endpoint":"https://api.atlassian.com/v1/mcp","tools":[{"name":"getJiraIssue","writes":false}]}`),
+		out(cliTestPolicyDocs["atlassian.json"]),
 		out("directory\nregular file\n"), // stat %F hermes config.yaml
 		out("mcp_servers:\n  atlassian:\n    command: /usr/local/bin/torio-mcp-connect\n"), // cat config.yaml
 		out("directory\ndirectory\n"), // runtime is present
@@ -85,8 +96,51 @@ func okMCPScript() []scriptedResp {
 		out("torio-mcp:torio-mcp-clients 750\n"),
 		out("atlassian.sock torio-mcp torio-mcp-clients 660\n"),
 		out("u_str LISTEN 0 4096 /run/torio-mcp/atlassian.sock 9 * 0\n"),
-		out(cliTestPolicyDigest() + "\n"),
+		out(cliTestPolicyDigest("atlassian.json") + "\n"),
 	}
+}
+
+// Indices into okMCPScript. The probes run in a fixed order, so a reply spliced
+// at a guessed offset would be consumed by a different check and prove nothing.
+const (
+	mcpPolicyListingIndex  = 15
+	mcpPolicyDocumentIndex = 16
+	mcpAgentConfigIndex    = 18
+	mcpSocketListingIndex  = 27
+)
+
+// multiServiceMCPScript is a guest whose policy directory holds three services
+// rather than one, listed in the order `find` walked the directory — which is
+// not sorted, and is not the order a report must present them in.
+func multiServiceMCPScript() []scriptedResp {
+	out := func(s string) scriptedResp { return scriptedResp{res: execx.Result{Stdout: []byte(s)}} }
+	script := okMCPScript()
+
+	script[mcpPolicyListingIndex] = out("slack.json root root 644 f\nlinear.json root root 644 f\natlassian.json root root 644 f\n")
+	// One `cat` per document, in the listing's order.
+	documents := []scriptedResp{
+		out(cliTestPolicyDocs["slack.json"]),
+		out(cliTestPolicyDocs["linear.json"]),
+		out(cliTestPolicyDocs["atlassian.json"]),
+	}
+	script = append(script[:mcpPolicyDocumentIndex], append(documents, script[mcpPolicyDocumentIndex+1:]...)...)
+	shift := len(documents) - 1
+
+	script[mcpAgentConfigIndex+shift] = out("mcp_servers:\n" +
+		"  atlassian:\n    command: /usr/local/bin/torio-mcp-connect\n" +
+		"  linear:\n    command: /usr/local/bin/torio-mcp-connect\n" +
+		"  slack:\n    command: /usr/local/bin/torio-mcp-connect\n")
+
+	socket := mcpSocketListingIndex + shift
+	script[socket] = out("atlassian.sock torio-mcp torio-mcp-clients 660\n" +
+		"linear.sock torio-mcp torio-mcp-clients 660\n" +
+		"slack.sock torio-mcp torio-mcp-clients 660\n")
+	script[socket+1] = out(
+		"u_str LISTEN 0 4096 /run/torio-mcp/atlassian.sock 9 * 0\n" +
+			"u_str LISTEN 0 4096 /run/torio-mcp/linear.sock 10 * 0\n" +
+			"u_str LISTEN 0 4096 /run/torio-mcp/slack.sock 11 * 0\n")
+	script[socket+2] = out(cliTestPolicyDigest("atlassian.json", "linear.json", "slack.json") + "\n")
+	return script
 }
 
 func TestMCPNoSubcommandIsUsage(t *testing.T) {
@@ -129,6 +183,87 @@ func TestMCPStatusHappyPathHumanAndJSON(t *testing.T) {
 	}
 	if data["broker_user"] != "torio-mcp" {
 		t.Errorf("data.broker_user = %v, want torio-mcp", data["broker_user"])
+	}
+}
+
+// TestMCPStatusReportsTheGrantItVerified is the reporting half of ADR-0022 §4.
+// The command surface is provider-agnostic — a service is a policy document, not
+// a code path — so the answer to "what is granted" has to be enumerated from the
+// documents rather than known in advance, and the count of granted write tools
+// has to be a number rather than a sentence.
+func TestMCPStatusReportsTheGrantItVerified(t *testing.T) {
+	code, stdout, stderr := runVMWithFake(t, []string{"mcp", "status", "--json"}, &fakeLimaRunner{script: multiServiceMCPScript()})
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q stdout=%q", code, stderr, stdout)
+	}
+	env := decodeOneEnvelope(t, stdout)
+	data, _ := env["data"].(map[string]any)
+	policy, _ := data["policy"].(map[string]any)
+	if digest, _ := policy["digest"].(string); len(digest) != 64 {
+		t.Errorf("policy.digest = %v, want the 64-character generation the broker publishes", policy["digest"])
+	}
+	services, _ := policy["services"].([]any)
+	if len(services) != 3 {
+		t.Fatalf("policy.services carries %d entries, want 3: %v", len(services), policy)
+	}
+
+	// Ordered by name, not by the order the guest's `find` happened to return.
+	// Two reports of one policy that differ only in order are two reports a
+	// caller has to diff by hand.
+	want := []map[string]any{
+		{"name": "atlassian", "upstream_endpoint": "https://api.atlassian.com/v1/mcp", "tools": 1.0, "write_tools": 0.0},
+		{"name": "linear", "upstream_endpoint": "https://mcp.linear.app/sse", "tools": 1.0, "write_tools": 0.0},
+		{"name": "slack", "upstream_endpoint": "https://slack.com/api/mcp", "tools": 2.0, "write_tools": 0.0},
+	}
+	for i, w := range want {
+		got, _ := services[i].(map[string]any)
+		for field, value := range w {
+			if got[field] != value {
+				t.Errorf("policy.services[%d].%s = %v, want %v", i, field, got[field], value)
+			}
+		}
+	}
+}
+
+// TestMCPStatusHumanOutputNamesEachServiceAndItsUpstream: an operator asking
+// what is granted is also asking where the data goes, and the endpoint is the
+// only place that is written down.
+func TestMCPStatusHumanOutputNamesEachServiceAndItsUpstream(t *testing.T) {
+	code, stdout, stderr := runVMWithFake(t, []string{"mcp", "status"}, &fakeLimaRunner{script: multiServiceMCPScript()})
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	for _, want := range []string{
+		"atlassian", "https://api.atlassian.com/v1/mcp",
+		"linear", "https://mcp.linear.app/sse",
+		"slack", "https://slack.com/api/mcp",
+		"Granted policy (generation ",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("human output does not carry %q: %q", want, stdout)
+		}
+	}
+}
+
+// TestMCPStatusReportsNoWriteToolOnTheReleasedSurface pins what the released
+// command may show. Nothing in the shipped policy grants a write, so a report
+// claiming one would either be counting wrong or describing a guest provisioned
+// outside the documented surface. The count exists because ADR-0022 §4 requires
+// it to; it is not a capability this binary can use.
+func TestMCPStatusReportsNoWriteToolOnTheReleasedSurface(t *testing.T) {
+	code, stdout, _ := runVMWithFake(t, []string{"mcp", "status", "--json"}, &fakeLimaRunner{script: multiServiceMCPScript()})
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	env := decodeOneEnvelope(t, stdout)
+	data, _ := env["data"].(map[string]any)
+	policy, _ := data["policy"].(map[string]any)
+	services, _ := policy["services"].([]any)
+	for i, entry := range services {
+		s, _ := entry.(map[string]any)
+		if s["write_tools"] != 0.0 {
+			t.Errorf("policy.services[%d] grants %v write tools; the released surface grants none", i, s["write_tools"])
+		}
 	}
 }
 
@@ -265,7 +400,7 @@ func freshMCPInstallScript() []scriptedResp {
 		out("directory\ndirectory\n"),           // verify policy directory path
 		out("root:root 755\n"),                  // verify policy directory ownership
 		out("atlassian.json root root 644 f\n"), // verify policy document metadata
-		out(`{"schema_version":"1","service":"atlassian","upstream_endpoint":"https://api.atlassian.com/v1/mcp","tools":[{"name":"getJiraIssue","writes":false}]}`),
+		out(cliTestPolicyDocs["atlassian.json"]),
 	}
 }
 
@@ -377,5 +512,41 @@ func TestMCPInstallHumanOutputNamesTheRestartStep(t *testing.T) {
 	// this line exists to prevent.
 	if !strings.Contains(stdout, "serve restart") {
 		t.Errorf("human output does not tell the operator to restart the backend: %q", stdout)
+	}
+	// The restart is what is left to do, so it stays last. A grant printed after
+	// it pushes the one actionable line off the bottom of the output.
+	if grant := strings.Index(stdout, "Granted policy"); grant < 0 || grant > strings.Index(stdout, "serve restart") {
+		t.Errorf("the grant must be printed before the restart step: %q", stdout)
+	}
+}
+
+// TestMCPInstallReportsTheGrantItProvisioned: install proves the same policy
+// boundary status does, so an operator who has just provisioned a guest does not
+// need a second command to learn what they granted.
+func TestMCPInstallReportsTheGrantItProvisioned(t *testing.T) {
+	code, stdout, stderr := runVMWithFake(t, []string{"mcp", "install", "--json"}, &fakeLimaRunner{script: freshMCPInstallScript()})
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	env := decodeOneEnvelope(t, stdout)
+	data, _ := env["data"].(map[string]any)
+	policy, _ := data["policy"].(map[string]any)
+	if digest, _ := policy["digest"].(string); digest != cliTestPolicyDigest("atlassian.json") {
+		t.Errorf("policy.digest = %v, want the generation of the documents install verified", policy["digest"])
+	}
+	services, _ := policy["services"].([]any)
+	if len(services) != 1 {
+		t.Fatalf("policy.services carries %d entries, want 1: %v", len(services), policy)
+	}
+	svc, _ := services[0].(map[string]any)
+	for field, want := range map[string]any{
+		"name":              "atlassian",
+		"upstream_endpoint": "https://api.atlassian.com/v1/mcp",
+		"tools":             1.0,
+		"write_tools":       0.0,
+	} {
+		if svc[field] != want {
+			t.Errorf("policy.services[0].%s = %v, want %v", field, svc[field], want)
+		}
 	}
 }

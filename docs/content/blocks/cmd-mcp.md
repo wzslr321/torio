@@ -14,6 +14,19 @@ error when a durable mutation succeeded before a later verification failed.
 That partial state is retained in JSON details and the human error explains the
 required rerun or backend restart.
 
+Both subcommands report the grant they verified: every service in
+`/etc/torio-mcp/policy.d/`, its upstream endpoint, how many tools it allows and
+how many of those write. Nothing about a service is built into the CLI — a
+service is a policy document, and adding one means writing a second file as
+root. Under `--json` the grant is a `policy` object with a `services` array
+ordered by name, alongside the generation digest a running broker publishes, so
+a report and the process enforcing policy can be compared rather than assumed
+equal.
+
+A reported write tool is a count, not a capability. The count exists because a
+document that marks writes must be able to say how many it grants; no released
+binary sends MCP traffic upstream.
+
 **This is custody preparation, not an active integration.** The released CLI
 does not package, install, or activate the dormant broker and relay binaries.
 It does not perform OAuth or send MCP traffic upstream. Runtime transport and

@@ -33,6 +33,11 @@ type MCPBrokerInstallReport struct {
 	// it is restarted.
 	RestartRequired bool
 	Checks          []CheckResult
+	// Policy is the grant the documents carried at the end of provisioning.
+	// Install proves the same policy boundary status does, so it answers "what is
+	// granted" the same way rather than sending the operator to a second command
+	// to find out what they just provisioned.
+	Policy PolicyGrant
 }
 
 func (r *MCPBrokerInstallReport) record(name string, ok bool, detail string) {
@@ -89,6 +94,7 @@ func (a *Adapter) ProvisionMCPBroker(ctx context.Context) (MCPBrokerInstallRepor
 		return rep, err
 	}
 	rep.Checks = append(rep.Checks, verify.Checks...)
+	rep.Policy = verify.Policy
 	return rep, nil
 }
 
@@ -177,13 +183,14 @@ func (a *Adapter) InstallMCPBroker(ctx context.Context) (MCPBrokerInstallReport,
 		return rep, err
 	}
 	rep.Checks = append(rep.Checks, verify.Checks...)
+	rep.Policy = verify.Policy
 
-	unitChanged, err := a.ensureMCPBrokerUnit(ctx, &rep, brokerDigest, verify.policyDigest)
+	unitChanged, err := a.ensureMCPBrokerUnit(ctx, &rep, brokerDigest, verify.Policy.Digest)
 	if err != nil {
 		return rep, err
 	}
 	rep.Changed = rep.Changed || unitChanged
-	socketReport := MCPBrokerReport{Instance: InstanceName, policyServices: verify.policyServices, policyDigest: verify.policyDigest}
+	socketReport := MCPBrokerReport{Instance: InstanceName, Policy: verify.Policy}
 	if err := a.verifyBrokerSockets(ctx, &socketReport); err != nil {
 		rep.Checks = append(rep.Checks, socketReport.Checks...)
 		return rep, err

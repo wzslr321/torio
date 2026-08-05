@@ -64,10 +64,49 @@ func newMCPStatusCmd(a *app) *cobra.Command {
 type mcpStatusData struct {
 	Instance     string         `json:"instance"`
 	Checks       []mcpCheckData `json:"checks"`
+	Policy       mcpPolicyData  `json:"policy"`
 	BrokerUser   string         `json:"broker_user"`
 	BrokerHome   string         `json:"broker_home"`
 	ClientsGroup string         `json:"clients_group"`
 	AgentUser    string         `json:"agent_user"`
+}
+
+// mcpPolicyData is the grant, in the envelope. The checks already say the policy
+// parsed; this says what it grants, in a form a caller can act on. ADR-0022
+// makes that legibility the point of the arrangement, and a count recovered by
+// parsing an English detail line is not legible to anything but a human.
+type mcpPolicyData struct {
+	// Digest is the generation identifier a running broker publishes, so a caller
+	// can tell two reports of one grant from reports of two grants.
+	Digest   string                 `json:"digest"`
+	Services []mcpPolicyServiceData `json:"services"`
+}
+
+// mcpPolicyServiceData is one service's grant. Unlike mcpCheckData, these fields
+// are values from the policy documents rather than derived markers, and they are
+// safe to carry for a specific reason: a service name has passed
+// mcpbroker.ValidateServiceName and an endpoint the policy schema's endpoint
+// rule, so neither can hold a control byte, a path traversal, or an embedded
+// credential. A guest filename, of which none of that is true, is still never
+// emitted anywhere in this file.
+type mcpPolicyServiceData struct {
+	Name             string `json:"name"`
+	UpstreamEndpoint string `json:"upstream_endpoint"`
+	Tools            int    `json:"tools"`
+	WriteTools       int    `json:"write_tools"`
+}
+
+func mcpPolicyPayload(g lima.PolicyGrant) mcpPolicyData {
+	services := make([]mcpPolicyServiceData, 0, len(g.Services))
+	for _, s := range g.Services {
+		services = append(services, mcpPolicyServiceData{
+			Name:             s.Name,
+			UpstreamEndpoint: s.UpstreamEndpoint,
+			Tools:            s.Tools,
+			WriteTools:       s.WriteTools,
+		})
+	}
+	return mcpPolicyData{Digest: g.Digest, Services: services}
 }
 
 // mcpCheckData is one proven boundary in the envelope. Detail is a short derived
@@ -87,6 +126,7 @@ func mcpStatusPayload(rep lima.MCPBrokerReport) mcpStatusData {
 	return mcpStatusData{
 		Instance:     rep.Instance,
 		Checks:       checks,
+		Policy:       mcpPolicyPayload(rep.Policy),
 		BrokerUser:   lima.TorioMCPUser,
 		BrokerHome:   lima.TorioMCPHome,
 		ClientsGroup: lima.TorioMCPClientsGroup,
@@ -125,13 +165,44 @@ func (a *app) emitMCPStatus(rep lima.MCPBrokerReport) error {
 			return err
 		}
 	}
-	_, err := fmt.Fprintf(a.stdout,
+	if _, err := fmt.Fprintf(a.stdout,
 		"\nBroker boundary holds on %s.\n"+
 			"Credential owner:   %s (home %s, readable by nobody else)\n"+
 			"Agent identity:     %s — may open the broker socket, cannot read its credentials\n"+
 			"Client group:       %s\n",
-		rep.Instance, lima.TorioMCPUser, lima.TorioMCPHome, lima.HermesUser, lima.TorioMCPClientsGroup)
-	return err
+		rep.Instance, lima.TorioMCPUser, lima.TorioMCPHome, lima.HermesUser, lima.TorioMCPClientsGroup); err != nil {
+		return err
+	}
+	return a.writeMCPPolicy(rep.Policy)
+}
+
+// writeMCPPolicy prints the grant the policy documents carry. The check line
+// above it already gives the totals; what this adds is which service holds them
+// and where each one's traffic goes — the half of "what is granted" that a
+// number cannot answer.
+//
+// The values are printed as parsed, which is safe for the reason given on
+// mcpPolicyServiceData: both fields are schema-validated before they reach here.
+func (a *app) writeMCPPolicy(g lima.PolicyGrant) error {
+	if len(g.Services) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintf(a.stdout, "\nGranted policy (generation %s):\n", g.Digest); err != nil {
+		return err
+	}
+	width := 0
+	for _, s := range g.Services {
+		if len(s.Name) > width {
+			width = len(s.Name)
+		}
+	}
+	for _, s := range g.Services {
+		if _, err := fmt.Fprintf(a.stdout, "  %-*s  %d tool(s), %d write  ->  %s\n",
+			width, s.Name, s.Tools, s.WriteTools, s.UpstreamEndpoint); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func newMCPInstallCmd(a *app) *cobra.Command {
@@ -170,6 +241,7 @@ type mcpInstallData struct {
 	Changed         bool           `json:"changed"`
 	RestartRequired bool           `json:"restart_required"`
 	Checks          []mcpCheckData `json:"checks"`
+	Policy          mcpPolicyData  `json:"policy"`
 	BrokerUser      string         `json:"broker_user"`
 	BrokerHome      string         `json:"broker_home"`
 	ClientsGroup    string         `json:"clients_group"`
@@ -186,6 +258,7 @@ func mcpInstallPayload(rep lima.MCPBrokerInstallReport) mcpInstallData {
 		Changed:         rep.Changed,
 		RestartRequired: rep.RestartRequired,
 		Checks:          checks,
+		Policy:          mcpPolicyPayload(rep.Policy),
 		BrokerUser:      lima.TorioMCPUser,
 		BrokerHome:      lima.TorioMCPHome,
 		ClientsGroup:    lima.TorioMCPClientsGroup,
@@ -231,6 +304,11 @@ func (a *app) emitMCPInstall(rep lima.MCPBrokerInstallReport) error {
 			"Credential owner:   %s (home %s, mode 0700)\n"+
 			"Policy directory:   %s (root-owned, world-readable: the grant is legible, the credentials are not)\n",
 		rep.Instance, rep.Changed, lima.TorioMCPUser, lima.TorioMCPHome, lima.TorioMCPPolicyDir); err != nil {
+		return err
+	}
+	// Before the restart note, not after: the restart is the thing left to do, so
+	// it stays the last line an operator reads.
+	if err := a.writeMCPPolicy(rep.Policy); err != nil {
 		return err
 	}
 	if rep.RestartRequired {

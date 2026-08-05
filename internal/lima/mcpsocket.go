@@ -156,12 +156,13 @@ func (a *Adapter) verifyBrokerSockets(ctx context.Context, rep *MCPBrokerReport)
 		published[service] = struct{}{}
 		served = append(served, service)
 	}
-	if len(rep.policyServices) == 0 || len(published) != len(rep.policyServices) {
+	granted := rep.Policy.Services
+	if len(granted) == 0 || len(published) != len(granted) {
 		return a.brokerFailed(rep, name, "published service sockets do not match the parsed policy set",
 			"restart the broker after repairing its root-owned policy documents")
 	}
-	for service := range rep.policyServices {
-		if _, ok := published[service]; !ok {
+	for _, service := range granted {
+		if _, ok := published[service.Name]; !ok {
 			return a.brokerFailed(rep, name, "published service sockets do not match the parsed policy set",
 				"restart the broker after repairing its root-owned policy documents")
 		}
@@ -170,7 +171,7 @@ func (a *Adapter) verifyBrokerSockets(ctx context.Context, rep *MCPBrokerReport)
 	if err != nil {
 		return err
 	}
-	if loaded.exit != 0 || len(rep.policyDigest) != 64 || loaded.trimmed() != rep.policyDigest {
+	if loaded.exit != 0 || len(rep.Policy.Digest) != 64 || loaded.trimmed() != rep.Policy.Digest {
 		return a.brokerFailed(rep, name,
 			"running broker policy generation differs from the verified policy documents",
 			"run `torio mcp install` on the host to restart the broker on the current policy")
