@@ -100,7 +100,9 @@ The journey is cut at the hypervisor boundary by the Ginkgo labels `host` and
 
 - **`host`** — release tarball, `scripts/install.sh`, real `limactl`, and
   `torio vm init` including the image pin and idempotence. Runs on any macOS
-  arm64, so it gates every pull request and every release.
+  arm64, so it gates every release and every pull request that could reach the
+  packaged binary. Prose, generated pages and spikes cannot, and are filtered
+  out: hosted macOS minutes bill at ten times the Linux rate.
 - **`guest`** — everything from `torio vm start` on: Hermes bootstrap, Brain,
   backend, project attach/show/remove. Needs Virtualization.framework.
 

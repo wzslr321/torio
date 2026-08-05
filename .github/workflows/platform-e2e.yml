@@ -24,9 +24,17 @@ on:
         required: false
         type: string
         default: macos-15
+  # Hosted macOS minutes bill at ten times the Linux rate on a private
+  # repository, so this gate runs when a change could reach the packaged binary
+  # and not otherwise. Prose, generated pages and spikes cannot: the journey
+  # installs a release tarball and drives the CLI.
   pull_request:
-  push:
-    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "site/**"
+      - "spikes/**"
+      - "LICENSE"
   workflow_dispatch:
     inputs:
       stage:
