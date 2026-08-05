@@ -30,7 +30,7 @@ const (
 	// maxServices bounds how many services one broker speaks for.
 	maxServices = 32
 	// maxToolsPerService bounds one service's grant. The Atlassian server
-	// migrated in ADR-0022 exposes 40 tools, so this leaves generous headroom.
+	// migrated in ADR-0004 exposes 40 tools, so this leaves generous headroom.
 	maxToolsPerService = 256
 	// maxDocumentBytes bounds one policy document. A grant of maxToolsPerService
 	// tools fits in a few tens of kilobytes.
@@ -55,7 +55,7 @@ const maxToolNameLen = 128
 // servicePattern is the accepted service name: a lowercase slug of ASCII
 // letters, digits and inner hyphens.
 //
-// The charset is restrictive because the name leaves this package. ADR-0022
+// The charset is restrictive because the name leaves this package. ADR-0004
 // derives the broker's socket path from it (/run/torio-mcp/<service>.sock) and
 // the name is echoed in reports and audit lines. Nothing here can traverse a
 // directory, be re-read as a flag, or move a terminal cursor.
@@ -96,7 +96,7 @@ func ValidateServiceName(name string) error {
 // Note what it also excludes: `*`, `?` and every other glob character. Not
 // because they would match anything — this package never pattern-matches — but
 // so that a document written by someone who assumed they would is rejected
-// instead of quietly granting a single, oddly named tool (ADR-0022 §4).
+// instead of quietly granting a single, oddly named tool (ADR-0004 §4).
 var toolPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$`)
 
 var (
@@ -118,7 +118,7 @@ const PolicySchemaVersion = "1"
 // Load reads every policy document in dir and returns the effective policy Set.
 //
 // Production reads /etc/torio-mcp/policy.d, whose documents are root-owned and
-// world-readable on purpose: ADR-0022 requires the grant to be legible to
+// world-readable on purpose: ADR-0004 requires the grant to be legible to
 // everyone, the agent included, while the credentials it unlocks are not. The
 // directory is a parameter so the rule can be exercised without root.
 func Load(dir string) (Set, error) {
@@ -135,7 +135,7 @@ func Load(dir string) (Set, error) {
 			// one rather than followed. That matters here and not only for tidiness:
 			// the directory is root-owned, but a symlink's content is not, so a link
 			// to a path under the agent's home would hand the grant to the identity
-			// ADR-0022 exists to keep away from it.
+			// ADR-0004 exists to keep away from it.
 			return Set{}, fmt.Errorf("policy %s: not a regular file; a policy document must live in the policy directory, not point at another path", name)
 		}
 		if !strings.HasSuffix(name, policyFileExt) {
@@ -231,7 +231,7 @@ type documentJSON struct {
 //
 // Writes is a pointer for the same reason, with more at stake: Go's zero value
 // for a bool is false, so an omitted classification would silently declare a
-// write tool read-only and shrink the granted-write count ADR-0022 requires the
+// write tool read-only and shrink the granted-write count ADR-0004 requires the
 // broker to be able to report.
 type toolJSON struct {
 	Name   string `json:"name"`
@@ -303,7 +303,7 @@ func parseDocument(data []byte, stem string) (service, error) {
 }
 
 // validateUpstreamEndpoint enforces the rules of the endpoint the broker sends a
-// service's traffic to. ADR-0022 §8 requires it to be configurable so a later
+// service's traffic to. ADR-0004 §8 requires it to be configurable so a later
 // egress decision can put a proxy in front of it without redesigning anything,
 // which is also why no URL is hardcoded anywhere in this package.
 //

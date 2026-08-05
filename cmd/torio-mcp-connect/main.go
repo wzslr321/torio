@@ -1,5 +1,5 @@
 // Command torio-mcp-connect is the stdio adapter Hermes spawns to reach the
-// MCP broker (ADR-0022). It connects to the broker's unix socket for one
+// MCP broker (ADR-0004). It connects to the broker's unix socket for one
 // service and copies bytes both ways, unchanged.
 //
 // # This binary is not a security control
@@ -15,7 +15,7 @@
 // It follows that the relay must not authenticate, filter or inspect the
 // traffic. Enforcement here would be theatre — bypassed by a direct connect —
 // and reading MCP frames would put upstream Jira and Confluence content within
-// reach of a log line, which ADR-0022 §5 forbids outright.
+// reach of a log line, which ADR-0004 §5 forbids outright.
 package main
 
 import (

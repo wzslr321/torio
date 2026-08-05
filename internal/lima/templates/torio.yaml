@@ -1,12 +1,6 @@
-# AI-Provenance:
-#   model: Cursor Grok 4.5
-#   harness: Cursor
-#   skills:
-#     - mark-ai-provenance
-#
-# Torio V1 product Lima template (embedded).
-# Pins and layout come from docs/spike-results/v1-onboarding-20260727T115633Z/FINDINGS.md
-# and spikes/v1-onboarding/torio-spike.yaml (promoted Gate 0 path).
+# Torio product Lima template (embedded).
+# Pins and layout come from the promoted Gate 0 path, recorded at
+# archive/pre-oss:docs/spike-results/v1-onboarding-20260727T115633Z/FINDINGS.md.
 # internal/lima.Init substitutes the operator user, cpus, memory, disk and the
 # operator shell helper before limactl create. Their tokens are deliberately not
 # spelled out here: substitution is a plain string replace over the whole file,
@@ -50,7 +44,7 @@ provision:
         groupadd --system torio-projects
       fi
 
-      # Dedicated hermes service identity — NEVER rootful docker group (ADR-0015).
+      # Dedicated hermes service identity — NEVER rootful docker group (ADR-0003).
       if ! id -u hermes >/dev/null 2>&1; then
         useradd --create-home --shell /bin/bash --user-group hermes
       fi

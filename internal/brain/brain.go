@@ -1,12 +1,3 @@
-/*
- * AI-Provenance:
- *   model: Cursor Grok 4.5
- *   harness: Cursor
- *   plugins:
- *     - lean-ai-provenance
- *   skills:
- *     - mark-ai-provenance
- */
 // Package brain initializes and verifies Torio's private, Markdown-first Second
 // Brain on the native filesystem of the managed Lima guest.
 package brain

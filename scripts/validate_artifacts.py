@@ -7,7 +7,7 @@ every document Go cites actually exists, and that no product version label reach
 a surface an operator reads.
 
 Scope note: this script used to also check a fixed list of required artifacts and
-a JSON Schema subset. Both belonged to the pre-V1 exploration removed by ADR-0017;
+a JSON Schema subset. Both belonged to the pre-V1 exploration removed by ADR-0005;
 nothing in the delivered product reads `schemas/`, and the required-file list only
 pinned files that no longer exist.
 """
@@ -68,7 +68,7 @@ CREDENTIAL_GLOBS = (
 
 # A docs/ path cited from Go source — in a comment or in help text the operator
 # reads. Either way the file has to exist: six references to a contract archived
-# by ADR-0017 survived three pull requests because nothing checked (ADR-0020).
+# by ADR-0005 survived three pull requests because nothing checked (ADR-0005).
 #
 # A path qualified by a Git ref (`archive/pre-v1:docs/…`) is exempt: it names
 # something in history on purpose, and the tree is the wrong place to look.
@@ -80,7 +80,7 @@ GO_DOC_REFERENCE = re.compile(r"(?<![:\w])docs/[A-Za-z0-9_./-]*\.md")
 # `--porcelain=v1` are not labels and never trip this.
 VERSION_LABEL = re.compile(r"(?<![\w/=-])[Vv][0-9]+\b")
 
-# Everything a user of Torio reads. ADR-0020 keeps labels out of exactly this
+# Everything a user of Torio reads. ADR-0005 keeps labels out of exactly this
 # set; ADRs, docs/contracts/ and AGENTS.md deliberately keep theirs, because
 # there the version scope is the subject of the record rather than decoration.
 #

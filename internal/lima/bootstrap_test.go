@@ -324,7 +324,7 @@ func TestBootstrapPathWrongOwnershipFailsClosed(t *testing.T) {
 }
 
 func TestBootstrapPathNotNativeFilesystemFailsClosed(t *testing.T) {
-	// A path backed by a macOS host share (virtiofs) violates ADR-0003.
+	// A path backed by a macOS host share (virtiofs) violates ADR-0002.
 	s := bootstrapHappyScript()
 	s[16] = scriptedResponse{result: stdoutResult("virtiofs virtiofs-share\n")}
 	fr := &fakeRunner{script: s}

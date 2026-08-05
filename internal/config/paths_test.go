@@ -189,7 +189,7 @@ func TestResolvePathsDefaultsUsingRealEnvHelpers(t *testing.T) {
 	}
 }
 
-// The operator selects the managed instance (ADR-0021). Unset must stay exactly
+// The operator selects the managed instance (ADR-0001). Unset must stay exactly
 // the pre-ADR behaviour, because every existing setup depends on it.
 func TestResolveInstanceDefaultsToTorio(t *testing.T) {
 	got, err := ResolveInstance(Options{Getenv: func(string) string { return "" }})
@@ -289,7 +289,7 @@ func TestNamedInstanceGetsItsOwnConfigDir(t *testing.T) {
 		t.Fatalf("instances = %q / %q", def.Instance, named.Instance)
 	}
 	// The instance directory stays inside the already-trusted config dir, so
-	// ADR-0013's path rules cover it without a second boundary.
+	// ADR-0001's path rules cover it without a second boundary.
 	if !strings.HasPrefix(named.ConfigDir, filepath.Join(base, appDir)+string(filepath.Separator)) {
 		t.Errorf("named instance config dir %q escaped the trusted config dir", named.ConfigDir)
 	}

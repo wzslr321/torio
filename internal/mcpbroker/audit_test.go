@@ -13,7 +13,7 @@ import (
 )
 
 // TestAuditRecordCannotCarryContent is the point of the type, asserted
-// structurally rather than trusted to review. ADR-0022 §5 fixes the fields an
+// structurally rather than trusted to review. ADR-0004 §5 fixes the fields an
 // audit line may hold — timestamp, service, tool, calling uid, decision — and
 // forbids arguments and response bodies, because upstream Jira and Confluence
 // content would otherwise land in a log that outlives the call.

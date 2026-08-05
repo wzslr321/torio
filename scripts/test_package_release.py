@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-#
-# AI-Provenance:
-#   model: Cursor Grok 4.5
-#   harness: Cursor
-#
 """Unit tests for scripts/package_release.py."""
 
 from __future__ import annotations

@@ -17,7 +17,7 @@ import (
 // Confluence pages; a log that recorded arguments or bodies would quietly turn
 // the audit trail into a second, unmanaged copy of the content the broker exists
 // to mediate — durable, readable by whoever reads logs, and outliving the call
-// that produced it. ADR-0022 §5 states the rule, and it is the same one
+// that produced it. ADR-0004 §5 states the rule, and it is the same one
 // docs/contracts/cli.md imposes on Brain output, where reporting is restricted to
 // bounded aggregate metadata and never note names or note content.
 //
@@ -38,7 +38,7 @@ type AuditRecord struct {
 	Tool string
 	// UID is the calling identity as the kernel reports it over the unix socket
 	// (SO_PEERCRED), never a value the caller claims. That is what makes the line
-	// evidence rather than a note: ADR-0022 puts identity in the kernel precisely
+	// evidence rather than a note: ADR-0004 puts identity in the kernel precisely
 	// so no presented secret can stand in for it.
 	UID uint32
 	// Allowed is the verdict.

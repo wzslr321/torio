@@ -192,7 +192,7 @@ func TestOperatorShellSpecNeverBuildsARemoteCommandString(t *testing.T) {
 // TestOperatorShellSpecRequiresARunningSSHAgent proves the session is refused
 // when the host has no agent to forward. Without it -A forwards nothing: the
 // operator would land in the project with no write capability and only find
-// out when the push fails (ADR-0015 — write capability comes from the macOS
+// out when the push fails (ADR-0003 — write capability comes from the macOS
 // agent, and only for the duration of the session).
 func TestOperatorShellSpecRequiresARunningSSHAgent(t *testing.T) {
 	operatorShellHost(t)

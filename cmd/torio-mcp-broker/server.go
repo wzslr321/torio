@@ -200,7 +200,7 @@ func (s *server) handleConn(ctx context.Context, conn *net.UnixConn) {
 
 	// The uid is read once, before a single byte is served. A connection whose
 	// caller the kernel will not name cannot be audited, and a call that cannot be
-	// audited must not be answered (ADR-0022 §5).
+	// audited must not be answered (ADR-0004 §5).
 	uid, err := s.cfg.peerUID(conn)
 	if err != nil {
 		s.logRefusal("peer credentials unavailable; connection refused")
@@ -369,7 +369,7 @@ type toolsListEnvelope struct {
 // be a schema Torio wrote, and the client would call the tool according to it.
 //
 // Every error here is a fixed sentence. The reply is upstream content, so no part
-// of it may end up in an error that gets logged (ADR-0022 §5).
+// of it may end up in an error that gets logged (ADR-0004 §5).
 func (s *server) filterToolsList(reply []byte) ([]byte, error) {
 	var env struct {
 		JSONRPC string          `json:"jsonrpc"`
@@ -533,11 +533,11 @@ const upstreamFailed = "the broker could not complete the call upstream; the rea
 // auditUnavailable is what a client is told when the decision could not be
 // written down. The call is refused whichever way the decision went: an
 // unrecorded allow is a call nobody can account for afterwards, and accounting
-// is what the broker is for (ADR-0022 §5).
+// is what the broker is for (ADR-0004 §5).
 const auditUnavailable = "the broker could not record this decision and therefore did not act on it; the broker's log has the reason"
 
 // denialMessage names what was refused, where the grant lives, and who can
-// change it. ADR-0022 makes the granted surface legible on purpose; a denial is
+// change it. ADR-0004 makes the granted surface legible on purpose; a denial is
 // the moment that legibility is worth something, so it points at the document
 // rather than restating that the answer is no.
 func (s *server) denialMessage(tool string) string {
@@ -563,7 +563,7 @@ func boundToolName(name string) string {
 // There is deliberately no field for arguments. The arguments are Jira and
 // Confluence content on their way upstream; the broker forwards the line it
 // received and never decodes them into a value it owns, so there is nowhere in
-// this process they could be logged from (ADR-0022 §5).
+// this process they could be logged from (ADR-0004 §5).
 type toolCallParams struct {
 	Name string `json:"name"`
 }
@@ -587,7 +587,7 @@ func toolName(params json.RawMessage) (string, error) {
 //
 // The refusal is not "unknown method". Every other MCP surface — resources,
 // prompts, sampling, completion — is refused because a policy document grants
-// tools by name (ADR-0022 §4) and has no vocabulary for anything else. A surface
+// tools by name (ADR-0004 §4) and has no vocabulary for anything else. A surface
 // the grant cannot describe is one the broker cannot enforce, so it is refused
 // rather than proxied, and the sentence says so: an operator who reads "method
 // not found" goes looking for a typo instead of for the decision.
@@ -632,7 +632,7 @@ func (s *server) write(conn *net.UnixConn, send func(io.Writer) error) bool {
 // reaches the log. Not the method, not the tool name, not the parser's
 // complaint. The audit log is the one place a caller-supplied name is recorded,
 // and mcpbroker.WriteAudit bounds and escapes it there. Everything else the
-// client sends is content, and content does not get written down (ADR-0022 §5).
+// client sends is content, and content does not get written down (ADR-0004 §5).
 func (s *server) logRefusal(msg string) {
 	s.cfg.log.Warn(msg, "service", s.cfg.service)
 }

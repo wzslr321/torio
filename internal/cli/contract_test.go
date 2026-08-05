@@ -28,7 +28,7 @@ func TestUnknownGlobalFlagStillRejected(t *testing.T) {
 // unknown-flag rule by accident: --state-dir was an accepted global, and a
 // document of that change is worth more than the absence of a registration.
 // Torio writes no host state, so there is no directory to point it at
-// (ADR-0019).
+// (ADR-0001).
 func TestStateDirFlagIsGone(t *testing.T) {
 	for _, args := range [][]string{
 		{"--state-dir", "/tmp/x", "version"},

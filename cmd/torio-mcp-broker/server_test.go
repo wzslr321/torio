@@ -396,7 +396,7 @@ func (b *testBroker) auditLines(t *testing.T) []auditLine {
 
 // Both verdicts are recorded, and recorded the same way. A log that only holds
 // denials makes an allowed write to Jira invisible, which is the opposite of what
-// ADR-0022 is for: the point is that what the broker did is legible afterwards,
+// ADR-0004 is for: the point is that what the broker did is legible afterwards,
 // not that its refusals are.
 //
 // The uid comes from the kernel, so the record attributes the call to an
@@ -504,7 +504,7 @@ func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("audit si
 // A decision that cannot be recorded is not acted on. The tempting failure is to
 // serve the call and log the logging failure — the policy did say yes — but then
 // the broker has carried a call it cannot account for, and being able to account
-// for calls is the reason it exists (ADR-0022 §5).
+// for calls is the reason it exists (ADR-0004 §5).
 func TestUnrecordableDecisionRefusesTheCall(t *testing.T) {
 	up := &fakeUpstream{}
 	b := startBroker(t, up, func(cfg *serverConfig) {
@@ -697,7 +697,7 @@ func waitFor(t *testing.T, cond func() bool) {
 // Nothing a call carries may be written down. Assume the arguments are a
 // Confluence page and the reply is a Jira issue: an audit line or a log line that
 // held either would be a second, durable copy of content the broker exists to
-// mediate, readable by whoever reads logs and outliving the call (ADR-0022 §5).
+// mediate, readable by whoever reads logs and outliving the call (ADR-0004 §5).
 //
 // Both verdicts are exercised, because the denial is the tempting one — nothing
 // went upstream, so it feels safe to record what was attempted.
@@ -739,7 +739,7 @@ func TestNoCallContentReachesTheAuditOrTheLog(t *testing.T) {
 
 // A denied tool name is the one caller-chosen string the broker does write down,
 // which makes the audit log a narrow write channel into a privileged file
-// (ADR-0022 §5). It stays narrow: the name is bounded and escaped, so a caller
+// (ADR-0004 §5). It stays narrow: the name is bounded and escaped, so a caller
 // cannot choose how much the broker logs, and cannot end the line and append one
 // of its own claiming a call was allowed.
 func TestDeniedToolNameCannotForgeAnAuditLine(t *testing.T) {

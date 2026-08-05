@@ -230,7 +230,7 @@ func newVMBootstrapCmd(a *app) *cobra.Command {
 			defer cancel()
 			// V1 runs unpinned: the observed hermes version is reported so drift is
 			// visible. Enforcing a pin would need a new pin source and a new ADR;
-			// the D2 version-lock manifest was never wired and is gone (ADR-0017).
+			// the D2 version-lock manifest was never wired and is gone (ADR-0005).
 			opUser, err := a.lookupOperatorUser()
 			if err != nil {
 				return &CLIError{

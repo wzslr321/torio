@@ -9,7 +9,7 @@ import (
 
 // HermesConfigPath is the agent's own configuration. It is not on the Hermes
 // write denylist and HERMES_WRITE_SAFE_ROOT is unset, so the identity the agent
-// has a shell as can rewrite it — that is ADR-0022's own premise for why
+// has a shell as can rewrite it — that is ADR-0004's own premise for why
 // `mcp_servers.<n>.tools.include` is a default rather than a control.
 //
 // The same writability is a bypass: an entry naming any command other than the
@@ -18,7 +18,7 @@ import (
 const HermesConfigPath = HermesProfilePath + "/config.yaml"
 
 // TorioMCPRelayPath is the only command an mcp_servers entry may name on a
-// managed guest (ADR-0022 §3). The relay itself holds no secret and is not a
+// managed guest (ADR-0004 §3). The relay itself holds no secret and is not a
 // control — the agent may bypass it and talk to the socket directly, and nothing
 // changes. What matters is that every configured server *ends up* at the broker.
 const TorioMCPRelayPath = "/usr/local/bin/torio-mcp-connect"

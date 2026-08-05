@@ -1060,7 +1060,7 @@ func (m *Manager) CheckServiceEnv(ctx context.Context) (ServiceEnvCheck, error) 
 		return check, &Error{
 			Op:   op,
 			Kind: KindVerification,
-			Err: fmt.Errorf("the persistent Hermes service environment declares %s; ephemeral operator forwarding must never reach it (ADR-0015)",
+			Err: fmt.Errorf("the persistent Hermes service environment declares %s; ephemeral operator forwarding must never reach it (ADR-0003)",
 				agentSocketVar),
 		}
 	}

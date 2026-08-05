@@ -135,7 +135,7 @@ func TestLoadOmittedProjectsNormalizesToEmptyRegistry(t *testing.T) {
 
 // TestLoadRejectsSettingsOnlySchemaVersion pins the removal of the pre-registry
 // schema: a document declaring "1" is rejected by version, not read as
-// settings-only. Torio never shipped a release that wrote one (ADR-0019).
+// settings-only. Torio never shipped a release that wrote one (ADR-0001).
 func TestLoadRejectsSettingsOnlySchemaVersion(t *testing.T) {
 	cfgHome := t.TempDir()
 	writeConfig(t, cfgHome, `{"schema_version":"1","default_timeout":"45s"}`)

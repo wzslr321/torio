@@ -123,7 +123,7 @@ func TestProjectShellHelperIsValidBash(t *testing.T) {
 // TestProjectShellHelperNeverDumpsTheSessionEnvironment proves the helper never
 // reads or prints the environment it is trusted to pass through. That
 // environment carries SSH_AUTH_SOCK: the session's whole write capability, and
-// the one value ADR-0015 keeps out of Torio's hands.
+// the one value ADR-0003 keeps out of Torio's hands.
 func TestProjectShellHelperNeverDumpsTheSessionEnvironment(t *testing.T) {
 	code := helperCode(t)
 	for _, forbidden := range []string{"SSH_AUTH_SOCK", "env", "printenv", "declare -p", "export -p", "ssh-add", "set -x", "-eux", "xtrace"} {

@@ -1,8 +1,3 @@
-/*
- * AI-Provenance:
- *   model: Claude Opus 5
- *   harness: Claude Code
- */
 package transfer
 
 import (
@@ -60,7 +55,7 @@ func TestCollectStagesOnlyAllowlistedTypes(t *testing.T) {
 }
 
 // The exclusion list is the harness filter from the promoted Gate run
-// (spikes/v1-brain-transfer/run.sh should_exclude), reproduced in Go and made
+// (archive/pre-oss:spikes/v1-brain-transfer/run.sh should_exclude), reproduced in Go and made
 // stricter: the whole .obsidian directory is out of V1, not only its plugins.
 func TestCollectExcludesRepositoriesCredentialsAndPluginCode(t *testing.T) {
 	src := t.TempDir()

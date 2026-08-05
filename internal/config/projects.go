@@ -64,7 +64,7 @@ var (
 // remote used to reach the code.
 //
 // The workspace path is deliberately not a field. It is derived from ID by the
-// projects layer (`/home/hermes/projects/<id>`, ADR-0015), so config can never
+// projects layer (`/home/hermes/projects/<id>`, ADR-0003), so config can never
 // point a project at an arbitrary location on the guest.
 type Project struct {
 	// ID is the stable slug identifying the project. It also derives the

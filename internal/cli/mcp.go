@@ -8,7 +8,7 @@ import (
 	"github.com/wzslr321/torio/internal/lima"
 )
 
-// newMCPCmd builds the `torio mcp` parent (ADR-0022). Like `torio vm` and
+// newMCPCmd builds the `torio mcp` parent (ADR-0004). Like `torio vm` and
 // `torio serve`, the parent takes no action itself: an absent or unknown
 // subcommand is a usage error, fail-closed.
 func newMCPCmd(a *app) *cobra.Command {
@@ -18,7 +18,7 @@ func newMCPCmd(a *app) *cobra.Command {
 		Long: "Provision the dedicated " + lima.TorioMCPUser + " identity, client group, private " +
 			"credential store, and root-owned policy boundary. The broker daemon is not installed or " +
 			"activated until its OAuth and upstream transport have an accepted contract. Torio accepts " +
-			"no MCP credentials through this CLI (ADR-0027).",
+			"no MCP credentials through this CLI (ADR-0004).",
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return usageError("no subcommand given; run 'torio mcp --help'")
@@ -59,7 +59,7 @@ func newMCPStatusCmd(a *app) *cobra.Command {
 
 // mcpStatusData is the `data` object of a successful `mcp status`. The identity
 // and path fields are constants rather than probe output: they tell the operator
-// which boundary was proven, and they are the same values a reader of ADR-0022
+// which boundary was proven, and they are the same values a reader of ADR-0004
 // will be looking for.
 type mcpStatusData struct {
 	Instance     string         `json:"instance"`

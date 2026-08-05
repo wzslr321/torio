@@ -120,7 +120,7 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 		a.lookupOperatorUser = defaultLookupOperatorUser
 	}
 	// The managed instance is fixed here, once, before the command tree runs and
-	// before anything can touch a VM or a config path (ADR-0021). It comes from
+	// before anything can touch a VM or a config path (ADR-0001). It comes from
 	// the environment rather than a flag, so it does not depend on flag parsing
 	// and cannot be forgotten on an individual invocation. A malformed name is a
 	// usage error: falling back to the default would send a command meant for a

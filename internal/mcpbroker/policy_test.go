@@ -18,7 +18,7 @@ func writePolicy(t *testing.T, dir, name, body string) {
 }
 
 // atlassianPolicy is the reference document: one read tool and one write tool,
-// the shape ADR-0022 requires an operator to have written down by hand.
+// the shape ADR-0004 requires an operator to have written down by hand.
 const atlassianPolicy = `{
   "schema_version": "1",
   "service": "atlassian",
@@ -154,7 +154,7 @@ func TestLoadRejectsServiceFilenameMismatch(t *testing.T) {
 }
 
 // TestLoadRejectsUnsupportedServiceName bounds the one identifier that leaves
-// this package. ADR-0022 derives the broker's socket path from the service name
+// this package. ADR-0004 derives the broker's socket path from the service name
 // (/run/torio-mcp/<service>.sock) and Hermes names the service in its own
 // config, so nothing in this charset may traverse a directory, be re-read as an
 // argument, or carry a terminal escape into an operator's report.
@@ -270,7 +270,7 @@ func TestLoadAcceptsToolNamesUpstreamActuallyUses(t *testing.T) {
 // TestLoadRejectsToolWithoutWriteClassification is the rule that keeps the
 // transparency requirement honest. Go would read an omitted "writes" as false,
 // so a forgotten field would silently reclassify a write tool as read-only and
-// the granted-write count ADR-0022 requires would under-report. The
+// the granted-write count ADR-0004 requires would under-report. The
 // classification is a claim someone has to make.
 func TestLoadRejectsToolWithoutWriteClassification(t *testing.T) {
 	dir := t.TempDir()
@@ -327,7 +327,7 @@ func TestLoadAcceptsEmptyToolList(t *testing.T) {
 	}
 }
 
-// TestLoadRejectsUnsupportedUpstreamEndpoint guards the field ADR-0022 §8 made
+// TestLoadRejectsUnsupportedUpstreamEndpoint guards the field ADR-0004 §8 made
 // configurable. Two things must hold at once: a later egress decision has to be
 // able to point it at a proxy, and this world-readable file must not become the
 // place a token is kept. So the scheme set is small and userinfo, query and
@@ -362,7 +362,7 @@ func TestLoadRejectsUnsupportedUpstreamEndpoint(t *testing.T) {
 }
 
 // TestLoadAcceptsPlainHTTPUpstreamForALocalProxy is the deliberate exception.
-// The egress-control decision ADR-0022 §8 anticipates would put a proxy in front
+// The egress-control decision ADR-0004 §8 anticipates would put a proxy in front
 // of the broker, and requiring TLS to a loopback proxy would buy nothing and
 // cost a certificate nobody would maintain.
 func TestLoadAcceptsPlainHTTPUpstreamForALocalProxy(t *testing.T) {

@@ -3,7 +3,7 @@
 //
 // The backend is the JSON-RPC/WebSocket gateway Hermes Desktop and remote
 // clients connect to. Demo A binds it to guest loopback only (127.0.0.1); the
-// Mac reaches it through an operator-controlled SSH tunnel (ADR-0003,
+// Mac reaches it through an operator-controlled SSH tunnel (ADR-0002,
 // docs/contracts/cli.md). This package generates and manages a
 // narrow user unit for the dedicated non-root `hermes` identity, never a broad
 // remote-shell facility: every guest action is a fixed argv run through the

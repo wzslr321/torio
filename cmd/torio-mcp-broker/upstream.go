@@ -11,7 +11,7 @@ import (
 //
 // It is an interface for two reasons. The first is testability — every
 // enforcement rule in this binary can be exercised against a fake without a
-// network. The second is ADR-0022 §8: the endpoint is configurable so a later
+// network. The second is ADR-0004 §8: the endpoint is configurable so a later
 // egress decision can put a proxy in front of it, and an interface is where that
 // substitution costs nothing.
 //
@@ -19,7 +19,7 @@ import (
 //
 //   - request is valid only for the duration of the call. It holds tool call
 //     arguments, so an implementation that retained it would create a second
-//     copy of upstream content with a lifetime nobody manages (ADR-0022 §5).
+//     copy of upstream content with a lifetime nobody manages (ADR-0004 §5).
 //   - a returned error must not embed any part of a reply body. Errors are
 //     logged; reply bodies must never be. An HTTP transport must therefore
 //     report status and cause, never the response text that explained them.
@@ -36,7 +36,7 @@ type upstream interface {
 //
 // It fails rather than pretends. A stub that answered with an empty result would
 // make an unfinished broker look like a working one, and the whole point of
-// ADR-0022 is that what the broker will and will not do is legible.
+// ADR-0004 is that what the broker will and will not do is legible.
 type pendingUpstream struct {
 	// endpoint is this service's upstream_endpoint, taken from its policy
 	// document. It is held rather than ignored so the error names where traffic

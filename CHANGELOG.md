@@ -31,6 +31,6 @@ Detailed notes: [`docs/releases/v0.2.0.md`](docs/releases/v0.2.0.md).
 ### Not delivered
 
 - The MCP broker daemon, relay, OAuth lifecycle, and upstream transport remain
-  outside the release surface under ADR-0027.
+  outside the release surface under ADR-0004.
 - The Atlassian result remains `PARTIAL`: the public probe stops before browser
   authorization, token issuance, content access, or write.

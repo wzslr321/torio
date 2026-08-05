@@ -9,7 +9,7 @@ import (
 
 const mcpBrokerOp = "mcp_broker"
 
-// The MCP broker boundary (ADR-0022). Torio reaches MCP servers through a
+// The MCP broker boundary (ADR-0004). Torio reaches MCP servers through a
 // broker that runs under its own guest identity, so no upstream credential ever
 // exists under the identity the agent has a shell as.
 //
@@ -103,7 +103,7 @@ func (r *MCPBrokerReport) record(name string, ok bool, detail string) {
 	r.Checks = append(r.Checks, CheckResult{Name: name, OK: ok, Detail: boundDetail(detail)})
 }
 
-// VerifyMCPBroker proves the ADR-0022 boundary on the guest. It modifies
+// VerifyMCPBroker proves the ADR-0004 boundary on the guest. It modifies
 // nothing: every drift is reported as a stable marker and fails closed, never
 // repaired in place — the same contract the rest of the adapter keeps, and the
 // only one that makes a security claim worth printing.
@@ -398,7 +398,7 @@ func (a *Adapter) verifyHermesNotBrokerOwner(ctx context.Context, rep *MCPBroker
 			seen[group] = true
 		case TorioMCPUser:
 			return a.brokerFailed(rep, name, "hermes is in the torio-mcp group",
-				"remove hermes from torio-mcp; membership makes every broker credential readable by the agent identity (ADR-0022)")
+				"remove hermes from torio-mcp; membership makes every broker credential readable by the agent identity (ADR-0004)")
 		default:
 			return a.brokerFailed(rep, name, "hermes has an unexpected supplementary group",
 				"remove groups outside hermes, torio-projects, and torio-mcp-clients; privileged groups bypass credential custody")
@@ -457,7 +457,7 @@ func (a *Adapter) verifyBrokerHome(ctx context.Context, rep *MCPBrokerReport) er
 	if !modeMatches(torioMCPHomeSpec, mode) {
 		return a.brokerFailed(rep, name,
 			fmt.Sprintf("mode %s, want one of %v", mode, torioMCPHomeSpec.modes),
-			"the broker credential store must not be readable outside torio-mcp (ADR-0022)")
+			"the broker credential store must not be readable outside torio-mcp (ADR-0004)")
 	}
 	rep.record(name, true, fmt.Sprintf("%s:%s %s", owner, group, mode))
 	return nil

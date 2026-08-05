@@ -11,7 +11,7 @@ import (
 	"github.com/wzslr321/torio/internal/mcpbroker"
 )
 
-// The socket is the boundary. ADR-0022 §3 puts it at 0660
+// The socket is the boundary. ADR-0004 §3 puts it at 0660
 // torio-mcp:torio-mcp-clients, and the mode is set explicitly rather than left to
 // umask: umask is inherited from whatever started the process, so a broker that
 // relied on it would publish a world-connectable socket the day somebody's unit
@@ -38,7 +38,7 @@ func TestListenSetsTheSocketModeExplicitly(t *testing.T) {
 }
 
 // The socket's group is the whole grant: membership in it is the only privilege
-// the agent identity is given (ADR-0022 §3). Handing the socket to that group is
+// the agent identity is given (ADR-0004 §3). Handing the socket to that group is
 // therefore not a detail of installation — it is the moment the capability is
 // conferred, so it is done here and proved here.
 func TestListenHandsTheSocketToTheClientGroup(t *testing.T) {

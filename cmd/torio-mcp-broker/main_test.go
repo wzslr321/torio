@@ -304,7 +304,7 @@ func TestRunRejectsArguments(t *testing.T) {
 }
 
 // One socket per service, every service in the policy directory, and the grant
-// stated at startup: ADR-0022 wants the granted surface legible without anybody
+// stated at startup: ADR-0004 wants the granted surface legible without anybody
 // reading a file, and the count of granted write tools is the number an operator
 // is accountable for.
 //

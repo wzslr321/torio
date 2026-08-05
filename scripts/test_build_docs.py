@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-#
-# AI-Provenance:
-#   model: claude-opus-4-6-20260115
-#   harness: Cursor
-#
 """Tests for scripts/build_docs.py — the single-source docs generator.
 
 Standard library only (matches the other scripts in this directory). Run with:

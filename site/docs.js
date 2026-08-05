@@ -1,10 +1,3 @@
-// AI-Provenance:
-//   model: claude-opus-4-6-20260115
-//   harness: Cursor
-//
-// Progressive enhancement for the Torio docs. No dependencies, no build step.
-// Both features here are additive: with JavaScript off the pages still read,
-// navigate, and select code normally.
 (function () {
   "use strict";
 

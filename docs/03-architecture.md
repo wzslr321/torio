@@ -1,151 +1,187 @@
-# Architektura Torio V1
+# Torio architecture
 
-> Ten dokument zastępuje czternaście numerowanych dokumentów projektowych
-> (`01-product-brief` … `14-local-development`), które opisywały pre-V0 platformę
-> workerów. Są pod tagiem `archive/pre-v1`
-> ([ADR-0017](adr/0017-pre-v1-exploration-leaves-the-working-tree.md)).
->
-> Zakres V1 rozstrzyga
-> [ADR-0015](adr/0015-torio-v1-onboarding-projects-and-operator-push.md). Ten
-> dokument nie jest streszczeniem kodu — opisuje wyłącznie to, czego z kodu nie
-> widać: gdzie przebiega granica zaufania i dlaczego akurat tam.
+This document is not a summary of the code. It describes the only thing the code
+cannot show on its own: where the trust boundary runs, why it runs there, and
+what it does **not** cover.
 
-## Czym Torio jest
+## What Torio is
 
-Cienkim control plane'em nad Limą, Hermes Agentem i Gitem. Nie jest frameworkiem
-agentowym, task queue ani worktree managerem — te warstwy albo należą do
-Hermesa, albo świadomie nie istnieją.
+A thin control plane over Lima, Hermes Agent and Git. It is not an agent
+framework, a task queue or a worktree manager — those layers either belong to
+Hermes or deliberately do not exist.
 
-## Granica zaufania
+## The trust boundary
 
-Jedna maszyna wirtualna Lima o nazwie `torio`, arm64, `vmType: vz`.
-Wszystko, co dotyczy pracy agenta, dzieje się na jej natywnym filesystemie.
-Granicą jest brzeg VM, nie proces i nie profil Hermesa.
+One Lima virtual machine, arm64, `vmType: vz`. Everything the agent does happens
+on that machine's native filesystem. **The boundary is the edge of the VM** — not
+a process, and not the Hermes profile.
 
-Dwie konsekwencje ustawiają resztę architektury:
+Two consequences set up the rest of the architecture.
 
-**Brak szerokiego mountu macOS.** `mounts: []` w szablonie gościa. Repozytoria
-i Brain leżą na dysku VM, nie w katalogu domowym Maca widzianym przez guest.
-Dlatego transport danych (`torio brain import`) jest jednorazowym, ograniczonym
-`limactl copy` przez prywatny staging, a nie kopiowaniem po współdzielonej
-ścieżce. Profil Hermesa nie jest sandboxem i nie próbujemy go nim uczynić —
-izolację daje brzeg VM.
+**No broad macOS mount.** `mounts: []` in the guest template. Repositories and the
+Brain live on the VM's disk, not in a Mac home directory the guest can see. That
+is why bringing data in (`torio brain import`) is a one-shot, bounded `limactl
+copy` through private staging rather than a copy across a shared path. The Hermes
+profile is not a sandbox and no attempt is made to turn it into one; the isolation
+comes from the VM edge.
 
-**Tożsamość serwisowa nie jest root-equivalent.** Guest ma dedykowanego
-użytkownika `hermes`, który **nie należy do grupy `docker`** — szablon usuwa go
-z niej przy provisioningu, a `torio vm bootstrap` weryfikuje nieobecność
-i zawodzi closed. Rootful Docker Engine nie jest instalowany. Członkostwo
-w `docker` to root na gościu, więc dawałoby agentowi dokładnie tę władzę, której
-granica VM ma go pozbawiać.
+**The service identity is not root-equivalent.** The guest has a dedicated
+`hermes` user which is **not in the `docker` group** — the template removes it
+during provisioning and `torio vm bootstrap` verifies the absence and fails
+closed. No rootful Docker Engine is installed. Membership of `docker` is root on
+the guest, so it would hand the agent exactly the authority the VM boundary
+exists to remove.
 
-## Podział własności
+## Threat model
 
-| Warstwa | Owner |
+**In scope: prompt injection and a confused agent.** A poisoned Jira ticket, a
+Confluence page or a README the agent was asked to read is ordinary input, and an
+instruction inside it reaches exactly the tools the agent legitimately holds.
+Everything below is aimed at that case.
+
+**Explicitly out of scope: an adversarial agent.** This is the load-bearing
+sentence of the whole document. The agent's job is to produce text a human reads,
+so the operator's terminal is itself an egress channel. No arrangement of
+credentials, sockets or firewall rules changes that. **"The box prevents
+exfiltration" is not a claim this project makes**, and any document that starts
+implying it is wrong and should be corrected.
+
+Also out of scope, and requiring a different class of tooling: a VM or kernel
+escape, a malicious or compromised Hermes runtime, someone with administrative
+access to the guest, and hostile multi-tenant use.
+
+### What follows from that scope
+
+- **Data exfiltration is unsolved.** The agent legitimately receives content
+  through permitted read tools and has unrestricted egress. Custody
+  ([ADR-0004](adr/0004-mcp-credential-custody-and-egress.md)) stops it acquiring a
+  durable capability; it does nothing about what the agent has already read.
+- **DNS is an accepted covert channel.** No DNS filter and no SNI proxy were
+  built. Filtering by name has to happen where the name is visible, and against
+  an adversarial agent — out of scope above — it fails anyway.
+- **`sudo hermes` runs agent-writable code as root.** `/usr/local/bin/hermes` is a
+  root-owned symlink to `/home/hermes/hermes-agent/venv/bin/hermes`, which the
+  `hermes` uid owns and can rewrite. That path is first on sudo's `secure_path`,
+  and the login user has passwordless sudo — provisioning itself relies on it
+  (`sudo -n usermod …` in `internal/lima/templates/torio.yaml`). An operator who
+  types `sudo hermes …` therefore executes whatever is at the target, as root.
+  This is an accepted trade-off of reaching Hermes through one stable command
+  path, not an oversight — but Hermes should be invoked as the `hermes` identity
+  and never through `sudo`.
+
+The controls that do exist are worth what they are worth: they keep the agent
+from acquiring a durable, transferable capability, and they make every granted
+capability legible and revocable. That is a smaller claim than "safe", and it is
+the correct one.
+
+## Ownership split
+
+| Layer | Owner |
 | --- | --- |
-| Lifecycle Limy, provisioning, weryfikacja gościa | Torio |
-| Deklaracja podpiętych projektów (niesekretna) | Torio (`config.json` V2) |
-| Ścieżki workspace'ów i vaulta | Torio (wyprowadzane, nie podawane) |
-| Sesja operatora z write capability | Torio (`project shell`) |
-| Model execution, sesje, pamięć, profile | Hermes Agent |
-| Rejestr projektów po stronie agenta | Hermes Agent (`hermes project` CLI) |
+| Lima lifecycle, provisioning, guest verification | Torio |
+| Declaration of attached projects (non-secret) | Torio (`config.json`) |
+| Workspace and vault paths | Torio (derived, never supplied) |
+| The operator session that carries write capability | Torio (`project shell`) |
+| Model execution, sessions, memory, profiles | Hermes Agent |
+| Agent-side project registry | Hermes Agent (`hermes project` CLI) |
 | Kanban, dispatch, retry | Hermes Agent |
 
-Torio nie zapisuje do wewnętrznego stanu Hermesa. Rejestracja projektu idzie
-przez publiczne `hermes project`, nie przez `~/.hermes/kanban.db`.
+Torio never writes to Hermes' internal state. A project is registered through the
+public `hermes project` CLI, not by touching `~/.hermes/kanban.db`.
 
-## Ścieżki danych
+## Data paths
 
-Trzy katalogi pod `/home/hermes`, celowo rozdzielone:
+Three directories under `/home/hermes`, separated on purpose:
 
-- `/home/hermes/.hermes` — **profil i stan aplikacyjny** Hermesa
+- `/home/hermes/.hermes` — Hermes' **profile and application state**
   (`HermesProfilePath`), `hermes:hermes 0750`;
-- `/home/hermes/brain` — **Second Brain**, prywatny vault Markdown
+- `/home/hermes/brain` — the **Second Brain**, a private Markdown vault
   (`HermesBrainPath`), `hermes:hermes 0750`;
-- `/home/hermes/projects` — **workspace'y**, `hermes:torio-projects 2770` (setgid).
+- `/home/hermes/projects` — **workspaces**, `hermes:torio-projects 2770` (setgid).
 
-Rozdzielenie pierwszych dwóch jest decyzją, nie kosmetyką: przed V1 kod nazywał
-katalog stanu aplikacji „Knowledge Base", co mieszało prywatne notatki
-z artefaktami Hermesa. `torio vm bootstrap` sprawdza ownership i mode każdej
-z tych ścieżek.
+Separating the first two is a decision, not cosmetics: earlier code called the
+application state directory a "Knowledge Base", which mixed private notes with
+Hermes artefacts. `torio vm bootstrap` checks the ownership and mode of each path.
 
-Setgid na `projects` jest tym, co pozwala operatorowi i tożsamości `hermes`
-pracować na tym samym checkoutcie: oba konta należą do grupy `torio-projects`,
-więc pliki tworzone przez jedno są zapisywalne dla drugiego. Bez tego sesja
-operatora zostawiałaby checkout, w którym agent nie może dalej pracować.
+The setgid bit on `projects` is what lets the operator and the `hermes` identity
+work on the same checkout: both accounts are in `torio-projects`, so files created
+by one are writable by the other. Without it, an operator session would leave
+behind a checkout the agent could not continue in.
 
-**Workspace path nie jest wejściem.** Wyprowadza się z id projektu jako
-`/home/hermes/projects/<id>`. Użytkownik podaje id i remote; ścieżki nie podaje
-nigdy, a config obiektu z polem `path` nie przyjmuje.
+**A workspace path is not an input.** It is derived from the project id as
+`/home/hermes/projects/<id>`. The operator supplies an id and a remote, never a
+path, and the config document has no field to hold one.
 
-## Skąd bierze się prawo zapisu do origin
+## Where write access to an origin comes from
 
-To jest właściwa treść V1 i jedyne miejsce, gdzie architektura mówi „nie" czemuś,
-co byłoby wygodne.
+This is the one place the architecture says "no" to something that would be
+convenient.
 
-Persistentny Hermes ma do origin wyłącznie **read**. Nie ma tokenu, nie
-dziedziczy `SSH_AUTH_SOCK`, a szablon gościa ustawia `ssh.forwardAgent: false`
-globalnie.
+The persistent Hermes has **read** access to an origin and nothing else. It holds
+no token, does not inherit `SSH_AUTH_SOCK`, and the guest template sets
+`ssh.forwardAgent: false` globally.
 
-Write capability istnieje wyłącznie w czasie trwania jednej interaktywnej sesji:
+Write capability exists only for the duration of one interactive session:
 
 ```text
 torio project shell <id>
   → ssh -A -t lima-torio /usr/local/bin/torio-project-shell /home/hermes/projects/<id>
-  → zwykłe komendy Git w tożsamości operatora, w grupie torio-projects
-  → exit — forwarded agent znika razem z sesją
+  → ordinary Git commands under the operator's identity, in group torio-projects
+  → exit — the forwarded agent goes with the session
 ```
 
-Helper na gościu jest `root:root 0755` i materializuje go szablon Limy przy
-każdym starcie. Bootstrap tylko dowodzi jego stanu i zgłasza drift zamiast go
-naprawiać. Powód jest wprost: przez tę ścieżkę przechodzi przekazany agent
-operatora, więc nic, co `hermes` albo operator mogą nadpisać, nie może na niej
-leżeć.
+The guest-side helper is `root:root 0755` and is materialized by the Lima
+template on every start. Bootstrap only proves its state and reports drift rather
+than repairing it. The reason is direct: the operator's forwarded agent passes
+through this path, so nothing `hermes` or the operator can overwrite may sit on
+it.
 
-Torio nie przechowuje credentiali Git write, nie automatyzuje push, merge ani
-release, i nie wykonuje test-pusha, żeby cokolwiek udowodnić. Remote z wbudowanym
-hasłem, tokenem, query albo fragmentem jest odrzucany.
+Torio stores no Git write credential, automates no push, merge or release, and
+runs no test push to prove anything. A remote carrying an embedded password,
+token, query or fragment is rejected.
 
-## Granica custody dla MCP
+## MCP custody boundary
 
-Credentiale MCP docelowo należą do osobnej, nieuprzywilejowanej tożsamości
-`torio-mcp`, której home `/home/torio-mcp` ma `0700`. `hermes` nie należy do
-grupy właściciela i nie może odczytać tego katalogu; dostaje wyłącznie
-członkostwo w `torio-mcp-clients`, potrzebne do przyszłego połączenia z unix
-socketem brokera. Jawny grant narzędzi leży poza profilem agenta w root-owned
-`/etc/torio-mcp/policy.d`.
+MCP credentials belong to a separate unprivileged identity `torio-mcp`, whose
+home `/home/torio-mcp` is `0700`. `hermes` is not in the owning group and cannot
+read that directory; it gets only membership of `torio-mcp-clients`, which is what
+a future connection to the broker's unix socket will require. The explicit tool
+grant lives outside the agent's profile, in root-owned `/etc/torio-mcp/policy.d`.
 
-V1 provisionuje i weryfikuje tę granicę, ale nie publikuje ani nie aktywuje
-daemona. Transport Streamable HTTP, callback logowania OAuth, refresh i format
-magazynu credentiali wymagają osobnej zaakceptowanej decyzji. Brak runtime
-brokera jest więc poprawnym stanem provisionowanej granicy, nie dowodem
-readiness usługi ([ADR-0027](adr/0027-mcp-boundary-before-daemon-delivery.md)).
+The released CLI provisions and verifies that boundary but neither publishes nor
+activates a daemon. Streamable HTTP transport, the OAuth login callback, refresh
+ownership and the credential store format all need their own accepted decision.
+An absent broker runtime is therefore a correct state for a provisioned boundary,
+not evidence that a service is ready
+([ADR-0004](adr/0004-mcp-credential-custody-and-egress.md)).
 
-## Second Brain w projektach
+## The Second Brain inside projects
 
-Brain jest osobnym Hermes Project do bezpośredniej pracy. Dostęp z pozostałych
-projektów daje **globalny skill `torio-brain`** — retrieval przez file/search
-tools, nie wstrzyknięcie treści.
+The Brain is a separate Hermes Project for working on it directly. Other projects
+reach it through a **global `torio-brain` skill** — retrieval through file and
+search tools, not injection of content.
 
-Wybór jest świadomy. Bulk injection całego vaulta do system promptu każdego
-projektu unieważniałby prompt cache przy każdej zmianie notatki i przenosiłby
-prywatne treści do kontekstu projektów, które ich nie potrzebują. Dodanie
-`/home/hermes/brain` jako folderu każdego projektu ma ten sam skutek i jest
-zakazane.
+The choice is deliberate. Injecting the whole vault into every project's system
+prompt would invalidate the prompt cache on every note change and move private
+content into the context of projects that do not need it. Adding
+`/home/hermes/brain` as a folder of every project has the same effect and is
+forbidden.
 
-## Backend i dostęp z Maca
+## The backend, and reaching it from the Mac
 
-`hermes serve` biegnie jako **user systemd service** na gościu, związany
-z `127.0.0.1:9119`. Loopback gościa, nie interfejs VM. Z Maca dostęp idzie
-wyłącznie przez tunel SSH, który zestawia operator — Torio żadnego tunelu nie
-otwiera i żadnej sesji czatu nie zaczyna.
+`hermes serve` runs as a **user systemd service** on the guest, bound to
+`127.0.0.1:9119` — the guest's loopback, not the VM interface. From the Mac the
+only route is an SSH tunnel the operator opens. Torio opens no tunnel and starts
+no chat session.
 
-## Gdzie Torio się kończy
+## Where Torio stops
 
-Świadomie nie istnieją: agent loop, drugi Kanban, dispatcher, queue, retry
-engine, per-task worker containers, fresh verifier, automatyczny
-merge/push/release, secret broker, domenowy egress allowlist, import hostowego
-checkoutu i szeroki mount katalogu macOS.
+Deliberately absent: an agent loop, a second Kanban, a dispatcher, a queue, a
+retry engine, per-task worker containers, a fresh verifier, automatic
+merge/push/release, a Vault-class secret manager, a domain egress allowlist,
+importing a host checkout, and any broad mount of a macOS directory.
 
-Ta lista nie jest roadmapą. Pierwsza wersja tego repozytorium zaprojektowała
-większość z tych rzeczy i żadnej nie dostarczyła; materiał jest pod
-`archive/pre-v1` i nie wraca do implementacji.
+That list is not a roadmap. The first version of this repository designed most of
+it and delivered none of it; the material is under the `archive/pre-v1` tag and is
+not coming back
+([ADR-0005](adr/0005-repository-and-documentation-governance.md)).

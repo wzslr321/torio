@@ -35,10 +35,10 @@ func (t objType) String() string {
 // is pure — no filesystem, no globals — so every rule is unit-tested by
 // constructing inputs directly. Production supplies typ/perm/uid from a single
 // Fstat on the validated descriptor and euid from os.Geteuid(); there is no
-// runtime-configurable ownership override (see ADR-0013 constraint 2). path is a
+// runtime-configurable ownership override (see ADR-0001 constraint 2). path is a
 // local filesystem path used only for diagnostics and is never a secret.
 //
-// Terminology (ADR-0013): "mode-private" is the permission property (no 0o077
+// Terminology (ADR-0001): "mode-private" is the permission property (no 0o077
 // bits); "owned-by-EUID" is the ownership property (uid == euid). Trust requires
 // both, plus the type check.
 func verifyTrusted(path string, want, typ objType, perm fs.FileMode, uid, euid uint32) error {

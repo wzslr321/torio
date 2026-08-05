@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-#
-# AI-Provenance:
-#   model: Cursor Grok 4.5
-#   harness: Cursor
-#
 """Package a Torio macOS arm64 release archive and SHA256SUMS.
 
 Usage:

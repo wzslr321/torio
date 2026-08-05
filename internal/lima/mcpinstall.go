@@ -9,7 +9,7 @@ import (
 const mcpInstallOp = "mcp_install"
 
 // TorioMCPPolicyDir holds one JSON policy document per service. It is
-// root-owned and world-readable on purpose: ADR-0022 makes the grant legible to
+// root-owned and world-readable on purpose: ADR-0004 makes the grant legible to
 // everyone, including the agent, while the credentials it authorizes stay
 // unreadable. An agent that can see exactly what it is allowed to do — and
 // cannot change it — is the whole transparency claim.

@@ -12,7 +12,7 @@ import (
 	"github.com/wzslr321/torio/internal/mcpbroker"
 )
 
-// socketDir is where the broker publishes one socket per service (ADR-0022 §3).
+// socketDir is where the broker publishes one socket per service (ADR-0004 §3).
 // It is fixed in the binary for the same reason it is fixed in the relay: the
 // guest layout is Torio's, not the caller's, and an overridable base would let
 // anything that can set argv or the environment move the boundary.
@@ -22,7 +22,7 @@ const socketDir = "/run/torio-mcp"
 // never mistaken for a whole path.
 const socketSuffix = ".sock"
 
-// socketMode is the mode ADR-0022 §3 requires: the owner (torio-mcp) and the
+// socketMode is the mode ADR-0004 §3 requires: the owner (torio-mcp) and the
 // client group (torio-mcp-clients), nobody else. Group membership is the entire
 // privilege the agent identity holds, so the bits that express it are not left
 // to whatever umask the process inherited.

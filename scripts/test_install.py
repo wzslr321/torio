@@ -1,11 +1,4 @@
 #!/usr/bin/env python3
-#
-# AI-Provenance:
-#   model: Cursor Grok 4.5
-#   harness: Cursor
-#   skills:
-#     - mark-ai-provenance
-#
 """Tests for scripts/install.sh using synthetic release assets."""
 
 from __future__ import annotations

@@ -9,7 +9,7 @@ import (
 	"github.com/wzslr321/torio/internal/mcpbroker"
 )
 
-// The policy document is the grant. ADR-0022 §4 puts it at `root:root 0644` and
+// The policy document is the grant. ADR-0004 §4 puts it at `root:root 0644` and
 // says why in one line: readable by the agent, writable only by root. Both
 // halves are load-bearing. Take away the read and the decision stops being
 // legible to the party it constrains; take away the root-only write and it stops
@@ -119,7 +119,7 @@ func (a *Adapter) verifyPolicyDocuments(ctx context.Context, rep *MCPBrokerRepor
 			// chose can appear. The shape of the drift is the finding.
 			return a.brokerFailed(rep, name,
 				fmt.Sprintf("a policy document is %s:%s %s, want %s:%s 0644", fOwner, fGroup, fMode, policyDocOwner, policyDocGroup),
-				"the grant must be readable by the agent and writable only by root (ADR-0022 §4)")
+				"the grant must be readable by the agent and writable only by root (ADR-0004 §4)")
 		}
 		content, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "cat", "--", path.Join(TorioMCPPolicyDir, file))
 		if err != nil {

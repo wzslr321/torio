@@ -609,7 +609,7 @@ func TestInstallMCPBrokerVerifiesListeningSocketsAfterActivation(t *testing.T) {
 // installer from quietly becoming a privilege grant. torio-mcp must not join
 // torio-projects (it would reach project checkouts) and hermes must not join
 // torio-mcp (it would read the credential store) -- the two mistakes that would
-// void ADR-0022 while leaving every other check green.
+// void ADR-0004 while leaving every other check green.
 func TestInstallMCPBrokerNeverGrantsBroaderAuthority(t *testing.T) {
 	fr := &fakeRunner{script: freshInstallScript()}
 	a := installTestAdapter(t, fr)

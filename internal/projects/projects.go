@@ -1,6 +1,6 @@
 // Package projects attaches, verifies and forgets Git repositories on the
 // managed Lima guest. It is the one place that implements the attach / adopt /
-// verify / register / remove invariants of ADR-0015, so no caller has to
+// verify / register / remove invariants of ADR-0003, so no caller has to
 // re-derive them.
 //
 // Two boundaries define the package. The workspace path is always derived from
@@ -302,7 +302,7 @@ type ShellSession struct {
 // ServiceEnvCheck is the read-only look at the persistent Hermes backend
 // environment that follows an operator session.
 //
-// ADR-0015 puts write capability in the ephemeral session and nowhere else:
+// ADR-0003 puts write capability in the ephemeral session and nowhere else:
 // the persistent `hermes` service identity must never hold SSH_AUTH_SOCK. This
 // is the cheap regression detector for that invariant. It carries a verdict —
 // never the environment it read.

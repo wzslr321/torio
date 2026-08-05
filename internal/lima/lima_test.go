@@ -43,7 +43,7 @@ func TestNewDefaultsBinToLimactl(t *testing.T) {
 }
 
 // The instance name must reach limactl from the resolved value, never from a
-// literal. This is the guard ADR-0021 promises: a new call site that hardcodes
+// literal. This is the guard ADR-0001 promises: a new call site that hardcodes
 // "torio" would work in production and silently ignore the operator's choice,
 // which is the one failure this mechanism cannot tolerate.
 func TestNoHardcodedInstanceLiteralInProductionCode(t *testing.T) {

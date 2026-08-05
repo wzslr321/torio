@@ -1,4 +1,4 @@
-// Package lima is the typed, testable adapter over `limactl` (ADR-0003 / ADR-0015).
+// Package lima is the typed, testable adapter over `limactl` (ADR-0002 / ADR-0003).
 // The V1 surface covers probe, status, init (trusted embedded template), start,
 // stop, bootstrap, and ssh for the single Torio target VM. Every external call
 // is an execx.Command argument array — never a shell string — run through the
@@ -17,8 +17,8 @@ import (
 
 // InstanceName is the Lima VM instance this invocation manages.
 //
-// ADR-0003 still holds: exactly one Linux arm64 VM is the trust boundary, and
-// Torio never manages several at once. What ADR-0021 changed is that the
+// ADR-0002 still holds: exactly one Linux arm64 VM is the trust boundary, and
+// Torio never manages several at once. What ADR-0001 changed is that the
 // operator chooses which one, so a test run and a day's work do not share a
 // Brain.
 //

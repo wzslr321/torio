@@ -1,5 +1,5 @@
 // Command torio-mcp-broker is the guest service that stands between the agent
-// and the MCP servers it uses (ADR-0022).
+// and the MCP servers it uses (ADR-0004).
 //
 // It runs as torio-mcp, an identity the agent cannot become, and publishes one
 // unix socket per service under /run/torio-mcp. Membership in torio-mcp-clients
@@ -26,7 +26,7 @@
 //
 // stdout carries audit records, one JSON object per line, and nothing else.
 // stderr carries diagnostics. Neither ever carries tool call arguments or
-// upstream reply content: those are Jira and Confluence material, and ADR-0022 §5
+// upstream reply content: those are Jira and Confluence material, and ADR-0004 §5
 // keeps them out of every Torio surface.
 package main
 
@@ -50,7 +50,7 @@ import (
 )
 
 // policyDir holds one JSON policy document per service, root-owned and
-// world-readable (ADR-0022 §4). It is fixed in the binary, like the socket
+// world-readable (ADR-0004 §4). It is fixed in the binary, like the socket
 // directory: internal/lima.TorioMCPPolicyDir provisions the same path from the
 // host side and stays the source of truth for it, but a guest binary does not
 // import the host adapter.
@@ -248,7 +248,7 @@ type publishedService struct {
 
 // publish binds every service's socket and states the grant it will enforce.
 //
-// The grant is logged at startup because ADR-0022 makes legibility the point:
+// The grant is logged at startup because ADR-0004 makes legibility the point:
 // what is granted, where it goes, and how many of those tools write, without
 // anybody having to read a file. If any service cannot be published the ones
 // already up are closed again — a partly-published broker is one whose missing
@@ -315,7 +315,7 @@ func closeAll(services []publishedService) {
 //
 // A failing accept loop takes the whole daemon down. The alternative — carrying
 // on with the remaining services — is a broker that is up and silently deaf on
-// one socket, which is exactly the state ADR-0022 §6 says verification must be
+// one socket, which is exactly the state ADR-0004 §6 says verification must be
 // able to catch.
 func serveAll(ctx context.Context, services []publishedService, log *slog.Logger) int {
 	ctx, cancel := context.WithCancel(ctx)

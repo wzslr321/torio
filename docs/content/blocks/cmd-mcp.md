@@ -30,10 +30,5 @@ binary sends MCP traffic upstream.
 **This is custody preparation, not an active integration.** The released CLI
 does not package, install, or activate the dormant broker and relay binaries.
 It does not perform OAuth or send MCP traffic upstream. Runtime transport and
-credential lifecycle remain blocked by ADR-0027 until a complete contract is
+credential lifecycle remain blocked by ADR-0004 until a complete contract is
 accepted.
-
-The multi-service Atlassian implementation under
-`spikes/001-multi-mcp-write-window/` is evidence and design exploration only.
-Its `PARTIAL` verdict does not promote the spike into the released command
-surface.

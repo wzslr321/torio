@@ -50,7 +50,7 @@ func TestAllowDistinguishesUnknownServiceFromUnlistedTool(t *testing.T) {
 	}
 }
 
-// TestAllowMatchesNothingButAnExactName is the rule ADR-0022 §4 states and the
+// TestAllowMatchesNothingButAnExactName is the rule ADR-0004 §4 states and the
 // one most likely to be eroded by a well-meaning change. Grants are enumerated
 // by name: no prefix, no suffix, no glob, no case folding, no separator
 // normalisation. Every input below is a way of "nearly" naming a granted tool.

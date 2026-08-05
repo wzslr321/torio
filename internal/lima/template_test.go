@@ -1,11 +1,3 @@
-/*
- * AI-Provenance:
- *   model: Cursor Grok 4.5
- *   harness: Cursor
- *   skills:
- *     - mark-ai-provenance
- */
-
 package lima
 
 import (

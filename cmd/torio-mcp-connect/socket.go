@@ -11,7 +11,7 @@ import (
 	"github.com/wzslr321/torio/internal/mcpbroker"
 )
 
-// socketDir is where the broker publishes one socket per service (ADR-0022 §3).
+// socketDir is where the broker publishes one socket per service (ADR-0004 §3).
 // It is fixed in the binary: the guest layout is Torio's, not the caller's, and
 // an overridable base would let anything that can set argv or the environment
 // point the relay at a socket of its own.
@@ -81,7 +81,7 @@ func dial(path string) (*net.UnixConn, error) {
 				"or it has never started (run `torio mcp install` on the host, then check the broker unit)", path),
 		}
 	case errors.Is(err, fs.ErrPermission):
-		// The socket is 0660 torio-mcp:torio-mcp-clients (ADR-0022 §3), so this
+		// The socket is 0660 torio-mcp:torio-mcp-clients (ADR-0004 §3), so this
 		// is the boundary doing its job, not a malfunction. The group name is
 		// repeated from internal/lima.TorioMCPClientsGroup, which stays the
 		// source of truth; a guest binary must not pull in the host adapter.

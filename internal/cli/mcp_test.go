@@ -54,7 +54,7 @@ func cliTestPolicyDigest(files ...string) string {
 	return policy.Digest()
 }
 
-// okMCPScript is the guest replying that every ADR-0022 boundary holds, probe
+// okMCPScript is the guest replying that every ADR-0004 boundary holds, probe
 // by probe, in the order lima.VerifyMCPBroker issues them.
 func okMCPScript() []scriptedResp {
 	out := func(s string) scriptedResp { return scriptedResp{res: execx.Result{Stdout: []byte(s)}} }

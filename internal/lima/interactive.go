@@ -32,7 +32,7 @@ const ProjectEnterHelper = "/usr/local/bin/torio-project-enter"
 
 // sshHostAlias is the host entry Lima writes into the instance ssh config. It
 // follows the selected instance because Lima derives the alias from the
-// instance name (ADR-0021); a fixed alias would point an operator shell at the
+// instance name (ADR-0001); a fixed alias would point an operator shell at the
 // wrong VM.
 func sshHostAlias() string { return "lima-" + InstanceName }
 

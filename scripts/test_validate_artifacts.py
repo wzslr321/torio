@@ -20,7 +20,7 @@ import validate_artifacts as v  # noqa: E402
 
 # The block exactly as it stood before the correction, at 6ff120b. Pasted
 # unchanged during Task 23 it pinned a working, guessable token and nothing
-# reported an error — see docs/v1-evidence/FINDINGS-run-a.md.
+# reported an error — see archive/pre-oss:docs/v1-evidence/FINDINGS-run-a.md.
 PRE_FIX_BLOCK = """\
 ```bash
 limactl shell torio            # interactive shell in the VM (Lima user)

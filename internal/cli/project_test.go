@@ -672,7 +672,7 @@ func TestProjectShellPreflightFailuresMapToExitCodesAndOpenNothing(t *testing.T)
 }
 
 // The forwarded agent reaching the persistent service identity is the one
-// invariant ADR-0015 puts above the session's own outcome, so it is reported
+// invariant ADR-0003 puts above the session's own outcome, so it is reported
 // even when the session itself ended cleanly.
 func TestProjectShellReportsAServiceEnvironmentLeak(t *testing.T) {
 	service := &fakeProjectService{

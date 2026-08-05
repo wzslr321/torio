@@ -9,7 +9,7 @@ import (
 )
 
 // This file holds the trusted-open primitive for the supported security hosts
-// (Darwin and Linux arm64; see ADR-0013). It is deliberately NOT tagged with the
+// (Darwin and Linux arm64; see ADR-0001). It is deliberately NOT tagged with the
 // generic `unix` constraint: the trusted-authority policy is only claimed on
 // darwin and linux. syscall.Open + Fstat cover both without a third-party
 // dependency; full openat-relative resolution (which would need

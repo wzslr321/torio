@@ -14,11 +14,11 @@ import (
 )
 
 // ConfigSchemaVersion is the only supported config document version: the
-// non-secret project registry schema (ADR-0015). A document declaring any other
+// non-secret project registry schema (ADR-0003). A document declaring any other
 // version is rejected rather than migrated.
 //
 // The settings-only predecessor ("1") is no longer read. Torio never shipped a
-// release that wrote one, so no such document exists (ADR-0019). A binary that
+// release that wrote one, so no such document exists (ADR-0001). A binary that
 // predates the registry still refuses this document — by its own version gate
 // and by DisallowUnknownFields on "projects" — so it can never misread a
 // registry as settings-only.
@@ -27,7 +27,7 @@ const ConfigSchemaVersion = "2"
 // File is the validated, typed content of the on-disk config document. It holds
 // only non-secret operator intent: runtime settings plus the active project
 // registry. A project's workspace path is deliberately absent — it is derived
-// from the project ID, never stored (ADR-0015).
+// from the project ID, never stored (ADR-0003).
 type File struct {
 	// SchemaVersion is the document schema version; ConfigSchemaVersion once
 	// validated.
@@ -78,7 +78,7 @@ type Runtime struct {
 //     invalid values, or secret-shaped material are all rejected.
 //   - On darwin/linux, a symlinked, non-mode-private, non-EUID-owned or
 //     non-regular config file, or such an existing config/state directory, is
-//     rejected (see ADR-0013); outside darwin/linux this is a documented no-op.
+//     rejected (see ADR-0001); outside darwin/linux this is a documented no-op.
 //
 // Load performs no writes and does not create directories.
 //
@@ -101,7 +101,7 @@ func Load(opts Options) (rt Runtime, err error) {
 	// For the default (non-explicit) config, ConfigDir is the trusted app
 	// directory holding the config document; validate it if it exists. An
 	// explicit --config is an operator-provided path whose parent mode is not
-	// enforced in D3.0 (ADR-0013 decision 1) — only the file itself is checked.
+	// enforced in D3.0 (ADR-0001 decision 1) — only the file itself is checked.
 	if !paths.explicitConfig {
 		if err := statTrustedDirIfExists(paths.ConfigDir); err != nil {
 			return Runtime{}, err

@@ -31,7 +31,7 @@ import (
 // (uid distinct from the Lima login user): it owns the persistent profile under
 // /home/hermes/.hermes and the Second Brain vault under /home/hermes/brain, and
 // is a member of torio-projects (not the docker group — rootful Docker for
-// hermes is forbidden per ADR-0015). `limactl shell` logs in as the Lima user,
+// hermes is forbidden per ADR-0003). `limactl shell` logs in as the Lima user,
 // so the documented stable path reaches hermes explicitly via
 // `sudo -u hermes -- hermes …`; the bare `hermes` name resolves through a fixed
 // symlink on sudo's secure_path.
@@ -197,7 +197,7 @@ type bootstrapPathSpec struct {
 }
 
 // bootstrapRequiredPaths are the persistent Hermes directories that must resolve
-// on the VM's native Linux filesystem with the V1 layout (ADR-0015 / Gate 0
+// on the VM's native Linux filesystem with the V1 layout (ADR-0003 / Gate 0
 // FINDINGS). Owned paths are inspected via sudo.
 var bootstrapRequiredPaths = []bootstrapPathSpec{
 	{path: HermesHome, owner: HermesUser, group: TorioProjectsGroup, modes: []string{"710", "0710"}},
@@ -243,7 +243,7 @@ trap - EXIT
 `
 
 // hostShareFSTypes is the findmnt -t filter for macOS host-share filesystems. A
-// broad host mount over the guest is an ADR-0003 violation and fails closed.
+// broad host mount over the guest is an ADR-0002 violation and fails closed.
 const hostShareFSTypes = "9p,virtiofs,fuse,fuse.virtiofs,nfs,cifs"
 
 // nativeFSTypes are the accepted on-VM block-backed filesystem types for the
@@ -537,7 +537,7 @@ func (a *Adapter) verifyHermesNotInDocker(ctx context.Context, rep *BootstrapRep
 		return a.verifyFailed(rep, name, "cannot read hermes group membership", "confirm the hermes user exists on the guest")
 	}
 	if hasGroup(string(res.Stdout), dockerGroup) {
-		return a.verifyFailed(rep, name, "hermes is in the docker group", "remove hermes from the docker group; rootful Docker for hermes is forbidden (ADR-0015)")
+		return a.verifyFailed(rep, name, "hermes is in the docker group", "remove hermes from the docker group; rootful Docker for hermes is forbidden (ADR-0003)")
 	}
 	rep.record(name, true, "not a member")
 	return nil
@@ -630,7 +630,7 @@ func (a *Adapter) verifyPaths(ctx context.Context, rep *BootstrapReport) error {
 		}
 		fstype := fields[0]
 		if !nativeFSTypes[fstype] {
-			return a.verifyFailed(rep, name, "backed by non-native filesystem "+fstype, "Hermes state must live on the VM's Linux filesystem, not a host share (ADR-0003)")
+			return a.verifyFailed(rep, name, "backed by non-native filesystem "+fstype, "Hermes state must live on the VM's Linux filesystem, not a host share (ADR-0002)")
 		}
 		rep.record(name, true, fmt.Sprintf("%s:%s %s %s", owner, group, mode, strings.Join(fields, " ")))
 	}
@@ -658,7 +658,7 @@ func (a *Adapter) verifyNoHostMounts(ctx context.Context, rep *BootstrapReport) 
 		return nil
 	case res.ExitCode == 0 && out != "":
 		// findmnt matched at least one host-share mount over the guest.
-		return a.verifyFailed(rep, name, "a macOS host-share mount is present", "remove the broad host mount; only a narrow transfer folder is allowed (ADR-0003)")
+		return a.verifyFailed(rep, name, "a macOS host-share mount is present", "remove the broad host mount; only a narrow transfer folder is allowed (ADR-0002)")
 	default:
 		// Anything else is not the evidence-backed PASS shape and cannot prove the
 		// absence of a host mount: exit 127 (findmnt missing / exec failure), an

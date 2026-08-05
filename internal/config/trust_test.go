@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// trust_test.go — D3.0 trusted-config-authority enforcement (ADR-0013).
+// trust_test.go — D3.0 trusted-config-authority enforcement (ADR-0001).
 // These are integration tests through the public API (Load / WriteFile)
 // exercising every matrix row that is reproducible without a
 // second user. Ownership mismatch is covered here only when the process can
@@ -35,7 +35,7 @@ func TestLoadRejectsDefaultConfigSymlink(t *testing.T) {
 }
 
 // A default ConfigDir that is itself a symlink must be rejected before any file
-// inside it is trusted (ADR-0013 requirement 1).
+// inside it is trusted (ADR-0001 requirement 1).
 func TestLoadRejectsSymlinkedConfigDir(t *testing.T) {
 	cfgHome := t.TempDir()
 	realDir := filepath.Join(t.TempDir(), "real")
@@ -87,7 +87,7 @@ func TestLoadRejectsConfigFileOwnedByOtherUID(t *testing.T) {
 // --- explicit --config: same final-file enforcement ------------------------
 
 // An explicit --config pointing at a symlink must be rejected: "trusted operator
-// input" does not license a symlinked authority file (ADR-0013 decision 1).
+// input" does not license a symlinked authority file (ADR-0001 decision 1).
 func TestLoadRejectsExplicitConfigSymlink(t *testing.T) {
 	base := t.TempDir()
 	target := filepath.Join(base, "target.json")

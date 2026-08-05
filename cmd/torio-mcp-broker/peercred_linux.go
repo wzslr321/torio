@@ -12,14 +12,14 @@ import (
 // of conn.
 //
 // SO_PEERCRED is read from the kernel, not presented by the caller, which is why
-// the resulting audit line is evidence and not a note: ADR-0022 puts identity in
+// the resulting audit line is evidence and not a note: ADR-0004 puts identity in
 // the kernel precisely so that no secret can stand in for it.
 //
 // # What this does not buy
 //
 // It names a uid, not a program. Everything running as hermes looks identical
 // here — the MCP client, a shell, a one-liner the agent wrote — so no rule may
-// ever be built on "which caller this is" (ADR-0022 §3). The uid is recorded
+// ever be built on "which caller this is" (ADR-0004 §3). The uid is recorded
 // because a decision has to be attributable, and it is used for nothing else.
 func peerUID(conn *net.UnixConn) (uint32, error) {
 	raw, err := conn.SyscallConn()

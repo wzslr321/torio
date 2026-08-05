@@ -1,11 +1,3 @@
-/*
- * AI-Provenance:
- *   model: Cursor Grok 4.5
- *   harness: Cursor
- *   skills:
- *     - mark-ai-provenance
- */
-
 package lima
 
 import (
@@ -17,12 +9,13 @@ import (
 	"strings"
 )
 
-// Promoted Gate 0 image pin (docs/spike-results/v1-onboarding-20260727T115633Z/FINDINGS.md).
+// Promoted Gate 0 image pin
+// (archive/pre-oss:docs/spike-results/v1-onboarding-20260727T115633Z/FINDINGS.md).
 const (
 	PromotedImageURL    = "https://cloud-images.ubuntu.com/releases/noble/release-20260705/ubuntu-24.04-server-cloudimg-arm64.img"
 	PromotedImageDigest = "sha256:7df0201546f75b8bcc1044594c806c35749421ad3c9bc1be2a3ab806cfae39cc"
 	// PromotedHermesCommit is the Hermes Agent pin from Gate 0. Init embeds it
-	// for callers/docs; guest Hermes install is reconciled in bootstrap (Task 9).
+	// for callers/docs; guest Hermes install is reconciled in bootstrap.
 	// Re-promoted 2026-08-03: wzslr321/hermes-agent 0a62610 (descendant of the
 	// Gate 0 pin 91546b8; picks up the openclaw EXDEV fsync fix).
 	PromotedHermesCommit = "0a62610f10cc34d696b2239b2c69fa1ba0f1ca63"

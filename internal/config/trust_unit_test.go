@@ -9,7 +9,7 @@ import (
 // trust_unit_test.go — deterministic, platform-neutral coverage of the pure
 // trust policy (verifyTrusted). Ownership mismatch is exercised here directly by
 // passing uid != euid, so the rule is proven without root or a runtime bypass
-// knob (ADR-0013 constraint 2). Integration coverage is in trust_test.go.
+// knob (ADR-0001 constraint 2). Integration coverage is in trust_test.go.
 
 const euid uint32 = 1000
 

@@ -16,13 +16,13 @@ const (
 	// configFileName is the default config document within the config dir.
 	configFileName = "config.json"
 	// instancesDir groups the config of every non-default instance. It sits
-	// inside the trusted config dir, so ADR-0013's path rules cover it without
+	// inside the trusted config dir, so ADR-0001's path rules cover it without
 	// a second boundary to reason about.
 	instancesDir = "instances"
 
 	// DefaultInstance is the Lima instance Torio manages when the operator
 	// selects none. It is also the only place the literal is allowed to appear
-	// in production code (ADR-0021).
+	// in production code (ADR-0001).
 	DefaultInstance = "torio"
 	// InstanceEnvKey selects the managed instance. It is not a credential: it
 	// picks which VM this invocation talks to, and is available to anyone who
@@ -39,7 +39,7 @@ var instancePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$
 
 // ResolveInstance returns the managed instance name for this invocation.
 //
-// Unset gives DefaultInstance, which is the pre-ADR-0021 behaviour exactly. A
+// Unset gives DefaultInstance, which is the pre-ADR-0001 behaviour exactly. A
 // set-but-malformed value is an error rather than a silent fall back to the
 // default: falling back would send a command meant for a test VM to the
 // operator's daily one, which is the failure this whole mechanism exists to
@@ -93,7 +93,7 @@ func (o Options) homeDir() (string, error) {
 //
 // There is no state directory: Torio writes no runtime state on the host. The
 // one that existed served the version-lock manifest, which was never wired and
-// is gone (ADR-0019).
+// is gone (ADR-0001).
 type Paths struct {
 	// Instance is the managed Lima instance this invocation targets. It is
 	// resolved here because this is where trusted inputs are resolved, and
@@ -153,7 +153,7 @@ func ResolvePaths(opts Options) (Paths, error) {
 		// A named instance gets its own registry. Sharing one would let
 		// `project list` show the daily projects while talking to a test VM,
 		// and `project add` write a test project into the real registry — so
-		// the separation is derived, never something to remember (ADR-0021).
+		// the separation is derived, never something to remember (ADR-0001).
 		if instance != DefaultInstance {
 			// One contained segment at a time: containedJoin validates a single
 			// file name, which is exactly the guarantee wanted here — the

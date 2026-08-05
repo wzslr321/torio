@@ -26,7 +26,7 @@ func brokerProbeArgs(command ...string) []string {
 	return append(args, command...)
 }
 
-// okBrokerScript is the probe-by-probe happy path: every invariant of ADR-0022
+// okBrokerScript is the probe-by-probe happy path: every invariant of ADR-0004
 // holds on the guest.
 //
 // Every `stat -c %F` probe names statControlPath first, so its reply carries one
@@ -69,7 +69,7 @@ func okBrokerScript() []scriptedResponse {
 }
 
 // relayOnlyConfig is a Hermes config whose every MCP server goes through the
-// broker relay — the shape ADR-0022 §3 prescribes.
+// broker relay — the shape ADR-0004 §3 prescribes.
 const relayOnlyConfig = `model:
   provider: custom
 mcp_servers:
@@ -276,7 +276,7 @@ func TestVerifyMCPBrokerHermesNotClient(t *testing.T) {
 }
 
 // TestVerifyMCPBrokerHermesOwnsBrokerIdentity is the custody invariant of
-// ADR-0022. If hermes lands in the torio-mcp group the broker's home and its
+// ADR-0004. If hermes lands in the torio-mcp group the broker's home and its
 // tokens become readable by the identity the agent has a shell as, and the whole
 // decision is void — so this must fail closed, loudly.
 func TestVerifyMCPBrokerHermesOwnsBrokerIdentity(t *testing.T) {
@@ -307,7 +307,7 @@ func TestVerifyMCPBrokerHomeIsGroupReadable(t *testing.T) {
 
 // TestVerifyMCPBrokerLeftoverTokens is the drift check that catches somebody
 // running `hermes mcp add` directly on a managed guest: credentials reappear
-// under the agent's own identity, which is exactly what ADR-0022 removes.
+// under the agent's own identity, which is exactly what ADR-0004 removes.
 func TestVerifyMCPBrokerLeftoverTokens(t *testing.T) {
 	script := okBrokerScript()
 	script[12] = scriptedResponse{result: stdoutResult("directory\ndirectory\n")}

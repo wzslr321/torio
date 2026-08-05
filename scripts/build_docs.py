@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-#
-# AI-Provenance:
-#   model: claude-opus-4-6-20260115
-#   harness: Cursor
-#
 """Single-source documentation generator for Torio.
 
 Prose lives once, under ``docs/content/``:

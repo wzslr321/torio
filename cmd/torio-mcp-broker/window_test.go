@@ -17,7 +17,7 @@ func TestGrantedWriteToolDoesNotDependOnProposedWriteWindow(t *testing.T) {
 
 	c.send(t, writeCall)
 	if resp := c.response(t); resp.Error != nil {
-		t.Fatalf("a policy-granted write tool was refused by Proposed ADR-0025 behavior: %+v", resp.Error)
+		t.Fatalf("a policy-granted write tool was refused by Proposed ADR-0004 behavior: %+v", resp.Error)
 	}
 	if n := len(up.requests); n != 1 {
 		t.Errorf("upstream saw %d requests, want 1", n)

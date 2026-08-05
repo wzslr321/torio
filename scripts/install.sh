@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# AI-Provenance:
-#   model: Cursor Grok 4.5
-#   harness: Cursor
-#
 # Verified Torio installer for macOS Apple Silicon.
 # Downloads a release asset, verifies SHA256SUMS, then installs the binary.
 # Never executes the downloaded binary before checksum verification.

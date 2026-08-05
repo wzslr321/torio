@@ -1,8 +1,3 @@
-/*
- * AI-Provenance:
- *   model: Claude Opus 5
- *   harness: Claude Code
- */
 // Package transfer is the host-side half of `torio brain import/export`: it
 // walks a local directory, applies the import filter, hashes what survives into
 // a private manifest, and stages the allowed bytes into a private directory that
@@ -38,7 +33,7 @@ const markdownExt = ".md"
 const canvasExt = ".canvas"
 
 // attachmentExts are the local attachment types a relative Markdown link can
-// point at (plan Task 12). `.canvas` is deliberately absent: it is admitted
+// point at. `.canvas` is deliberately absent: it is admitted
 // separately, after its own content validation.
 var attachmentExts = map[string]bool{
 	".png":  true,

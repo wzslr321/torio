@@ -13,7 +13,7 @@ const TorioMCPSocketDir = "/run/torio-mcp"
 
 const torioMCPPolicyDigestPath = TorioMCPSocketDir + "/.policy.sha256"
 
-// The socket's own owner, group and mode ARE the access control (ADR-0022 §3):
+// The socket's own owner, group and mode ARE the access control (ADR-0004 §3):
 // only members of the client group may connect at all. Nothing else stands
 // between an identity on this guest and the broker, so a widened mode is not a
 // cosmetic drift.

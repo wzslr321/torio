@@ -52,9 +52,12 @@ brings those three into a known-good state and then gets out of the way.
   workers.
 - **It does not broker MCP traffic yet.** The released CLI provisions custody
   only. It does not install or activate the dormant broker, run OAuth, or send
-  requests to an upstream MCP service. The multi-service Atlassian work under
-  [`spikes/001-multi-mcp-write-window/`](spikes/001-multi-mcp-write-window/)
-  remains an isolated spike with a `PARTIAL` verdict.
+  requests to an upstream MCP service.
+- **It does not stop an agent leaking what it has read.** The trust boundary is
+  the edge of the VM, and the threat model covers prompt injection and a confused
+  agent — not an adversarial one. See
+  [`docs/03-architecture.md`](docs/03-architecture.md) and
+  [`SECURITY.md`](SECURITY.md).
 
 ## Prerequisites
 
@@ -132,5 +135,5 @@ A broader design exploration (worker/control-plane, registry, verifier, evidence
 pipeline) came first, was never delivered, and is **superseded**. It no longer
 ships in the working tree; it is kept under the annotated tag `archive/pre-v1`
 and read with `git show archive/pre-v1:<path>`. See
-[`docs/adr/0017-pre-v1-exploration-leaves-the-working-tree.md`](docs/adr/0017-pre-v1-exploration-leaves-the-working-tree.md).
+[`docs/adr/0005-repository-and-documentation-governance.md`](docs/adr/0005-repository-and-documentation-governance.md).
 Do not use it as an onboarding or task path.

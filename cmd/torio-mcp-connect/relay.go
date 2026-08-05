@@ -19,7 +19,7 @@ type halfCloser interface {
 // It parses nothing. The only thing it knows about MCP is which event ends
 // which direction: stdin closing ends the request, the socket closing ends the
 // answer. Anything more — framing, filtering, counting tool calls — would make
-// this a place where upstream content could be read, and ADR-0022 §5 keeps
+// this a place where upstream content could be read, and ADR-0004 §5 keeps
 // content out of every Torio surface, not just the log.
 func relay(ctx context.Context, conn halfCloser, stdin io.Reader, stdout io.Writer) error {
 	// A signal cancels ctx, and closing the connection is what unblocks a copy

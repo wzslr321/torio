@@ -1,5 +1,5 @@
 // Package mcpbroker holds the policy engine of the MCP credential broker
-// (ADR-0022): the grant a service is given, the decision taken on one tool call,
+// (ADR-0004): the grant a service is given, the decision taken on one tool call,
 // and the audit record that decision leaves behind.
 //
 // The package deliberately knows nothing about credentials, sockets or
@@ -34,7 +34,7 @@ type service struct {
 	upstreamEndpoint string
 	// tools maps an allowed tool name to its write classification. Absence from
 	// this map is the denial: there is no pattern, prefix or wildcard form, so a
-	// name that is not a key was never granted (ADR-0022 §4).
+	// name that is not a key was never granted (ADR-0004 §4).
 	tools map[string]bool
 }
 
@@ -91,7 +91,7 @@ type Decision struct {
 // Allow reports whether service may invoke tool.
 //
 // Default deny, and matching is exact. There is no wildcard, prefix, suffix or
-// case-insensitive form, and adding one would not be a feature — ADR-0022 §4
+// case-insensitive form, and adding one would not be a feature — ADR-0004 §4
 // grants tools by name precisely so that nobody has to reason about what a
 // pattern covers. A name that is not in the document was not granted, however
 // close it looks to one that was.
@@ -112,7 +112,7 @@ func (s Set) Allow(service, tool string) Decision {
 }
 
 // Grant is the complete effective grant of a Set, in a form a caller can render
-// without reaching back into the broker. It exists because ADR-0022 makes
+// without reaching back into the broker. It exists because ADR-0004 makes
 // legibility the point of the whole arrangement: the answer to "what is granted"
 // must be enumerable and machine-readable, not inferred from an installer's
 // history.
@@ -128,11 +128,11 @@ type ServiceGrant struct {
 	Name string
 	// UpstreamEndpoint is where the broker sends this service's traffic. It is
 	// reported, not just held: an operator asking what is granted is also asking
-	// where the data goes (ADR-0022 §8).
+	// where the data goes (ADR-0004 §8).
 	UpstreamEndpoint string
 	// Tools is every allowed tool, ordered by name.
 	Tools []ToolGrant
-	// WriteTools is how many of Tools are write-classified. ADR-0022 requires a
+	// WriteTools is how many of Tools are write-classified. ADR-0004 requires a
 	// report to be able to state the number of granted write tools, and a count
 	// derived at report time cannot drift from the list it summarises.
 	WriteTools int

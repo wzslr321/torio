@@ -1,13 +1,3 @@
-<!--
-AI-Provenance:
-  model: Cursor Grok 4.5
-  harness: Cursor
-  plugins:
-    - lean-ai-provenance
-  skills:
-    - mark-ai-provenance
--->
-
 # Second Brain
 
 This is a private, Markdown-first workspace for notes, decisions, and follow-up.

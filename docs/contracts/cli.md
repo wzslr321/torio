@@ -1,21 +1,23 @@
 # CLI contract
 
-> Ten dokument jest **normatywny**: opisuje command surface dostarczonej binarki. Rozjazd
-> z jej zachowaniem jest defektem do naprawy, a nie zapisem do zachowania — patrz
-> [ADR-0016](../adr/0016-normative-documents-are-corrected-not-archived.md).
+> This document is **normative**: it describes the command surface of the
+> delivered binary. A disagreement with the binary's behaviour is a defect to
+> fix, not a record to preserve —
+> [ADR-0005](../adr/0005-repository-and-documentation-governance.md).
 >
-> Kontrakt powstał dla platformy **pre-V0** i przez jakiś czas opisywał komendy, których
-> binarka nigdy nie miała (`doctor`, `status`, `reconcile`, `vm logs`, `gateway`, `task`,
-> `admin`), a nie opisywał `brain` ani dostarczonego kształtu `project`. Ta treść została
-> usunięta, a nie zarchiwizowana: kontrakt, który wymienia nieistniejące komendy, myli
-> czytelnika bez względu na to, jak jest opatrzony. Zakres wyznacza
-> [ADR-0015](../adr/0015-torio-v1-onboarding-projects-and-operator-push.md); pre-V1
-> eksploracja, z której pochodziła usunięta treść, jest pod tagiem `archive/pre-v1`
-> ([ADR-0017](../adr/0017-pre-v1-exploration-leaves-the-working-tree.md)).
+> The contract once described commands the binary never had (`doctor`, `status`,
+> `reconcile`, `vm logs`, `gateway`, `task`, `admin`) and omitted `brain` and the
+> delivered shape of `project`. That content was removed rather than archived: a
+> contract listing commands that do not exist misleads the reader however it is
+> labelled. Scope is set by
+> [ADR-0003](../adr/0003-ownership-split-and-operator-carried-write.md); the
+> earlier exploration it came from is under the `archive/pre-v1` tag.
 
-## Binary i output
+## Binary and output
 
-Binary nazywa się `torio` (zmiana nazwy: [ADR-0014](../adr/0014-rename-to-torio.md)). Domyślnie wypisuje czytelny output na stdout i diagnostykę na stderr. `--json` zwraca dokładnie jeden JSON document na stdout i nie miesza z nim logów.
+The binary is `torio`. By default it writes human-readable output to stdout and
+diagnostics to stderr. `--json` returns exactly one JSON document on stdout and
+never mixes logs into it.
 
 ### JSON envelope
 
@@ -30,7 +32,7 @@ Binary nazywa się `torio` (zmiana nazwy: [ADR-0014](../adr/0014-rename-to-torio
 }
 ```
 
-Błąd:
+An error:
 
 ```json
 {
@@ -49,70 +51,73 @@ Błąd:
 }
 ```
 
-`command` jest to samo dla sukcesu i błędu tej samej komendy, więc maszynowy caller nie musi
-zgadywać, co się nie udało.
+`command` is the same on success and on failure of the same command, so a machine
+caller does not have to guess what failed.
 
-`message` **i wszystkie wartości w `details`** nie mogą zawierać credentials, raw env ani pełnych
-command lines zawierających sekrety; finalny renderer redaguje oba po znanych kształtach jako
-ostatnia linia obrony.
+`message` **and every value in `details`** must not contain credentials, raw
+environment or full command lines carrying secrets; the final renderer redacts
+both by known shapes as a last line of defence.
 
-`warnings` jest dziś zawsze pustą tablicą: żadna komenda nie ma warunku niefatalnego, który nie
-należałby już do `data`. Pole zostaje, bo caller parsujący envelope może polegać na jego obecności.
+`warnings` is currently always an empty array: no command has a non-fatal
+condition that does not already belong in `data`. The field stays so a caller
+parsing the envelope can rely on it being present.
 
 ## Exit codes
 
-| Exit | Klasa | Przykład |
+| Exit | Class | Example |
 |---:|---|---|
-| 0 | success/idempotent success | zgodna istniejąca VM przy `vm init` |
-| 2 | usage/schema validation | brak argumentu, invalid config, nieznana flaga |
-| 3 | unmet precondition | VM stopped, backend not installed, Brain nieobecny |
-| 5 | stale/conflict | id albo remote już zajęty |
-| 6 | verification failed | drift bootstrapu, endpoint nie odpowiada 200 |
-| 7 | permission/capability denied | gość nie ma prawa czytać remote'u |
-| 8 | external dependency failed | brak `limactl`, niezerowy exit komendy gościa |
-| 9 | reconciliation required | praca na gościu się udała, zapis registry nie |
+| 0 | success / idempotent success | a matching existing VM on `vm init` |
+| 2 | usage / schema validation | missing argument, invalid config, unknown flag |
+| 3 | unmet precondition | VM stopped, backend not installed, Brain absent |
+| 5 | stale / conflict | id or remote already taken |
+| 6 | verification failed | bootstrap drift, endpoint does not answer 200 |
+| 7 | permission / capability denied | the guest may not read the remote |
+| 8 | external dependency failed | no `limactl`, non-zero exit from a guest command |
+| 9 | reconciliation required | guest work succeeded, the registry write did not |
 
-Kod **4** („policy denied") pochodził z platformy pre-V0 i nie jest produkowany przez żadną
-komendę: V1 nie ma silnika policy, który mógłby czegokolwiek odmówić. Numer pozostaje nieużyty,
-a nie przydzielony ponownie — tabela jest kontraktem, a recykling kodu po cichu zmieniłby
-znaczenie istniejącej czwórki.
+Code **4** ("policy denied") came from the earlier platform and is produced by no
+command: there is no policy engine that could deny anything. The number stays
+unused rather than being reassigned — the table is a contract, and recycling a
+code would silently change the meaning of an existing 4.
 
 ## Global flags
 
 ```text
 --json                 machine output
 --config PATH          explicit non-secret config
---timeout DURATION     bounded operation; cannot exceed policy maximum
+--timeout DURATION     bounded operation; cannot exceed the policy maximum
 --verbose              more redacted diagnostics on stderr
 ```
 
-To pełna lista. Wszystkie cztery są realnymi globalnymi (persistent) flagami, działającymi przed
-i po subkomendzie; nieznana flaga jest odrzucana (usage, exit 2), nie akceptowana po cichu.
-`--config` resolwuje się do typowanej konfiguracji (patrz [`config.md`](config.md)) używanej przez
-wykonanie komendy — nie jest tylko parsowany. Błąd resolucji lub walidacji konfiguracji jest
-usage/schema error (exit 2).
+That is the full list. All four are real persistent flags, accepted before and
+after a subcommand; an unknown flag is rejected (usage, exit 2), never silently
+accepted. `--config` resolves to the typed configuration (see
+[`config.md`](config.md)) used by the command — it is not merely parsed. A
+resolution or validation failure is a usage/schema error (exit 2).
 
-Nie ma globalnego `--force`. Komendy mogą mieć wąskie, udokumentowane recovery flags, ale żadna nie
-może omijać weryfikacji ani granicy credentials: `vm init` nie recreatuje niezgodnej instancji,
-`brain import` nie nadpisuje istniejących danych, a `project remove` nie kasuje checkoutu.
+There is no global `--force`. A command may have a narrow, documented recovery
+flag, but none may bypass verification or the credential boundary: `vm init` does
+not recreate a non-matching instance, `brain import` does not overwrite existing
+data, and `project remove` does not delete a checkout.
 
-`--state-dir PATH` **nie istnieje**. Był globalną flagą w D2, ale wskazywał katalog, do którego
-Torio nigdy nic nie zapisało; zniknął wraz z manifestem version-lock —
-[ADR-0019](../adr/0019-state-directory-and-config-schema-v1-leave.md).
+`--state-dir PATH` **does not exist**. It once pointed at a directory Torio never
+wrote to, and it went with the version-lock manifest —
+[ADR-0001](../adr/0001-control-plane-and-trusted-host-inputs.md).
 
-### `--help` a `--json`
+### `--help` and `--json`
 
-`--help`/`-h` jest jedynym, wąskim wyjątkiem od reguły „jeden JSON envelope na stdout w trybie
-`--json`". Help to afordancja dla człowieka: wypisuje tekst usage na stdout i kończy exit 0, także gdy
-podano `--json` (nie emituje envelope). Każde inne wyjście w trybie `--json` MUSI być dokładnie jednym
-envelope.
+`--help`/`-h` is the one narrow exception to "exactly one JSON envelope on stdout
+in `--json` mode". Help is an affordance for a human: it prints usage text to
+stdout and exits 0 even when `--json` is given, emitting no envelope. Every other
+output in `--json` mode MUST be exactly one envelope.
 
 ## Command surface
 
-To pełna lista. Każdy parent (`vm`, `serve`, `brain`, `project`, `mcp`) bez subkomendy albo z
-nieznaną subkomendą kończy się usage error (exit 2) — fail-closed, tak jak root.
+This is the full list. Any parent (`vm`, `serve`, `brain`, `project`, `mcp`)
+without a subcommand, or with an unknown one, is a usage error (exit 2) —
+fail-closed, like the root command.
 
-### Informacyjne
+### Informational
 
 ```text
 torio version [--json]
@@ -129,30 +134,67 @@ torio vm status
 torio vm ssh -- COMMAND...
 ```
 
-- `init` tworzy VM z wbudowanego, pinowanego template'u Gate 0 albo kończy się idempotentnym
-  sukcesem, gdy istniejąca instancja pasuje do zaufanych pinów (image digest i URL, `mounts: []`,
-  `ssh.forwardAgent=false`, `vz`/`aarch64`). Niezgodna instancja **fail-closed** (exit 6): nie ma
-  `--force`, a Torio nigdy nie recreatuje, nie resetuje ani nie kasuje istniejącej VM.
-- `--cpus`/`--memory`/`--disk` dobierają rozmiar VM przy **tworzeniu**; domyślnie 4 vCPU, `8GiB`
-  i `60GiB`. To jedyne wartości operatora podstawiane do template'u poza jego login identity;
-  `--memory` i `--disk` muszą być jednoliniowe. Ponieważ `init` nigdy nie recreatuje, zmiana tych
-  wartości po utworzeniu VM wymaga usunięcia instancji poza Torio.
-- Każde inne pole template'u jest stałe. Ich zmiana wymagałaby nowego ADR-u, nie flagi.
-- `stop` nie usuwa VM ani danych. Jest idempotentne (już `Stopped` → exit 0) i nie ufa czystemu exit code: po `limactl stop` re-query wymaga stanu `Stopped`, inaczej fail-closed (exit 3). Nigdy nie używa `--force`.
-- `bootstrap` reconciliuje i weryfikuje target dla Remote Second Brain V1: stabilną, nieinteraktywną komendę `hermes` oraz układ trwałych katalogów gościa na natywnym Linux filesystem. Działa wyłącznie na istniejącym targetcie po zweryfikowanym warunku `Running`, przez typed Lima/execx boundary (fixed argv, bez `sh -c`, bez sklejanych stringów, bounded/redacted output). Jest idempotentne i wąskie: może doinstalować pinowany launcher Hermes Agent oraz symlink PATH `/usr/local/bin/hermes`, ale **nie** recreatuje/re-image'uje VM, nie instaluje modelu/providera, nie przyjmuje sekretów i nie tworzy usługi backendu (to robi `serve install`).
-- **Docker: `hermes` NIE MOŻE należeć do grupy `docker`.** Członkostwo w `docker` jest równoważne rootowi na gościu, więc rootful Docker dla tożsamości serwisowej `hermes` jest zakazany przez [ADR-0015](../adr/0015-torio-v1-onboarding-projects-and-operator-push.md). `bootstrap` **weryfikuje brak** tego członkostwa (`verifyHermesNotInDocker`) i fail-closed, gdy je znajdzie; template provisioningu usuwa `hermes` z `docker`, jeśli grupa istnieje. W V1 Docker Engine nie jest w ogóle instalowany, a `bootstrap` **nie** sprawdza osiągalności serwera Docker. Przyszły container runtime wymaga rootless, hermes-owned rozwiązania za osobnym ADR-em.
-- `bootstrap` **weryfikuje** (nie ufa samemu exit code): istnienie użytkownika `hermes`; istnienie grupy `torio-projects` oraz członkostwo w niej `hermes` i operatora (login identity Limy); **brak** członkostwa `hermes` w grupie `docker`; `uname -m == aarch64`; `hermes --version` przez tę samą, dokumentowaną stabilną ścieżkę; `git --version`; że każda wymagana ścieżka jest katalogiem o oczekiwanym owner/group/mode na natywnym Linux filesystem (nie host share); oraz brak szerokiego host mountu macOS. Każdy nieznany/nieweryfikowalny stan lub drift (architektura/wersja/ownership/mount) jest raportowany i fail-closed (exit 6), nie papering over. Rerun jest sukcesem tylko gdy wszystkie postconditions są udowodnione.
-- Wymagane ścieżki i ich role są rozłączne (ADR-0015; stałe w `internal/lima/bootstrap.go`) — `/home/hermes/.hermes` **nie jest** Knowledge Base:
+- `init` creates the VM from the embedded, pinned template, or succeeds
+  idempotently when an existing instance matches the trusted pins (image digest
+  and URL, `mounts: []`, `ssh.forwardAgent=false`, `vz`/`aarch64`). A
+  non-matching instance is **fail-closed** (exit 6): there is no `--force`, and
+  Torio never recreates, resets or deletes an existing VM.
+- `--cpus`/`--memory`/`--disk` size the VM at **creation**; defaults are 4 vCPU,
+  `8GiB` and `60GiB`. These are the only operator values substituted into the
+  template besides the login identity, and `--memory`/`--disk` must be single
+  tokens. Because `init` never recreates, changing them after creation means
+  removing the instance outside Torio.
+- Every other template field is fixed. Changing one requires a new ADR, not a
+  flag.
+- `stop` removes no VM and no data. It is idempotent (already `Stopped` → exit 0)
+  and does not trust a clean exit code: after `limactl stop` it re-queries and
+  requires state `Stopped`, otherwise fail-closed (exit 3). It never uses
+  `--force`.
+- `bootstrap` reconciles and verifies the guest: a stable, non-interactive
+  `hermes` command and the layout of persistent guest directories on a native
+  Linux filesystem. It runs only against an existing target in a verified
+  `Running` state, through the typed Lima/execx boundary (fixed argv, no
+  `sh -c`, no concatenated strings, bounded and redacted output). It is
+  idempotent and narrow: it may install the pinned Hermes Agent launcher and the
+  `/usr/local/bin/hermes` PATH symlink, but it does **not** recreate or re-image
+  the VM, install a model or provider, accept secrets, or create the backend
+  service (that is `serve install`).
+- **Docker: `hermes` MUST NOT be in the `docker` group.** Membership is
+  root-equivalent on the guest, so rootful Docker for the `hermes` service
+  identity is forbidden by
+  [ADR-0003](../adr/0003-ownership-split-and-operator-carried-write.md).
+  `bootstrap` **verifies the absence** of that membership and fails closed if it
+  finds it; the provisioning template removes `hermes` from `docker` if the group
+  exists. No Docker Engine is installed at all, and `bootstrap` does **not** check
+  Docker reachability. A future container runtime requires a rootless,
+  hermes-owned design behind its own ADR.
+- `bootstrap` **verifies** rather than trusting an exit code: the `hermes` user
+  exists; the `torio-projects` group exists with both `hermes` and the operator
+  (the Lima login identity) in it; `hermes` is **not** in `docker`;
+  `uname -m == aarch64`; `hermes --version` works through the documented stable
+  path; `git --version` works; every required path is a directory with the
+  expected owner, group and mode on a native Linux filesystem rather than a host
+  share; and no broad macOS host mount is present. Any unknown, unverifiable or
+  drifted state (architecture, version, ownership, mount) is reported and
+  fail-closed (exit 6), never papered over. A rerun is a success only when every
+  postcondition is proven.
+- The required paths have disjoint roles (constants in
+  `internal/lima/bootstrap.go`) — `/home/hermes/.hermes` is **not** a knowledge
+  base:
 
-  | Stała | Ścieżka | Rola |
+  | Constant | Path | Role |
   |---|---|---|
-  | `HermesHome` | `/home/hermes` | home tożsamości serwisowej |
-  | `HermesProfilePath` | `/home/hermes/.hermes` | profil i stan aplikacyjny Hermesa (`$HERMES_HOME`) |
-  | `HermesBrainPath` | `/home/hermes/brain` | vault Second Brain |
-  | `HermesWorkspacePath` | `/home/hermes/projects` | współdzielony workspace projektów |
+  | `HermesHome` | `/home/hermes` | home of the service identity |
+  | `HermesProfilePath` | `/home/hermes/.hermes` | Hermes profile and application state (`$HERMES_HOME`) |
+  | `HermesBrainPath` | `/home/hermes/brain` | Second Brain vault |
+  | `HermesWorkspacePath` | `/home/hermes/projects` | shared project workspace |
 
-  `bootstrap` weryfikuje profil i brain **niezależnie**; żadna z tych ścieżek nie jest aliasem drugiej.
-- `bootstrap` wykonuje kilka bounded guest probes i może instalować Hermesa ze źródeł; uruchamiaj go z największym timeoutem, na jaki pozwala policy: `--timeout 10m` (`config.MaxTimeout`). Akcja dotarcia do zdalnego Hermesa po bootstrapie pozostaje operator-controlled (np. `torio vm ssh -- sudo -u hermes -- hermes --version`).
+  `bootstrap` verifies the profile and the Brain **independently**; neither path
+  is an alias of the other.
+- `bootstrap` runs several bounded guest probes and may install Hermes from
+  source; run it with the largest timeout policy allows: `--timeout 10m`
+  (`config.MaxTimeout`). Reaching Hermes afterwards stays operator-controlled
+  (for example `torio vm ssh -- sudo -u hermes -- hermes --version`).
 
 ### Backend
 
@@ -162,30 +204,37 @@ torio serve start|stop|restart|status
 torio serve logs [--lines N]
 ```
 
-- `serve install` zarządza własną **user** service (custom systemd unit dla użytkownika `hermes`)
-  wyłącznie po feature detection (`hermes serve --help`). W D5 (V1) generuje deterministyczny unit
-  `hermes-serve.service` z pinowanym loopback bindem (`--host 127.0.0.1 --port 9119`), `HERMES_HOME=/home/hermes/.hermes`
-  i `Restart=always`, waliduje go `systemd-analyze --user verify` **przed aktywacją**, po czym
-  `daemon-reload` + `enable`. Zapewnia `linger` dla `hermes`, by usługa `Restart=always` działała bez
-  interaktywnej sesji i po reboot. Jest idempotentne (re-run bez zmiany = `changed:false`), nie przyjmuje
-  sekretów i **nie startuje** backendu. Zapis unitu jest atomowy (staging → verify → rename); niepoprawny
-  unit nigdy nie jest aktywowany. Kilka bounded guest probes — używaj większego `--timeout` (np. `--timeout 2m`).
-- `serve start`/`restart` startują backend i **weryfikują** readiness: re-query stanu systemd (`is-active == active`)
-  **oraz** rzeczywistą odpowiedź `GET /api/status == 200` przez loopback. Aktywny proces z martwym endpointem
-  to porażka (exit 6). Idempotentne. `serve stop` jest graceful i idempotentne (re-query wymaga stanu
-  nie-active), nie usuwa unitu/profilu/state.
-- `serve status` udowadnia **oba**: stan user-systemd i faktyczną gotowość endpointu przez loopback.
-  Exit 0 tylko gdy `active` i `/api/status == 200`; brak instalacji lub inactive → exit 3; aktywny z martwym
-  endpointem → exit 6. Nie modyfikuje systemu.
-- `serve logs [--lines N]` zwraca bounded, redagowane wpisy journala **tylko** dla unitu
-  (`journalctl --user -u hermes-serve.service -n N --no-pager`) — scope'owane do unitu i
-  redagowane przez execx, więc nie ujawnia własnej konfiguracji `torio` (profil/brain/provider). Nie jest
-  to jednak absolutna gwarancja: własny stdout/stderr backendu Hermes może teoretycznie zawierać
-  tekst pochodny od danych użytkownika. Traktuj to jako runtime-only ograniczenie ekspozycji, nie
-  formalną gwarancję prywatności.
-- `serve` binduje loopback w VM. Dotarcie z Maca to operator-controlled SSH tunnel do gościa
-  `127.0.0.1:9119` (patrz [runbook](../runbooks/first-run.md)); `torio` nie dodaje własnej
-  funkcji tunelu. `serve` to **backend Desktopu**. `torio gateway` (messaging) nie istnieje.
+- `serve install` manages its own **user** service (a custom systemd unit for the
+  `hermes` user) only after feature detection (`hermes serve --help`). It
+  generates a deterministic `hermes-serve.service` with a pinned loopback bind
+  (`--host 127.0.0.1 --port 9119`), `HERMES_HOME=/home/hermes/.hermes` and
+  `Restart=always`, validates it with `systemd-analyze --user verify` **before
+  activation**, then runs `daemon-reload` and `enable`. It ensures `linger` for
+  `hermes` so a `Restart=always` service survives without an interactive session
+  and across reboots. It is idempotent (an unchanged rerun is `changed:false`),
+  accepts no secrets, and does **not** start the backend. The unit write is
+  atomic (staging → verify → rename); an invalid unit is never activated. Several
+  bounded guest probes — use a larger `--timeout` (for example `--timeout 2m`).
+- `serve start`/`restart` start the backend and **verify** readiness: a re-query
+  of systemd state (`is-active == active`) **and** an actual
+  `GET /api/status == 200` over loopback. An active process with a dead endpoint
+  is a failure (exit 6). Both are idempotent. `serve stop` is graceful and
+  idempotent (the re-query requires a non-active state) and removes no unit,
+  profile or state.
+- `serve status` proves **both**: the user-systemd state and actual endpoint
+  readiness over loopback. Exit 0 only when `active` and `/api/status == 200`; not
+  installed or inactive → exit 3; active with a dead endpoint → exit 6. It
+  modifies nothing.
+- `serve logs [--lines N]` returns bounded, redacted journal entries for the unit
+  **only** (`journalctl --user -u hermes-serve.service -n N --no-pager`) — scoped
+  to the unit and redacted through execx, so it does not expose Torio's own
+  configuration. That is not an absolute guarantee: the Hermes backend's own
+  stdout and stderr may in principle contain text derived from user data. Treat it
+  as a runtime exposure limit, not a formal privacy guarantee.
+- `serve` binds the guest loopback. Reaching it from the Mac is an
+  operator-controlled SSH tunnel to the guest's `127.0.0.1:9119` (see the
+  [runbook](../runbooks/first-run.md)); `torio` adds no tunnel feature of its own.
+  `serve` is the Desktop backend. There is no `torio gateway`.
 
 ### Brain
 
@@ -195,38 +244,42 @@ torio brain status
 torio brain import <host-directory> [--into SUBDIR] [--dry-run]
 ```
 
-Second Brain to prywatny, wersjonowany lokalnym Gitem vault Markdown pod `/home/hermes/brain`,
-zarejestrowany jako osobny Hermes Project ([ADR-0015](../adr/0015-torio-v1-onboarding-projects-and-operator-push.md)).
+The Second Brain is a private Markdown vault under `/home/hermes/brain`,
+versioned by its own local Git repository and registered as a separate Hermes
+Project ([ADR-0003](../adr/0003-ownership-split-and-operator-carried-write.md)).
 
-- **Output nigdy nie zawiera nazw notatek ani ich treści.** Wszystkie trzy komendy raportują
-  wyłącznie bounded aggregate metadata: liczby plików, sumę bajtów, digest manifestu, stabilne
-  markery driftu. Dotyczy to także `error.details`. To jest granica prywatności Braina, nie
-  kwestia zwięzłości.
-- `init` tworzy kanoniczny scaffold atomowo przez prywatny staging na gościu, robi pierwszy lokalny
-  commit i rejestruje Hermes Project. Po weryfikacji instaluje albo odświeża globalny skill
-  `torio-brain`, żeby Brain był przeszukiwalny z innych projektów; Hermes cache'uje prompt skilla
-  per proces backendu, więc otwarte sesje muszą zostać zrestartowane. Idempotentne dla pasującego
-  managed state; odmawia dla niepustych, niezarządzanych danych. **Nie** konfiguruje remote'u
-  i nie pushuje.
-- `status` raportuje stan (`initialized`/`uninitialized`/drift), natywny filesystem,
-  ownership i mode, stan worktree Gita, agregaty, rejestrację Hermes Projectu i stan skilla.
-  Nie modyfikuje niczego.
-- `import` przenosi allowlistowane pliki (Markdown, Canvas, lokalne załączniki) przez prywatny
-  staging hosta i gościa, weryfikowany checksumem po stronie gościa. Pliki o kształcie credentiala,
-  metadane repozytoriów, linki, hardlinki, pliki specjalne i wykonywalne są odrzucane albo pomijane.
-  Istniejące dane **nigdy** nie są nadpisywane — z jedynym wyjątkiem dokładnie pristine scaffoldu
-  Torio. `--into` importuje jako jedno nowe, zawarte poddrzewo (sposób na uniknięcie kolizji);
-  `--dry-run` wykonuje preflight bez transferu i bez zmiany danych Braina.
+- **Output never contains note names or note content.** All three commands report
+  bounded aggregate metadata only: file counts, total bytes, a manifest digest,
+  stable drift markers. This applies to `error.details` as well. It is the Brain's
+  privacy boundary, not a matter of brevity.
+- `init` creates the canonical scaffold atomically through private guest staging,
+  makes the first local commit and registers the Hermes Project. After
+  verification it installs or refreshes the global `torio-brain` skill so the
+  Brain is searchable from other projects; Hermes caches a skill prompt per
+  backend process, so open sessions must be restarted. Idempotent for matching
+  managed state; refuses non-empty unmanaged data. It configures no remote and
+  pushes nothing.
+- `status` reports state (`initialized`/`uninitialized`/drift), the native
+  filesystem, ownership and mode, the Git worktree state, aggregates, Hermes
+  Project registration and skill state. It modifies nothing.
+- `import` moves allowlisted files (Markdown, Canvas, local attachments) through
+  private host and guest staging, verified by a guest-side checksum.
+  Credential-shaped files, repository metadata, symlinks, hardlinks, special
+  files and executables are rejected or skipped. Existing data is **never**
+  overwritten — the sole exception being an exactly pristine Torio scaffold.
+  `--into` imports as one new contained subtree, which is how a collision is
+  avoided; `--dry-run` performs preflight without transfer and without changing
+  Brain data.
 
-**Torio wnosi dane do środka i nie wynosi ich na zewnątrz.** `brain export` nie istnieje
-([ADR-0018](../adr/0018-brain-export-leaves-v1.md)). Skopiowanie Braina na Maca to jawna operacja
-operatora:
+**Torio brings data in and does not take it out.** `brain export` does not exist
+([ADR-0003](../adr/0003-ownership-split-and-operator-carried-write.md)). Copying
+the Brain to the Mac is an explicit operator action:
 
 ```bash
 limactl copy torio:/home/hermes/brain/ <host-destination>/
 ```
 
-Torio nie deklaruje, że jest to backup, i niczego w niej nie weryfikuje.
+Torio does not claim that this is a backup and verifies nothing about it.
 
 ### Projects
 
@@ -240,39 +293,46 @@ torio project enter <id>
 torio project shell <id>
 ```
 
-- **Workspace path nie jest inputem.** Jest zawsze wyprowadzany jako
-  `/home/hermes/projects/<id>`, nigdy przyjmowany od operatora i nigdy przechowywany w configu
-  (patrz [`config.md`](config.md)). Bez `--id` identyfikatorem jest samo `<name>`, które musi być
-  lowercase slugiem.
-- **Torio nie przechowuje żadnych credentials Gita.** Remote, którego gość nie potrafi już czytać
-  nieinteraktywnie, kończy się fail-closed (exit 7) — remedium jest ludzkie nadanie dostępu poza
-  Torio, a nie retry.
-- `add` klonuje dokładnie podany remote do wyprowadzonej ścieżki **albo** weryfikuje i adoptuje
-  checkout, który już tam jest, nadaje operatorowi i `hermes` współdzielony dostęp i rejestruje
-  projekt w Hermesie przed zapisem do configu. Nic na gościu nie jest resetowane, czyszczone ani
-  kasowane, więc rerun po błędzie dokańcza pracę. `--use` czyni projekt aktywnym po sukcesie.
-- `list` czyta wyłącznie config i nie uruchamia żadnej komendy na gościu — działa przy wyłączonej VM.
-- `show` raportuje wpis registry, stan checkoutu i rejestracji w Hermesie. **Raportuje drift jako
-  stabilne markery zamiast go naprawiać** i nigdy nie zwraca nazw plików, diffów ani surowego
-  outputu Gita.
-- `remove` archiwizuje Hermes Project i usuwa wpis z configu. Katalog checkoutu **nigdy** nie jest
-  kasowany, a output mówi wprost, gdzie nadal jest. V1 nie ma `--delete`.
-- `enter` otwiera zwykłą interaktywną sesję w checkoucie z wyłączonym agent forwarding oraz
-  multiplexingiem SSH. Sesja może edytować i commitować lokalnie, ale nie dostaje od Torio write
-  capability wobec remote'u. Jest preflightowana tak samo jak workspace shella, z wyjątkiem
-  lokalnego agenta SSH, którego nie sprawdza ani nie odczytuje.
-- `shell` otwiera efemeryczną sesję operatora w checkoucie z forwardowanym agentem SSH. **To jedyna
-  droga, którą write capability wobec remote'ów Gita dociera do gościa**, i żyje dokładnie do
-  wyjścia z sesji; persistent Hermes ma wobec origin wyłącznie read. Zdanie było kiedyś napisane
-  bez tego zawężenia i przez to nieprawdziwe: zdolność zapisu docierająca przez serwer MCP nie
-  przechodzi tą drogą i nie kończy się z sesją — jest osobnym, jawnie przyznanym kanałem opisanym
-  niżej ([ADR-0022](../adr/0022-mcp-credential-broker.md)). Sesja jest preflightowana (projekt zarejestrowany, VM zweryfikowana
-  bootstrapem, checkout obecny z zarejestrowanym origin i współdzielonymi uprawnieniami, lokalny
-  agent trzyma tożsamość do forwardu), ale Torio **nigdy nie robi testowego pusha**, żeby cokolwiek
-  udowodnić. Sesja nie jest ograniczana `--timeout`: kończy ją operator.
-  Po jej zakończeniu Torio nie twierdzi, czego dotyczył push — sprawdź remote sam.
-- `enter` i `shell` są interaktywne i **nie wspierają `--json`**: nie ma dokumentu do wyemitowania, więc
-  `--json` jest usage error (exit 2), a nie po cichu zignorowaną flagą.
+- **A workspace path is not an input.** It is always derived as
+  `/home/hermes/projects/<id>`, never accepted from the operator and never stored
+  in the config (see [`config.md`](config.md)). Without `--id` the identifier is
+  `<name>` itself, which must be a lowercase slug.
+- **Torio stores no Git credentials.** A remote the guest cannot already read
+  non-interactively is fail-closed (exit 7) — the remedy is a human granting
+  access outside Torio, not a retry.
+- `add` clones exactly the given remote into the derived path **or** verifies and
+  adopts a checkout already there, gives the operator and `hermes` shared access,
+  and registers the project with Hermes before writing to the config. Nothing on
+  the guest is reset, cleaned or deleted, so a rerun after an error finishes the
+  work. `--use` makes the project active on success.
+- `list` reads only the config and runs no guest command — it works with the VM
+  shut down.
+- `show` reports the registry entry, the checkout state and Hermes registration.
+  It **reports drift as stable markers rather than repairing it** and never
+  returns file names, diffs or raw Git output.
+- `remove` archives the Hermes Project and drops the config entry. The checkout
+  directory is **never** deleted, and the output says plainly where it still is.
+  There is no `--delete`.
+- `enter` opens an ordinary interactive session in the checkout with agent
+  forwarding and SSH multiplexing disabled. That session can edit and commit
+  locally but receives no write capability toward the remote. It is preflighted
+  like `shell`, except for the local SSH agent, which it neither checks nor reads.
+- `shell` opens an ephemeral operator session in the checkout with the SSH agent
+  forwarded. **This is the only way write capability toward a Git remote reaches
+  the guest**, and it lives exactly until the session exits; the persistent Hermes
+  has read-only access to an origin. That sentence was once written without the
+  qualifier and was therefore untrue: write capability arriving through an MCP
+  server does not travel this path and does not end with the session — it is a
+  separate, explicitly granted channel
+  ([ADR-0004](../adr/0004-mcp-credential-custody-and-egress.md)). The session is
+  preflighted (project registered, VM bootstrap-verified, checkout present with a
+  registered origin and shared permissions, local agent holding an identity to
+  forward), but Torio **never performs a test push** to prove anything. The
+  session is not bounded by `--timeout`: the operator ends it. Afterwards Torio
+  makes no claim about what was pushed — check the remote yourself.
+- `enter` and `shell` are interactive and **do not support `--json`**: there is no
+  document to emit, so `--json` is a usage error (exit 2) rather than a silently
+  ignored flag.
 
 ### MCP
 
@@ -281,81 +341,94 @@ torio mcp install
 torio mcp status
 ```
 
-Docelowo serwery MCP będą osiągane przez brokera działającego pod własną tożsamością gościa
-`torio-mcp`, aby credential upstreamu nie istniał pod tożsamością, pod którą agent ma powłokę
-([ADR-0022](../adr/0022-mcp-credential-broker.md)). Obecnie Torio provisionuje i weryfikuje granicę
-custody potrzebną temu brokerowi, ale nie dostarcza jeszcze daemona ani transportu upstream
-([ADR-0027](../adr/0027-mcp-boundary-before-daemon-delivery.md)).
+MCP servers are to be reached through a broker running under its own guest
+identity `torio-mcp`, so that an upstream credential does not exist under the
+identity the agent has a shell as
+([ADR-0004](../adr/0004-mcp-credential-custody-and-egress.md)). Torio currently
+provisions and verifies the custody boundary that broker needs; it does not yet
+deliver the daemon or the upstream transport.
 
-- `install` tworzy nieuprzywilejowaną tożsamość `torio-mcp`, jej magazyn credentiali `0700`, grupę
-  `torio-mcp-clients` oraz root-owned katalog policy — po czym **dowodzi** wyniku zamiast ufać exit
-  code'om komend, które go wyprodukowały. Idempotentne (`changed:false` przy przebiegu bez zmian),
-  nie przyjmuje sekretów i **nie przyznaje niczego** poza członkostwem w grupie klientów, którego
-  `hermes` potrzebuje, by otworzyć socket, oraz którego `torio-mcp` potrzebuje, by przekazać grupie
-  własny socket. `torio-mcp` nigdy nie trafia do `torio-projects`, a `hermes` nigdy do grupy
-  `torio-mcp`; to dwie pomyłki, które unieważniłyby decyzję, zostawiając wszystkie pozostałe checki
-  zielone.
-- `install` **nie instaluje ani nie aktywuje daemona**. Transport upstream i lifecycle OAuth wymagają
-  osobnego zaakceptowanego kontraktu; dopóki go nie ma, release nie publikuje binariów brokera ani
-  przekaźnika. Publiczna komenda provisionuje wyłącznie granicę custody, której potrzebuje przyszły
-  daemon.
-- Policy jest jawnym grantem operatora, więc `install` nie generuje jej ani nie zgaduje. Na świeżym
-  gościu pierwszy przebieg może utworzyć root-owned katalog policy i zakończyć się precondition
-  z `changed:true`; operator zapisuje co najmniej jeden
-  `/etc/torio-mcp/policy.d/<service>.json` jako `root:root 0644`, po czym ponawia `install`.
-  Pusta albo niepoprawna policy nie daje pozornie zdrowej granicy z pustym grantem.
-- `install` **nie blokuje się** na credentialach zalegających pod profilem Hermesa. Są dokładnie
-  tym, co broker ma zlikwidować, ale odmowa instalacji przy ich obecności to zakleszczenie: operator
-  nie może zbudować rzeczy, do której ma migrować. Ten ciągły invariant należy do `status`.
-- Gdy `hermes` dopiero co dołączył do grupy klientów, `install` raportuje `restart_required` i mówi
-  o tym wprost. Długo żyjący proces nie nabywa grupy dlatego, że zmieniła się pod nim baza grup —
-  backend trzyma to, z czym wystartował, aż do `torio serve restart`.
-- `status` **dowodzi i raportuje; niczego nie naprawia.** Weryfikuje, że tożsamość brokera istnieje,
-  że jego magazyn credentiali nie jest czytelny dla nikogo poza nim, że `hermes` może otworzyć socket
-  brokera, ale **nie** należy do grupy samego brokera, nie ma sudo ani grup spoza zarządzanego zestawu
-  `hermes`, `torio-projects`, `torio-mcp-clients`, oraz że pod profilem Hermesa nie pojawił się żaden
-  credential MCP. Nie uruchamia żadnej komendy mutującej.
-- Do tego weryfikuje **dwa dokumenty, które przesądzają, po co ta custody w ogóle jest**. Pliki
-  policy muszą być `root:root 0644`, zwykłymi plikami (nigdy dowiązaniami) w katalogu, do którego
-  nikt poza rootem nie pisze — dokument policy zapisywalny przez agenta unieważnia decyzję,
-  zostawiając wszystkie pozostałe checki zielone. Ich zawartość przechodzi ten sam ścisły parser
-  co broker. Brak runtime jest poprawnym stanem niezależnie od obecności dormant unit. To obecność
-  `/run/torio-mcp`, a nie pliku unit, uruchamia weryfikację daemona. Gdy runtime istnieje, musi istnieć
-  również dokładny, aktywny trusted unit; zbiór usług musi być dokładnie równy zbiorowi zwykłych,
-  nasłuchujących socketów, a digest policy działającego procesu musi odpowiadać zweryfikowanym
-  dokumentom.
-  A `mcp_servers` w `config.yaml` musi wskazywać
-  wyłącznie na przekaźnik: ten plik jest zapisywalny przez agenta, więc wpis wskazujący gdzie
-  indziej to serwer MCP, którego broker nigdy nie zobaczy — bez policy i bez audytu.
-- Kontrola `mcp_servers` czyta **jeden kształt YAML-a i odmawia reszty**. Blok w składni inline, z
-  kotwicą, aliasem, merge key, tabulacją albo w drugim dokumencie jest raportowany jako drift, a nie
-  zgadywany. Nie jest to granica i nie wolno jej tak opisywać: plik należy do tożsamości, którą
-  kontrola ogranicza. Wykrywa rozjazd i `hermes mcp add` uruchomiony ręcznie — nie przeciwnika
-  piszącego pod różnicę parserów.
-- Gość, na którym broker nigdy nie był provisionowany, to **niespełniony precondition (exit 3)**, a
-  nie drift. Granica, która przestała trzymać, to **verification failed (exit 6)**. Rozróżnienie jest
-  częścią kontraktu: operator, który po prostu nie uruchomił jeszcze instalatora, nie może dostać
-  alarmu o złamanej gwarancji, bo nauczy się ignorować ten, który ma znaczenie.
-- Wykrycie credentiali pod profilem Hermesa raportuje **liczbę plików i nigdy ich nazw**. Zwykłym
-  źródłem tego driftu jest `hermes mcp add` uruchomiony wprost na zarządzanym gościu, który
-  uwierzytelnia się w upstreamie i zapisuje token z powrotem pod tożsamość agenta.
-- **Zakres narzędzi jest jawny, sekrety nie.** Policy leży w `/etc/torio-mcp/policy.d/<usługa>.json`
-  jako `root:root 0644` — czytelna dla agenta i niezapisywalna przez niego. Domyślnie deny; przechodzą
-  wyłącznie narzędzia wymienione z nazwy, bez wnioskowania z nazw i bez wzorców.
-- Broker **nie broni przed confused deputy w pełni**: wstrzyknięta instrukcja może użyć każdego
-  narzędzia przyznanego w policy, także zapisującego, wobec każdego dozwolonego celu. Przyznanie
-  zapisu pozostaje jawną decyzją operatora zapisaną w root-owned policy, a nie skutkiem ubocznym
-  instalacji.
+- `install` creates the unprivileged `torio-mcp` identity, its `0700` credential
+  store, the `torio-mcp-clients` group and the root-owned policy directory — then
+  **proves** the result instead of trusting the exit codes of the commands that
+  produced it. Idempotent (`changed:false` on an unchanged run), accepts no
+  secrets, and **grants nothing** beyond the client-group membership `hermes`
+  needs to open a socket and `torio-mcp` needs to hand its own socket to the
+  group. `torio-mcp` never lands in `torio-projects`, and `hermes` never lands in
+  the `torio-mcp` group; those are the two mistakes that would void the decision
+  while leaving every other check green.
+- `install` **installs and activates no daemon.** Upstream transport and OAuth
+  lifecycle need their own accepted contract; until that exists, the release
+  publishes neither the broker nor the relay binary. The public command
+  provisions only the custody boundary a future daemon will need.
+- Policy is an explicit operator grant, so `install` neither generates nor guesses
+  it. On a fresh guest the first run may create the root-owned policy directory
+  and end as a precondition with `changed:true`; the operator then writes at least
+  one `/etc/torio-mcp/policy.d/<service>.json` as `root:root 0644` and reruns
+  `install`. An empty or invalid policy does not yield an apparently healthy
+  boundary with an empty grant.
+- `install` **does not block** on credentials left under the Hermes profile. They
+  are exactly what the broker exists to eliminate, but refusing to install while
+  they are present is a deadlock: the operator cannot build the thing they are
+  meant to migrate to. That continuous invariant belongs to `status`.
+- When `hermes` has just joined the client group, `install` reports
+  `restart_required` and says so plainly. A long-lived process does not acquire a
+  group because the group database changed underneath it — the backend keeps what
+  it started with until `torio serve restart`.
+- `status` **proves and reports; it repairs nothing.** It verifies that the broker
+  identity exists, that its credential store is readable by nobody else, that
+  `hermes` can open the broker socket but is **not** in the broker's own group, has
+  no sudo and no groups outside the managed set (`hermes`, `torio-projects`,
+  `torio-mcp-clients`), and that no MCP credential has appeared under the Hermes
+  profile. It runs no mutating command.
+- It also verifies **the two documents that decide what this custody is for**.
+  Policy files must be `root:root 0644` regular files (never symlinks) in a
+  directory nobody but root writes to — a policy document the agent can write
+  voids the decision while leaving every other check green. Their contents pass
+  the same strict parser the broker uses. An absent runtime is a valid state
+  regardless of a dormant unit: it is the presence of `/run/torio-mcp`, not of a
+  unit file, that triggers daemon verification. When a runtime exists, the exact
+  trusted unit must be active, the service set must equal the set of ordinary
+  listening sockets exactly, and the running process's policy digest must match
+  the verified documents. And `mcp_servers` in `config.yaml` must point only at
+  the relay: that file is writable by the agent, so an entry pointing elsewhere is
+  an MCP server the broker will never see — no policy, no audit.
+- The `mcp_servers` check reads **one shape of YAML and refuses the rest**. A block
+  in inline syntax, with an anchor, alias, merge key or tab, or in a second
+  document, is reported as drift rather than guessed at. This is not a boundary
+  and must not be described as one: the file belongs to the identity the check
+  constrains. It detects drift and a hand-run `hermes mcp add` — not an adversary
+  writing to the gap between parsers.
+- A guest where the broker was never provisioned is an **unmet precondition
+  (exit 3)**, not drift. A boundary that has stopped holding is **verification
+  failed (exit 6)**. The distinction is part of the contract: an operator who
+  simply has not run the installer yet must not get the alarm that means a
+  guarantee broke, or they will learn to ignore the one that matters.
+- Detecting credentials under the Hermes profile reports **a file count and never
+  file names**. The ordinary source of that drift is `hermes mcp add` run directly
+  on a managed guest, which authenticates upstream and writes the token back under
+  the agent's identity.
+- **Tool scope is explicit; secrets are not.** Policy lives in
+  `/etc/torio-mcp/policy.d/<service>.json` as `root:root 0644` — readable by the
+  agent, unwritable by it. Deny by default; only tools named explicitly pass, with
+  no inference from names and no patterns.
+- The broker **does not fully prevent a confused deputy**: an injected instruction
+  can use any tool the policy grants, including a writing one, against any
+  permitted target. Granting a write stays an explicit operator decision recorded
+  in root-owned policy rather than a side effect of installation.
 
 ## Idempotency
 
-Każda komenda zmieniająca stan jest idempotentna, a idempotentny sukces to exit 0:
+Every state-changing command is idempotent, and idempotent success is exit 0:
 
-- `vm init` — zgodna istniejąca instancja: `created:false`. Niezgodna: fail-closed, nigdy recreate.
-- `vm start`/`stop`, `serve start`/`stop`/`restart` — pożądany stan jest **re-query'owany** po
-  akcji; czysty exit code sam w sobie nie jest postcondition.
-- `serve install` — rerun bez zmiany daje `changed:false`.
-- `brain init` — pasujący managed state jest sukcesem bez akcji.
-- `project add` — rerun po błędzie dokańcza pracę, bo nic nie jest cofane ani czyszczone.
-- `project remove` — brakujący albo już zarchiwizowany Hermes Project nie jest błędem.
-- `mcp install` — rerun bez zmiany daje `changed:false`, tak jak `serve install`.
+- `vm init` — a matching existing instance gives `created:false`. A non-matching
+  one is fail-closed, never a recreate.
+- `vm start`/`stop`, `serve start`/`stop`/`restart` — the desired state is
+  **re-queried** after the action; a clean exit code is not itself a
+  postcondition.
+- `serve install` — an unchanged rerun gives `changed:false`.
+- `brain init` — matching managed state is a success with no action.
+- `project add` — a rerun after an error finishes the work, because nothing is
+  rolled back or cleaned.
+- `project remove` — a missing or already archived Hermes Project is not an error.
+- `mcp install` — an unchanged rerun gives `changed:false`, like `serve install`.

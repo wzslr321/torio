@@ -1,101 +1,105 @@
-# Config contract (D2)
+# Config contract
 
-Ten dokument opisuje typowaną konfigurację hosta wprowadzoną w D2
-(patrz `archive/pre-v1:docs/plans/02-demo-a.md` § D2). Implementacja: `internal/config/`.
-Konfiguracja jest **non-secret** (AGENTS §6): materiał o kształcie sekretu jest odrzucany.
+This document describes the typed host configuration. Implementation:
+`internal/config/`. The configuration is **non-secret** (`AGENTS.md` §6):
+secret-shaped material is rejected.
 
-> **Version-lock manifest (`version-lock.json`) nie istnieje.** Był zaprojektowany w D2, ale
-> nigdy nie został podpięty: żadna komenda go nie czytała, a jego jedyny konsument
-> (`lima.Probe`) nie był wołany. Kod i ten opis zostały usunięte — patrz
-> [ADR-0017](../adr/0017-pre-v1-exploration-leaves-the-working-tree.md). Opisana niżej granica
-> zaufania ścieżek obowiązuje bez zmian dla `config.json`.
+> **There is no version-lock manifest.** `version-lock.json` was designed but
+> never wired up: no command read it, and its only consumer was never called. The
+> code and its description were removed —
+> [ADR-0001](../adr/0001-control-plane-and-trusted-host-inputs.md). The path trust
+> boundary below applies unchanged to `config.json`.
 
-> **Katalog state nie istnieje.** `XDG_STATE_HOME`, `Paths.StateDir` i flaga `--state-dir` służyły
-> wyłącznie manifestowi version-lock i zniknęły razem z nim — patrz
-> [ADR-0019](../adr/0019-state-directory-and-config-schema-v1-leave.md). Torio nie zapisuje na
-> hoście żadnego trwałego stanu poza `config.json`.
+> **There is no state directory.** `XDG_STATE_HOME`, `Paths.StateDir` and the
+> `--state-dir` flag existed only for the version-lock manifest and went with it —
+> [ADR-0001](../adr/0001-control-plane-and-trusted-host-inputs.md). Torio writes no
+> persistent host state other than `config.json`.
 
-## Lokalizacje (XDG)
+## Locations (XDG)
 
-Ścieżki resolują się deterministycznie z zmiennych XDG, z udokumentowanymi fallbackami:
+Paths resolve deterministically from XDG variables, with documented fallbacks:
 
-| Rola | Baza (env) | Fallback | Katalog aplikacji |
+| Role | Base (env) | Fallback | Application directory |
 |---|---|---|---|
 | Config | `XDG_CONFIG_HOME` | `$HOME/.config` | `<base>/torio/` |
 
-Reguły:
+Rules:
 
-- Ustawiony, ale **non-absolutny** `XDG_CONFIG_HOME` jest odrzucany fail-closed
-  (nie jest po cichu ignorowany ani "naprawiany").
-- Gdy XDG base jest nieustawiony i nie można ustalić `$HOME`, resolucja kończy się błędem
-  (fail closed) zamiast zgadywać lokalizację.
-- Fallback `$HOME` musi być **absolutny**. Non-absolutny `$HOME` (przy nieustawionym XDG) jest
-  odrzucany fail-closed — nie jest kanonikalizowany względem CWD — z tego samego powodu co
-  non-absolutny XDG base: katalog roboczy nie może wyznaczać domyślnej zaufanej lokalizacji
-  configu.
-- Flaga `--config PATH` nadpisuje wartość i jest kanonikalizowana
-  (`filepath.Abs` + `Clean`, bez rozwijania symlinków — explicit override to zaufany input).
-- **Precedence:** explicit `--config` całkowicie **omija** XDG base — malformed `XDG_CONFIG_HOME`
-  ani `$HOME` nie mogą zablokować w pełni jawnej inwokacji. XDG jest konsultowany wyłącznie wtedy,
-  gdy override jest nieobecny, i wtedy nadal ściśle walidowany (patrz reguła absolutności powyżej).
-- Przy explicit `--config` zaufanym katalogiem config jest katalog nadrzędny wskazanego pliku.
-- Pliki lokalizowane **wewnątrz** zaufanego katalogu (`config.json`) używają
-  contained-join: nazwa musi być czystą nazwą pliku, a wynik nie może opuścić katalogu bazowego.
-  Traversal jest odrzucany strukturalnie, nie przez czyszczenie stringów.
+- A set but **non-absolute** `XDG_CONFIG_HOME` is rejected fail-closed — never
+  silently ignored or "fixed".
+- When the XDG base is unset and `$HOME` cannot be determined, resolution fails
+  closed rather than guessing a location.
+- The `$HOME` fallback must be **absolute**. A non-absolute `$HOME` (with XDG
+  unset) is rejected fail-closed and is not canonicalized against the working
+  directory, for the same reason as a non-absolute XDG base: the working directory
+  must not decide where the trusted config lives.
+- `--config PATH` overrides the value and is canonicalized (`filepath.Abs` +
+  `Clean`, without resolving symlinks — an explicit override is a trusted input).
+- **Precedence:** an explicit `--config` **bypasses** the XDG base entirely, so a
+  malformed `XDG_CONFIG_HOME` or `$HOME` cannot block a fully explicit
+  invocation. XDG is consulted only when there is no override, and is still
+  strictly validated then.
+- With an explicit `--config`, the trusted config directory is the parent of the
+  named file.
+- A file located **inside** the trusted directory (`config.json`) uses a contained
+  join: the name must be a plain file name and the result must not leave the base
+  directory. Traversal is rejected structurally, not by string cleaning.
 
-## Granica zaufania ścieżek (ADR-0013)
+## Path trust boundary ([ADR-0001](../adr/0001-control-plane-and-trusted-host-inputs.md))
 
-Zanim `config.json` stanie się authority, ścieżki są egzekwowane fail-closed.
-Terminologia jest rozdzielona (koniec z „owner-only"):
+Before `config.json` becomes authority, its paths are enforced fail-closed. The
+terminology is deliberately split — "owner-only" is not a thing:
 
-- **mode-private** — brak dostępu grupy/innych: `perm & 0o077 == 0`.
-- **owned-by-EUID** — właściciel obiektu to efektywny użytkownik procesu: `st_uid == geteuid()`
-  (ścisła równość; jako root oczekiwany jest obiekt root-owned).
+- **mode-private** — no group or other access: `perm & 0o077 == 0`.
+- **owned-by-EUID** — the object's owner is the process's effective user:
+  `st_uid == geteuid()`, strict equality. As root, a root-owned object is what is
+  expected.
 
-Reguły (egzekwowane na **darwin/linux**; poza nimi jawny, udokumentowany no-op — hosty Demo A to
-macOS/Linux arm64):
+Rules, enforced on **darwin/linux**; elsewhere an explicit, documented no-op:
 
-- Zaufane pliki (`config.json`, także explicit `--config`) są otwierane
-  **no-follow** (`O_NOFOLLOW`): symlink w ostatnim komponencie jest odrzucany. Typ, tryb i własność są
-  weryfikowane przez `Fstat` **na tym samym deskryptorze**, z którego następuje odczyt — brak TOCTOU
-  na ostatnim komponencie (`Lstat`+`ReadFile` jest niedozwolone). Plik musi być zwykły, mode-private
-  (`0600`) i owned-by-EUID.
-- Bezpośredni zaufany katalog (`ConfigDir`), jeśli istnieje, musi być **nie-symlinkiem**,
-  katalogiem, mode-private i owned-by-EUID. Katalog nieistniejący = poprawny first-run. Walidacja
-  otwiera katalog `O_RDONLY|O_DIRECTORY`, więc zaufany katalog musi być **używalny jako katalog
-  aplikacji** — w praktyce `0700` (`mode-private` sam w sobie dopuszczałby np. `0100` tylko-exec, co
-  jest fail-closed odrzucane przy otwarciu; utwardzenie tego rozróżnienia to ewentualny późniejszy
-  slice, nie ta granica).
-- **Zakres:** walidowany jest wyłącznie bezpośredni katalog aplikacji; łańcuch przodków ponad nim
-  (XDG base / `$HOME`) pozostaje zaufany i poza granicą tego slice (brak pełnego ancestor-walk).
-- **explicit `--config`:** otrzymuje pełne egzekwowanie *pliku* (no-follow, typ, mode-private,
-  owned-by-EUID); tryb jego katalogu nadrzędnego **nie** jest wymagany (operator może wskazać wspólną
-  lokalizację).
-- **Zapis:** `WriteFile` waliduje zaufany katalog **przed** utworzeniem plików — atomowy rename
-  nie „legalizuje" symlinkowanego/permissive/obcego katalogu jako authority.
-- Błędy uprawnień/typu/ścieżki nie ujawniają materiału o kształcie sekretu (redakcja na granicy).
+- Trusted files (`config.json`, including an explicit `--config`) are opened
+  **no-follow** (`O_NOFOLLOW`): a symlink in the last component is rejected. Type,
+  mode and ownership are verified with `Fstat` **on the same descriptor** the read
+  comes from — no TOCTOU on the last component, and `Lstat` + `ReadFile` is not
+  permitted. The file must be regular, mode-private (`0600`) and owned-by-EUID.
+- The immediate trusted directory (`ConfigDir`), if it exists, must be a
+  non-symlink directory, mode-private and owned-by-EUID. A missing directory is a
+  valid first run. Validation opens it `O_RDONLY|O_DIRECTORY`, so a trusted
+  directory must be **usable as an application directory** — in practice `0700`
+  (mode-private alone would admit something like `0100`, which fails closed at
+  open).
+- **Scope:** only the immediate application directory is validated. The ancestor
+  chain above it (XDG base, `$HOME`) is treated as trusted and is outside this
+  boundary; there is no full ancestor walk.
+- **Explicit `--config`:** the *file* gets full enforcement (no-follow, type,
+  mode-private, owned-by-EUID); the mode of its parent directory is **not**
+  required, so an operator may point at a shared location.
+- **Writes:** `WriteFile` validates the trusted directory **before** creating any
+  file — an atomic rename must not "legalize" a symlinked, permissive or
+  foreign-owned directory as authority.
+- Permission, type and path errors do not reveal secret-shaped material;
+  redaction happens at the package boundary.
 
-## Config document — `config.json`
+## The config document — `config.json`
 
-- Lokalizacja domyślna: `<config-dir>/config.json` (lub explicit `--config PATH`).
-- Format: JSON (standardowa biblioteka Go). Dokładnie jeden dokument; trailing data jest błędem.
-- Nieznane pola są odrzucane (`DisallowUnknownFields`) — schemat fail-closed.
-- Własność/uprawnienia/typ: na darwin/linux wymagany zwykły plik, mode-private (`0600`) i
-  owned-by-EUID, otwierany no-follow (patrz „Granica zaufania ścieżek"); szersze bity, symlink, obcy
-  właściciel lub nie-zwykły typ są odrzucane. Poza darwin/linux egzekwowanie nie jest deklarowane
-  (hosty Demo A: macOS/Linux arm64).
-- Brak domyślnego configu to **poprawny first-run** (defaulty). Explicit `--config` wskazujący na
-  nieistniejący plik to błąd (exit 2).
+- Default location: `<config-dir>/config.json`, or an explicit `--config PATH`.
+- Format: JSON, standard library. Exactly one document; trailing data is an error.
+- Unknown fields are rejected (`DisallowUnknownFields`) — a fail-closed schema.
+- Ownership, permissions and type: on darwin/linux a regular file, mode-private
+  (`0600`) and owned-by-EUID, opened no-follow. Wider bits, a symlink, a foreign
+  owner or a non-regular type are rejected.
+- A missing default config is a **valid first run** and yields defaults. An
+  explicit `--config` naming a file that does not exist is an error (exit 2).
 
-Pola:
+Fields:
 
-| Pole | Typ | Wymagane | Semantyka |
+| Field | Type | Required | Meaning |
 |---|---|---|---|
-| `schema_version` | string | tak | `"2"`. Inna wartość → odrzucone (bez migracji). |
-| `default_timeout` | string (Go duration) | nie | Domyślny timeout operacji; walidowany > 0 i ≤ policy max. Zasila timeout policy, gdy `--timeout` nie podano jawnie (flaga wygrywa). |
-| `projects` | array | nie | Aktywny project registry — patrz niżej. Pominięty normalizuje się do pustego registry. |
+| `schema_version` | string | yes | `"2"`. Any other value is rejected, with no migration. |
+| `default_timeout` | string (Go duration) | no | Default operation timeout; validated > 0 and ≤ the policy maximum. Feeds the timeout policy when `--timeout` is not given explicitly (the flag wins). |
+| `projects` | array | no | The project registry — see below. Omitted normalizes to an empty registry. |
 
-Przykład (poprawny dokument):
+A valid document:
 
 ```json
 {
@@ -111,80 +115,86 @@ Przykład (poprawny dokument):
 }
 ```
 
-## Project registry — schema V2
+## Project registry
 
-Registry jest **niesekretnym** źródłem prawdy o podpiętych projektach
-([ADR-0015](../adr/0015-torio-v1-onboarding-projects-and-operator-push.md)).
-Legacy `archive/pre-v1:docs/contracts/project-config.md` i
-`archive/pre-v1:schemas/project.schema.json` **nie** obowiązują i nie są już w drzewie
-([ADR-0017](../adr/0017-pre-v1-exploration-leaves-the-working-tree.md)).
+The registry is the **non-secret** source of truth about attached projects
+([ADR-0003](../adr/0003-ownership-split-and-operator-carried-write.md)).
 
-**Workspace path nie jest polem.** Jest wyprowadzany z `id` (`/home/hermes/projects/<id>`) przez
-warstwę projektów, więc config nie może wskazać projektu na dowolną ścieżkę w guest. Obiekt projektu
-z polem `path` jest odrzucany jak każde nieznane pole.
+**A workspace path is not a field.** It is derived from `id` as
+`/home/hermes/projects/<id>` by the projects layer, so the config cannot point a
+project at an arbitrary guest path. A project object carrying a `path` field is
+rejected like any unknown field.
 
-| Pole | Typ | Wymagane | Reguła |
+| Field | Type | Required | Rule |
 |---|---|---|---|
-| `id` | string | tak | Lowercase slug ASCII: litery, cyfry i wewnętrzne `-`; ≤ 64 bajty; unikalny w dokumencie. Ten sam charset wyprowadza workspace path, więc nic w nim nie może traversować ani zmienić katalogu. |
-| `display_name` | string | tak | Niepusty, ≤ 64 bajty, poprawny UTF-8, bez control characters i bez leading/trailing whitespace. |
-| `remote` | string | tak | Wspierana forma transportu (niżej); ≤ 512 bajtów. |
+| `id` | string | yes | Lowercase ASCII slug: letters, digits and internal `-`; ≤ 64 bytes; unique within the document. The same charset derives the workspace path, so nothing in it can traverse or change directory. |
+| `display_name` | string | yes | Non-empty, ≤ 64 bytes, valid UTF-8, no control characters, no leading or trailing whitespace. |
+| `remote` | string | yes | A supported transport form (below); ≤ 512 bytes. |
 
-Wspierane formy `remote`:
+Supported `remote` forms:
 
-- `https://host[:port]/path` — **bez userinfo w ogóle**, bo to jedyne miejsce, w którym siedzi token
-  albo hasło HTTPS;
-- `ssh://[user@]host[:port]/path` — username jest niesekretnym elementem transportu i jest
-  dozwolony, hasło nigdy;
-- `[user@]host:path` — forma scp-like ze **względną** ścieżką (absolutna sprawiłaby, że lokalne
-  `C:/repo` wygląda jak remote).
+- `https://host[:port]/path` — **no userinfo at all**, because that is the one
+  place an HTTPS token or password sits;
+- `ssh://[user@]host[:port]/path` — a username is a non-secret transport element
+  and is allowed; a password never is;
+- `[user@]host:path` — the scp-like form with a **relative** path (an absolute one
+  would make a local `C:/repo` look like a remote).
 
-Odrzucane fail-closed: query i fragment (mogą nieść token), percent-encoding (ukrywa powyższe),
-control characters i whitespace, wiodący `-` (Git przeczytałby remote jako flagę), lokalna ścieżka
-i `file://`, `http://`, `git://`, oraz materiał o kształcie sekretu w dowolnym polu.
+Rejected fail-closed: query and fragment (either can carry a token),
+percent-encoding (it hides the former), control characters and whitespace, a
+leading `-` (Git would read the remote as a flag), a local path, `file://`,
+`http://`, `git://`, and secret-shaped material in any field.
 
-Reguły całego registry:
+Registry-wide rules:
 
-- **Unikalne `id`** — egzekwowane zawsze, także przy odczycie.
-- **Duplikat `remote`** — odrzucany domyślnie **przy dodawaniu** (`AddOptions.AllowDuplicateRemote`
-  to jawna decyzja operatora). Walidacja dokumentu go nie odrzuca: raz podjęta jawna decyzja nie może
-  uczynić configu nieczytelnym.
-- **Bounded** — maksymalnie 64 projekty; config jest czytany przy każdej inwokacji.
-- Registry jest walidowany **przy odczycie i przy zapisie**, więc ręcznie wyedytowany dokument nie
-  przemyci wpisu, którego write path by nie przyjął.
+- **Unique `id`** — enforced always, including on read.
+- **Duplicate `remote`** — rejected by default **when adding**
+  (`AddOptions.AllowDuplicateRemote` is an explicit operator decision). Document
+  validation does not reject it: a decision once taken deliberately must not make
+  the config unreadable.
+- **Bounded** — at most 64 projects; the config is read on every invocation.
+- The registry is validated **on read and on write**, so a hand-edited document
+  cannot smuggle in an entry the write path would refuse.
 
-## Wersja schematu
+## Schema version
 
-- `"2"` jest **jedyną** wspieraną wersją, przy odczycie i przy zapisie. `File` deklarujący inną
-  wersję jest przy zapisie odrzucany, nie podnoszony po cichu.
-- Poprzednik `"1"` (settings-only, sprzed registry) **nie jest czytany**. Torio nie miało wydania,
-  które by taki dokument zapisało, więc żaden nie istnieje —
-  [ADR-0019](../adr/0019-state-directory-and-config-schema-v1-leave.md). Ręcznie napisany dokument
-  z `"1"` jest odrzucany jawnie (exit 2), nie czytany jako settings-only.
-- Starsza binarka **jawnie odrzuca** ten dokument — i przez własny version gate (`"2"` nie jest dla
-  niej wspierane), i przez `DisallowUnknownFields` na polu `projects`. Nie może przeczytać go jako
-  settings-only i po cichu zgubić registry. Ta gwarancja leży po jej stronie i obowiązuje
-  niezależnie od tego, co czyta binarka bieżąca.
+- `"2"` is the **only** supported version, on read and on write. A `File`
+  declaring another version is rejected on write rather than quietly upgraded.
+- The predecessor `"1"` (settings-only, before the registry) is **not read**.
+  Torio never had a release that wrote such a document, so none exists —
+  [ADR-0001](../adr/0001-control-plane-and-trusted-host-inputs.md). A hand-written
+  `"1"` document is rejected explicitly (exit 2), not read as settings-only.
+- An older binary **explicitly rejects** this document, both through its own
+  version gate and through `DisallowUnknownFields` on `projects`. It cannot read
+  it as settings-only and silently drop the registry. That guarantee lives on its
+  side and holds regardless of what the current binary reads.
 
-## Zapis configu
+## Writing the config
 
-- Zapis jest crash-safe: private temp → `fsync` → atomic rename, `0600`, katalog `0700`.
-- Dokument jest walidowany **przed** utworzeniem pliku, a zaufany katalog **przed** zapisem — atomowy
-  rename nie legalizuje symlinkowanego/permissive/obcego katalogu jako authority.
-- Projekty są sortowane po `id`, więc ten sam registry daje ten sam plik niezależnie od kolejności
-  dodawania.
-- Po rename plik jest **odczytany ponownie** tą samą zaufaną ścieżką co loader, sparsowany,
-  zwalidowany i porównany z dokumentem, który miał zostać zapisany. Rozjazd jest raportowany, nie
-  naprawiany po cichu — rename już się wydarzył, więc decyzję podejmuje operator.
+- The write is crash-safe: private temp → `fsync` → atomic rename, `0600`, in a
+  `0700` directory.
+- The document is validated **before** the file is created, and the trusted
+  directory **before** the write — an atomic rename does not legalize a symlinked,
+  permissive or foreign-owned directory as authority.
+- Projects are sorted by `id`, so the same registry produces the same file
+  regardless of the order things were added.
+- After the rename the file is **read back** through the same trusted path the
+  loader uses, parsed, validated and compared with the document that was meant to
+  be written. A mismatch is reported, not silently repaired — the rename already
+  happened, so the decision is the operator's.
 
-## Exit / błędy
+## Exit codes and errors
 
-Błędy resolucji i walidacji konfiguracji mapują się na usage/schema error (exit `2`) zgodnie z
-[`cli.md`](cli.md). Komunikaty błędów nie ujawniają materiału o kształcie sekretu — gwarancja jest
-egzekwowana na granicy pakietu `internal/config` (redakcja każdego zwracanego błędu), więc obowiązuje
-także dla bezpośrednich wywołań API, nie tylko przez finalny renderer CLI. Skan surowych bajtów
-odrzuca sekrety wcześnie, ale sam nie wystarcza: wartość o kształcie sekretu zapisana w formie
-JSON-escaped (np. z literą `h` w prefiksie zapisaną jako escape `\uXXXX`) nie ma w surowych bajtach
-dosłownego prefiksu, więc dekoder mógłby ją odtworzyć i wstawić do błędu — przez interpolację `%q`
-zdekodowanej wartości albo przez nazwę nieznanego pola zwróconą z `DisallowUnknownFields`. Redakcja
-na granicy zamyka tę ścieżkę; finalny renderer redaguje znane kształty dodatkowo, jako defense in
-depth.
+Configuration resolution and validation failures map to a usage/schema error
+(exit `2`), per [`cli.md`](cli.md). Error messages do not reveal secret-shaped
+material; the guarantee is enforced at the `internal/config` package boundary by
+redacting every returned error, so it holds for direct API calls too and not only
+through the CLI renderer.
+
+Scanning raw bytes rejects secrets early but is not sufficient on its own: a
+secret-shaped value written JSON-escaped — for example with a letter of its prefix
+encoded as `\uXXXX` — has no literal prefix in the raw bytes, so the decoder could
+reconstruct it and place it into an error, either by interpolating the decoded
+value with `%q` or through an unknown field name returned by
+`DisallowUnknownFields`. Boundary redaction closes that path; the final renderer
+redacts known shapes as defence in depth.

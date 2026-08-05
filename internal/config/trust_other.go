@@ -6,7 +6,7 @@ import "os"
 
 // On hosts other than Darwin and Linux the trusted-authority policy (no-follow
 // open, ownership and mode enforcement) is NOT claimed: the security-relevant
-// hosts for Demo A are macOS and Linux arm64 (see ADR-0013). These stubs
+// hosts for Demo A are macOS and Linux arm64 (see ADR-0001). These stubs
 // preserve functional behavior — files open, directories read as present or
 // absent — without asserting the trust invariants. This is a documented no-op
 // boundary, consistent with the historical perm_other.go stance it replaces.

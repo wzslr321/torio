@@ -34,7 +34,7 @@ const (
 // rpcRequest is the envelope of one client message, and only the envelope.
 //
 // Params stays raw. Decoding it here would mean holding tool call arguments —
-// Jira and Confluence content — in a structure this process owns, and ADR-0022
+// Jira and Confluence content — in a structure this process owns, and ADR-0004
 // §5 keeps that content out of every Torio surface. Only the two enforcement
 // points look inside, and each looks for exactly one field.
 //
@@ -61,7 +61,7 @@ var nullID = json.RawMessage("null")
 // so a client that sent a structurally wrong request still gets an answer it can
 // correlate. The returned error is never rendered to the client or the log: it
 // describes bytes the caller chose, and both destinations are places the caller
-// must not be able to write to (ADR-0022 §5).
+// must not be able to write to (ADR-0004 §5).
 func parseRequest(line []byte) (rpcRequest, int, error) {
 	var req rpcRequest
 	if err := json.Unmarshal(line, &req); err != nil {

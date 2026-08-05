@@ -28,7 +28,7 @@ func TestVerifyPolicyDocumentsRejectsAnEmptyGrant(t *testing.T) {
 	}
 }
 
-// TestVerifyPolicyDocumentsAgentWritableIsDrift is the check ADR-0022 §6
+// TestVerifyPolicyDocumentsAgentWritableIsDrift is the check ADR-0004 §6
 // requires and PR #78 shipped without.
 //
 // The policy document is the whole grant. It is root:root 0644 so the agent can
@@ -153,7 +153,7 @@ func TestVerifyPolicyDocumentsSummarisesEveryServiceInOrder(t *testing.T) {
 // perform on its own.
 //
 // config.yaml is not on the Hermes write denylist and HERMES_WRITE_SAFE_ROOT is
-// unset, which is ADR-0022's own premise for why tools.include is not a control.
+// unset, which is ADR-0004's own premise for why tools.include is not a control.
 // The same writability lets the agent add an MCP server that never reaches the
 // broker — no policy, no audit, no window.
 func TestVerifyMCPServersForeignCommandIsDrift(t *testing.T) {
