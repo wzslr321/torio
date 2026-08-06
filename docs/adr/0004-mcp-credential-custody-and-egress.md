@@ -4,6 +4,12 @@
   inference-credential custody and egress control are **not delivered** and are
   marked per section below.
 - Date: 2026-08-05
+- Superseded in part by: [ADR-0006](0006-destination-egress-allowlist-rejected.md),
+  which replaces the **Keyed by destination** paragraph under "Blocked — egress
+  control" below. That paragraph records the destination allowlist as an open
+  question for the operator to settle; it is settled, and the allowlist is
+  rejected. Nothing else here is superseded — in particular the uid-keyed half of
+  egress control, which ADR-0006 states it does not decide.
 - Consolidates: the MCP credential broker, inference credential custody, guest
   egress control, the MCP write window, the destination allowlist, and the
   delivery boundary that separated custody from the daemon. The superseded

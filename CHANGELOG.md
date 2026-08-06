@@ -9,6 +9,20 @@
   stands unamended; exfiltration remains unsolved and the documentation keeps
   saying so. Recorded in
   [`docs/adr/0006-destination-egress-allowlist-rejected.md`](docs/adr/0006-destination-egress-allowlist-rejected.md).
+- Corrected the number of consolidated decision records from twenty to nineteen,
+  the count actually held at `archive/pre-oss:docs/adr/`. The figure was wrong in
+  `docs/adr/README.md`, in four places in ADR-0005, in the `0.2.0` entry below
+  and in the `0.2.0` release note. `archive/pre-oss:docs/adr/0014-rename-to-torio.md`
+  was claimed by both ADR-0001 and ADR-0005; the claim now belongs to ADR-0001
+  alone, which carries the naming decision. ADR-0005 also said the tree was
+  Polish in "seventeen of nineteen" ADRs; only `0027` was written in English, so
+  the figure is eighteen.
+- Added a `Superseded in part by:` header convention for ADRs, documented in
+  [`docs/adr/README.md`](docs/adr/README.md) beside the immutability rule. ADR-0004
+  carries the first one, pointing at ADR-0006 for the destination-allowlist
+  question its "Blocked — egress control" section still presents as open. The
+  header is a pointer; no superseded prose is rewritten. ADR-0004 is the only
+  record in the tree that needs one.
 
 ### Fixed
 
@@ -74,7 +88,7 @@ Detailed notes: [`docs/releases/v0.2.0.md`](docs/releases/v0.2.0.md).
 - Documented the released MCP custody boundary in the README and generated
   command reference.
 - Prepared the repository for open source: five English decision records in
-  place of twenty, a stated threat model, and roughly 330 files of run
+  place of nineteen, a stated threat model, and roughly 330 files of run
   transcripts, spike results and internal plans out of the working tree. The
   prior tree is readable at `git show archive/pre-oss:<path>`.
 

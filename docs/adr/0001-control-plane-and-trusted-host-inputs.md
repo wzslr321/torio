@@ -2,9 +2,10 @@
 
 - Status: Accepted
 - Date: 2026-08-05
-- Consolidates: the Go/CLI choice, the Cobra dependency, the trusted config
-  authority policy, the removal of the host state directory, and operator
-  selection of the managed instance. The superseded originals are recoverable at
+- Consolidates: the Go/CLI choice, the product and module name, the Cobra
+  dependency, the trusted config authority policy, the removal of the host state
+  directory, and operator selection of the managed instance. The superseded
+  originals are recoverable at
   `git show archive/pre-oss:docs/adr/…` (`0001`, `0012`, `0013`, `0014`, `0019`,
   `0021`).
 - Applies to: `cmd/torio`, `internal/cli`, `internal/config`

@@ -5,8 +5,8 @@
 - Consolidates and amends: the rules that normative documents are corrected
   rather than archived, that exploration leaves the working tree, and that
   product documentation describes the delivered binary. The superseded originals
-  are recoverable at `git show archive/pre-oss:docs/adr/…` (`0014`, `0016`,
-  `0017`, `0020`).
+  are recoverable at `git show archive/pre-oss:docs/adr/…` (`0016`, `0017`,
+  `0020`).
 - Applies to: `docs/`, `README.md`, `AGENTS.md`, `CONTRIBUTING.md`,
   `SECURITY.md`, `site/`, `spikes/`
 
@@ -39,11 +39,11 @@ Two of those rules now block the repository being published.
 
 The tree is Polish in the places a contributor must read — `AGENTS.md`,
 `CONTRIBUTING.md`, `SECURITY.md`, `docs/contracts/`, `docs/03-architecture.md`,
-and seventeen of twenty ADRs — and English in the places a user reads. Half a
+and eighteen of nineteen ADRs — and English in the places a user reads. Half a
 migration reads worse than either end of it.
 
 The decision record is also the most valuable thing here and the least
-accessible: twenty ADRs, heavy overlap, several describing decisions that were
+accessible: nineteen ADRs, heavy overlap, several describing decisions that were
 later narrowed or withdrawn, and one — the destination allowlist — that exists
 only to say it is blocked. A reader deciding whether to trust a tool that
 provisions a VM and a system identity has to read all of it in a language they
@@ -107,7 +107,7 @@ consolidated. What is neither is carried by a tag.**
 ## Consequences
 
 - Anyone reading the repository for the first time reads five decisions instead
-  of twenty, in one language.
+  of nineteen, in one language.
 - The Polish originals are one command away and are still the authoritative
   record of what was decided when. Where the consolidated text and the archived
   original disagree about a *decision*, the original is right and the
@@ -125,7 +125,7 @@ consolidated. What is neither is carried by a tag.**
   `SECURITY.md` would describe an architecture — workers, task containers, a
   Docker socket — that this product does not have.
 - **Translate but do not consolidate.** Cheaper and preserves granularity, but
-  leaves twenty overlapping records including several that were narrowed or
+  leaves nineteen overlapping records including several that were narrowed or
   withdrawn, and one that exists only to announce a blockage. The value of the
   record is that it can be read.
 - **Consolidate but keep the ADRs in Polish.** The decision record is the
