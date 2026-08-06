@@ -6,7 +6,6 @@ import (
 
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
-	brokerpolicy "github.com/wzslr321/torio/internal/mcpbroker"
 )
 
 const cliTestMCPBrokerUnit = `[Unit]
@@ -47,7 +46,7 @@ func cliTestPolicyDigest(files ...string) string {
 	for _, f := range files {
 		documents[f] = []byte(cliTestPolicyDocs[f])
 	}
-	policy, err := brokerpolicy.ParseDocuments(documents)
+	policy, err := lima.ParseDocuments(documents)
 	if err != nil {
 		panic(err)
 	}

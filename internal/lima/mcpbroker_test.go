@@ -5,12 +5,10 @@ import (
 	"errors"
 	"strings"
 	"testing"
-
-	brokerpolicy "github.com/wzslr321/torio/internal/mcpbroker"
 )
 
 func validGuestPolicyDigest() string {
-	set, err := brokerpolicy.ParseDocuments(map[string][]byte{"atlassian.json": []byte(validGuestPolicy)})
+	set, err := ParseDocuments(map[string][]byte{"atlassian.json": []byte(validGuestPolicy)})
 	if err != nil {
 		panic(err)
 	}

@@ -85,7 +85,7 @@ type mcpPolicyData struct {
 // mcpPolicyServiceData is one service's grant. Unlike checkData, these fields
 // are values from the policy documents rather than derived markers, and they are
 // safe to carry for a specific reason: a service name has passed
-// mcpbroker.ValidateServiceName and an endpoint the policy schema's endpoint
+// lima.ValidateServiceName and an endpoint the policy schema's endpoint
 // rule, so neither can hold a control byte, a path traversal, or an embedded
 // credential. A guest filename, of which none of that is true, is still never
 // emitted anywhere in this file.

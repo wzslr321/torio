@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-Six records cover the decisions that govern the delivered binary and how it is
+Seven records cover the decisions that govern the delivered binary and how it is
 published.
 
 | ADR | Decision |
@@ -11,6 +11,7 @@ published.
 | [0004](0004-mcp-credential-custody-and-egress.md) | MCP credentials live under a separate guest identity; what is still unsolved is named |
 | [0005](0005-repository-and-documentation-governance.md) | English, five ADRs, and what leaves the tree instead of rotting in it |
 | [0006](0006-destination-egress-allowlist-rejected.md) | The destination allowlist is rejected; exfiltration stays unsolved and the documentation keeps saying so |
+| [0008](0008-mcp-broker-daemon-deleted.md) | The dormant MCP broker daemon and relay are deleted; the policy-document parser they held moves into `internal/lima` |
 
 ## Rules
 

@@ -33,6 +33,15 @@
 
 ### Internal
 
+- [ADR-0008](docs/adr/0008-mcp-broker-daemon-deleted.md) deletes the fully
+  dormant MCP broker daemon and relay — `internal/mcpbroker`,
+  `cmd/torio-mcp-broker`, `cmd/torio-mcp-connect`, about 5,650 lines — that
+  ADR-0004 had decided would stay in the repository, tested but unshipped.
+  The shared policy-document parser (`ParseDocuments`, `Set`, `Grant`,
+  `Digest`) moves into `internal/lima`, where the delivered `torio mcp
+  install`/`status` verification already used it. ADR-0004 gains a second
+  `Superseded in part by:` pointer for the one sentence this replaces; the
+  custody boundary and every other "not delivered" item stand unchanged.
 - 0.3.0 is published under a rewritten commit history. Historical and internal
   records of that migration are not part of the public repository.
 - Nine source comments cited removed delivery evidence by address; each now

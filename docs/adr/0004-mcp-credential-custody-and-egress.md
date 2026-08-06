@@ -8,8 +8,15 @@
   which replaces the **Keyed by destination** paragraph under "Blocked — egress
   control" below. That paragraph records the destination allowlist as an open
   question for the operator to settle; it is settled, and the allowlist is
-  rejected. Nothing else here is superseded — in particular the uid-keyed half of
-  egress control, which ADR-0006 states it does not decide.
+  rejected. [ADR-0008](0008-mcp-broker-daemon-deleted.md) separately replaces
+  the sentence "The unfinished daemon code stays in the repository and stays
+  tested. It is not a delivered product surface." under "Not delivered — the
+  broker daemon" below: the code is deleted rather than kept, and the
+  policy-document parser it held moves into `internal/lima`. Nothing else here
+  is superseded — in particular the custody boundary, `torio mcp
+  install`/`status`, the uid-keyed half of egress control, and the remaining
+  "not delivered" items (the write window and inference-credential custody)
+  all stand exactly as recorded.
 - Consolidates: the MCP credential broker, inference credential custody, guest
   egress control, the MCP write window, the destination allowlist, and the
   delivery boundary that separated custody from the daemon. The superseded

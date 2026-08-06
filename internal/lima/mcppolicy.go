@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"path"
 	"strings"
-
-	"github.com/wzslr321/torio/internal/mcpbroker"
 )
 
 // The policy document is the grant. ADR-0004 §4 puts it at `root:root 0644` and
@@ -23,12 +21,6 @@ var (
 	policyDocGroup = "root"
 	policyDocModes = map[string]bool{"644": true, "0644": true}
 )
-
-// policyFileSuffix is what the broker's own loader accepts. It is repeated here
-// rather than imported so a guest-path rule and a host-side check cannot be made
-// to disagree by an import cycle; the loader stays the source of truth and this
-// check refuses anything it would refuse.
-const policyFileSuffix = ".json"
 
 // verifyPolicyDocuments proves the grant is a grant: root-owned, agent-readable,
 // agent-unwritable, and a real file rather than a link to one.
@@ -105,12 +97,12 @@ func (a *Adapter) verifyPolicyDocuments(ctx context.Context, rep *MCPBrokerRepor
 				fmt.Sprintf("policy directory holds a non-regular entry of type %q", fType),
 				"a policy document must be a regular file in this directory, never a link to one")
 		}
-		if !strings.HasSuffix(file, policyFileSuffix) {
+		if !strings.HasSuffix(file, policyFileExt) {
 			// The loader fails the whole set on a stray file rather than skipping
 			// it, so a guest in this state has no working policy at all. Reporting
 			// it as drift is what tells the operator that before the broker does.
 			return a.brokerFailed(rep, name,
-				"policy directory holds a file that is not a "+policyFileSuffix+" document",
+				"policy directory holds a file that is not a "+policyFileExt+" document",
 				"the broker refuses the whole policy set when it finds one; remove or rename the file")
 		}
 		if fOwner != policyDocOwner || fGroup != policyDocGroup || !policyDocModes[fMode] {
@@ -131,7 +123,7 @@ func (a *Adapter) verifyPolicyDocuments(ctx context.Context, rep *MCPBrokerRepor
 		documents[file] = []byte(content.out)
 	}
 
-	set, err := mcpbroker.ParseDocuments(documents)
+	set, err := ParseDocuments(documents)
 	if err != nil {
 		return a.brokerFailed(rep, name, "policy documents do not satisfy the strict broker schema", "repair the root-owned policy documents; the broker refuses a partially valid policy set")
 	}
@@ -154,7 +146,7 @@ func (a *Adapter) verifyPolicyDocuments(ctx context.Context, rep *MCPBrokerRepor
 //
 // The order is the grant's, which is already sorted by service name, so two
 // reports of one policy are identical without sorting again here.
-func summarizePolicy(set mcpbroker.Set) PolicyGrant {
+func summarizePolicy(set Set) PolicyGrant {
 	grants := set.Grants()
 	summary := PolicyGrant{
 		Digest:   set.Digest(),
