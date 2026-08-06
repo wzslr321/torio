@@ -16,7 +16,7 @@ as Torio grows.
 ## Get started {#get-started}
 
 By the end of this page you will have built the CLI, created the Linux VM,
-brought up the loopback-only Hermes backend, reached it from your Mac through a
+brought up the loopback-only Hermes backend, reached it from your host through a
 tunnel you control, created your Second Brain, attached your first repository,
 and held a real Hermes Desktop session against it — with no automated commit,
 push, or credential handling anywhere in the loop.
@@ -39,7 +39,7 @@ links are for going deeper afterwards.
 
 <!-- include: serve-bring-up level=3 heading="Step 3 — Bring up the loopback backend" -->
 
-<!-- include: tunnel level=3 heading="Step 4 — Reach the backend from your Mac" -->
+<!-- include: tunnel level=3 heading="Step 4 — Reach the backend from your host" -->
 
 <!-- include: session-token level=3 heading="Step 5 — Pin a session token" -->
 

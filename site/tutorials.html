@@ -62,19 +62,30 @@
         <h1 id="tutorials">Tutorials</h1>
 <p>Guided, start-to-finish walkthroughs. Right now there is one; more will be added as Torio grows.</p>
 <h2 id="get-started">Get started</h2>
-<p>By the end of this page you will have built the CLI, created the Linux VM, brought up the loopback-only Hermes backend, reached it from your Mac through a tunnel you control, created your Second Brain, attached your first repository, and held a real Hermes Desktop session against it — with no automated commit, push, or credential handling anywhere in the loop.</p>
+<p>By the end of this page you will have built the CLI, created the Linux VM, brought up the loopback-only Hermes backend, reached it from your host through a tunnel you control, created your Second Brain, attached your first repository, and held a real Hermes Desktop session against it — with no automated commit, push, or credential handling anywhere in the loop.</p>
 <p>Work straight down. Nothing here sends you to another page to finish a step; the links are for going deeper afterwards.</p>
 <nav class="toc" aria-label="Steps on this page">
-<ul><li><a href="#prerequisites">Before you start</a></li><li><a href="#build-cli">Step 1 — Install the CLI</a></li><li><a href="#vm-bring-up">Step 2 — Create and verify the VM</a></li><li><a href="#serve-bring-up">Step 3 — Bring up the loopback backend</a></li><li><a href="#tunnel">Step 4 — Reach the backend from your Mac</a></li><li><a href="#session-token">Step 5 — Pin a session token</a></li><li><a href="#brain-bring-up">Step 6 — Create the Second Brain</a></li><li><a href="#project-attach">Step 7 — Attach your first repository</a></li><li><a href="#desktop-connect">Step 8 — Connect Hermes Desktop</a></li><li><a href="#desktop-workspace">Step 9 — Point Desktop at the project</a></li><li><a href="#provider-auth">Step 10 — Configure a model provider</a></li><li><a href="#everyday-loop">Step 11 — Learn the everyday loop</a></li><li><a href="#step-end">Step 12 — Leave a clean end state</a></li></ul>
+<ul><li><a href="#prerequisites">Before you start</a></li><li><a href="#build-cli">Step 1 — Install the CLI</a></li><li><a href="#vm-bring-up">Step 2 — Create and verify the VM</a></li><li><a href="#serve-bring-up">Step 3 — Bring up the loopback backend</a></li><li><a href="#tunnel">Step 4 — Reach the backend from your host</a></li><li><a href="#session-token">Step 5 — Pin a session token</a></li><li><a href="#brain-bring-up">Step 6 — Create the Second Brain</a></li><li><a href="#project-attach">Step 7 — Attach your first repository</a></li><li><a href="#desktop-connect">Step 8 — Connect Hermes Desktop</a></li><li><a href="#desktop-workspace">Step 9 — Point Desktop at the project</a></li><li><a href="#provider-auth">Step 10 — Configure a model provider</a></li><li><a href="#everyday-loop">Step 11 — Learn the everyday loop</a></li><li><a href="#step-end">Step 12 — Leave a clean end state</a></li></ul>
 </nav>
 <h3 id="prerequisites">Before you start</h3>
 <p>You need all of the following in place first:</p>
 <ul><li>a supported host with <code>limactl</code> on your <code>PATH</code>: macOS on Apple Silicon, where Torio uses Lima <code>vmType: vz</code> on <code>aarch64</code>, or Linux on x86_64, where it uses <code>qemu</code> on <code>x86_64</code> over KVM. Intel Macs are out of scope — <code>vz</code> needs Apple Silicon — and so is arm64 Linux, which nothing here has booted;</li><li>a checkout of the <code>torio</code> repository and a Go toolchain to build the CLI;</li><li>for each repository you plan to attach: read access that already works from the guest, without a prompt. Provisioning it is yours to do, outside Torio.</li></ul>
 <p>Torio creates the VM itself, so there is nothing to provision by hand first.</p>
 <h3 id="build-cli">Step 1 — Install the CLI</h3>
-<p>From a checkout of the <code>torio</code> repository, build the binary and put it on your <code>PATH</code>. Every command in these docs is written as <code>torio</code>, so do this once and the rest of the page just works:</p>
+<p>Every command in these docs is written as <code>torio</code>, so put the binary on your <code>PATH</code> once and the rest of the page just works.</p>
+<p>Where a release exists, install its verified asset. From a checkout of the <code>torio</code> repository:</p>
+<div class="code-block"><pre data-lang="bash"><code>scripts/install.sh                       <span class="tok-comment"># latest stable release</span>
+scripts/install.sh --version X.Y.Z       <span class="tok-comment"># or a specific one, without the leading v</span></code></pre></div>
+<p>The installer resolves the release, verifies <code>SHA256SUMS</code> before the binary is copied anywhere — which is the whole reason to use it rather than untarring by hand — and installs into <code>~/.local/bin</code> by default. It needs a published release to exist; before one does, build from source below.</p>
+<p><code>install.sh</code> authenticates to nothing and never will. Torio stores and transports no credentials, and an installer carrying a forwarded token would be the one exception that makes the claim untrue. So a repository it cannot read anonymously answers <code>404</code> from <code>api.github.com</code>, and <code>gh</code> — which does hold your credentials — closes that gap without Torio touching them:</p>
+<div class="code-block"><pre data-lang="bash"><code>gh release download vX.Y.Z -D /tmp/torio-rel
+scripts/install.sh --version X.Y.Z --base-url file:///tmp/torio-rel</code></pre></div>
+<p>Either route verifies the same checksums. Set <code>TORIO_REPO=owner/name</code> if the assets live somewhere other than the default.</p>
+<h4 id="install-source">Building from source instead</h4>
+<p>With a Go toolchain, build the binary and put it on your <code>PATH</code>:</p>
 <div class="code-block"><pre data-lang="bash"><code>go build -o torio ./cmd/torio
 sudo install -m 755 torio /usr/local/bin/torio</code></pre></div>
+<div class="callout"><p>Prefer not to install system-wide? Any directory already on your <code>PATH</code> works — for example <code>install -m 755 torio ~/.local/bin/torio</code>. If you skip this step entirely, <code>torio</code> will not resolve at all: a freshly built binary is not on your <code>PATH</code> and your shell does not search the current directory, so you would have to prefix every later command with <code>./</code> and run it from the repository root.</p></div>
 <p>Confirm it resolves and runs:</p>
 <div class="code-block"><pre data-lang="bash"><code>which torio
 torio version</code></pre></div>
@@ -82,23 +93,16 @@ torio version</code></pre></div>
 <div class="code-block"><pre data-lang="text"><code>torio dev (commit …, built …)
 go1.26.5 darwin/arm64</code></pre></div>
 <p>A binary built straight from a checkout calls itself <code>dev</code>; the commit is the one you built.</p>
-<p><code>torio vm status</code> also works from here and answers <code>torio: not_found</code> until the next step creates the VM. That is the expected answer on a Mac that has never run Torio, not a failure — it exits <code>0</code>.</p>
-<div class="callout"><p>Prefer not to install system-wide? Any directory already on your <code>PATH</code> works — for example <code>install -m 755 torio ~/.local/bin/torio</code>. If you skip this step entirely, <code>torio</code> will not resolve at all: a freshly built binary is not on your <code>PATH</code> and your shell does not search the current directory, so you would have to prefix every later command with <code>./</code> and run it from the repository root.</p></div>
-<h4 id="install-release">Installing a release build instead</h4>
-<p>Where a release exists and you would rather install its verified asset than build, fetch the asset with a tool that already holds your credentials, then point the installer at what you fetched:</p>
-<div class="code-block"><pre data-lang="bash"><code>gh release download vX.Y.Z -D /tmp/torio-rel
-scripts/install.sh --version X.Y.Z --base-url file:///tmp/torio-rel</code></pre></div>
-<p><code>install.sh</code> authenticates to nothing and never will. Torio stores and transports no credentials, and an installer carrying a forwarded token would be the one exception that makes the claim untrue. So a repository it cannot read anonymously answers <code>404</code> from <code>api.github.com</code>, and <code>gh</code> — which does hold your credentials — closes that gap without Torio touching them.</p>
-<p>Either route verifies <code>SHA256SUMS</code> before the binary is copied anywhere, which is the whole reason to use the installer rather than untarring by hand. Set <code>TORIO_REPO=owner/name</code> if the assets live somewhere other than the default.</p>
+<p><code>torio vm status</code> also works from here and answers <code>torio: not_found</code> until the next step creates the VM. That is the expected answer on a host that has never run Torio, not a failure — it exits <code>0</code>.</p>
 <h3 id="vm-bring-up">Step 2 — Create and verify the VM</h3>
 <p>Create the VM from the trusted template, start it, then reconcile and verify it. Run all three in order: each is idempotent, so this is also the sequence you re-run later.</p>
 <div class="code-block"><pre data-lang="bash"><code>torio vm init
 torio vm start
 torio vm bootstrap --timeout 10m</code></pre></div>
 <p><code>init</code> prints <code>next: torio vm start</code> whether it created the instance or found a compatible one, so there is no state in which you skip the second command.</p>
-<p><code>init</code> creates the Gate-0-pinned Lima instance (or succeeds idempotently when a compatible one already exists) and verifies the post-create list output before reporting success. <code>start</code> is idempotent and confirms a <code>Running</code> post-state. <code>bootstrap</code> operates only on the existing target after a verified <code>Running</code> precondition, through the typed Lima boundary. Hermes Agent install can be slow, so give it room — but <code>10m</code> is the policy maximum for any single operation, and asking for more is refused before any work starts:</p>
+<p><code>init</code> creates the pinned Lima instance (or succeeds idempotently when a compatible one already exists) and verifies the post-create list output before reporting success. <code>start</code> is idempotent and confirms a <code>Running</code> post-state. <code>bootstrap</code> operates only on the existing target after a verified <code>Running</code> precondition, through the typed Lima boundary. Hermes Agent install can be slow, so give it room — but <code>10m</code> is the policy maximum for any single operation, and asking for more is refused before any work starts:</p>
 <div class="code-block"><pre data-lang="text"><code>torio: timeout 15m0s exceeds policy maximum 10m0s</code></pre></div>
-<p>On a fully-reconciled target it mutates nothing; when the pinned launcher is missing it installs Hermes Agent at the Gate-0 commit (verifiable postcondition: git HEAD pin + launcher path), then reconciles the PATH shim. It:</p>
+<p>On a fully-reconciled target it mutates nothing; when the pinned launcher is missing it installs Hermes Agent at the pinned commit, then reconciles the PATH shim. It:</p>
 <ul><li>installs the pinned Hermes Agent when <code>/home/hermes/hermes-agent/venv/bin/hermes</code> is missing (never curl|bash pipe — download to a hermes-writable path, run with fixed flags, verify git HEAD);</li><li>ensures <code>/usr/local/bin/hermes</code> is a symlink to the pinned launcher (only after confirming the launcher exists);</li><li><strong>verifies</strong> (not merely trusts an exit code): the <code>hermes</code> user exists; group <code>torio-projects</code> exists; <code>hermes</code> and the Lima login operator are members; <code>hermes</code> is <strong>not</strong> in the <code>docker</code> group (rootful Docker for hermes is forbidden); <code>uname -m</code> matches the host profile's guest architecture; <code>hermes --version</code> through the documented stable command path; <code>git --version</code>; the persistent profile, Second Brain, and workspace paths are directories with the expected owner, group, and mode on native Linux (ext4), not a host share; and no broad host mount is present.</li></ul>
 <p>Any drift or unverifiable state fails closed (exit 6) with remediation. A rerun is success only when every postcondition is proven. Use <code>--json</code> for the machine-readable envelope (one document on stdout).</p>
 <h4 id="persistent-locations">Persistent Hermes locations</h4>
@@ -111,12 +115,12 @@ torio vm bootstrap --timeout 10m</code></pre></div>
 torio serve start   --timeout 2m
 torio serve status</code></pre></div>
 <ul><li><code>install</code> ensures user linger, renders the unit (loopback bind, <code>HERMES_HOME</code>, <code>Restart=always</code>), validates it with <code>systemd-analyze</code> <strong>before</strong> activation, then reloads and enables it for boot. Idempotent; accepts no secrets; does not start the backend.</li><li><code>start</code> starts it and fails closed unless the systemd state is active <strong>and</strong> <code>GET /api/status</code> answers 200 through loopback.</li><li><code>status</code> proves the same and exits non-zero when not ready. <code>stop</code> and <code>restart</code> mirror the lifecycle. <code>logs [--lines N]</code> shows bounded, redacted, unit-scoped journal entries only.</li></ul>
-<h3 id="tunnel">Step 4 — Reach the backend from your Mac</h3>
+<h3 id="tunnel">Step 4 — Reach the backend from your host</h3>
 <p>The backend binds <code>127.0.0.1:9119</code> <em>inside</em> the VM, so you forward a host loopback port to it over SSH. Torio deliberately adds no tunnel feature — you control the forward, which means network exposure is never an accident of running a command.</p>
 <p>Derive the forward from the supported live Lima SSH config and open it:</p>
 <div class="code-block"><pre data-lang="bash"><code>ssh -F ~/.lima/torio/ssh.config -L 19119:127.0.0.1:9119 -N -f \
     -o ExitOnForwardFailure=yes lima-torio</code></pre></div>
-<p>Verify it from the Mac — you should get <code>200</code>:</p>
+<p>Verify it from the host — you should get <code>200</code>:</p>
 <div class="code-block"><pre data-lang="bash"><code>curl -s -m 5 -o /dev/null -w <span class="tok-str">'%{http_code}\n'</span> http://127.0.0.1:19119/api/status</code></pre></div>
 <p>Tear the tunnel down when you are done by killing the <code>ssh</code> process holding the forward.</p>
 <div class="callout"><p><code>overall:degraded</code> in <code>/api/status</code> is <strong>expected</strong> when the messaging gateway is stopped — the serve backend/dashboard component is still <code>ok</code>.</p></div>
@@ -170,14 +174,14 @@ torio brain status</code></pre></div>
 <p>It configures no remote and pushes nothing. The Brain stays on the VM.</p>
 <div class="callout"><p>If the backend was already running, restart it — <code>torio serve restart --timeout 2m</code>. Hermes caches the assembled skills prompt <strong>in the backend process</strong>, keyed on the skills directory rather than on the files in it, and Torio installs the skill by writing it. Reconnecting Desktop is not enough: the client reconnects, the process does not, and the cache it holds is the one that decides whether <code>torio-brain</code> is offered. <code>torio brain status</code> reports that the file is correct and says in as many words that it cannot tell whether a running session has loaded it.</p></div>
 <h4 id="brain-import">Bring an existing vault in</h4>
-<p>If you already keep Markdown notes on your Mac — an Obsidian vault, say — import them once:</p>
+<p>If you already keep Markdown notes on your host — an Obsidian vault, say — import them once:</p>
 <div class="code-block"><pre data-lang="bash"><code>torio brain import ~/path/to/vault --dry-run   <span class="tok-comment"># preflight, transfers nothing</span>
 torio brain import ~/path/to/vault</code></pre></div>
 <p>Start with <code>--dry-run</code>: it runs the full preflight and reports what would move, without transferring a byte or touching Brain data.</p>
 <p>The import is deliberately narrow. It carries Markdown, Canvas, and local attachments, and refuses or skips credential-shaped files, repository metadata, links, hardlinks, special files, and executables. Existing data is <strong>never</strong> overwritten — the one exception is a scaffold Torio itself created and you have not touched. To land the vault as one contained subtree instead of merging it into the root, pass <code>--into notes</code>.</p>
 <p>Output is counts, bytes, and a manifest digest. No note name and no note content ever appears in it.</p>
 <h4 id="brain-out">Getting it back out</h4>
-<p>Torio brings data in and does not take it out — there is no export command. Copying the Brain to your Mac is something you do explicitly:</p>
+<p>Torio brings data in and does not take it out — there is no export command. Copying the Brain to your host is something you do explicitly:</p>
 <div class="code-block"><pre data-lang="bash"><code>limactl copy torio:/home/hermes/brain/ ~/torio-brain-copy/</code></pre></div>
 <p>That is your command. Nothing verifies the result, and Torio does not call it a backup.</p>
 <h3 id="project-attach">Step 7 — Attach your first repository</h3>
@@ -189,7 +193,7 @@ torio project list</code></pre></div>
 <p><strong>Read access is your job.</strong> Torio stores no Git credentials, prompts for none, and passes none to the model. A remote the guest cannot already read without prompting fails closed:</p>
 <div class="code-block"><pre data-lang="text"><code>torio: project add: auth: the guest cannot read the remote noninteractively; provision access for the hermes user out of band</code></pre></div>
 <p>That is exit <code>7</code>.</p>
-<p>The fix is to grant the guest read access yourself, on the guest, outside Torio — not to re-run the command. Do not work around it by copying a checkout from your Mac: a recursive copy drags host Git config, hooks, and keys across the VM boundary, which is exactly the thing this path exists to prevent.</p>
+<p>The fix is to grant the guest read access yourself, on the guest, outside Torio — not to re-run the command. Do not work around it by copying a checkout from your host: a recursive copy drags host Git config, hooks, and keys across the VM boundary, which is exactly the thing this path exists to prevent.</p>
 <p>Nothing on the guest is reset, cleaned, or deleted, so if <code>add</code> fails partway a rerun finishes the work instead of starting over.</p>
 <h4 id="project-inspect">Inspect and forget</h4>
 <div class="code-block"><pre data-lang="bash"><code>torio project show my-service     <span class="tok-comment"># registry entry, checkout state, Hermes registration</span>
@@ -200,13 +204,13 @@ torio project remove my-service   <span class="tok-comment"># forget it</span></
 <h3 id="desktop-connect">Step 8 — Connect Hermes Desktop</h3>
 <p>Desktop talks to the same loopback endpoint you forwarded, so bring the tunnel up first and confirm both ends are ready: <code>torio serve status</code> exits <code>0</code>, and the <code>curl</code> to <code>http://127.0.0.1:19119/api/status</code> returns <code>200</code>.</p>
 <p>In Hermes Desktop → Settings → <strong>Gateway Connection → Remote gateway</strong>, set:</p>
-<div class="table-scroll"><table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>Remote URL</td><td><code>http://127.0.0.1:19119</code> — the Mac end of the SSH forward to the guest backend on <code>127.0.0.1:9119</code></td></tr><tr><td>Session token</td><td>the value you pinned in the drop-in</td></tr></tbody></table></div>
+<div class="table-scroll"><table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>Remote URL</td><td><code>http://127.0.0.1:19119</code> — the host end of the SSH forward to the guest backend on <code>127.0.0.1:9119</code></td></tr><tr><td>Session token</td><td>the value you pinned in the drop-in</td></tr></tbody></table></div>
 <p>After <strong>Save and reconnect</strong>, the status bar shows the remote endpoint plus matching client and backend versions.</p>
 <h3 id="desktop-workspace">Step 9 — Point Desktop at the project</h3>
 <p>Registering the project does <strong>not</strong> by itself change what Desktop shows. Settings → <strong>Workspace → Working Directory</strong> defaults to <code>.</code>, which resolves against the serve unit's <code>WorkingDirectory=/home/hermes/hermes-agent</code> — the Hermes source checkout — so the file tree shows the wrong repository. Set it to the project's derived path:</p>
 <div class="code-block"><pre data-lang="text"><code>/home/hermes/projects/my-service</code></pre></div>
 <p>Optionally set <strong>Repository Discovery Roots</strong> to <code>/home/hermes/projects</code> so discovery stays inside the workspace root and sees every project you attached.</p>
-<p>Two dead ends worth skipping: the folder chip in the status bar opens a context menu, not a project switcher; and Desktop's <strong>Terminal</strong> tab is a shell on your <strong>Mac</strong>, not on the guest.</p>
+<p>Two dead ends worth skipping: the folder chip in the status bar opens a context menu, not a project switcher; and Desktop's <strong>Terminal</strong> tab is a shell on your <strong>host</strong>, not on the guest.</p>
 <h3 id="provider-auth">Step 10 — Configure a model provider</h3>
 <p>Until a provider is configured, starting a session fails at agent init — for example <code>agent init failed: No Codex credentials stored</code>. Check what the guest currently has:</p>
 <div class="code-block"><pre data-lang="bash"><code>torio vm ssh -- sudo -u hermes -- hermes status</code></pre></div>

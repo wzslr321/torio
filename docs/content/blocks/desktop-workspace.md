@@ -15,4 +15,4 @@ discovery stays inside the workspace root and sees every project you attached.
 
 Two dead ends worth skipping: the folder chip in the status bar opens a context
 menu, not a project switcher; and Desktop's **Terminal** tab is a shell on your
-**Mac**, not on the guest.
+**host**, not on the guest.

@@ -12,7 +12,7 @@ ssh -F ~/.lima/torio/ssh.config -L 19119:127.0.0.1:9119 -N -f \
     -o ExitOnForwardFailure=yes lima-torio
 ```
 
-Verify it from the Mac — you should get `200`:
+Verify it from the host — you should get `200`:
 
 ```bash
 curl -s -m 5 -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19119/api/status

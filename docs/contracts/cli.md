@@ -3,15 +3,9 @@
 > This document is **normative**: it describes the command surface of the
 > delivered binary. A disagreement with the binary's behaviour is a defect to
 > fix, not a record to preserve —
-> [ADR-0005](../adr/0005-repository-and-documentation-governance.md).
->
-> The contract once described commands the binary never had (`doctor`, `status`,
-> `reconcile`, `vm logs`, `gateway`, `task`, `admin`) and omitted `brain` and the
-> delivered shape of `project`. That content was removed rather than archived: a
-> contract listing commands that do not exist misleads the reader however it is
-> labelled. Scope is set by
-> [ADR-0003](../adr/0003-ownership-split-and-operator-carried-write.md); the
-> earlier exploration it came from is under the `archive/pre-v1` tag.
+> [ADR-0005](../adr/0005-repository-and-documentation-governance.md). Scope is
+> set by
+> [ADR-0003](../adr/0003-ownership-split-and-operator-carried-write.md).
 
 ## Binary and output
 
@@ -75,10 +69,8 @@ parsing the envelope can rely on it being present.
 | 8 | external dependency failed | no `limactl`, non-zero exit from a guest command |
 | 9 | reconciliation required | guest work succeeded, the registry write did not |
 
-Code **4** ("policy denied") came from the earlier platform and is produced by no
-command: there is no policy engine that could deny anything. The number stays
-unused rather than being reassigned — the table is a contract, and recycling a
-code would silently change the meaning of an existing 4.
+Code **4** is produced by no command. It stays unused rather than being
+reassigned: recycling a code would silently change the meaning of an existing 4.
 
 ## Global flags
 
@@ -99,10 +91,6 @@ There is no global `--force`. A command may have a narrow, documented recovery
 flag, but none may bypass verification or the credential boundary: `vm init` does
 not recreate a non-matching instance, `brain import` does not overwrite existing
 data, and `project remove` does not delete a checkout.
-
-`--state-dir PATH` **does not exist**. It once pointed at a directory Torio never
-wrote to, and it went with the version-lock manifest —
-[ADR-0001](../adr/0001-control-plane-and-trusted-host-inputs.md).
 
 ### `--help` and `--json`
 
@@ -233,10 +221,10 @@ torio serve logs [--lines N]
   configuration. That is not an absolute guarantee: the Hermes backend's own
   stdout and stderr may in principle contain text derived from user data. Treat it
   as a runtime exposure limit, not a formal privacy guarantee.
-- `serve` binds the guest loopback. Reaching it from the Mac is an
+- `serve` binds the guest loopback. Reaching it from the host is an
   operator-controlled SSH tunnel to the guest's `127.0.0.1:9119` (see the
   [runbook](../runbooks/first-run.md)); `torio` adds no tunnel feature of its own.
-  `serve` is the Desktop backend. There is no `torio gateway`.
+  `serve` is the Desktop backend.
 
 ### Brain
 
@@ -275,7 +263,7 @@ Project ([ADR-0003](../adr/0003-ownership-split-and-operator-carried-write.md)).
 
 **Torio brings data in and does not take it out.** `brain export` does not exist
 ([ADR-0003](../adr/0003-ownership-split-and-operator-carried-write.md)). Copying
-the Brain to the Mac is an explicit operator action:
+the Brain to the host is an explicit operator action:
 
 ```bash
 limactl copy torio:/home/hermes/brain/ <host-destination>/
@@ -319,7 +307,7 @@ torio project shell <id>
   It **reports drift as stable markers rather than repairing it** and never
   returns file names, diffs or raw Git output.
 - `remove` archives the Hermes Project and drops the config entry. The checkout
-  directory is **never** deleted, and the output says plainly where it still is.
+  directory is **never** deleted, and the output says where it still is.
   There is no `--delete`.
 - `enter` opens an ordinary interactive session in the checkout with agent
   forwarding and SSH multiplexing disabled. That session can edit and commit
@@ -328,8 +316,7 @@ torio project shell <id>
 - `shell` opens an ephemeral operator session in the checkout with the SSH agent
   forwarded. **This is the only way write capability toward a Git remote reaches
   the guest**, and it lives exactly until the session exits; the persistent Hermes
-  has read-only access to an origin. That sentence was once written without the
-  qualifier and was therefore untrue: write capability arriving through an MCP
+  has read-only access to an origin. Write capability arriving through an MCP
   server does not travel this path and does not end with the session — it is a
   separate, explicitly granted channel
   ([ADR-0004](../adr/0004-mcp-credential-custody-and-egress.md)). The session is
@@ -380,7 +367,7 @@ deliver the daemon or the upstream transport.
   they are present is a deadlock: the operator cannot build the thing they are
   meant to migrate to. That continuous invariant belongs to `status`.
 - When `hermes` has just joined the client group, `install` reports
-  `restart_required` and says so plainly. A long-lived process does not acquire a
+  `restart_required`. A long-lived process does not acquire a
   group because the group database changed underneath it — the backend keeps what
   it started with until `torio serve restart`.
 - `status` **proves and reports; it repairs nothing.** It verifies that the broker

@@ -8,7 +8,7 @@ In Hermes Desktop → Settings → **Gateway Connection → Remote gateway**, se
 
 | Field | Value |
 | --- | --- |
-| Remote URL | `http://127.0.0.1:19119` — the Mac end of the SSH forward to the guest backend on `127.0.0.1:9119` |
+| Remote URL | `http://127.0.0.1:19119` — the host end of the SSH forward to the guest backend on `127.0.0.1:9119` |
 | Session token | the value you pinned in the drop-in |
 
 After **Save and reconnect**, the status bar shows the remote endpoint plus

@@ -125,7 +125,8 @@ Torio creates the VM itself, so there is nothing to provision by hand first.
 
 From a checkout, install a published release asset. The installer resolves the
 latest stable release, verifies `SHA256SUMS` before the binary is copied
-anywhere, and installs into `~/.local/bin` by default:
+anywhere, and installs into `~/.local/bin` by default. It needs a published
+release to exist; before one does, build from source below:
 
 ```bash
 scripts/install.sh                       # latest stable release
@@ -150,18 +151,6 @@ command works as written:
 go build -o torio ./cmd/torio
 sudo install -m 755 torio /usr/local/bin/torio
 ```
-
-Confirm it resolves. A binary built straight from a checkout calls itself `dev`;
-the commit is the one you built:
-
-```bash
-which torio
-torio version
-```
-
-`torio vm status` also works from here and answers `torio: not_found` until the
-next step creates the VM. That is the expected answer on a machine that has never
-run Torio, and it exits `0`.
 
 ### 2. Create and verify the VM
 
@@ -392,8 +381,7 @@ read as a guarantee.
   [`site/tutorials.html`](site/tutorials.html); the command reference is
   [`site/reference.html`](site/reference.html). It is prepared for deployment on
   **Vercel**, but **deployment is pending**: no Vercel project and no `torio.dev`
-  domain are connected or configured by this repository, and the high-level human
-  setup sequence is in [`site/DEPLOYMENT.md`](site/DEPLOYMENT.md).
+  domain are connected or configured by this repository.
 - [`docs/adr/`](docs/adr/README.md) — the accepted architecture decisions,
   including why the VM is the trust boundary, why write capability is
   operator-carried, and why the destination egress allowlist was rejected.
@@ -423,12 +411,3 @@ make validate     # fail if any generated file drifted from its source
 Generated files are committed, so serving the site still needs no build step.
 Edit the sources, never the outputs — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 This README is not generated; edit it directly.
-
-## Earlier exploration
-
-A broader design exploration (worker/control-plane, registry, verifier, evidence
-pipeline) came first, was never delivered, and is **superseded**. It no longer
-ships in the working tree; it is kept under the annotated tag `archive/pre-v1`
-and read with `git show archive/pre-v1:<path>`. See
-[`docs/adr/0005-repository-and-documentation-governance.md`](docs/adr/0005-repository-and-documentation-governance.md).
-Do not use it as an onboarding or task path.

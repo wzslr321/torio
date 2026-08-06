@@ -4,7 +4,7 @@ output: docs/runbooks/first-run.md
 
 # Runbook — first run
 
-Brings a Mac from nothing to a working setup: a Linux VM, a Hermes backend on
+Brings a workstation from nothing to a working setup: a Linux VM, a Hermes backend on
 the VM's own loopback, a tunnel you control, a Second Brain, and your first
 attached repository.
 
@@ -25,7 +25,7 @@ generated from one source, so the two cannot drift.
 
 <!-- include: serve-bring-up level=2 heading="3. Bring up the loopback backend" -->
 
-<!-- include: tunnel level=2 heading="4. Reach the backend from the Mac" -->
+<!-- include: tunnel level=2 heading="4. Reach the backend from the host" -->
 
 <!-- include: session-token level=2 heading="5. Pin a session token" -->
 

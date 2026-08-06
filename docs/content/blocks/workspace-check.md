@@ -18,7 +18,7 @@ torio vm ssh -- sudo -u hermes -- \
 The second command must print nothing: a check that leaves the tree dirty was
 not the read-only check you thought you were running.
 
-Two things worth knowing before you rely on this:
+Two limits:
 
 - **`torio vm ssh` forwards no stdin.** Piping into it produces an empty result while still exiting `0` — `echo … | torio vm ssh -- … tee file` looks like it worked and wrote nothing. Create files in a real shell instead.
 - **The guest is deliberately minimal.** Python is there; most other toolchains are not. Anything else you want to run inside the VM you install in the VM yourself, and that install must never add a Git remote, configure a credential helper, or grant push access.

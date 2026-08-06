@@ -78,8 +78,8 @@ The numbering below is load-bearing: source comments cite these clauses as
    one-liner from the agent looks identical. No per-caller policy may rest on it,
    and operator documentation must not describe it as if it could.
 
-   A service name is capped at 32 bytes, and the cap is load-bearing rather than
-   cosmetic: a unix socket address must fit in `sun_path` (~104 bytes), and
+   A service name is capped at 32 bytes because a unix socket address must fit
+   in `sun_path` (~104 bytes), and
    `/run/torio-mcp/` plus the longest permitted name plus `.sock` is 52. An
    address too long is unreachable by construction instead of failing at
    `connect()`. Both sides — the broker binding and the relay searching — must
@@ -161,7 +161,7 @@ authorization condition today: a tool listed in root-owned policy is granted,
 including one marked as writing. Reinstating a write window requires its own
 accepted ADR.
 
-The design is worth keeping in view, because the gap it addresses is real: a
+The gap it addresses is real: a
 grant says *what*, never *when*, and a poisoned Jira ticket reaches exactly the
 tools the agent legitimately holds. Its shape was two independent conditions —
 a grant in policy **and** an open, self-expiring window per service — with the
@@ -201,7 +201,7 @@ of this work that addresses data exfiltration at all, and it is **blocked**:
 `AGENTS.md` names a domain network allowlist among the things Torio must not
 implement, `AGENTS.md` is the first source of truth, and resolving that
 contradiction is the operator's decision, not the implementer's. Two exits exist —
-amend that rule, or reject the allowlist and keep saying plainly that exfiltration
+amend that rule, or reject the allowlist and keep saying that exfiltration
 is unsolved. Nothing is built on it until one is chosen.
 
 ## Consequences

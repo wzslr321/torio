@@ -107,7 +107,7 @@ consolidated. What is neither is carried by a tag.**
    control is for, and a stale header in a security-adjacent tool invites a
    conversation about the wrong thing.
 
-7. **The validation gate keeps the surface honest**, because prose rules did not:
+7. **The validation gate enforces what prose rules did not**:
    relative links resolve, documents cited from Go exist, no operator-facing
    surface carries a version label, no document hands the reader a pasteable
    credential, and no obvious secret material is committed.

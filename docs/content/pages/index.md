@@ -3,7 +3,7 @@ output: site/index.html
 nav: Home
 order: 1
 title: Torio — your AI second brain on a Linux VM you control
-description: Torio is a thin control plane that runs an AI second brain and your coding projects on a Linux VM on your Mac. It creates the VM, keeps the backend healthy, and leaves credentials, the tunnel, and every Git write to you.
+description: Torio is a thin control plane that runs an AI second brain and your coding projects on a Linux VM on your workstation. It creates the VM, keeps the backend healthy, and leaves credentials, the tunnel, and every Git write to you.
 ---
 
 <section class="hero">
@@ -21,18 +21,18 @@ moving parts, split across the two machines:
 
 <div class="stack" aria-label="How the pieces fit together">
 <section class="stack-zone">
-<p class="stack-where">On your Mac</p>
+<p class="stack-where">On your host</p>
 <div class="stack-items">
 <div class="stack-item"><b>torio</b><span>The Torio CLI, and the only part of this that we wrote. It creates the VM, installs the backend as a service, proves the service is genuinely answering, and registers your projects. It has no daemon and holds no state of its own.</span></div>
 <div class="stack-item"><b>Hermes Desktop</b><span>The chat app you already use, pointed at a URL instead of a local backend. This is where you actually talk to the second brain and to the code.</span></div>
-<div class="stack-item"><b>Your <code>ssh -L</code></b><span>The one and only route from the Mac to the backend. You open it in a terminal you can see, and close it when you are done.</span></div>
+<div class="stack-item"><b>Your <code>ssh -L</code></b><span>The one and only route from the host to the backend. You open it in a terminal you can see, and close it when you are done.</span></div>
 </div>
 </section>
 <p class="stack-pipe"><span>localhost:19119 → the VM's 127.0.0.1:9119</span></p>
 <section class="stack-zone">
 <p class="stack-where">Inside the Linux VM</p>
 <div class="stack-items">
-<div class="stack-item"><b>Hermes backend</b><span>A <code>hermes serve</code> process, run as a user systemd service so it survives logout and restarts on its own. It binds <code>127.0.0.1</code> <em>of the guest</em>: nothing on your network, and nothing on your Mac, can reach it except through your tunnel.</span></div>
+<div class="stack-item"><b>Hermes backend</b><span>A <code>hermes serve</code> process, run as a user systemd service so it survives logout and restarts on its own. It binds <code>127.0.0.1</code> <em>of the guest</em>: nothing on your network, and nothing on your host, can reach it except through your tunnel.</span></div>
 <div class="stack-item"><b>Your Second Brain</b><span>A private Markdown vault, versioned by its own Git repository and registered with Hermes so any session can search it. Torio can import an existing vault into it; there is no export, because getting data back out is a copy you run yourself.</span></div>
 <div class="stack-item"><b>Your projects</b><span>Repository clones on the VM's own Linux filesystem — not on a host share reaching back into your home directory. The model sees the ones you registered, and no others.</span></div>
 </div>
@@ -87,7 +87,7 @@ model — a workspace it prepared has no push credentials in it at all.
 
 ## What Torio will not do {#limits}
 
-The narrowness is the point, so it is worth being blunt about it. Torio never
+The narrowness is the point. Torio never
 holds or prompts for a credential — the one it forwards is your SSH agent, into
 a session you opened, for as long as you keep it open. It never opens a tunnel
 or exposes a port beyond the guest's loopback. It never commits, pushes, merges,

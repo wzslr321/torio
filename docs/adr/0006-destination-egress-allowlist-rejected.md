@@ -17,9 +17,8 @@ the process that created the socket, which `hermes` has no primitive to change o
 bypass. The other is keyed on destination: an enumerable list of hosts the guest
 may reach at all, everything else refused.
 
-The destination half was proposed for one thing, and ADR-0004 says so in the
-plainest terms available to it — it "is the only part of this work that addresses
-data exfiltration at all". Every other mechanism in that record governs what the
+The destination half was proposed for one thing. ADR-0004 states: it "is the
+only part of this work that addresses data exfiltration at all". Every other mechanism in that record governs what the
 agent may **hold** or **invoke**. Custody moves the tokens under `torio-mcp`;
 root-owned policy decides which tools are reachable; the audit log records the
 decision. None of them touches what happens to bytes the agent has already and
@@ -54,7 +53,7 @@ prohibition stands unamended.**
 
 3. The documentation keeps saying, without qualification, that exfiltration is
    unsolved. `SECURITY.md` and [`docs/03-architecture.md`](../03-architecture.md)
-   already do; that wording is now load-bearing and softening it is a defect.
+   already do, and softening that wording is a defect.
 
 The reasoning is about where this product is used, not about the strength of the
 mechanism. The box runs in the operator's own workplace against the operator's own
@@ -83,11 +82,8 @@ building the uid-keyed rule needs its own accepted ADR, not this one.
   query.
 
 - **No mechanism in this repository partially mitigates it, and none may be
-  described as doing so.** Custody bounds what the agent can steal. Root-owned
-  policy bounds which tools it can call. Neither observes the content those tools
-  return. The write window withdrawn in ADR-0004 would not have helped either,
-  and not because it was withdrawn: exfiltration does not pass through the broker
-  at all, so a condition on broker calls cannot bound it.
+  described as doing so.** Exfiltration does not pass through the broker at all,
+  so no condition on broker calls can bound it.
 
 - A reader auditing this box gets an honest answer to "what stops the agent
   sending my Confluence page somewhere else" — nothing does — instead of a
@@ -105,11 +101,9 @@ building the uid-keyed rule needs its own accepted ADR, not this one.
 ## Rejected
 
 - **Amending `AGENTS.md` section 4 to permit the allowlist.** The other exit both
-  documents named, and the one actually on the table. Rejected because the threat
-  it addresses is not worth the machinery in the context this product is used in
-  — the operator's own workplace, their own Jira and Confluence. A control against
-  an adversary who has already been given legitimate access to that content is not
-  what this box is for.
+  documents named, and the one actually on the table. Rejected for the reasoning
+  under the decision: the threat is not worth the machinery in the context this
+  product is used in.
 
 - **Leaving the question open.** An unresolved conflict in the first source of
   truth stops work on both halves of egress control and, read a year later, is

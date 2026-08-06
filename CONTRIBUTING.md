@@ -65,9 +65,10 @@ go test -race ./...       # before reviewing concurrency or state changes
 go vet ./...
 ```
 
-Every new behaviour goes RED → GREEN → REFACTOR. A spike is the only exception,
-it lives in `spikes/`, and its code is either removed or explicitly approved for a
-test-first rewrite — it never graduates into `internal/` unchanged.
+Every new behaviour goes RED → GREEN → REFACTOR. A spike is the only exception:
+it lives in a `spikes/` directory it creates, and its code is either removed or
+explicitly approved for a test-first rewrite — it never graduates into
+`internal/` unchanged.
 
 ## End-to-end suites
 
@@ -106,8 +107,8 @@ The journey is cut at the hypervisor boundary by the Ginkgo labels `host` and
   backend, project attach/show/remove. Needs a usable hypervisor:
   Virtualization.framework on macOS, `/dev/kvm` on Linux.
 
-**Both stages gate every pull request, on Linux.** That is recent, and it is
-worth knowing why. GitHub-hosted macOS runners are themselves VMs without nested
+**Both stages gate every pull request, on Linux.** GitHub-hosted macOS runners
+are themselves VMs without nested
 virtualization — `kern.hv_support` is `0` — so `vz` starts no guest there and
 the `guest` stage had never run automatically at all. Hosted Linux runners
 expose `/dev/kvm`, so the whole journey now runs per pull request, and at a

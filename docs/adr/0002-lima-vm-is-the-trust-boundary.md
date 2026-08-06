@@ -10,11 +10,10 @@
 ## Context
 
 An agent with a full terminal on the operator's machine has too large a blast
-radius. Dev
-Containers do not by themselves separate the daemon and runtime from the host,
-and Dev Container metadata is an environment format, not a policy: it can carry
-build steps, lifecycle commands, arbitrary mounts, capabilities and privileged
-mode.
+radius. Dev Containers do not by themselves separate the daemon and runtime
+from the host, and Dev Container metadata is an environment format, not a
+policy: it can carry build steps, lifecycle commands, arbitrary mounts,
+capabilities and privileged mode.
 
 Torio therefore needs one place where the boundary is drawn, and that place has
 to be provable rather than declared. A VM created from whatever image happened to
@@ -45,7 +44,7 @@ pinned image and verified, never trusted.**
    both renders the template and verifies the created instance.
 
    This does not weaken the pins. They were never a claim about isolation
-   strength -- both drivers are hardware virtualization, and the threat model in
+   strength — both drivers are hardware virtualization, and the threat model in
    `SECURITY.md` does not admit an adversarial agent. They answer one question:
    *is this instance the one Torio would have created here?* That question is
    only meaningful against a single expected answer, and it stays exactly as
@@ -57,7 +56,7 @@ pinned image and verified, never trusted.**
 
    The supported matrix is `darwin/arm64` and `linux/amd64`. Intel Macs are out:
    `vz` requires Apple Silicon. arm64 Linux is out because nothing here has ever
-   booted it -- a row in that table reads as a guarantee, and an unproven row is
+   booted it — a row in that table reads as a guarantee, and an unproven row is
    a claim.
 
 5. **Verification proves every postcondition and fails closed.** The guest

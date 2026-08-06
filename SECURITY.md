@@ -53,8 +53,8 @@ In scope, and where a report is valuable:
 
 ## Known and accepted
 
-Reporting one of these tells us nothing new. They are listed because a project
-that hides its accepted trade-offs is not describing its boundary honestly.
+Reporting one of these tells us nothing new. They are listed because an accepted
+trade-off left unstated would misdescribe the boundary.
 
 - **Data exfiltration is unsolved.** The agent legitimately receives content
   through permitted read tools and has unrestricted egress.

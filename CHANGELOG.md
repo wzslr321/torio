@@ -22,6 +22,7 @@
   given two different local ports — the exact symptom troubleshooting explains
   as "you forwarded a different local port". The page now names `19119` as the
   host end and keeps `9119` as the guest bind.
+
 ### Changed
 
 - `README.md` is now the project's full front page rather than a pointer to the
@@ -42,16 +43,8 @@
   — including the retirement of its tag-form citation rule, which the purge of
   the evidence tree makes unresolvable. ADR-0005 gains a `Superseded in part by:`
   header pointer for that rule, and nothing below its header changes.
-- Nine comments cited a findings document under `docs/spike-results/` or
-  `docs/v1-evidence/` at an archive tag instead of stating what was found. Each
-  now carries the fact and its consequence inline — the SSH flag order and the
-  Lima and OpenSSH versions it was proven against, the NDJSON framing of
-  `limactl list --json`, the readiness endpoint and the two unreliable
-  lifecycle flags, the shared-group and no-Docker rules, and the pasted
-  placeholder that produced a live guessable session token — and points at the
-  test that pins it where one exists. The addresses would not have survived the
-  history rewrite, and a reader had to fetch a tag to learn why the code is
-  shaped the way it is.
+- Nine source comments cited removed delivery evidence by address; each now
+  carries its fact inline.
 - Removed the `spikes/` tree and every coupling to it: the `make validate` step
   that ran the dogfood driver's structural assertions, the `spikes/**`
   paths-ignore entry in the platform-e2e trigger, two dead `.gitignore` rules,
@@ -61,6 +54,9 @@
   `spikes/` and never graduates into `internal/` unchanged stays in `AGENTS.md`
   §7 and `CONTRIBUTING.md`: it governs a spike someone starts, not files that
   happen to exist.
+- Pre-publication cleanup audit: removed dead code, inlined or deleted stale
+  comments, and trimmed duplicated or self-narrating documentation. No decision
+  changed.
 
 ## 0.3.0 - 2026-08-06
 
@@ -146,10 +142,8 @@ Detailed notes: [`docs/releases/v0.3.0.md`](docs/releases/v0.3.0.md).
   the spike's "no live flow" claim held because the call site was missing, not
   because the code was. Their two exclusive helpers and the three `liveConfig`
   fields only they read went with them; every function left in the module is
-  reached by a test. `docs/releases/v0.2.0.md` now carries the correction for
-  the sentence that was untrue when it shipped, and the spike README says what
-  the harness proves and which of its pinned evidence conclusions that
-  supersedes.
+  reached by a test. The spike README says what the harness proves and which of
+  its pinned evidence conclusions that supersedes.
 - `.gitignore` now covers the binary `go build` drops inside
   `spikes/002-remote-mcp-oauth-compatibility/`, by exact path rather than by a
   pattern that would hide real files added to a spike.
@@ -166,51 +160,11 @@ Nothing under `Changed` or `Internal` alters the behaviour of the binary.
 
 ## 0.2.0 - 2026-08-05
 
-Detailed notes: [`docs/releases/v0.2.0.md`](docs/releases/v0.2.0.md).
-
-### Added
-
-- `torio mcp status` and `torio mcp install` report the grant they verified:
-  each service in the policy directory, its upstream endpoint, and its tool and
-  write-tool counts, as a `policy` object under `--json` and as a listing in
-  human output. Services are enumerated from the documents, so a second or third
-  provider needs no CLI change.
-
 ### Fixed
 
-- Guest commands now address the instance the operator selected. `TORIO_INSTANCE`
-  is resolved after package initialization, but the guest command prefix had
-  captured the default instance before that, so `limactl start` and `stop`
-  operated on the selected VM while every probe behind it went to the default
-  one — and the report printed the selected name over evidence from a machine it
-  never touched.
+- Guest commands now address the instance the operator selected: the guest
+  command prefix captured the default instance before `TORIO_INSTANCE` was
+  resolved, so `limactl start` and `stop` operated on the selected VM while
+  every probe behind them went to the default one.
 - Normalized release archive modes to `0755` for the CLI and `0644` for the
   license and release README, independent of source-file permissions.
-
-### Changed
-
-- Preserved `changed` and `restart_required` in `torio mcp install` failures
-  after partial guest provisioning, with actionable redacted remediation.
-- Documented the released MCP custody boundary in the README and generated
-  command reference.
-- Prepared the repository for open source: five English decision records in
-  place of nineteen, a stated threat model, and roughly 330 files of run
-  transcripts, spike results and internal plans out of the working tree. The
-  prior tree is readable at `git show archive/pre-oss:<path>`.
-
-### Internal
-
-- Two end-to-end levels behind build tags, in a module of their own: a
-  compiled-CLI suite against an in-process `limactl` fake that gates every pull
-  request, and a real macOS arm64 journey against real Lima that gates every
-  release.
-- A throwaway harness pinning remote MCP OAuth compatibility for the Atlassian
-  and Linear profiles against an in-process fake provider. It implements no live
-  flow and can reach no real provider.
-
-### Not delivered
-
-- The MCP broker daemon, relay, OAuth lifecycle, and upstream transport remain
-  outside the release surface under ADR-0004.
-- The Atlassian result remains `PARTIAL`: the public probe stops before browser
-  authorization, token issuance, content access, or write.

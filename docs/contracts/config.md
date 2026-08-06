@@ -2,18 +2,8 @@
 
 This document describes the typed host configuration. Implementation:
 `internal/config/`. The configuration is **non-secret** (`AGENTS.md` §6):
-secret-shaped material is rejected.
-
-> **There is no version-lock manifest.** `version-lock.json` was designed but
-> never wired up: no command read it, and its only consumer was never called. The
-> code and its description were removed —
-> [ADR-0001](../adr/0001-control-plane-and-trusted-host-inputs.md). The path trust
-> boundary below applies unchanged to `config.json`.
-
-> **There is no state directory.** `XDG_STATE_HOME`, `Paths.StateDir` and the
-> `--state-dir` flag existed only for the version-lock manifest and went with it —
-> [ADR-0001](../adr/0001-control-plane-and-trusted-host-inputs.md). Torio writes no
-> persistent host state other than `config.json`.
+secret-shaped material is rejected. `config.json` is the only persistent host
+state Torio writes ([ADR-0001](../adr/0001-control-plane-and-trusted-host-inputs.md)).
 
 ## Locations (XDG)
 

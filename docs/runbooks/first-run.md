@@ -3,7 +3,7 @@
 
 # Runbook — first run
 
-Brings a Mac from nothing to a working setup: a Linux VM, a Hermes backend on
+Brings a workstation from nothing to a working setup: a Linux VM, a Hermes backend on
 the VM's own loopback, a tunnel you control, a Second Brain, and your first
 attached repository.
 
@@ -32,14 +32,51 @@ Torio creates the VM itself, so there is nothing to provision by hand first.
 
 ## 1. Build the CLI
 
-From a checkout of the `torio` repository, build the binary and put it on your
-`PATH`. Every command in these docs is written as `torio`, so do this once and
-the rest of the page just works:
+Every command in these docs is written as `torio`, so put the binary on your
+`PATH` once and the rest of the page just works.
+
+Where a release exists, install its verified asset. From a checkout of the
+`torio` repository:
+
+```bash
+scripts/install.sh                       # latest stable release
+scripts/install.sh --version X.Y.Z       # or a specific one, without the leading v
+```
+
+The installer resolves the release, verifies `SHA256SUMS` before the binary is
+copied anywhere — which is the whole reason to use it rather than untarring by
+hand — and installs into `~/.local/bin` by default. It needs a published
+release to exist; before one does, build from source below.
+
+`install.sh` authenticates to nothing and never will. Torio stores and
+transports no credentials, and an installer carrying a forwarded token would be
+the one exception that makes the claim untrue. So a repository it cannot read
+anonymously answers `404` from `api.github.com`, and `gh` — which does hold your
+credentials — closes that gap without Torio touching them:
+
+```bash
+gh release download vX.Y.Z -D /tmp/torio-rel
+scripts/install.sh --version X.Y.Z --base-url file:///tmp/torio-rel
+```
+
+Either route verifies the same checksums. Set `TORIO_REPO=owner/name` if the
+assets live somewhere other than the default.
+
+### Building from source instead
+
+With a Go toolchain, build the binary and put it on your `PATH`:
 
 ```bash
 go build -o torio ./cmd/torio
 sudo install -m 755 torio /usr/local/bin/torio
 ```
+
+> Prefer not to install system-wide? Any directory already on your `PATH` works
+> — for example `install -m 755 torio ~/.local/bin/torio`. If you skip this
+> step entirely, `torio` will not resolve at all: a freshly built binary is not
+> on your `PATH` and your shell does not search the current directory, so you
+> would have to prefix every later command with `./` and run it from the
+> repository root.
 
 Confirm it resolves and runs:
 
@@ -59,36 +96,8 @@ A binary built straight from a checkout calls itself `dev`; the commit is the
 one you built.
 
 `torio vm status` also works from here and answers `torio: not_found` until the
-next step creates the VM. That is the expected answer on a Mac that has never
+next step creates the VM. That is the expected answer on a host that has never
 run Torio, not a failure — it exits `0`.
-
-> Prefer not to install system-wide? Any directory already on your `PATH` works
-> — for example `install -m 755 torio ~/.local/bin/torio`. If you skip this
-> step entirely, `torio` will not resolve at all: a freshly built binary is not
-> on your `PATH` and your shell does not search the current directory, so you
-> would have to prefix every later command with `./` and run it from the
-> repository root.
-
-### Installing a release build instead
-
-Where a release exists and you would rather install its verified asset than
-build, fetch the asset with a tool that already holds your credentials, then
-point the installer at what you fetched:
-
-```bash
-gh release download vX.Y.Z -D /tmp/torio-rel
-scripts/install.sh --version X.Y.Z --base-url file:///tmp/torio-rel
-```
-
-`install.sh` authenticates to nothing and never will. Torio stores and
-transports no credentials, and an installer carrying a forwarded token would be
-the one exception that makes the claim untrue. So a repository it cannot read
-anonymously answers `404` from `api.github.com`, and `gh` — which does hold your
-credentials — closes that gap without Torio touching them.
-
-Either route verifies `SHA256SUMS` before the binary is copied anywhere, which
-is the whole reason to use the installer rather than untarring by hand. Set
-`TORIO_REPO=owner/name` if the assets live somewhere other than the default.
 
 ## 2. Create and verify the VM
 
@@ -105,7 +114,7 @@ torio vm bootstrap --timeout 10m
 `init` prints `next: torio vm start` whether it created the instance or found a
 compatible one, so there is no state in which you skip the second command.
 
-`init` creates the Gate-0-pinned Lima instance (or succeeds idempotently when a
+`init` creates the pinned Lima instance (or succeeds idempotently when a
 compatible one already exists) and verifies the post-create list output before
 reporting success. `start` is idempotent and confirms a `Running` post-state.
 `bootstrap` operates only on the existing target after a verified `Running`
@@ -119,8 +128,7 @@ torio: timeout 15m0s exceeds policy maximum 10m0s
 
 On a fully-reconciled target
 it mutates nothing; when the pinned launcher is missing it installs Hermes Agent
-at the Gate-0 commit (verifiable postcondition: git HEAD pin + launcher path),
-then reconciles the PATH shim. It:
+at the pinned commit, then reconciles the PATH shim. It:
 
 - installs the pinned Hermes Agent when `/home/hermes/hermes-agent/venv/bin/hermes` is missing (never curl|bash pipe — download to a hermes-writable path, run with fixed flags, verify git HEAD);
 - ensures `/usr/local/bin/hermes` is a symlink to the pinned launcher (only after confirming the launcher exists);
@@ -162,7 +170,7 @@ torio serve status
 - `start` starts it and fails closed unless the systemd state is active **and** `GET /api/status` answers 200 through loopback.
 - `status` proves the same and exits non-zero when not ready. `stop` and `restart` mirror the lifecycle. `logs [--lines N]` shows bounded, redacted, unit-scoped journal entries only.
 
-## 4. Reach the backend from the Mac
+## 4. Reach the backend from the host
 
 The backend binds `127.0.0.1:9119` *inside* the VM, so you forward a host
 loopback port to it over SSH. Torio deliberately adds no tunnel feature — you
@@ -176,7 +184,7 @@ ssh -F ~/.lima/torio/ssh.config -L 19119:127.0.0.1:9119 -N -f \
     -o ExitOnForwardFailure=yes lima-torio
 ```
 
-Verify it from the Mac — you should get `200`:
+Verify it from the host — you should get `200`:
 
 ```bash
 curl -s -m 5 -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19119/api/status
@@ -333,7 +341,7 @@ It configures no remote and pushes nothing. The Brain stays on the VM.
 
 ### Bring an existing vault in
 
-If you already keep Markdown notes on your Mac — an Obsidian vault, say —
+If you already keep Markdown notes on your host — an Obsidian vault, say —
 import them once:
 
 ```bash
@@ -357,7 +365,7 @@ ever appears in it.
 ### Getting it back out
 
 Torio brings data in and does not take it out — there is no export command.
-Copying the Brain to your Mac is something you do explicitly:
+Copying the Brain to your host is something you do explicitly:
 
 ```bash
 limactl copy torio:/home/hermes/brain/ ~/torio-brain-copy/
@@ -399,7 +407,7 @@ That is exit `7`.
 
 The fix is to grant the guest read access yourself, on the guest, outside Torio
 — not to re-run the command. Do not work around it by copying a checkout from
-your Mac: a recursive copy drags host Git config, hooks, and keys across the VM
+your host: a recursive copy drags host Git config, hooks, and keys across the VM
 boundary, which is exactly the thing this path exists to prevent.
 
 Nothing on the guest is reset, cleaned, or deleted, so if `add` fails partway a
@@ -428,7 +436,7 @@ Each one fails closed: when Torio cannot prove the condition, it stops and says
 so rather than proceeding.
 
 - **The control plane is credential- and config-neutral.** It never copies or materializes host Git state in the VM — no host `.git/`, `.git/config`, hooks, SSH keys, tokens, `.env`, or host Git configuration — and never causes a credential prompt. It runs credential-neutral `git`; read access is yours to provision on the guest.
-- **A workspace is never seeded from your Mac.** A recursive copy would drag the host `.git/` — config, hooks, host-only keys — across the VM boundary. If read access cannot be provisioned, the correct outcome is to stop at that prerequisite, not to weaken the boundary.
+- **A workspace is never seeded from the host.** A recursive copy would drag the host `.git/` — config, hooks, host-only keys — across the VM boundary. If read access cannot be provisioned, the correct outcome is to stop at that prerequisite, not to weaken the boundary.
 - **Attaching is non-destructive.** `add` clones only into a path that is absent. A checkout already there with the registered origin is verified and adopted as-is. Anything else — not a repository, a different origin, unreadable — is a hard stop. Nothing is overwritten, reset, cleaned, deleted, or recloned over.
 - **No substitution.** If the exact remote is unreadable, Torio does not swap in another repository and does not attempt an auth workaround.
 - **Writes to history are yours.** The control plane runs no `git commit`, `push`, merge, deploy, or release. The persistent backend holds read access only; write capability exists solely inside a `torio project shell` session you opened, and leaves when you exit it.
@@ -443,7 +451,7 @@ In Hermes Desktop → Settings → **Gateway Connection → Remote gateway**, se
 
 | Field | Value |
 | --- | --- |
-| Remote URL | `http://127.0.0.1:19119` — the Mac end of the SSH forward to the guest backend on `127.0.0.1:9119` |
+| Remote URL | `http://127.0.0.1:19119` — the host end of the SSH forward to the guest backend on `127.0.0.1:9119` |
 | Session token | the value you pinned in the drop-in |
 
 After **Save and reconnect**, the status bar shows the remote endpoint plus
@@ -466,7 +474,7 @@ discovery stays inside the workspace root and sees every project you attached.
 
 Two dead ends worth skipping: the folder chip in the status bar opens a context
 menu, not a project switcher; and Desktop's **Terminal** tab is a shell on your
-**Mac**, not on the guest.
+**host**, not on the guest.
 
 ## 9. Configure a model provider
 
@@ -510,7 +518,7 @@ capability:
 torio project shell my-service
 ```
 
-This forwards your Mac's SSH agent into an interactive session in the checkout.
+This forwards your host's SSH agent into an interactive session in the checkout.
 The capability lives exactly as long as the session does and leaves with you
 when you exit. Inside it you are the `hermes` identity, in the project
 directory, with your agent available to Git:

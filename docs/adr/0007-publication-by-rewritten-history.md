@@ -40,9 +40,7 @@ path filter and no content filter will ever touch, because neither reads a commi
 message. In the archive, `331757ff` carries the employer repository URL twice
 plus a guest workspace path, and `9273d2d3` carries the author's host username.
 Both are ancestors of every release tag from `v0.1.0` to `v0.3.0`. This needed a
-separate pass over messages, and it is worth stating plainly, because assuming
-that a tree filter covers a message is the failure mode a reader would otherwise
-repeat.
+separate pass over messages. A tree filter does not read commit messages.
 
 **The author's machine.** The host username in 36 blobs across 32 paths,
 including `internal/lima/template_test.go` at older commits where it was a source
@@ -50,12 +48,8 @@ constant, and a file named `.sanitized` that still contained it. Alongside it, i
 run transcripts, a machine fingerprint: timezone, macOS build version, uid, and a
 per-account temporary-directory token.
 
-This record describes those strings rather than quoting them, for two reasons.
-The rewrite is a literal text replacement across every blob, so an ADR that named
-them would be silently mangled by the operation it documents. And if it were
-somehow exempted, publishing it would restore exactly what the pass removed.
-ADR-0005 §4 already writes "the author's host username" without naming it. The
-counts are the part a reader can check, and they are all here.
+The strings are named here by description, not by value, so the rewrite cannot
+mangle its own record; the counts are the part a reader can check.
 
 None of that is the load-bearing reason for a new repository. This is: GitHub
 creates a `refs/pull/N/head` reference for every pull request ever opened against
@@ -69,9 +63,9 @@ readable at a stable URL. A rewrite whose input is still fetchable has not
 removed anything.
 
 The count only illustrates the size of that surface, and it is a floor rather
-than a figure: at least 106 references as of 2026-08-06 — from those fifteen days
-— plus one for every pull request opened since, including the ones that carry
-this decision.
+than a figure: at least 106 references as of 2026-08-06, from those fifteen
+days. Every pull request opened since — including the ones that carry this
+decision — adds one.
 
 ## Decision
 
@@ -126,14 +120,9 @@ of them adds anything to purge:
 An accepted ADR is an immutable record, so the corrections live here rather than
 in it.
 
-1. **§6's counts do not reproduce.** ADR-0005 states that fifty-eight files
-   carried an AI-Provenance header and thirty still named the earlier harness.
-   Measured at the commit immediately before the consolidation (`d329468^` in the
-   archive), 57 files carried a header and 34 named the earlier harness. Counting
-   only the files that survived the consolidation, 29 and 24. No denominator
-   produces 58 or 30. Both measurements are given with their reference point so
-   that a reader can check either, rather than guessing which the author meant.
-   The decision in §6 — that the headers are removed — is unaffected.
+1. **§6's counts do not reproduce.** Measured at `d329468^` in the archive: 57
+   AI-Provenance headers and 34 harness references, not the stated 58 and 30
+   (29 and 24 among surviving files). The §6 decision is unaffected.
 
 2. **§4's tag-form citation rule is retired**, per the header of this record.
    The mechanism assumed the evidence stayed recoverable at `archive/pre-oss`,
@@ -167,10 +156,6 @@ in it.
   decisions. What survives publicly is what the ADRs and the changelog say, which
   is the reason both are written to stand on their own.
 
-- **`git log` on the published repository still names one person and every model
-  that co-wrote a commit.** Someone who wants to know how much of this was written
-  by a model can count it, which is the intended effect of keeping both.
-
 - **The purge has to be verified, not assumed.** The measurements in the context
   section are the checklist: a filter that leaves the organization name and misses
   the repository name would look successful against a grep for the employer.
@@ -186,8 +171,7 @@ in it.
 - **Rewrite in place and force-push.** The obvious move, and the one this record
   exists to reject. Every `refs/pull/N/head` reference survives the force-push and
   is served on the public repository, so the clean `main` sits next to a complete
-  copy of what it removed, at stable URLs. This is the load-bearing reason for a
-  new repository and not a secondary concern.
+  copy of what it removed, at stable URLs.
 
 - **Squash to a single initial commit.** Removes everything in one move, needs no
   filter, no measurement and no commit-message pass. It also removes the thing

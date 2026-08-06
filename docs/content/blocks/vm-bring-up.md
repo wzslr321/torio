@@ -13,7 +13,7 @@ torio vm bootstrap --timeout 10m
 `init` prints `next: torio vm start` whether it created the instance or found a
 compatible one, so there is no state in which you skip the second command.
 
-`init` creates the Gate-0-pinned Lima instance (or succeeds idempotently when a
+`init` creates the pinned Lima instance (or succeeds idempotently when a
 compatible one already exists) and verifies the post-create list output before
 reporting success. `start` is idempotent and confirms a `Running` post-state.
 `bootstrap` operates only on the existing target after a verified `Running`
@@ -27,8 +27,7 @@ torio: timeout 15m0s exceeds policy maximum 10m0s
 
 On a fully-reconciled target
 it mutates nothing; when the pinned launcher is missing it installs Hermes Agent
-at the Gate-0 commit (verifiable postcondition: git HEAD pin + launcher path),
-then reconciles the PATH shim. It:
+at the pinned commit, then reconciles the PATH shim. It:
 
 - installs the pinned Hermes Agent when `/home/hermes/hermes-agent/venv/bin/hermes` is missing (never curl|bash pipe — download to a hermes-writable path, run with fixed flags, verify git HEAD);
 - ensures `/usr/local/bin/hermes` is a symlink to the pinned launcher (only after confirming the launcher exists);

@@ -3,7 +3,7 @@ output: site/explanation.html
 nav: Explanation
 order: 5
 title: Explanation — why Torio is narrow · Torio
-description: Why Torio is intentionally narrow — the VM, loopback, and tunnel boundary, human-only credentials, projects as a list you keep, write capability that lives only in a session you opened, no editor integration, why a stored note is an observation rather than the current state, and earlier exploration kept only as history.
+description: Why Torio is intentionally narrow — the VM, loopback, and tunnel boundary, human-only credentials, projects as a list you keep, write capability that lives only in a session you opened, no editor integration, data that comes in and does not go out, and documentation generated from one source.
 kicker: Explanation
 scope_notice: "This page explains the reasoning behind the boundaries. It is background, not a procedure."
 ---
@@ -24,7 +24,7 @@ destroying the thing you were trying to keep.
 
 The persistent Hermes backend runs as a user systemd service bound to **guest
 loopback only** — it is not exposed on any public or LAN address. Reaching it
-from the Mac is therefore a deliberate act: you open an SSH port forward
+from the host is therefore a deliberate act: you open an SSH port forward
 yourself. Torio opens no tunnel and starts no chat. Keeping the backend
 loopback-bound and putting you in charge of the forward means network exposure
 is never an accident of running a command.
@@ -64,7 +64,7 @@ construction: it clones only into an absent path, verifies and adopts a checkout
 already there, and hard-stops on anything else without resetting, cleaning, or
 recloning.
 
-A workspace is also never seeded by copying a checkout from your Mac, because a
+A workspace is also never seeded by copying a checkout from your host, because a
 recursive copy would drag host Git configuration, hooks, and keys across the VM
 boundary. If read access cannot be provisioned, the correct outcome is to stop
 — not to weaken the boundary.
@@ -75,13 +75,9 @@ There is no automated commit, push, merge, or release, and the persistent
 backend cannot perform one: it holds read access only.
 
 When you want to write to a remote, `torio project shell` forwards your own SSH
-agent into an interactive session, and that capability ends when you exit. This
-is the whole reason the split exists — a credential that lives only inside a
-session you opened cannot be used by something running while you sleep.
-
-Torio preflights that session but never test-pushes to prove it works, because a
-test push is a write nobody asked for. Afterwards it makes no claim about what
-you pushed. It does not know, and it will not guess.
+agent into an interactive session, and that capability ends when you exit. A
+credential that lives only inside a session you opened cannot be used by
+something running while you sleep.
 
 ## No editor integration, and no host mount {#no-editor-integration}
 
@@ -105,46 +101,8 @@ staging. There is no matching export, and that asymmetry is intentional: an
 export command would be a supported, verified-looking path for Brain content to
 leave the boundary, and every guarantee it implied would have to hold.
 
-Copying the Brain back to your Mac is a `limactl copy` you run yourself. Torio
-does not verify it and does not call it a backup, which is exactly the honest
-description of what it is.
-
-## A note is an observation, not the current state {#brain-drift}
-
-Torio guarantees where your notes live, who owns them, and that a session can
-find them. It guarantees nothing about whether they are still true.
-
-A note records what was the case when it was written. It can stay accurate and
-still be the wrong thing to act on, because the situation around it moved and
-the note never said so: "we moved off the old provider" is true, and deleting
-the one service still running on it is not what you meant. A note tells you
-where to look, not what is true right now.
-
-The second failure is quieter, and it belongs to any vault a model writes into.
-Each time a model reads a note and re-saves or summarises it, it re-reads it
-through its own defaults, and the shift has a direction. An observation becomes
-a recommendation, a recommendation becomes a rule, and the qualifier that made
-the original honest — "probably", "on this machine, in July" — drops out. Every
-version reads as a clean note, so the file itself carries no sign of how far it
-has travelled from what was actually seen.
-
-Three habits contain that, and none of them are Torio features:
-
-- Write the source and the date into the note, and keep what a person said
-  apart from what a model concluded from it.
-- Before a step that changes something, check the live thing — the config, the
-  file, a test — rather than the note that describes it.
-- Commit as you work. Torio commits the vault at the operations it performs —
-  creating it, and a checkpoint before an import — and `torio brain status`
-  reports whether the worktree is clean, but your ongoing edits are yours to
-  record. Kept history is what lets `git log -p` show a claim hardening across
-  three rewrites; without it that is invisible.
-
-Torio does not read your notes, summarise them, prune them, or mark them stale.
-The privacy boundary that keeps note names and contents out of every command's
-output is the same boundary that keeps Torio from curating what is inside. The
-vault is yours, Hermes owns retrieval and the session, and deciding what in
-there is still true stays with you.
+Copying the Brain back to your host is a `limactl copy` you run yourself. Torio
+does not verify it and does not call it a backup.
 
 ## How this documentation avoids drifting {#single-source}
 
@@ -154,15 +112,3 @@ than one place — pinning the session token, say, which is both a step in Get
 started and a task in the how-to guides — is a single file included in each, not
 a copy. A validation gate re-renders everything and fails if any committed
 output has drifted from its source, so the two cannot disagree even briefly.
-
-## Earlier exploration is history, not a roadmap {#legacy}
-
-A much broader exploration came first: a staged roadmap, a control plane with a
-project registry and admission control, per-task worker isolation, fresh
-sandboxed verification, and an evidence and review pipeline. None of that is
-what Torio is.
-
-That material is not part of the product and must not be treated as an
-onboarding or next-task path. It no longer ships in the repository's working
-tree; it is kept under the annotated tag `archive/pre-v1` and read with
-`git show archive/pre-v1:<path>`.

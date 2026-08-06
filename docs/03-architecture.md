@@ -12,14 +12,16 @@ Hermes or deliberately do not exist.
 
 ## The trust boundary
 
-One Lima virtual machine, arm64, `vmType: vz`. Everything the agent does happens
+One Lima virtual machine — `vz`/aarch64 on a macOS arm64 host, `qemu`/x86_64 on
+a Linux amd64 host
+([ADR-0002](adr/0002-lima-vm-is-the-trust-boundary.md) §4). Everything the agent does happens
 on that machine's native filesystem. **The boundary is the edge of the VM** — not
 a process, and not the Hermes profile.
 
 Two consequences set up the rest of the architecture.
 
 **No broad host mount.** `mounts: []` in the guest template. Repositories and the
-Brain live on the VM's disk, not in a Mac home directory the guest can see. That
+Brain live on the VM's disk, not in a host home directory the guest can see. That
 is why bringing data in (`torio brain import`) is a one-shot, bounded `limactl
 copy` through private staging rather than a copy across a shared path. The Hermes
 profile is not a sandbox and no attempt is made to turn it into one; the isolation
@@ -34,10 +36,9 @@ exists to remove.
 
 ## Threat model
 
-**In scope: prompt injection and a confused agent.** A poisoned Jira ticket, a
-Confluence page or a README the agent was asked to read is ordinary input, and an
-instruction inside it reaches exactly the tools the agent legitimately holds.
-Everything below is aimed at that case.
+The full statement — scope, the accepted trade-offs, and the reporting path — is
+in [`SECURITY.md`](../SECURITY.md). Two pieces are load-bearing for this
+document and stay here.
 
 **Explicitly out of scope: an adversarial agent.** This is the load-bearing
 sentence of the whole document. The agent's job is to produce text a human reads,
@@ -46,33 +47,19 @@ credentials, sockets or firewall rules changes that. **"The box prevents
 exfiltration" is not a claim this project makes**, and any document that starts
 implying it is wrong and should be corrected.
 
-Also out of scope, and requiring a different class of tooling: a VM or kernel
-escape, a malicious or compromised Hermes runtime, someone with administrative
-access to the guest, and hostile multi-tenant use.
+**`sudo hermes` runs agent-writable code as root.** `/usr/local/bin/hermes` is a
+root-owned symlink to `/home/hermes/hermes-agent/venv/bin/hermes`, which the
+`hermes` uid owns and can rewrite. That path is first on sudo's `secure_path`,
+and the login user has passwordless sudo — provisioning itself relies on it
+(`sudo -n usermod …` in `internal/lima/templates/torio.yaml`). An operator who
+types `sudo hermes …` therefore executes whatever is at the target, as root.
+This is an accepted trade-off of reaching Hermes through one stable command
+path, not an oversight — but Hermes should be invoked as the `hermes` identity
+and never through `sudo`.
 
-### What follows from that scope
-
-- **Data exfiltration is unsolved.** The agent legitimately receives content
-  through permitted read tools and has unrestricted egress. Custody
-  ([ADR-0004](adr/0004-mcp-credential-custody-and-egress.md)) stops it acquiring a
-  durable capability; it does nothing about what the agent has already read.
-- **DNS is an accepted covert channel.** No DNS filter and no SNI proxy were
-  built. Filtering by name has to happen where the name is visible, and against
-  an adversarial agent — out of scope above — it fails anyway.
-- **`sudo hermes` runs agent-writable code as root.** `/usr/local/bin/hermes` is a
-  root-owned symlink to `/home/hermes/hermes-agent/venv/bin/hermes`, which the
-  `hermes` uid owns and can rewrite. That path is first on sudo's `secure_path`,
-  and the login user has passwordless sudo — provisioning itself relies on it
-  (`sudo -n usermod …` in `internal/lima/templates/torio.yaml`). An operator who
-  types `sudo hermes …` therefore executes whatever is at the target, as root.
-  This is an accepted trade-off of reaching Hermes through one stable command
-  path, not an oversight — but Hermes should be invoked as the `hermes` identity
-  and never through `sudo`.
-
-The controls that do exist are worth what they are worth: they keep the agent
-from acquiring a durable, transferable capability, and they make every granted
-capability legible and revocable. That is a smaller claim than "safe", and it is
-the correct one.
+The controls that exist do one thing: they keep the agent from acquiring a
+durable, transferable capability, and they make every granted capability legible
+and revocable. That is a smaller claim than "safe".
 
 ## Ownership split
 
@@ -99,9 +86,8 @@ Three directories under `/home/hermes`, separated on purpose:
   (`HermesBrainPath`), `hermes:hermes 0750`;
 - `/home/hermes/projects` — **workspaces**, `hermes:torio-projects 2770` (setgid).
 
-Separating the first two is a decision, not cosmetics: earlier code called the
-application state directory a "Knowledge Base", which mixed private notes with
-Hermes artefacts. `torio vm bootstrap` checks the ownership and mode of each path.
+Separating the first two is a decision, not cosmetics. `torio vm bootstrap`
+checks the ownership and mode of each path.
 
 The setgid bit on `projects` is what lets the operator and the `hermes` identity
 work on the same checkout: both accounts are in `torio-projects`, so files created
@@ -167,10 +153,10 @@ content into the context of projects that do not need it. Adding
 `/home/hermes/brain` as a folder of every project has the same effect and is
 forbidden.
 
-## The backend, and reaching it from the Mac
+## The backend, and reaching it from the host
 
 `hermes serve` runs as a **user systemd service** on the guest, bound to
-`127.0.0.1:9119` — the guest's loopback, not the VM interface. From the Mac the
+`127.0.0.1:9119` — the guest's loopback, not the VM interface. From the host the
 only route is an SSH tunnel the operator opens. Torio opens no tunnel and starts
 no chat session.
 
@@ -181,7 +167,6 @@ retry engine, per-task worker containers, a fresh verifier, automatic
 merge/push/release, a Vault-class secret manager, a domain egress allowlist,
 importing a host checkout, and any broad mount of a host directory.
 
-That list is not a roadmap. The first version of this repository designed most of
-it and delivered none of it; the material is under the `archive/pre-v1` tag and is
-not coming back
+That list is not a roadmap; the earlier exploration behind it is under the
+`archive/pre-v1` and `archive/pre-oss` tags
 ([ADR-0005](adr/0005-repository-and-documentation-governance.md)).

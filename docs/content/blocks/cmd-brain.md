@@ -26,7 +26,7 @@ Hermes caches a skill's prompt per backend process, so restart them.
 ### Getting the Brain back out {#brain-export}
 
 Torio brings data in and does not take it out. There is no `torio brain export`.
-Copying the Brain to your Mac is an explicit thing you do:
+Copying the Brain to your host is an explicit thing you do:
 
 ```bash
 limactl copy torio:/home/hermes/brain/ <host-destination>/

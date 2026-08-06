@@ -31,7 +31,7 @@ That is exit `7`.
 
 The fix is to grant the guest read access yourself, on the guest, outside Torio
 — not to re-run the command. Do not work around it by copying a checkout from
-your Mac: a recursive copy drags host Git config, hooks, and keys across the VM
+your host: a recursive copy drags host Git config, hooks, and keys across the VM
 boundary, which is exactly the thing this path exists to prevent.
 
 Nothing on the guest is reset, cleaned, or deleted, so if `add` fails partway a

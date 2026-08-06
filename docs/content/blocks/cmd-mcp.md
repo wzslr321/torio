@@ -1,4 +1,4 @@
-## Command surface: `torio mcp` {#mcp}
+## Command surface — `torio mcp` {#mcp}
 
 Prepares and verifies the guest boundary that a future MCP broker will use. The
 parent command takes no action itself; an absent or unknown subcommand is a

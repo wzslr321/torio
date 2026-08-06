@@ -28,7 +28,7 @@ It configures no remote and pushes nothing. The Brain stays on the VM.
 
 ### Bring an existing vault in {#brain-import}
 
-If you already keep Markdown notes on your Mac — an Obsidian vault, say —
+If you already keep Markdown notes on your host — an Obsidian vault, say —
 import them once:
 
 ```bash
@@ -52,7 +52,7 @@ ever appears in it.
 ### Getting it back out {#brain-out}
 
 Torio brings data in and does not take it out — there is no export command.
-Copying the Brain to your Mac is something you do explicitly:
+Copying the Brain to your host is something you do explicitly:
 
 ```bash
 limactl copy torio:/home/hermes/brain/ ~/torio-brain-copy/
