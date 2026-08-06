@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 - 2026-08-07
+
+The first release built from the public repository. 0.3.0's tag predates the
+publication cleanup and cannot be rebuilt from it, so it carries no downloadable
+assets; this release replaces it. The command surface is unchanged between the
+two.
 
 ### Added
 
@@ -41,8 +46,8 @@
   install`/`status` verification already used it. ADR-0004 gains a second
   `Superseded in part by:` pointer for the one sentence this replaces; the
   custody boundary and every other "not delivered" item stand unchanged.
-- 0.3.0 is published under a rewritten commit history. Historical and internal
-  records of that migration are not part of the public repository.
+- The public repository is published under a rewritten commit history.
+  Historical and internal records of that migration are not part of it.
 - Nine source comments cited removed delivery evidence by address; each now
   carries its fact inline.
 - Removed the `spikes/` tree and every coupling to it: the `make validate` step
