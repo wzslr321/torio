@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- `README.md` is now the project's full front page rather than a pointer to the
+  site. It carries the flow as a diagram, the shortest true path from nothing to
+  a working box, the complete 25-command leaf surface, the four global flags,
+  the exit-code table, and the supported host matrix — so a reader can decide
+  whether to install Torio without following a link.
+
 ## 0.3.0 - 2026-08-06
 
 Detailed notes: [`docs/releases/v0.3.0.md`](docs/releases/v0.3.0.md).
