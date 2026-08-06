@@ -1,6 +1,6 @@
 ## Edit a project with your own editor {#editor}
 
-Torio adds no editor integration and mounts no macOS directory into the VM. A
+Torio adds no editor integration and mounts no host directory into the VM. A
 project is an ordinary Git checkout at `/home/hermes/projects/<id>`, owned by
 the `hermes` guest identity, on a minimal Ubuntu image. Whatever tool you use is
 your own, reaching that checkout; it does not move the boundary — read access

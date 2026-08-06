@@ -4,7 +4,7 @@
 #
 # The Torio Lima template installs this file root-owned and 0755, and
 # `torio project shell` invokes it as the fixed remote argv of an ssh session
-# that forwards the operator's macOS agent:
+# that forwards the operator's host agent:
 #
 #   ssh … lima-torio /usr/local/bin/torio-project-shell /home/hermes/projects/<id>
 #

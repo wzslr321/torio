@@ -32,7 +32,7 @@ then reconciles the PATH shim. It:
 
 - installs the pinned Hermes Agent when `/home/hermes/hermes-agent/venv/bin/hermes` is missing (never curl|bash pipe — download to a hermes-writable path, run with fixed flags, verify git HEAD);
 - ensures `/usr/local/bin/hermes` is a symlink to the pinned launcher (only after confirming the launcher exists);
-- **verifies** (not merely trusts an exit code): the `hermes` user exists; group `torio-projects` exists; `hermes` and the Lima login operator are members; `hermes` is **not** in the `docker` group (rootful Docker for hermes is forbidden); `uname -m == aarch64`; `hermes --version` through the documented stable command path; `git --version`; the persistent profile, Second Brain, and workspace paths are directories with the expected owner, group, and mode on native Linux (ext4), not a host share; and no broad macOS host mount is present.
+- **verifies** (not merely trusts an exit code): the `hermes` user exists; group `torio-projects` exists; `hermes` and the Lima login operator are members; `hermes` is **not** in the `docker` group (rootful Docker for hermes is forbidden); `uname -m` matches the host profile's guest architecture; `hermes --version` through the documented stable command path; `git --version`; the persistent profile, Second Brain, and workspace paths are directories with the expected owner, group, and mode on native Linux (ext4), not a host share; and no broad host mount is present.
 
 Any drift or unverifiable state fails closed (exit 6) with remediation. A rerun
 is success only when every postcondition is proven. Use `--json` for the

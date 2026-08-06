@@ -29,9 +29,45 @@ const (
 	fakeTemplateEnv     = "TORIO_E2E_TEMPLATE_CAPTURE"
 	fakeForwardAgentEnv = "TORIO_E2E_FORWARD_AGENT"
 
-	promotedImageURL    = "https://cloud-images.ubuntu.com/releases/noble/release-20260705/ubuntu-24.04-server-cloudimg-arm64.img"
-	promotedImageDigest = "sha256:7df0201546f75b8bcc1044594c806c35749421ad3c9bc1be2a3ab806cfae39cc"
+	promotedImageRelease = "https://cloud-images.ubuntu.com/releases/noble/release-20260705/"
 )
+
+// The instance pins the fake `limactl` reports must be the ones the compiled
+// CLI expects, and the CLI derives them from the host it runs on
+// (internal/lima.profiles). This module cannot import that table — the e2e
+// suites are their own module, and `internal/` does not cross a module boundary
+// — so the values are restated here and selected the same way.
+//
+// A single hardcoded pair would make this suite pass on one host and fail on
+// the other with a message about image digests, which says nothing about what
+// is actually wrong.
+type hostPins struct {
+	vmType      string
+	arch        string
+	imageURL    string
+	imageDigest string
+}
+
+func pinsForHost() (hostPins, error) {
+	switch runtime.GOOS + "/" + runtime.GOARCH {
+	case "darwin/arm64":
+		return hostPins{
+			vmType:      "vz",
+			arch:        "aarch64",
+			imageURL:    promotedImageRelease + "ubuntu-24.04-server-cloudimg-arm64.img",
+			imageDigest: "sha256:7df0201546f75b8bcc1044594c806c35749421ad3c9bc1be2a3ab806cfae39cc",
+		}, nil
+	case "linux/amd64":
+		return hostPins{
+			vmType:      "qemu",
+			arch:        "x86_64",
+			imageURL:    promotedImageRelease + "ubuntu-24.04-server-cloudimg-amd64.img",
+			imageDigest: "sha256:ffe6203da54deeb6db5d2a98a83f9ec8e55f149d3f7ba622e1abe5fa966ee3d6",
+		}, nil
+	default:
+		return hostPins{}, fmt.Errorf("no Torio instance pins for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+}
 
 var torioBinary string
 
@@ -91,13 +127,17 @@ var _ = Describe("the compiled Torio CLI", func() {
 			"state": "not_found",
 		})
 
+		pins, err := pinsForHost()
+		if err != nil {
+			t.Fatalf("%v", err)
+		}
 		created := env.runJSON(t, "--json", "vm", "init")
 		assertData(t, created, "vm.init", map[string]any{
 			"name":           "torio-e2e",
 			"created":        true,
 			"unchanged":      false,
-			"image_location": promotedImageURL,
-			"image_digest":   promotedImageDigest,
+			"image_location": pins.imageURL,
+			"image_digest":   pins.imageDigest,
 			"next_step":      "torio vm start",
 		})
 
@@ -152,8 +192,10 @@ var _ = Describe("the compiled Torio CLI", func() {
 		for _, required := range []string{
 			"mounts: []",
 			"forwardAgent: false",
-			promotedImageURL,
-			promotedImageDigest,
+			"vmType: " + pins.vmType,
+			"arch: " + pins.arch,
+			pins.imageURL,
+			pins.imageDigest,
 		} {
 			if !bytes.Contains(template, []byte(required)) {
 				t.Errorf("captured template does not contain %q", required)
@@ -452,15 +494,20 @@ func fakeList() int {
 		return 1
 	}
 	forwardAgent := os.Getenv(fakeForwardAgentEnv) == "true"
+	pins, err := pinsForHost()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	record := map[string]any{
 		"name":   os.Getenv("TORIO_INSTANCE"),
 		"status": strings.TrimSpace(string(body)),
 		"config": map[string]any{
-			"vmType": "vz",
-			"arch":   "aarch64",
+			"vmType": pins.vmType,
+			"arch":   pins.arch,
 			"images": []map[string]string{{
-				"location": promotedImageURL,
-				"digest":   promotedImageDigest,
+				"location": pins.imageURL,
+				"digest":   pins.imageDigest,
 			}},
 			"mounts": []any{},
 			"ssh":    map[string]bool{"forwardAgent": forwardAgent},

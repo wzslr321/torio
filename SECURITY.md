@@ -84,7 +84,7 @@ These need a different class of tooling than a VM and a control plane:
 ## Configurations that are never acceptable
 
 - the Hermes backend reachable without authentication on a non-loopback address;
-- a broad mount of a macOS home directory into the guest;
+- a broad mount of a host home directory into the guest;
 - the `hermes` identity in the `docker` group, or reaching `docker.sock`;
 - host Git write credentials placed on the guest;
 - a persistent forwarded SSH agent, or `SSH_AUTH_SOCK` shared with the `hermes`

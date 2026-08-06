@@ -86,8 +86,8 @@ it is asked for.
 flag parsing, JSON envelopes, exit codes, idempotence and mutation order. It
 needs no host support and gates every pull request.
 
-**`make platform-e2e`** (tag `platform_e2e`) runs the real product on macOS
-arm64 through [`.github/workflows/platform-e2e.yml`](.github/workflows/platform-e2e.yml).
+**`make platform-e2e`** (tag `platform_e2e`) runs the real product on a real
+host through [`.github/workflows/platform-e2e.yml`](.github/workflows/platform-e2e.yml).
 It substitutes nothing: real `limactl`, a throwaway instance named after the run
 ID, and a blocking cleanup step that survives cancellation, retries the delete
 and verifies the VM is gone. On failure it keeps technical diagnostics for seven
@@ -99,19 +99,24 @@ The journey is cut at the hypervisor boundary by the Ginkgo labels `host` and
 `guest`:
 
 - **`host`** — release tarball, `scripts/install.sh`, real `limactl`, and
-  `torio vm init` including the image pin and idempotence. Runs on any macOS
-  arm64, so it gates every release and every pull request that could reach the
-  packaged binary. Prose, generated pages and spikes cannot, and are filtered
-  out: hosted macOS minutes bill at ten times the Linux rate.
+  `torio vm init` including the image pin and idempotence. Runs on any supported
+  host. Prose, generated pages and spikes cannot reach the packaged binary and
+  are filtered out.
 - **`guest`** — everything from `torio vm start` on: Hermes bootstrap, Brain,
-  backend, project attach/show/remove. Needs Virtualization.framework.
+  backend, project attach/show/remove. Needs a usable hypervisor:
+  Virtualization.framework on macOS, `/dev/kvm` on Linux.
 
-GitHub-hosted macOS arm64 runners are themselves VMs without nested
-virtualization, so `vz` starts no guest there: `kern.hv_support` is `0` and the
-`guest` stage aborts with that message rather than waiting for Lima's host agent
-to exit with an empty error list. Run the full journey by hand — a
-`workflow_dispatch` with `stage: full` and a `runner` pointing at real Apple
-Silicon, or locally:
+**Both stages gate every pull request, on Linux.** That is recent, and it is
+worth knowing why. GitHub-hosted macOS runners are themselves VMs without nested
+virtualization — `kern.hv_support` is `0` — so `vz` starts no guest there and
+the `guest` stage had never run automatically at all. Hosted Linux runners
+expose `/dev/kvm`, so the whole journey now runs per pull request, and at a
+tenth of the macOS billing rate.
+
+macOS still gates releases, at the `host` stage: it is the only way to prove the
+darwin/arm64 archive installs and runs on darwin. To run the full journey on
+Apple Silicon by hand, use a `workflow_dispatch` with `stage: full` and a
+`runner` pointing at a real Mac, or locally:
 
 ```bash
 export TORIO_INSTANCE=torio-ci-local
@@ -122,8 +127,8 @@ make platform-e2e                                     # the whole journey
 PLATFORM_E2E_LABEL_FILTER='!guest' make platform-e2e  # the host stage alone
 ```
 
-It refuses to run without a release-shaped binary, off Darwin/arm64, and when the
-instance already exists. If it creates one, it removes it with `limactl delete`
+It refuses to run without a release-shaped binary, on an unsupported host, and
+when the instance already exists. If it creates one, it removes it with `limactl delete`
 even on failure. Do not point it at a machine whose state you want to keep.
 
 The harness in `spikes/v1-e2e/` is a different thing again: it needs a real Apple

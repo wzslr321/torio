@@ -855,20 +855,38 @@ func (m *Manager) activate(ctx context.Context, op string, p Project) error {
 
 // hermesStatus reads the Hermes project state for id from `show` stdout.
 //
-// Exit 0 with empty stdout means the slug is free — the CLI writes only a
-// stderr diagnostic for an unknown project and still exits 0, because upstream
-// discards the handler's return value. A non-zero exit therefore never means
-// "no such project"; it means the CLI itself is broken or absent, and we fail
-// closed rather than guess. `list` is probed only to make that message precise:
-// its output carries slugs and names, never a path, so it can never be a source
-// of state.
+// The exit code of `show` is not evidence in either direction, and the two
+// directions failed at different times.
+//
+// Hermes 0.19.0 exited 0 for an unknown project, writing only a stderr
+// diagnostic, because upstream discarded the handler's return value. So a clean
+// exit never meant the project existed. Hermes 0.19.1 fixed that and now exits
+// non-zero — which broke the other half of the original reading, where a
+// non-zero exit was taken to mean the CLI itself was broken. On 0.19.1 the most
+// ordinary case in the product, adding the first project to a fresh VM, fails
+// closed on a guest that is working perfectly.
+//
+// So neither exit code answers "does this project exist?", and the answer has
+// to come from somewhere that is not an exit code:
+//
+//   - `show` printed a block — the project exists; parse it.
+//   - `show` printed nothing and `list` does not name the slug — the slug is
+//     free, whatever `show` exited with.
+//   - `show` printed nothing and `list` does name the slug — the project exists
+//     but could not be described. `show` is the only source of the primary
+//     path, so this is unverifiable state and fails closed.
+//   - `list` itself failed — the CLI is broken or absent. Fails closed.
+//
+// `list` is still never a source of *state*: its output carries slugs and
+// names, never a path. It is used here only to answer an existence question,
+// which is exactly what a list of slugs can answer.
 func (m *Manager) hermesStatus(ctx context.Context, op, id, workspace string) (HermesStatus, error) {
 	var st HermesStatus
 	show, err := m.run(ctx, op, userExec("hermes", "project", "show", id))
 	if err != nil {
 		return st, err
 	}
-	if show.ExitCode != 0 {
+	if strings.TrimSpace(string(show.Stdout)) == "" {
 		list, listErr := m.run(ctx, op, userExec("hermes", "project", "list"))
 		if listErr != nil {
 			return st, listErr
@@ -876,9 +894,9 @@ func (m *Manager) hermesStatus(ctx context.Context, op, id, workspace string) (H
 		if list.ExitCode != 0 {
 			return st, &Error{Op: op, Kind: KindRegistration, Err: errors.New("the Hermes project CLI is unavailable on the guest")}
 		}
-		return st, commandError(op, KindRegistration, "inspect the Hermes project", show.ExitCode)
-	}
-	if strings.TrimSpace(string(show.Stdout)) == "" {
+		if hermesProjectListed(string(list.Stdout), id) {
+			return st, commandError(op, KindRegistration, "inspect the Hermes project", show.ExitCode)
+		}
 		return st, nil
 	}
 	st, err = parseProjectShow(string(show.Stdout), id, workspace)
@@ -886,6 +904,27 @@ func (m *Manager) hermesStatus(ctx context.Context, op, id, workspace string) (H
 		return HermesStatus{}, &Error{Op: op, Kind: KindVerification, Err: err}
 	}
 	return st, nil
+}
+
+// hermesProjectListed reports whether `hermes project list` names slug.
+//
+// The listing prints one project per line with the slug first, and prints a
+// "No projects yet." sentence when there are none. Matching the first field
+// rather than searching the whole line is deliberate: a project *named* after
+// another project's slug must not answer for it, and a substring search would
+// let it.
+//
+// A slug cannot contain whitespace (it is the project-ID rule: lowercase
+// alphanumerics and hyphens), so the first whitespace-separated field is the
+// whole slug or nothing.
+func hermesProjectListed(out, slug string) bool {
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] == slug {
+			return true
+		}
+	}
+	return false
 }
 
 // parseProjectShow reads the block `hermes project show` prints: a

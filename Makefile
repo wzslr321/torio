@@ -42,12 +42,27 @@ platform-e2e:
 		-ginkgo.label-filter="$$PLATFORM_E2E_LABEL_FILTER" \
 		-ginkgo.junit-report="$(abspath $(PLATFORM_E2E_ARTIFACT_DIR))/ginkgo-junit.xml"
 
-# Build + package a darwin/arm64 release tarball into dist/.
+# Build + package a release tarball per supported host into dist/.
 # Usage: make package-release VERSION=1.0.0
+#
+# Both hosts land in one dist/ and share a single SHA256SUMS, which
+# package_release.py regenerates from the directory on every run. PLATFORMS is
+# overridable so the platform-e2e host stage can package only the host it is
+# about to install on, instead of cross-building one it will never run.
+PLATFORMS ?= darwin/arm64 linux/amd64
+
 package-release:
 	@test -n "$(VERSION)" || (echo "VERSION is required, e.g. make package-release VERSION=1.0.0" >&2; exit 2)
 	mkdir -p dist
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -trimpath \
-		-ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$$(git rev-parse HEAD) -X main.date=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-		-o dist/torio ./cmd/torio
-	python3 scripts/package_release.py --version "$(VERSION)" --binary dist/torio --license LICENSE --out dist
+	@set -eu; \
+	commit="$$(git rev-parse HEAD)"; \
+	date="$$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
+	for platform in $(PLATFORMS); do \
+		goos="$${platform%%/*}"; goarch="$${platform##*/}"; \
+		echo "building $$platform"; \
+		GOOS="$$goos" GOARCH="$$goarch" CGO_ENABLED=0 go build -trimpath \
+			-ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$$commit -X main.date=$$date" \
+			-o "dist/torio-$$goos-$$goarch" ./cmd/torio; \
+		python3 scripts/package_release.py --version "$(VERSION)" --platform "$$platform" \
+			--binary "dist/torio-$$goos-$$goarch" --license LICENSE --out dist; \
+	done

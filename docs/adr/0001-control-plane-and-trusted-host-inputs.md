@@ -11,7 +11,7 @@
 
 ## Context
 
-Torio runs on macOS arm64, drives `limactl`, Git and systemd inside a guest, and
+Torio runs on a supported host (ADR-0002), drives `limactl`, Git and systemd inside a guest, and
 must be runnable by a person who has installed one binary. It should not require
 a system Python, modify the Hermes environment, or import Hermes' private
 modules.

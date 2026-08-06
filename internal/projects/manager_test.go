@@ -432,9 +432,13 @@ func TestAddDetectsRegistrationFailureThatExitsZero(t *testing.T) {
 	}
 }
 
+// A broken CLI is one that cannot answer at all. `show` alone can no longer
+// prove that: Hermes 0.19.1 exits non-zero for an unknown project, which is the
+// most ordinary state there is. `list` failing is what remains.
 func TestAddFailsClosedWhenTheHermesProjectCLIIsBroken(t *testing.T) {
 	g := readyFake()
 	g.hermesShowExit = 2
+	g.hermesListExit = 2
 	r := emptyRegistry()
 
 	_, err := newTestManager(g, r).Add(context.Background(), addRequest())
@@ -444,6 +448,91 @@ func TestAddFailsClosedWhenTheHermesProjectCLIIsBroken(t *testing.T) {
 	}
 	if len(r.saved) != 0 {
 		t.Fatalf("config was written while the Hermes state was unknown: %#v", r.saved)
+	}
+}
+
+// The two commands disagreeing is the case that must stay closed: `list` names
+// the slug, so the project exists, but `show` will not describe it — and `show`
+// is the only source of the primary path. Creating here would ask Hermes for a
+// slug it already holds, which it answers by silently inventing another one.
+func TestAddFailsClosedWhenListNamesASlugShowWillNotDescribe(t *testing.T) {
+	g := readyFake()
+	g.hermesPresent = true // so `list` names the slug
+	g.hermesShowExit = 2   // but `show` cannot describe it
+	r := emptyRegistry()
+
+	_, err := newTestManager(g, r).Add(context.Background(), addRequest())
+	assertKind(t, err, KindRegistration)
+	if g.saw("hermes project create") {
+		t.Fatalf("a project was created over a slug Hermes already lists: %v", g.calls)
+	}
+	if len(r.saved) != 0 {
+		t.Fatalf("config was written while the Hermes state was unknown: %#v", r.saved)
+	}
+}
+
+// Hermes 0.19.1 exits non-zero for an unknown project where 0.19.0 exited 0.
+// Reading that as a broken CLI made the most ordinary path in the product —
+// adding the first project to a fresh VM — fail closed on a guest that was
+// working perfectly. `list` is what answers the existence question now.
+func TestAddRegistersWhenShowExitsNonZeroForAnUnknownProject(t *testing.T) {
+	g := readyFake()
+	g.hermesUnknownShowExit = 1
+	r := emptyRegistry()
+
+	report, err := newTestManager(g, r).Add(context.Background(), addRequest())
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if !report.HermesCreated {
+		t.Fatalf("report = %#v, want the Hermes project recorded as created", report)
+	}
+	if !g.saw("hermes project create") {
+		t.Fatalf("the project was never registered: %v", g.calls)
+	}
+	if len(r.saved) != 1 {
+		t.Fatalf("config entries = %d, want 1", len(r.saved))
+	}
+}
+
+// The fake defaults to the version the product pins (0.19.1). A guest may still
+// be running 0.19.0, whose `show` exits 0 for an unknown project, so both
+// spellings of "no such project" stay covered rather than one replacing the
+// other.
+func TestAddRegistersWhenShowExitsZeroForAnUnknownProject(t *testing.T) {
+	g := readyFake()
+	g.hermesUnknownShowExit = 0
+	r := emptyRegistry()
+
+	report, err := newTestManager(g, r).Add(context.Background(), addRequest())
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if !report.HermesCreated {
+		t.Fatalf("report = %#v, want the Hermes project recorded as created", report)
+	}
+	if len(r.saved) != 1 {
+		t.Fatalf("config entries = %d, want 1", len(r.saved))
+	}
+}
+
+func TestHermesProjectListedMatchesTheSlugColumnOnly(t *testing.T) {
+	const listing = "  demo                     Demo  [1 folder(s)]\n" +
+		"  other                    demo  [2 folder(s)]\n"
+
+	if !hermesProjectListed(listing, "demo") {
+		t.Error("the listed slug was not found")
+	}
+	if hermesProjectListed(listing, "absent") {
+		t.Error("an absent slug was reported as listed")
+	}
+	// "demo" is the *name* of the second project. A substring search would let
+	// one project answer an existence question about another.
+	if hermesProjectListed("  other                    demo  [2 folder(s)]\n", "demo") {
+		t.Error("a project name answered for a different project's slug")
+	}
+	if hermesProjectListed("No projects yet. Create one with `hermes project create <name>`.\n", "demo") {
+		t.Error("the empty-listing sentence was read as a project")
 	}
 }
 

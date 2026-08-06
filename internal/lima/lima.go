@@ -10,6 +10,8 @@ package lima
 
 import (
 	"context"
+	"fmt"
+	"runtime"
 
 	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
@@ -40,15 +42,47 @@ type Adapter struct {
 	Runner execx.Runner
 	// Bin overrides the limactl executable name/path. Empty uses "limactl".
 	Bin string
-	// MCPGuestBinaryDir is the directory containing the two Linux arm64 MCP
-	// payloads shipped beside the host CLI. Empty resolves beside the running
+	// MCPGuestBinaryDir is the directory containing the two MCP guest payloads
+	// shipped beside the host CLI. Empty resolves beside the running
 	// executable. Tests set it to a private fixture directory.
 	MCPGuestBinaryDir string
+	// Profile carries the host-derived instance pins. New resolves it from the
+	// running platform; tests set it explicitly so a pin assertion states which
+	// host it is about rather than inheriting whichever machine ran it.
+	//
+	// It is a field and not a package-level variable on purpose. InstanceName is
+	// one because internal/cli fixes it during startup, and that is already the
+	// riskier shape: a package-level value captured at initialization time is
+	// exactly how guest commands once ended up addressing the default VM while
+	// lifecycle commands addressed the selected one.
+	Profile Profile
 }
 
-// New returns an Adapter backed by runner.
+// New returns an Adapter backed by runner, pinned to the host's profile.
+//
+// An unsupported host leaves the zero Profile rather than failing here, because
+// a constructor that cannot report an error would have to panic. Every
+// operation that depends on a pin calls profile() and fails closed with a
+// message naming the host; internal/cli additionally rejects an unsupported
+// host during startup, so the deep failure is a backstop and not the path an
+// operator meets.
 func New(runner execx.Runner) *Adapter {
-	return &Adapter{Runner: runner, Bin: bin}
+	a := &Adapter{Runner: runner, Bin: bin}
+	if p, err := HostProfile(); err == nil {
+		a.Profile = p
+	}
+	return a
+}
+
+// profile returns the adapter's pins, or an error if it has none. Callers must
+// not fall back to a default: comparing an instance against empty pins would
+// accept every instance, which is the opposite of what the pins are for.
+func (a *Adapter) profile() (Profile, error) {
+	if !a.Profile.valid() {
+		return Profile{}, fmt.Errorf("no instance pins for host %s/%s; Torio supports %s",
+			runtime.GOOS, runtime.GOARCH, SupportedHosts())
+	}
+	return a.Profile, nil
 }
 
 func (a *Adapter) bin() string {

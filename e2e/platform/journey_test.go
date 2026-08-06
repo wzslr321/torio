@@ -24,11 +24,13 @@ const (
 
 // The journey splits at the hypervisor boundary. Everything up to and including
 // `torio vm init` is host work — real release tarball, real install, real
-// limactl, real image pin — and runs anywhere macOS/arm64 runs. Everything from
-// `torio vm start` on needs Lima's vz driver to actually boot a guest, which
-// requires a hypervisor the host is allowed to use. GitHub-hosted macOS arm64
-// runners are themselves VMs without nested virtualization, so they can serve
-// the host stage only.
+// limactl, real image pin — and runs on any supported host. Everything from
+// `torio vm start` on needs a hypervisor the host is allowed to use: Apple's
+// Virtualization framework on macOS, KVM on Linux.
+//
+// GitHub-hosted macOS runners are themselves VMs without nested virtualization,
+// so they serve the host stage only. Hosted Linux runners expose /dev/kvm, so
+// they serve both — which is why the guest stage is gateable at all.
 const (
 	hostStage  = "host"
 	guestStage = "guest"
@@ -50,8 +52,13 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 
 	BeforeAll(func(_ SpecContext) {
 		Expect(os.Getenv("PLATFORM_E2E_RUN")).To(Equal("1"), "run through make platform-e2e")
-		Expect(runtime.GOOS).To(Equal("darwin"), "real platform E2E requires macOS")
-		Expect(runtime.GOARCH).To(Equal("arm64"), "real platform E2E requires Apple Silicon")
+		// The supported host matrix, restated: this module cannot import
+		// internal/lima.profiles across the module boundary. Running the journey
+		// on an unsupported host would exercise a CLI that refuses every command,
+		// and report it as a product failure.
+		Expect(supportedHost()).To(BeTrue(),
+			"real platform E2E requires a supported host (darwin/arm64 or linux/amd64), got %s/%s",
+			runtime.GOOS, runtime.GOARCH)
 		_, err := exec.LookPath("limactl")
 		Expect(err).NotTo(HaveOccurred(), "real limactl is required")
 
@@ -108,10 +115,13 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 
 	It("installs the expected artifact and provisions a real VM instance", Label(hostStage), func(ctx SpecContext) {
 		torio.setContext(ctx)
+		// The installed binary must report the machine it is running on. Pinning
+		// this to one host would have the assertion pass only where the archive
+		// happened to be built, which is the opposite of what it is for.
 		version := torio.mustRun("torio-version", "version", "version")
 		expectData(version, map[string]any{
-			"os":      "darwin",
-			"arch":    "arm64",
+			"os":      runtime.GOOS,
+			"arch":    runtime.GOARCH,
 			"version": os.Getenv("PLATFORM_E2E_EXPECTED_VERSION"),
 		})
 
@@ -274,7 +284,28 @@ func limaInstanceExists(instanceName string) (bool, error) {
 // requireHypervisor fails the guest stage before Lima is asked to boot anything.
 // Without it the failure surfaces as `limactl start` exiting after the host
 // agent quits with an empty error list, which says nothing about the cause.
+func supportedHost() bool {
+	switch runtime.GOOS + "/" + runtime.GOARCH {
+	case "darwin/arm64", "linux/amd64":
+		return true
+	default:
+		return false
+	}
+}
+
 func requireHypervisor() {
+	GinkgoHelper()
+	switch runtime.GOOS {
+	case "darwin":
+		requireAppleVirtualization()
+	case "linux":
+		requireKVM()
+	default:
+		Fail(fmt.Sprintf("no hypervisor check for %s; the guest stage supports darwin and linux", runtime.GOOS))
+	}
+}
+
+func requireAppleVirtualization() {
 	GinkgoHelper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -294,9 +325,29 @@ func requireHypervisor() {
 			"Apple Silicon.", observed)
 }
 
+// requireKVM checks what actually stops the qemu driver: a /dev/kvm this
+// process may open. Presence alone is not enough — hosted runners deliver the
+// node unwritable, and without the accompanying udev rule qemu silently falls
+// back to TCG emulation, which does not fail so much as never finish.
+func requireKVM() {
+	GinkgoHelper()
+	info, err := os.Stat("/dev/kvm")
+	Expect(err).ToNot(HaveOccurred(),
+		"/dev/kvm is absent: this host cannot use KVM, so Lima's qemu driver would "+
+			"fall back to emulation. Run the guest stage on a Linux host with nested "+
+			"virtualization enabled.")
+	Expect(info.Mode()&os.ModeDevice).ToNot(BeZero(), "/dev/kvm is not a device node")
+
+	node, err := os.OpenFile("/dev/kvm", os.O_RDWR, 0)
+	Expect(err).ToNot(HaveOccurred(),
+		"/dev/kvm is present but not writable by this user. Hosted runners deliver it "+
+			"that way; the workflow's Enable KVM step installs the udev rule that fixes it.")
+	Expect(node.Close()).To(Succeed())
+}
+
 func captureTechnicalVersions(artifactDir string) {
 	GinkgoHelper()
-	commands := []struct {
+	type versionCommand struct {
 		label string
 		name  string
 		args  []string
@@ -304,11 +355,26 @@ func captureTechnicalVersions(artifactDir string) {
 		// so sysctl exits non-zero. That output is the diagnostic — recording it
 		// is the point, and failing on it would throw the evidence away.
 		recordFailure bool
-	}{
+	}
+	commands := []versionCommand{
 		{label: "limactl-version.txt", name: "limactl", args: []string{"--version"}},
-		{label: "macos-version.txt", name: "sw_vers"},
 		{label: "go-version.txt", name: "go", args: []string{"version"}},
-		{label: "hv-support.txt", name: "sysctl", args: []string{"kern.hv_support"}, recordFailure: true},
+	}
+	// The hypervisor evidence is whatever the host can be asked about. Running
+	// the macOS probes on Linux would fail the capture on a healthy machine and
+	// throw away the diagnostics the failure was collected for.
+	switch runtime.GOOS {
+	case "darwin":
+		commands = append(commands,
+			versionCommand{label: "macos-version.txt", name: "sw_vers"},
+			versionCommand{label: "hv-support.txt", name: "sysctl", args: []string{"kern.hv_support"}, recordFailure: true},
+		)
+	case "linux":
+		commands = append(commands,
+			versionCommand{label: "kernel-version.txt", name: "uname", args: []string{"-a"}},
+			versionCommand{label: "kvm-node.txt", name: "ls", args: []string{"-l", "/dev/kvm"}, recordFailure: true},
+			versionCommand{label: "qemu-version.txt", name: "qemu-system-x86_64", args: []string{"--version"}, recordFailure: true},
+		)
 	}
 	for _, command := range commands {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

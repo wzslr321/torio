@@ -18,7 +18,7 @@ a process, and not the Hermes profile.
 
 Two consequences set up the rest of the architecture.
 
-**No broad macOS mount.** `mounts: []` in the guest template. Repositories and the
+**No broad host mount.** `mounts: []` in the guest template. Repositories and the
 Brain live on the VM's disk, not in a Mac home directory the guest can see. That
 is why bringing data in (`torio brain import`) is a one-shot, bounded `limactl
 copy` through private staging rather than a copy across a shared path. The Hermes
@@ -179,7 +179,7 @@ no chat session.
 Deliberately absent: an agent loop, a second Kanban, a dispatcher, a queue, a
 retry engine, per-task worker containers, a fresh verifier, automatic
 merge/push/release, a Vault-class secret manager, a domain egress allowlist,
-importing a host checkout, and any broad mount of a macOS directory.
+importing a host checkout, and any broad mount of a host directory.
 
 That list is not a roadmap. The first version of this repository designed most of
 it and delivered none of it; the material is under the `archive/pre-v1` tag and is

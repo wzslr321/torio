@@ -45,23 +45,30 @@ class InstallerTests(unittest.TestCase):
         license_path.write_text("MIT test\n", encoding="utf-8")
         readme = self.root / "README.md"
         readme.write_text("# test\n", encoding="utf-8")
-        proc = run(
-            [
-                sys.executable,
-                str(PACKAGE),
-                "--version",
-                "9.9.9",
-                "--binary",
-                str(binary),
-                "--license",
-                str(license_path),
-                "--readme",
-                str(readme),
-                "--out",
-                str(self.assets),
-            ]
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        # Every supported host is packaged into one asset directory, sharing a
+        # single SHA256SUMS -- the shape a real release has. An installer test
+        # that only ever saw its own platform's archive could not tell "picked
+        # the right asset" from "picked the only asset".
+        for platform in ("darwin/arm64", "linux/amd64"):
+            proc = run(
+                [
+                    sys.executable,
+                    str(PACKAGE),
+                    "--version",
+                    "9.9.9",
+                    "--platform",
+                    platform,
+                    "--binary",
+                    str(binary),
+                    "--license",
+                    str(license_path),
+                    "--readme",
+                    str(readme),
+                    "--out",
+                    str(self.assets),
+                ]
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -136,14 +143,43 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(self._install().returncode, 0)
         self.assertEqual((self.prefix / "torio").read_bytes(), first)
 
-    def test_rejects_non_darwin_platform(self):
-        """Real reject path: keep Darwin-only gate, stubbed as Linux for CI."""
+    def test_installs_on_linux_x86_64(self):
+        """The Linux host installs the Linux asset, from the same directory."""
         self._write_uname_stub("Linux", "x86_64")
         proc = self._install()
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("unsupported platform", proc.stderr)
-        self.assertIn("Linux/x86_64", proc.stderr)
-        self.assertFalse((self.prefix / "torio").exists())
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue((self.prefix / "torio").is_file())
+        self.assertIn("torio_9.9.9_linux_amd64.tar.gz", proc.stderr)
+        self.assertNotIn("darwin_arm64", proc.stderr)
+
+    def test_each_host_selects_its_own_asset(self):
+        """The asset name follows the machine, not the order of the directory."""
+        for sysname, machine, want in (
+            ("Darwin", "arm64", "torio_1.2.3_darwin_arm64.tar.gz"),
+            ("Linux", "x86_64", "torio_1.2.3_linux_amd64.tar.gz"),
+        ):
+            with self.subTest(host=f"{sysname}/{machine}"):
+                self._write_uname_stub(sysname, machine)
+                proc = self._source_lib("require_platform; asset_urls 1.2.3")
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertIn(want, proc.stdout)
+
+    def test_rejects_unsupported_platform(self):
+        """Hosts outside the matrix fail before anything is downloaded.
+
+        Both of these are plausible mistakes rather than absurd ones: an Intel
+        Mac cannot run Lima's vz driver, and arm64 Linux is a configuration
+        nothing here has ever booted. The installer must not place a binary that
+        would refuse every command it is given.
+        """
+        for sysname, machine in (("Darwin", "x86_64"), ("Linux", "aarch64")):
+            with self.subTest(host=f"{sysname}/{machine}"):
+                self._write_uname_stub(sysname, machine)
+                proc = self._install()
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertIn("unsupported platform", proc.stderr)
+                self.assertIn(f"{sysname}/{machine}", proc.stderr)
+                self.assertFalse((self.prefix / "torio").exists())
 
     def test_help(self):
         proc = run(["bash", str(INSTALL_SH), "--help"])
@@ -160,7 +196,7 @@ class InstallerTests(unittest.TestCase):
         return run(["bash", "-c", f"source {INSTALL_SH}\n{script}"], env=env)
 
     def test_repository_defaults_to_the_upstream_slug(self):
-        proc = self._source_lib('asset_urls 1.2.3')
+        proc = self._source_lib('require_platform; asset_urls 1.2.3')
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("wzslr321/torio/releases/download/v1.2.3", proc.stdout)
 
@@ -169,7 +205,7 @@ class InstallerTests(unittest.TestCase):
         # an organization. Without an override the installer resolves assets
         # from a repository that no longer holds them.
         proc = self._source_lib(
-            "asset_urls 1.2.3", {"TORIO_REPO": "an-org/torio"}
+            "require_platform; asset_urls 1.2.3", {"TORIO_REPO": "an-org/torio"}
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("an-org/torio/releases/download/v1.2.3", proc.stdout)

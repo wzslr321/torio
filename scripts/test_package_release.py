@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import sys
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import package_release as pr  # noqa: E402
@@ -17,16 +19,16 @@ import package_release as pr  # noqa: E402
 
 class AssetNameTests(unittest.TestCase):
     def test_semver_name(self):
-        self.assertEqual(pr.asset_name("1.0.0"), "torio_1.0.0_darwin_arm64.tar.gz")
+        self.assertEqual(pr.asset_name("1.0.0", "darwin/arm64"), "torio_1.0.0_darwin_arm64.tar.gz")
 
     def test_prerelease_allowed(self):
         self.assertEqual(
-            pr.asset_name("1.0.0-rc.1"), "torio_1.0.0-rc.1_darwin_arm64.tar.gz"
+            pr.asset_name("1.0.0-rc.1", "linux/amd64"), "torio_1.0.0-rc.1_linux_amd64.tar.gz"
         )
 
     def test_rejects_garbage(self):
         with self.assertRaises(pr.PackageError):
-            pr.asset_name("../evil")
+            pr.asset_name("../evil", "darwin/arm64")
 
 
 class PackageArchiveTests(unittest.TestCase):
@@ -47,6 +49,7 @@ class PackageArchiveTests(unittest.TestCase):
 
             archive, sums = pr.build_archive(
                 version="0.0.0",
+                platform="darwin/arm64",
                 binary=binary,
                 license_path=license_path,
                 readme_path=readme,
@@ -80,6 +83,7 @@ class PackageArchiveTests(unittest.TestCase):
             out = root / "dist"
             pr.build_archive(
                 version="0.0.1",
+                platform="darwin/arm64",
                 binary=binary,
                 license_path=license_path,
                 readme_path=readme,
@@ -88,6 +92,7 @@ class PackageArchiveTests(unittest.TestCase):
             with self.assertRaises(pr.PackageError):
                 pr.build_archive(
                     version="0.0.1",
+                    platform="darwin/arm64",
                     binary=binary,
                     license_path=license_path,
                     readme_path=readme,
@@ -108,6 +113,7 @@ class PackageArchiveTests(unittest.TestCase):
 
             archive, _ = pr.build_archive(
                 version="0.0.3",
+                platform="darwin/arm64",
                 binary=binary,
                 license_path=license_path,
                 readme_path=readme,
@@ -133,17 +139,86 @@ class PackageArchiveTests(unittest.TestCase):
             with self.assertRaises(pr.PackageError):
                 pr.build_archive(
                     version="0.0.2",
+                    platform="darwin/arm64",
                     binary=binary,
                     license_path=bad,
                     readme_path=readme,
                     out_dir=root / "dist",
                 )
 
-    def test_deterministic_manifest_line(self):
-        text = pr.default_release_readme("1.2.3")
-        self.assertIn("1.2.3", text)
-        self.assertIn("Apple Silicon", text)
-        self.assertNotIn("TOKEN", text)
+    def test_release_readme_names_the_host_it_is_for(self):
+        for platform, expected in (
+            ("darwin/arm64", "Apple Silicon"),
+            ("linux/amd64", "x86_64"),
+        ):
+            with self.subTest(platform=platform):
+                text = pr.default_release_readme("1.2.3", platform)
+                self.assertIn("1.2.3", text)
+                self.assertIn(platform, text)
+                self.assertIn(expected, text)
+                self.assertNotIn("TOKEN", text)
+
+    def test_sums_cover_every_archive_in_the_directory(self):
+        """One SHA256SUMS, every asset, regardless of packaging order.
+
+        `install.sh` looks its own asset up by filename, so a manifest holding
+        only the last-packaged archive would leave the other host unable to
+        verify anything.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            binary = root / "torio"
+            self._touch_binary(binary)
+            license_path = root / "LICENSE"
+            readme = root / "README.md"
+            license_path.write_text("L\n", encoding="utf-8")
+            readme.write_text("R\n", encoding="utf-8")
+            out = root / "dist"
+
+            names = []
+            for platform in pr.SUPPORTED_PLATFORMS:
+                archive, sums = pr.build_archive(
+                    version="0.0.4",
+                    platform=platform,
+                    binary=binary,
+                    license_path=license_path,
+                    readme_path=readme,
+                    out_dir=out,
+                )
+                names.append(archive.name)
+
+            lines = sums.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), len(pr.SUPPORTED_PLATFORMS))
+            listed = [line.split("  ", 1)[1] for line in lines]
+            self.assertEqual(listed, sorted(names))
+            for line, name in zip(lines, sorted(names)):
+                digest = hashlib.sha256((out / name).read_bytes()).hexdigest()
+                self.assertEqual(line, f"{digest}  {name}")
+
+    def test_rejects_unsupported_platform(self):
+        with self.assertRaises(pr.PackageError):
+            pr.asset_name("1.0.0", "linux/arm64")
+        with self.assertRaises(pr.PackageError):
+            pr.asset_name("1.0.0", "windows/amd64")
+
+
+class SupportedPlatformsMatchTheProductTests(unittest.TestCase):
+    """The packager and the CLI must agree on what a supported host is.
+
+    They cannot share a definition across languages, so this reads the Go table
+    instead. Without it, adding a host to one side produces either an archive
+    that installs and then refuses every command, or a supported platform that
+    has no archive to install -- both of which look fine until someone tries.
+    """
+
+    def test_python_list_equals_the_go_profile_table(self):
+        source = (ROOT / "internal" / "lima" / "profile.go").read_text(encoding="utf-8")
+        go_hosts = set(re.findall(r'"((?:darwin|linux|windows)/[a-z0-9]+)":\s*\{', source))
+        self.assertTrue(go_hosts, "found no host keys in internal/lima/profile.go")
+        self.assertEqual(go_hosts, set(pr.SUPPORTED_PLATFORMS))
+
+    def test_every_supported_platform_has_a_release_label(self):
+        self.assertEqual(set(pr.PLATFORM_LABELS), set(pr.SUPPORTED_PLATFORMS))
 
 
 if __name__ == "__main__":

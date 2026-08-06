@@ -4,7 +4,7 @@ Documentation source: [`site/`](site/). The public deployment and domain are
 not configured yet.
 
 > Torio is a thin, trusted control plane for running an AI second brain and your
-> coding projects on a Linux VM on Apple Silicon Macs.
+> coding projects on a Linux VM, on macOS or Linux.
 
 Torio is not the AI, not the VM, and not the chat window. It is the layer that
 brings those three into a known-good state and then gets out of the way.
@@ -13,7 +13,7 @@ brings those three into a known-good state and then gets out of the way.
 
 - **Creates and reconciles the VM.** A Lima instance built from a pinned
   template, verified rather than trusted: architecture, image digest, ownership,
-  modes, group membership, and the absence of any macOS host mount. Drift fails
+  modes, group membership, and the absence of any host mount. Drift fails
   closed with remediation instead of being quietly repaired.
 - **Runs the Hermes backend as a service.** A user systemd unit bound to the
   guest's own loopback, validated before it is ever activated, and proven ready
@@ -61,7 +61,9 @@ brings those three into a known-good state and then gets out of the way.
 
 ## Prerequisites
 
-- A macOS host on Apple Silicon with `limactl` on your `PATH`.
+- A supported host with `limactl` on your `PATH`: macOS on Apple Silicon, or
+  Linux on x86_64. Torio refuses to run anywhere else rather than creating a VM
+  it could never verify.
 - A Go toolchain, to build the CLI.
 - For each repository you attach: read access that already works from the guest,
   without a prompt.

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Verified Torio installer for macOS Apple Silicon.
+# Verified Torio installer for the supported hosts: macOS on Apple Silicon and
+# Linux on x86_64. The list is the same one internal/lima.profiles carries; a
+# platform this installs for but the CLI has no pins for would produce a working
+# binary that refuses every command.
 # Downloads a release asset, verifies SHA256SUMS, then installs the binary.
 # Never executes the downloaded binary before checksum verification.
 # Never modifies shell rc files; prints the exact PATH step instead.
@@ -25,7 +28,8 @@ usage() {
   cat <<'EOF'
 Usage: install.sh [--version X.Y.Z] [--prefix DIR] [--base-url URL] [--dry-run]
 
-Installs Torio for Darwin/arm64 into a user-writable prefix (default: ~/.local/bin).
+Installs Torio for this machine (Darwin/arm64 or Linux/x86_64) into a
+user-writable prefix (default: ~/.local/bin).
 Verifies SHA256SUMS before copying the binary. Does not use sudo and does not
 modify shell startup files.
 
@@ -55,13 +59,23 @@ EOF
 log() { printf '%s\n' "$*" >&2; }
 die() { log "install.sh: $*"; exit 1; }
 
+# PLATFORM is the "<goos>_<goarch>" fragment of the asset name, set by
+# require_platform. It is derived from the running machine rather than accepted
+# as a flag: an installer that let you ask for the wrong architecture would
+# happily place a binary that cannot execute.
+PLATFORM=""
+
 require_platform() {
   local os arch
   os="$(uname -s)"
   arch="$(uname -m)"
-  if [[ "$os" != "Darwin" || "$arch" != "arm64" ]]; then
-    die "unsupported platform ${os}/${arch}; Torio supports only Darwin/arm64"
-  fi
+  case "${os}/${arch}" in
+    Darwin/arm64) PLATFORM="darwin_arm64" ;;
+    Linux/x86_64) PLATFORM="linux_amd64" ;;
+    *)
+      die "unsupported platform ${os}/${arch}; Torio supports Darwin/arm64 and Linux/x86_64"
+      ;;
+  esac
 }
 
 require_tools() {
@@ -155,7 +169,7 @@ download() {
 
 asset_urls() {
   local version="$1"
-  local name="torio_${version}_darwin_arm64.tar.gz"
+  local name="torio_${version}_${PLATFORM}.tar.gz"
   if [[ -n "$BASE_URL" ]]; then
     local base="${BASE_URL%/}"
     printf '%s\n' "${base}/${name}"

@@ -15,21 +15,39 @@ permissions:
   contents: write
 
 jobs:
-  platform-e2e:
-    name: verify on real macOS arm64 / Lima
+  # The two gates prove different things, so a release waits for both.
+  #
+  # Linux boots a real guest and runs the whole journey — the strongest evidence
+  # available, and the same gate every pull request already passed.
+  linux-e2e:
+    name: verify on real Linux / KVM
     permissions:
       contents: read
     uses: ./.github/workflows/platform-e2e.yml
     with:
       checkout_ref: ${{ inputs.tag || github.ref }}
-      # Hosted runners cannot boot a guest; the full journey is a manual gate on
-      # real Apple Silicon. See .github/workflows/platform-e2e.yml.
+      runner: ubuntu-24.04
+      stage: full
+
+  # macOS proves the one thing Linux cannot: that the darwin/arm64 archive
+  # installs and runs on darwin. Hosted macOS runners cannot boot a guest
+  # (kern.hv_support is 0), so this is the host stage only. It bills at ten
+  # times the Linux rate on a private repository, which is worth paying a
+  # handful of times a year and was not worth paying per pull request.
+  darwin-e2e:
+    name: verify the darwin archive on real macOS arm64
+    permissions:
+      contents: read
+    uses: ./.github/workflows/platform-e2e.yml
+    with:
+      checkout_ref: ${{ inputs.tag || github.ref }}
+      runner: macos-15
       stage: host
 
-  darwin-arm64:
-    name: package darwin/arm64
-    needs: platform-e2e
-    # Cross-compile from Linux runner; GOOS/GOARCH produce the macOS arm64 binary.
+  package:
+    name: package every supported host
+    needs: [linux-e2e, darwin-e2e]
+    # Cross-compiled from a Linux runner; GOOS/GOARCH produce both binaries.
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -74,7 +92,12 @@ jobs:
           go test ./...
           go vet ./...
 
-      - name: Build darwin/arm64 binary
+      # One archive per supported host, into one dist/ with a single
+      # SHA256SUMS covering both. The platform list lives in
+      # scripts/package_release.py and is asserted against
+      # internal/lima.profiles, so a host can never be shipped without pins or
+      # pinned without being shipped.
+      - name: Build and package every supported host
         env:
           VERSION: ${{ steps.meta.outputs.version }}
           COMMIT: ${{ steps.meta.outputs.commit }}
@@ -82,18 +105,19 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -trimpath \
-            -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
-            -o dist/torio ./cmd/torio
-
-      - name: Package release assets
-        run: |
-          set -euo pipefail
-          python3 scripts/package_release.py \
-            --version "${{ steps.meta.outputs.version }}" \
-            --binary dist/torio \
-            --license LICENSE \
-            --out dist
+          for platform in darwin/arm64 linux/amd64; do
+            goos="${platform%%/*}"; goarch="${platform##*/}"
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -trimpath \
+              -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+              -o "dist/torio-${goos}-${goarch}" ./cmd/torio
+            python3 scripts/package_release.py \
+              --version "${VERSION}" \
+              --platform "${platform}" \
+              --binary "dist/torio-${goos}-${goarch}" \
+              --license LICENSE \
+              --out dist
+          done
+          cat dist/SHA256SUMS
 
       # A manual dispatch validates, builds and packages without creating a tag
       # or a release — the publish step below is push-only. Without this the run
@@ -106,9 +130,10 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: torio-${{ steps.meta.outputs.version }}-darwin-arm64-dryrun
+          name: torio-${{ steps.meta.outputs.version }}-dryrun
           path: |
             dist/torio_${{ steps.meta.outputs.version }}_darwin_arm64.tar.gz
+            dist/torio_${{ steps.meta.outputs.version }}_linux_amd64.tar.gz
             dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 7
@@ -126,5 +151,6 @@ jobs:
           fi
           gh release upload "$TAG" \
             "dist/torio_${{ steps.meta.outputs.version }}_darwin_arm64.tar.gz" \
+            "dist/torio_${{ steps.meta.outputs.version }}_linux_amd64.tar.gz" \
             dist/SHA256SUMS \
             --clobber

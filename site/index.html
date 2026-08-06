@@ -57,7 +57,7 @@
     <main id="main">
       <div class="content">
         <section class="hero">
-<p class="hero-eyebrow">Thin control plane · Apple Silicon</p>
+<p class="hero-eyebrow">Thin control plane · macOS and Linux</p>
 <h1 class="hero-title">Your AI second brain, on a Linux VM you actually control.</h1>
 <p class="hero-lede">Torio creates the Linux VM, runs a Hermes backend on the VM's own loopback, tells you in one command whether the whole stack is healthy, and gives the model access to exactly the repositories you listed. You open the connection, you hold the credentials, you decide what gets committed.</p>
 <p class="hero-actions"><a class="btn btn-primary" href="tutorials.html#get-started">Get started</a><a class="btn btn-quiet" href="#pieces">See how it fits together</a></p>
@@ -79,7 +79,7 @@
 <div class="stack-items">
 <div class="stack-item"><b>Hermes backend</b><span>A <code>hermes serve</code> process, run as a user systemd service so it survives logout and restarts on its own. It binds <code>127.0.0.1</code> <em>of the guest</em>: nothing on your network, and nothing on your Mac, can reach it except through your tunnel.</span></div>
 <div class="stack-item"><b>Your Second Brain</b><span>A private Markdown vault, versioned by its own Git repository and registered with Hermes so any session can search it. Torio can import an existing vault into it; there is no export, because getting data back out is a copy you run yourself.</span></div>
-<div class="stack-item"><b>Your projects</b><span>Repository clones on the VM's own Linux filesystem — not on a macOS share reaching back into your home directory. The model sees the ones you registered, and no others.</span></div>
+<div class="stack-item"><b>Your projects</b><span>Repository clones on the VM's own Linux filesystem — not on a host share reaching back into your home directory. The model sees the ones you registered, and no others.</span></div>
 </div>
 </section>
 </div>

@@ -9,17 +9,16 @@ import (
 	"strings"
 )
 
-// Promoted Gate 0 image pin
-// (archive/pre-oss:docs/spike-results/v1-onboarding-20260727T115633Z/FINDINGS.md).
-const (
-	PromotedImageURL    = "https://cloud-images.ubuntu.com/releases/noble/release-20260705/ubuntu-24.04-server-cloudimg-arm64.img"
-	PromotedImageDigest = "sha256:7df0201546f75b8bcc1044594c806c35749421ad3c9bc1be2a3ab806cfae39cc"
-	// PromotedHermesCommit is the Hermes Agent pin from Gate 0. Init embeds it
-	// for callers/docs; guest Hermes install is reconciled in bootstrap.
-	// Re-promoted 2026-08-03: wzslr321/hermes-agent 0a62610 (descendant of the
-	// Gate 0 pin 91546b8; picks up the openclaw EXDEV fsync fix).
-	PromotedHermesCommit = "0a62610f10cc34d696b2239b2c69fa1ba0f1ca63"
-)
+// The promoted Gate 0 image pin is now per-host and lives in Profile: the two
+// supported hosts run the same Ubuntu build compiled for different machines,
+// so a single pair of constants could only have described one of them.
+//
+// PromotedHermesCommit is the Hermes Agent pin from Gate 0. Init embeds it for
+// callers/docs; guest Hermes install is reconciled in bootstrap. It is not
+// host-derived — Hermes is built in the guest — so it stays a constant.
+// Re-promoted 2026-08-03: wzslr321/hermes-agent 0a62610 (descendant of the
+// Gate 0 pin 91546b8; picks up the openclaw EXDEV fsync fix).
+const PromotedHermesCommit = "0a62610f10cc34d696b2239b2c69fa1ba0f1ca63"
 
 // Default VM resources for torio vm init (FINDINGS: product disk SHOULD be 60GiB).
 const (
@@ -62,6 +61,12 @@ const (
 	placeholderShellContent = "__TORIO_PROJECT_SHELL__"
 	placeholderEnterPath    = "__TORIO_PROJECT_ENTER_PATH__"
 	placeholderEnterContent = "__TORIO_PROJECT_ENTER__"
+	// The host-derived pins. They are substituted from the same Profile that
+	// verifyCompatibleConfig checks the created instance against.
+	placeholderVMType      = "__TORIO_VMTYPE__"
+	placeholderArch        = "__TORIO_ARCH__"
+	placeholderImageURL    = "__TORIO_IMAGE_URL__"
+	placeholderImageDigest = "__TORIO_IMAGE_DIGEST__"
 )
 
 // InitOptions configures torio vm init. Zero values select documented defaults.
@@ -113,7 +118,7 @@ func validateOperatorUser(user string) error {
 	return nil
 }
 
-func renderTemplate(opts InitOptions) ([]byte, error) {
+func renderTemplate(opts InitOptions, profile Profile) ([]byte, error) {
 	opts = opts.withDefaults()
 	op := strings.TrimSpace(opts.OperatorUser)
 	if err := validateOperatorUser(op); err != nil {
@@ -125,6 +130,11 @@ func renderTemplate(opts InitOptions) ([]byte, error) {
 	if strings.ContainsAny(opts.Memory, "\n\r") || strings.ContainsAny(opts.Disk, "\n\r") {
 		return nil, fmt.Errorf("memory/disk must be a single-line size string")
 	}
+	// A partial profile would render a template with empty pins that the
+	// verifier would then compare against the same empty pins and accept.
+	if !profile.valid() {
+		return nil, fmt.Errorf("incomplete host profile; refusing to render a template with unpinned vmType, arch or image")
+	}
 
 	text := string(embeddedTemplate)
 	replacer := strings.NewReplacer(
@@ -134,6 +144,10 @@ func renderTemplate(opts InitOptions) ([]byte, error) {
 		placeholderDisk, opts.Disk,
 		placeholderShellPath, OperatorShellHelper,
 		placeholderEnterPath, ProjectEnterHelper,
+		placeholderVMType, profile.VMType,
+		placeholderArch, profile.Arch,
+		placeholderImageURL, profile.ImageURL,
+		placeholderImageDigest, profile.ImageDigest,
 	)
 	text = replacer.Replace(text)
 	// The helper is injected after every other substitution, so the bytes that
@@ -152,7 +166,11 @@ func renderTemplate(opts InitOptions) ([]byte, error) {
 		strings.Contains(text, placeholderMemory) ||
 		strings.Contains(text, placeholderDisk) ||
 		strings.Contains(text, placeholderShellPath) ||
-		strings.Contains(text, placeholderEnterPath) {
+		strings.Contains(text, placeholderEnterPath) ||
+		strings.Contains(text, placeholderVMType) ||
+		strings.Contains(text, placeholderArch) ||
+		strings.Contains(text, placeholderImageURL) ||
+		strings.Contains(text, placeholderImageDigest) {
 		return nil, fmt.Errorf("template placeholder left unsubstituted")
 	}
 	if !strings.Contains(text, "path: "+OperatorShellHelper) {
@@ -164,8 +182,19 @@ func renderTemplate(opts InitOptions) ([]byte, error) {
 	if !strings.Contains(text, "mounts: []") {
 		return nil, fmt.Errorf("embedded template invariant broken: mounts must be empty")
 	}
-	if !strings.Contains(text, PromotedImageDigest) || !strings.Contains(text, PromotedImageURL) {
+	if !strings.Contains(text, profile.ImageDigest) || !strings.Contains(text, profile.ImageURL) {
 		return nil, fmt.Errorf("embedded template invariant broken: promoted image pin missing")
+	}
+	// The rendered document must carry the driver and architecture the verifier
+	// will demand. Checking for the substituted values rather than the absence
+	// of placeholders catches the case the placeholder check cannot: a template
+	// edited to spell a literal driver, which would render successfully and
+	// then fail verification against a profile that says something else.
+	if !strings.Contains(text, "vmType: "+profile.VMType) {
+		return nil, fmt.Errorf("embedded template invariant broken: vmType is not the profile's %q", profile.VMType)
+	}
+	if !strings.Contains(text, "arch: "+profile.Arch) {
+		return nil, fmt.Errorf("embedded template invariant broken: arch is not the profile's %q", profile.Arch)
 	}
 	return []byte(text), nil
 }

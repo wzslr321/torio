@@ -106,6 +106,11 @@ type fakeGuest struct {
 	hermesActive     string
 	hermesShowExit   int
 	hermesListExit   int
+	// hermesUnknownShowExit is what `show` returns for a project that does not
+	// exist. Hermes 0.19.0 returned 0 and wrote only a stderr diagnostic;
+	// 0.19.1 returns non-zero. Both are "no such project", so the exit code is
+	// not the answer -- which is exactly what these tests have to cover.
+	hermesUnknownShowExit int
 	// hermesShowOutput overrides the `show` block verbatim, so a test can feed
 	// output the parser must refuse.
 	hermesShowOutput string
@@ -130,15 +135,16 @@ type fakeGuest struct {
 // and an empty Hermes project registry: the shape `Add` clones into.
 func readyFake() *fakeGuest {
 	return &fakeGuest{
-		remote:             testRemote,
-		remoteReadable:     true,
-		owner:              lima.HermesUser,
-		group:              sharedGroup,
-		mode:               "2775",
-		safeDirs:           map[string][]string{},
-		failContains:       map[string]int{},
-		hermesUID:          "1001",
-		serviceEnvironment: "HERMES_HOME=" + lima.HermesProfilePath,
+		remote:                testRemote,
+		remoteReadable:        true,
+		owner:                 lima.HermesUser,
+		group:                 sharedGroup,
+		mode:                  "2775",
+		safeDirs:              map[string][]string{},
+		failContains:          map[string]int{},
+		hermesUID:             "1001",
+		hermesUnknownShowExit: 1,
+		serviceEnvironment:    "HERMES_HOME=" + lima.HermesProfilePath,
 	}
 }
 
@@ -284,7 +290,7 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 			return okResult(f.hermesShowOutput), nil
 		}
 		if !f.hermesPresent {
-			return exitResult(0, "", "project: no such project: "+testID), nil
+			return exitResult(f.hermesUnknownShowExit, "", "project: no such project: "+testID), nil
 		}
 		return okResult(projectShowOutput(testID, testName, f.hermesPrimary, f.hermesArchived)), nil
 	case strings.Contains(joined, "hermes project list"):

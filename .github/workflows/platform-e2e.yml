@@ -1,12 +1,19 @@
 name: platform-e2e
 
-# The journey is split at the hypervisor boundary (see e2e/platform/journey_test.go).
-# The `host` stage — release tarball, install.sh, real limactl, `torio vm init`
-# and its image pin — runs on any macOS arm64 machine, so GitHub-hosted runners
-# can gate every PR and every release on it. The `guest` stage boots the VM and
-# needs Apple's Virtualization framework, which hosted runners cannot offer:
-# they are themselves VMs without nested virtualization. Run `full` by hand on
-# real Apple Silicon, or point `runner` at a self-hosted arm64 Mac.
+# The real product journey: release tarball, install.sh, real limactl, a real
+# guest.
+#
+# It runs on Linux by default, and that is the point. Hosted macOS runners are
+# themselves VMs and report `kern.hv_support = 0`, so they can only ever run the
+# `host` half — no automated job in this repository had ever booted a guest.
+# Hosted Linux runners expose /dev/kvm, so the `guest` half becomes gateable for
+# the first time, at a tenth of the macOS billing rate on a private repository.
+# Spike 003 measured create 10s, boot 104s.
+#
+# macOS is still reachable, and the release workflow still uses it: it is the
+# only way to prove the darwin/arm64 archive installs and runs on darwin. There
+# it is worth ten times the rate a handful of times a year; on every pull
+# request it was not.
 on:
   workflow_call:
     inputs:
@@ -18,16 +25,12 @@ on:
         description: "host (no hypervisor needed) or full (boots a real VM)"
         required: false
         type: string
-        default: host
+        default: full
       runner:
         description: Runner label to execute on
         required: false
         type: string
-        default: macos-15
-  # Hosted macOS minutes bill at ten times the Linux rate on a private
-  # repository, so this gate runs when a change could reach the packaged binary
-  # and not otherwise. Prose, generated pages and spikes cannot: the journey
-  # installs a release tarball and drives the CLI.
+        default: ubuntu-24.04
   pull_request:
     paths-ignore:
       - "**.md"
@@ -41,13 +44,13 @@ on:
         description: "host (no hypervisor needed) or full (boots a real VM)"
         required: false
         type: choice
-        default: host
+        default: full
         options: [host, full]
       runner:
-        description: Runner label to execute on (needs real Apple Silicon for full)
+        description: Runner label to execute on
         required: false
         type: string
-        default: macos-15
+        default: ubuntu-24.04
 
 permissions:
   contents: read
@@ -58,12 +61,12 @@ concurrency:
 
 jobs:
   platform:
-    name: real macOS arm64 / Lima ${{ inputs.stage || 'host' }} stage
-    runs-on: ${{ inputs.runner || 'macos-15' }}
-    timeout-minutes: ${{ inputs.stage == 'full' && 75 || 25 }}
+    name: real ${{ inputs.runner || 'ubuntu-24.04' }} / Lima ${{ inputs.stage || 'full' }} stage
+    runs-on: ${{ inputs.runner || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ (inputs.stage || 'full') == 'full' && 45 || 25 }}
     env:
       TORIO_INSTANCE: torio-ci-${{ github.run_id }}-${{ github.run_attempt }}
-      PLATFORM_E2E_STAGE: ${{ inputs.stage || 'host' }}
+      PLATFORM_E2E_STAGE: ${{ inputs.stage || 'full' }}
     steps:
       - name: Checkout
         timeout-minutes: 3
@@ -78,21 +81,62 @@ jobs:
           go-version: "1.26.5"
           check-latest: false
 
-      - name: Install verified Lima 2.2.0
+      # /dev/kvm exists on hosted Linux runners but is not writable as
+      # delivered. Measured in spike 003, along with the rule that fixes it.
+      #
+      # The rule is applied *and* the mode is set directly, because `udevadm
+      # trigger` is asynchronous: reading writability straight after it is a
+      # race, and one that a first run happened to win. The rule is what
+      # survives the device being re-created; the chmod is what makes this step
+      # true by the time it exits.
+      - name: Enable KVM
+        if: runner.os == 'Linux'
         timeout-minutes: 5
-        env:
-          LIMA_ARCHIVE: lima-2.2.0-Darwin-arm64.tar.gz
-          LIMA_SHA256: bbdef91774885a0d05f7b048c4eb89ae2bcf3a0c252ae7ca7934e63df76d93c3
         run: |
           set -euo pipefail
+          test -e /dev/kvm || { echo "no /dev/kvm on this runner" >&2; exit 1; }
+          printf 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"\n' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle --timeout=30 || true
+          if [ ! -w /dev/kvm ]; then
+            sudo chmod 0666 /dev/kvm
+          fi
+          test -w /dev/kvm || { echo "/dev/kvm still not writable" >&2; exit 1; }
+          ls -l /dev/kvm
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            qemu-system-x86 qemu-utils ovmf
+
+      - name: Install verified Lima 2.2.0
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          case "${RUNNER_OS}" in
+            Linux)
+              archive_name="lima-2.2.0-Linux-x86_64.tar.gz"
+              archive_sha="a0ea1ccf6b7335a900adb5f8d2b8384457965fecb1ba72f09b4e3e46d12f424a"
+              ;;
+            macOS)
+              archive_name="lima-2.2.0-Darwin-arm64.tar.gz"
+              archive_sha="bbdef91774885a0d05f7b048c4eb89ae2bcf3a0c252ae7ca7934e63df76d93c3"
+              ;;
+            *) echo "unsupported runner OS ${RUNNER_OS}" >&2; exit 1 ;;
+          esac
           lima_root="${RUNNER_TEMP}/lima-2.2.0"
-          archive="${RUNNER_TEMP}/${LIMA_ARCHIVE}"
+          archive="${RUNNER_TEMP}/${archive_name}"
           mkdir -p "${lima_root}"
           curl --fail --silent --show-error --location \
             --retry 3 --retry-all-errors \
             --output "${archive}" \
-            "https://github.com/lima-vm/lima/releases/download/v2.2.0/${LIMA_ARCHIVE}"
-          printf '%s  %s\n' "${LIMA_SHA256}" "${archive}" | shasum -a 256 -c -
+            "https://github.com/lima-vm/lima/releases/download/v2.2.0/${archive_name}"
+          # The two runner families ship different checksum tools.
+          if command -v sha256sum >/dev/null 2>&1; then
+            printf '%s  %s\n' "${archive_sha}" "${archive}" | sha256sum -c -
+          else
+            printf '%s  %s\n' "${archive_sha}" "${archive}" | shasum -a 256 -c -
+          fi
           tar -xzf "${archive}" -C "${lima_root}"
           printf '%s/bin\n' "${lima_root}" >> "${GITHUB_PATH}"
 
@@ -100,14 +144,20 @@ jobs:
         timeout-minutes: 10
         run: |
           set -euo pipefail
-          make package-release VERSION=0.0.0
+          # Package only the host about to be installed on. Cross-building the
+          # other platform here would prove nothing this job goes on to run.
+          case "${RUNNER_OS}" in
+            Linux) platform="linux/amd64" ;;
+            macOS) platform="darwin/arm64" ;;
+          esac
+          make package-release VERSION=0.0.0 PLATFORMS="${platform}"
           bash scripts/install.sh \
             --version 0.0.0 \
             --base-url "${PWD}/dist" \
             --prefix "${RUNNER_TEMP}/torio-e2e-bin"
 
       - name: Run real product journey
-        timeout-minutes: ${{ inputs.stage == 'full' && 35 || 15 }}
+        timeout-minutes: ${{ (inputs.stage || 'full') == 'full' && 30 || 15 }}
         env:
           PLATFORM_E2E_ARTIFACT_DIR: ${{ runner.temp }}/torio-platform-e2e-artifacts
           PLATFORM_E2E_EXPECTED_VERSION: 0.0.0

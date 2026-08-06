@@ -11,5 +11,5 @@ import (
 
 func TestPlatformE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Real macOS Lima Platform E2E Suite")
+	RunSpecs(t, "Real Lima Platform E2E Suite")
 }

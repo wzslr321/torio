@@ -24,13 +24,17 @@ MAKEFILE = ROOT / "Makefile"
 
 
 class PlatformE2EContractTests(unittest.TestCase):
-    def test_workflow_runs_real_apple_silicon_gate(self) -> None:
+    def test_workflow_gates_on_a_real_linux_guest_by_default(self) -> None:
+        # Linux is the default because it is the only hosted runner that can
+        # boot a guest at all: macOS runners are themselves VMs and report
+        # kern.hv_support = 0. Defaulting back to macOS would silently return
+        # the gate to its host half and prove nothing about a running VM.
         text = WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("runs-on: ${{ inputs.runner || 'macos-15' }}", text)
+        self.assertIn("runs-on: ${{ inputs.runner || 'ubuntu-24.04' }}", text)
         self.assertIn("workflow_call:", text)
         self.assertIn("permissions:\n  contents: read", text)
-        self.assertIn("timeout-minutes: ${{ inputs.stage == 'full' && 75 || 25 }}", text)
-        self.assertIn("timeout-minutes: ${{ inputs.stage == 'full' && 35 || 15 }}", text)
+        self.assertIn("timeout-minutes: ${{ (inputs.stage || 'full') == 'full' && 45 || 25 }}", text)
+        self.assertIn("timeout-minutes: ${{ (inputs.stage || 'full') == 'full' && 30 || 15 }}", text)
         for step, timeout in (
             ("Checkout", 3),
             ("Set up Go", 5),
@@ -70,11 +74,47 @@ class PlatformE2EContractTests(unittest.TestCase):
 
     def test_workflow_selects_the_stage_and_rejects_an_unknown_one(self) -> None:
         text = WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("PLATFORM_E2E_STAGE: ${{ inputs.stage || 'host' }}", text)
+        self.assertIn("PLATFORM_E2E_STAGE: ${{ inputs.stage || 'full' }}", text)
         self.assertIn("host) export PLATFORM_E2E_LABEL_FILTER='!guest' ;;", text)
         self.assertIn("full) export PLATFORM_E2E_LABEL_FILTER='' ;;", text)
         self.assertRegex(text, r"\*\) printf 'unknown stage %s\\n'.*exit 2")
         self.assertIn("options: [host, full]", text)
+
+    def test_workflow_makes_dev_kvm_usable_before_asking_lima_to_boot(self) -> None:
+        # /dev/kvm is present on hosted Linux runners but not writable as
+        # delivered (measured in spike 003). Without the rule, qemu falls back
+        # to TCG emulation, which does not fail so much as never finish -- the
+        # job would burn its timeout and report nothing useful.
+        text = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("- name: Enable KVM", text)
+        self.assertIn("if: runner.os == 'Linux'", text)
+        self.assertIn('KERNEL=="kvm", GROUP="kvm", MODE="0666"', text)
+        self.assertIn("test -w /dev/kvm", text)
+        # `udevadm trigger` returns before the rule has been applied, so reading
+        # writability straight after it is a race -- one a first run won and a
+        # second lost. The settle and the direct chmod are what make the step
+        # true when it exits rather than usually true.
+        self.assertIn("udevadm settle", text)
+        self.assertIn("sudo chmod 0666 /dev/kvm", text)
+        self.assertIn("qemu-system-x86", text)
+        self.assertLess(
+            text.index("- name: Enable KVM"),
+            text.index("- name: Run real product journey"),
+            "KVM must be usable before the journey boots anything",
+        )
+
+    def test_workflow_verifies_a_lima_archive_per_runner_family(self) -> None:
+        # One pinned checksum cannot cover two runner families, and an
+        # unverified download is the one step that would let a compromised
+        # release binary run as the thing under test.
+        text = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("lima-2.2.0-Linux-x86_64.tar.gz", text)
+        self.assertIn("a0ea1ccf6b7335a900adb5f8d2b8384457965fecb1ba72f09b4e3e46d12f424a", text)
+        self.assertIn("lima-2.2.0-Darwin-arm64.tar.gz", text)
+        self.assertIn("bbdef91774885a0d05f7b048c4eb89ae2bcf3a0c252ae7ca7934e63df76d93c3", text)
+        self.assertIn("sha256sum -c -", text)
+        self.assertIn("shasum -a 256 -c -", text)
+        self.assertRegex(text, r"\*\) echo \"unsupported runner OS \$\{RUNNER_OS\}\" >&2; exit 1 ;;")
 
     def test_workflow_collects_diagnostics_before_anything_deletes_the_instance(self) -> None:
         # `limactl delete` destroys ha.stderr.log and the serial console log, the
@@ -123,7 +163,7 @@ class PlatformE2EContractTests(unittest.TestCase):
         self.assertIn("stage: host", text)
         self.assertRegex(
             text,
-            re.compile(r"darwin-arm64:\n(?:.*\n)*?\s+needs: platform-e2e", re.MULTILINE),
+            re.compile(r"package:\n(?:.*\n)*?\s+needs: \[linux-e2e, darwin-e2e\]", re.MULTILINE),
         )
 
     def test_workflow_installs_the_verified_lima_version(self) -> None:
@@ -140,8 +180,11 @@ class PlatformE2EContractTests(unittest.TestCase):
     def test_ginkgo_journey_drives_the_real_vertical_product_slice(self) -> None:
         text = JOURNEY.read_text(encoding="utf-8")
         required = [
-            'runtime.GOOS).To(Equal("darwin")',
-            'runtime.GOARCH).To(Equal("arm64")',
+            # The host gate is a matrix check, not a single-platform equality.
+            # Pinning it back to darwin would silently reintroduce a suite that
+            # can only ever run where the guest stage cannot.
+            "Expect(supportedHost()).To(BeTrue()",
+            '"darwin/arm64", "linux/amd64"',
             'exec.LookPath("limactl")',
             '"vm", "init"',
             '"vm", "start"',

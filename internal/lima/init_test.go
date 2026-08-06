@@ -44,7 +44,7 @@ func TestInitCreatesAbsentInstance(t *testing.T) {
 				if strings.Contains(text, "usermod -aG docker hermes") {
 					t.Fatalf("template must not grant hermes docker group")
 				}
-				if !strings.Contains(text, PromotedImageDigest) {
+				if !strings.Contains(text, testProfile.ImageDigest) {
 					t.Fatalf("template missing promoted image digest")
 				}
 				if !strings.Contains(text, "operator") {
@@ -66,8 +66,8 @@ func TestInitCreatesAbsentInstance(t *testing.T) {
 	if !res.Created {
 		t.Fatalf("Created = false, want true")
 	}
-	if res.ImageDigest != PromotedImageDigest {
-		t.Fatalf("ImageDigest = %q, want %q", res.ImageDigest, PromotedImageDigest)
+	if res.ImageDigest != testProfile.ImageDigest {
+		t.Fatalf("ImageDigest = %q, want %q", res.ImageDigest, testProfile.ImageDigest)
 	}
 	want := []string{"create", "--name=" + InstanceName, "--tty=false", seenTemplate}
 	if !equalArgs(createArgs, want) {
@@ -137,20 +137,20 @@ func TestVerifyCompatibleConfigRejectsExtraImage(t *testing.T) {
 	rec := &instanceRecord{
 		Name: InstanceName,
 		Config: &instanceConfig{
-			VMType: "vz",
-			Arch:   "aarch64",
+			VMType: testProfile.VMType,
+			Arch:   testProfile.Arch,
 			Images: []struct {
 				Location string `json:"location"`
 				Digest   string `json:"digest"`
 			}{
-				{Location: PromotedImageURL, Digest: PromotedImageDigest},
+				{Location: testProfile.ImageURL, Digest: testProfile.ImageDigest},
 				{Location: "https://example.com/other.img", Digest: "sha256:bad"},
 			},
 			Mounts: nil,
 		},
 	}
 	rec.Config.SSH.ForwardAgent = false
-	if err := verifyCompatibleConfig(rec); err == nil {
+	if err := verifyCompatibleConfig(rec, testProfile); err == nil {
 		t.Fatal("want error for two images")
 	}
 }
@@ -292,7 +292,7 @@ func TestInitTemplateHasNoMountsAndPinnedImage(t *testing.T) {
 	if !strings.Contains(body, "mounts: []") {
 		t.Fatalf("template missing empty mounts")
 	}
-	if !strings.Contains(body, PromotedImageURL) || !strings.Contains(body, PromotedImageDigest) {
+	if !strings.Contains(body, testProfile.ImageURL) || !strings.Contains(body, testProfile.ImageDigest) {
 		t.Fatalf("template missing promoted image pin")
 	}
 	if !strings.Contains(body, `OPERATOR_USER="alice"`) {
@@ -356,7 +356,7 @@ func TestInitInterruptedCreateLeavesNoTemplate(t *testing.T) {
 
 func renderedTemplateForTest(t *testing.T, opts InitOptions) string {
 	t.Helper()
-	text, err := renderTemplate(opts)
+	text, err := renderTemplate(opts, testProfile)
 	if err != nil {
 		t.Fatalf("renderTemplate: %v", err)
 	}
@@ -364,17 +364,17 @@ func renderedTemplateForTest(t *testing.T, opts InitOptions) string {
 }
 
 func fixtureCompatibleInstanceJSON(name, status string) string {
-	return `{"name":"` + name + `","status":"` + status + `","config":{"vmType":"vz","arch":"aarch64","images":[{"location":"` + PromotedImageURL + `","arch":"aarch64","digest":"` + PromotedImageDigest + `","variant":"server"}],"mounts":[],"ssh":{"forwardAgent":false},"cpus":4,"memory":"8GiB","disk":"60GiB"}}`
+	return `{"name":"` + name + `","status":"` + status + `","config":{"vmType":"` + testProfile.VMType + `","arch":"` + testProfile.Arch + `","images":[{"location":"` + testProfile.ImageURL + `","arch":"` + testProfile.Arch + `","digest":"` + testProfile.ImageDigest + `","variant":"server"}],"mounts":[],"ssh":{"forwardAgent":false},"cpus":4,"memory":"8GiB","disk":"60GiB"}}`
 }
 
 func fixtureIncompatibleMountsJSON(name, status string) string {
-	return `{"name":"` + name + `","status":"` + status + `","config":{"vmType":"vz","arch":"aarch64","images":[{"location":"` + PromotedImageURL + `","digest":"` + PromotedImageDigest + `"}],"mounts":[{"location":"/Users/me","mountPoint":"/Users/me"}],"ssh":{"forwardAgent":false}}}`
+	return `{"name":"` + name + `","status":"` + status + `","config":{"vmType":"` + testProfile.VMType + `","arch":"` + testProfile.Arch + `","images":[{"location":"` + testProfile.ImageURL + `","digest":"` + testProfile.ImageDigest + `"}],"mounts":[{"location":"/Users/me","mountPoint":"/Users/me"}],"ssh":{"forwardAgent":false}}}`
 }
 
 func fixtureIncompatibleForwardAgentJSON(name, status string) string {
-	return `{"name":"` + name + `","status":"` + status + `","config":{"vmType":"vz","arch":"aarch64","images":[{"location":"` + PromotedImageURL + `","digest":"` + PromotedImageDigest + `"}],"mounts":[],"ssh":{"forwardAgent":true}}}`
+	return `{"name":"` + name + `","status":"` + status + `","config":{"vmType":"` + testProfile.VMType + `","arch":"` + testProfile.Arch + `","images":[{"location":"` + testProfile.ImageURL + `","digest":"` + testProfile.ImageDigest + `"}],"mounts":[],"ssh":{"forwardAgent":true}}}`
 }
 
 func fixtureIncompatibleDigestJSON(name, status string) string {
-	return `{"name":"` + name + `","status":"` + status + `","config":{"vmType":"vz","arch":"aarch64","images":[{"location":"` + PromotedImageURL + `","digest":"sha256:deadbeef"}],"mounts":[],"ssh":{"forwardAgent":false}}}`
+	return `{"name":"` + name + `","status":"` + status + `","config":{"vmType":"` + testProfile.VMType + `","arch":"` + testProfile.Arch + `","images":[{"location":"` + testProfile.ImageURL + `","digest":"sha256:deadbeef"}],"mounts":[],"ssh":{"forwardAgent":false}}}`
 }

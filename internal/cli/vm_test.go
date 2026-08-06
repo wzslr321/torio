@@ -18,9 +18,27 @@ import (
 )
 
 const (
-	cliTestMCPBrokerBinary = "broker-linux-arm64"
-	cliTestMCPRelayBinary  = "relay-linux-arm64"
+	cliTestMCPBrokerBinary = "broker-guest-payload"
+	cliTestMCPRelayBinary  = "relay-guest-payload"
 )
+
+// testProfile is the profile the production adapter resolves on this machine.
+//
+// CLI fixtures are built from it rather than from literals, because the wiring
+// under test genuinely is host-dependent: `lima.New` pins the adapter to the
+// running platform. Deriving the fixtures means these assertions read `vz` and
+// `aarch64` on macOS and `qemu` and `x86_64` on Linux, and that the same file
+// covers whichever host runs it — instead of covering one and being blind to
+// the other.
+var testProfile = mustHostProfile()
+
+func mustHostProfile() lima.Profile {
+	p, err := lima.HostProfile()
+	if err != nil {
+		panic("internal/cli tests need a supported Torio host: " + err.Error())
+	}
+	return p
+}
 
 // scriptedResp is one canned (Result, error) pair for the fake runner.
 type scriptedResp struct {
@@ -61,8 +79,8 @@ func runVMWithFakeBoundJSON(t *testing.T, args []string, fake execx.Runner) (int
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	mcpArtifacts := t.TempDir()
 	for name, body := range map[string]string{
-		lima.TorioMCPBrokerArtifact: cliTestMCPBrokerBinary,
-		lima.TorioMCPRelayArtifact:  cliTestMCPRelayBinary,
+		testProfile.MCPBrokerArtifact(): cliTestMCPBrokerBinary,
+		testProfile.MCPRelayArtifact():  cliTestMCPRelayBinary,
 	} {
 		if err := os.WriteFile(filepath.Join(mcpArtifacts, name), []byte(body), 0o755); err != nil {
 			t.Fatalf("write MCP guest fixture %s: %v", name, err)
@@ -85,12 +103,12 @@ func runVMWithFakeBoundJSON(t *testing.T, args []string, fake execx.Runner) (int
 }
 
 func listCompatibleJSON(name, status string) execx.Result {
-	body := `{"name":"` + name + `","status":"` + status + `","config":{"vmType":"vz","arch":"aarch64","images":[{"location":"` + lima.PromotedImageURL + `","digest":"` + lima.PromotedImageDigest + `"}],"mounts":[],"ssh":{"forwardAgent":false}}}`
+	body := `{"name":"` + name + `","status":"` + status + `","config":{"vmType":"` + testProfile.VMType + `","arch":"` + testProfile.Arch + `","images":[{"location":"` + testProfile.ImageURL + `","digest":"` + testProfile.ImageDigest + `"}],"mounts":[],"ssh":{"forwardAgent":false}}}`
 	return execx.Result{ExitCode: 0, Stdout: []byte(body + "\n")}
 }
 
 func listIncompatibleMountsJSON(name, status string) execx.Result {
-	body := `{"name":"` + name + `","status":"` + status + `","config":{"vmType":"vz","arch":"aarch64","images":[{"location":"` + lima.PromotedImageURL + `","digest":"` + lima.PromotedImageDigest + `"}],"mounts":[{"location":"/Users/me"}],"ssh":{"forwardAgent":false}}}`
+	body := `{"name":"` + name + `","status":"` + status + `","config":{"vmType":"` + testProfile.VMType + `","arch":"` + testProfile.Arch + `","images":[{"location":"` + testProfile.ImageURL + `","digest":"` + testProfile.ImageDigest + `"}],"mounts":[{"location":"/Users/me"}],"ssh":{"forwardAgent":false}}}`
 	return execx.Result{ExitCode: 0, Stdout: []byte(body + "\n")}
 }
 
@@ -136,7 +154,7 @@ func TestVMInitJSONCreated(t *testing.T) {
 	if data["created"] != true || data["unchanged"] != false {
 		t.Fatalf("data = %v", data)
 	}
-	if data["image_digest"] != lima.PromotedImageDigest {
+	if data["image_digest"] != testProfile.ImageDigest {
 		t.Fatalf("digest = %v", data["image_digest"])
 	}
 	if data["next_step"] != "torio vm start" {
@@ -582,7 +600,7 @@ func bootstrapHappyResp() []scriptedResp {
 		{res: out(lima.PromotedHermesCommit + "\n")},              // git rev-parse HEAD
 		{res: execx.Result{ExitCode: 0}},                          // test -x launcher (shim)
 		{res: out("/home/hermes/hermes-agent/venv/bin/hermes\n")}, // readlink shim
-		{res: out("aarch64\n")},                                   // uname -m
+		{res: out(testProfile.Arch + "\n")},                       // uname -m (this host's guest arch)
 		{res: out("Hermes Agent v0.19.0 (2026.7.20)\n")},          // hermes --version
 		{res: out("git version 2.43.0\n")},                        // git --version
 		{res: out("directory\n")},                                 // stat home type
@@ -666,9 +684,11 @@ func TestVMBootstrapNotRunningIsPrecondition(t *testing.T) {
 
 func TestVMBootstrapVerificationFailureIsExit6(t *testing.T) {
 	// Arch mismatch → verification failure → exit 6, with the failing check
-	// surfaced in the redacted error details.
+	// surfaced in the redacted error details. The mismatching value is an
+	// architecture no profile pins: naming the other supported host would make
+	// this assert a mismatch on one platform and a match on the other.
 	s := bootstrapHappyResp()
-	s[10] = scriptedResp{res: execx.Result{ExitCode: 0, Stdout: []byte("x86_64\n")}}
+	s[10] = scriptedResp{res: execx.Result{ExitCode: 0, Stdout: []byte("riscv64\n")}}
 	fake := &fakeLimaRunner{script: s}
 	code, stdout, _ := runVMWithFake(t, []string{"vm", "bootstrap", "--json", "--timeout", "5m"}, fake)
 	if code != int(ExitVerification) {
@@ -686,7 +706,7 @@ func TestVMBootstrapVerificationFailureIsExit6(t *testing.T) {
 
 func TestVMBootstrapHumanErrorNoStdoutContamination(t *testing.T) {
 	s := bootstrapHappyResp()
-	s[10] = scriptedResp{res: execx.Result{ExitCode: 0, Stdout: []byte("x86_64\n")}}
+	s[10] = scriptedResp{res: execx.Result{ExitCode: 0, Stdout: []byte("riscv64\n")}}
 	fake := &fakeLimaRunner{script: s}
 	code, stdout, stderr := runVMWithFake(t, []string{"vm", "bootstrap", "--timeout", "5m"}, fake)
 	if code != int(ExitVerification) {

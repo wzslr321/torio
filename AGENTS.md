@@ -97,7 +97,7 @@ and [`docs/03-architecture.md`](docs/03-architecture.md).
 Every implementation MUST preserve:
 
 1. Repositories, the Brain and state live on the VM's native filesystem, never on
-   a broad macOS mount.
+   a broad host mount.
 2. The Hermes profile is not a sandbox; the boundary is the edge of the VM.
 3. The `hermes` service identity MUST NOT be in the `docker` group or reach
    `docker.sock`.

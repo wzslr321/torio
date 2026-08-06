@@ -51,12 +51,12 @@ import (
 //   - group torio-projects exists and hermes is a member;
 //   - the operator (Lima login user) is a member of torio-projects;
 //   - hermes is NOT in the docker group;
-//   - uname -m == aarch64;
+//   - uname -m is the host profile's guest architecture;
 //   - `hermes --version` works through the documented stable command path;
 //   - git --version works;
 //   - each required path is a directory with the expected owner, group, and mode
 //     on native ext4;
-//   - no macOS host-share mount (9p/virtiofs/fuse/nfs/cifs) is present;
+//   - no host-share mount (9p/virtiofs/fuse/nfs/cifs) is present;
 //   - the operator shell helper is a root-owned, non-writable regular file at
 //     OperatorShellHelper — the guest side of `torio project shell`, provisioned
 //     by the template and never reconciled here.
@@ -174,7 +174,6 @@ const (
 // general remote-script transport.
 const (
 	dockerGroup             = "docker"
-	requiredArch            = "aarch64"
 	hermesAgentDir          = "/home/hermes/hermes-agent"
 	hermesTarget            = "/home/hermes/hermes-agent/venv/bin/hermes" // pinned launcher (owned by hermes)
 	hermesShimPath          = "/usr/local/bin/hermes"                     // on sudo secure_path
@@ -543,15 +542,25 @@ func (a *Adapter) verifyHermesNotInDocker(ctx context.Context, rep *BootstrapRep
 	return nil
 }
 
+// verifyArch proves the guest runs the architecture this host pins. Lima's
+// config spelling and the kernel's `uname -m` agree on both supported
+// platforms, so Profile.Arch serves the created-instance check and this guest
+// probe from one value.
 func (a *Adapter) verifyArch(ctx context.Context, rep *BootstrapReport) error {
 	const name = "arch"
+	profile, err := a.profile()
+	if err != nil {
+		return a.verifyFailed(rep, name, err.Error(), "run Torio on a supported host")
+	}
 	res, err := a.guestProbe(ctx, rep, name, "uname", "-m")
 	if err != nil {
 		return err
 	}
 	arch := strings.TrimSpace(string(res.Stdout))
-	if res.ExitCode != 0 || arch != requiredArch {
-		return a.verifyFailed(rep, name, fmt.Sprintf("arch %q, want %q", arch, requiredArch), "the target VM must be Linux arm64")
+	if res.ExitCode != 0 || arch != profile.Arch {
+		return a.verifyFailed(rep, name,
+			fmt.Sprintf("arch %q, want %q", arch, profile.Arch),
+			"the target VM must be Linux "+profile.Arch)
 	}
 	rep.record(name, true, arch)
 	return nil

@@ -136,7 +136,9 @@ torio vm ssh -- COMMAND...
 
 - `init` creates the VM from the embedded, pinned template, or succeeds
   idempotently when an existing instance matches the trusted pins (image digest
-  and URL, `mounts: []`, `ssh.forwardAgent=false`, `vz`/`aarch64`). A
+  and URL, `mounts: []`, `ssh.forwardAgent=false`, and the host profile's
+  hypervisor driver and guest architecture — `vz`/`aarch64` on macOS,
+  `qemu`/`x86_64` on Linux; see ADR-0002). A
   non-matching instance is **fail-closed** (exit 6): there is no `--force`, and
   Torio never recreates, resets or deletes an existing VM.
 - `--cpus`/`--memory`/`--disk` size the VM at **creation**; defaults are 4 vCPU,
@@ -171,10 +173,10 @@ torio vm ssh -- COMMAND...
 - `bootstrap` **verifies** rather than trusting an exit code: the `hermes` user
   exists; the `torio-projects` group exists with both `hermes` and the operator
   (the Lima login identity) in it; `hermes` is **not** in `docker`;
-  `uname -m == aarch64`; `hermes --version` works through the documented stable
+  `uname -m` is the host profile's guest architecture; `hermes --version` works through the documented stable
   path; `git --version` works; every required path is a directory with the
   expected owner, group and mode on a native Linux filesystem rather than a host
-  share; and no broad macOS host mount is present. Any unknown, unverifiable or
+  share; and no broad host mount is present. Any unknown, unverifiable or
   drifted state (architecture, version, ownership, mount) is reported and
   fail-closed (exit 6), never papered over. A rerun is a success only when every
   postcondition is proven.
@@ -305,6 +307,12 @@ torio project shell <id>
   and registers the project with Hermes before writing to the config. Nothing on
   the guest is reset, cleaned or deleted, so a rerun after an error finishes the
   work. `--use` makes the project active on success.
+- Whether a Hermes project already holds the slug is decided from command
+  **output**, never from an exit code: `hermes project show` has exited both 0
+  and non-zero for a project that does not exist, depending on its version. When
+  `show` describes nothing, `hermes project list` answers the existence
+  question. `list` failing, or naming a slug `show` will not describe, is
+  unverifiable state and is fail-closed (exit 6).
 - `list` reads only the config and runs no guest command — it works with the VM
   shut down.
 - `show` reports the registry entry, the checkout state and Hermes registration.

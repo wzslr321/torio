@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `torio project add` no longer fails closed on a working guest running Hermes
+  Agent 0.19.1. That version exits non-zero from `hermes project show` for a
+  project that does not exist, where 0.19.0 exited 0; Torio read the non-zero
+  exit as a broken CLI, so adding the first project to a fresh VM could not
+  succeed. Existence now comes from `hermes project list` output rather than
+  from either exit code. `list` failing, or naming a slug `show` will not
+  describe, still fails closed.
+
 ## 0.2.0 - 2026-08-05
 
 Detailed notes: [`docs/releases/v0.2.0.md`](docs/releases/v0.2.0.md).

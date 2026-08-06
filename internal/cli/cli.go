@@ -131,6 +131,16 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 	}
 	lima.InstanceName = instance
 
+	// An unsupported host is rejected here, once, rather than deep inside the
+	// first command that needs a pin. The adapter still fails closed on its own
+	// (lima.Adapter.profile), but that message would arrive after an operator
+	// had already been told to install Lima and create a VM that could never
+	// verify. This is a precondition of the machine, not a usage mistake.
+	if _, err := lima.HostProfile(); err != nil {
+		return fail(a.stdout, a.stderr, firstNonFlag(args), a.jsonOut || wantsJSON(args),
+			&CLIError{Exit: ExitPrecondition, Code: "unsupported_host", Message: err.Error()})
+	}
+
 	root := newRootCmd(a)
 	root.SetArgs(args)
 

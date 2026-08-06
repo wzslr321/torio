@@ -28,8 +28,8 @@ func installTestAdapter(t *testing.T, fr *fakeRunner) *Adapter {
 	t.Helper()
 	dir := t.TempDir()
 	for name, body := range map[string]string{
-		TorioMCPBrokerArtifact: testMCPBrokerBinary,
-		TorioMCPRelayArtifact:  testMCPRelayBinary,
+		testProfile.MCPBrokerArtifact(): testMCPBrokerBinary,
+		testProfile.MCPRelayArtifact():  testMCPRelayBinary,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
 			t.Fatalf("write fixture %s: %v", name, err)

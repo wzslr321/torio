@@ -9,11 +9,12 @@ import (
 	"strings"
 )
 
-const (
-	TorioMCPBrokerArtifact = "torio-mcp-broker-linux-arm64"
-	TorioMCPRelayArtifact  = "torio-mcp-connect-linux-arm64"
-	maxMCPGuestBinarySize  = 128 << 20
-)
+// The guest payload names are derived from the host profile
+// (Profile.MCPBrokerArtifact / MCPRelayArtifact) because the guest runs the
+// host's architecture. A constant pair could only ever name one of the two
+// supported guests, and the failure would be a release that ships the right
+// binaries under names the CLI does not look for.
+const maxMCPGuestBinarySize = 128 << 20
 
 type mcpGuestBinary struct {
 	artifact string
@@ -23,6 +24,10 @@ type mcpGuestBinary struct {
 }
 
 func (a *Adapter) loadMCPGuestBinaries() ([]mcpGuestBinary, error) {
+	profile, err := a.profile()
+	if err != nil {
+		return nil, &Error{Op: mcpInstallOp, Kind: KindVerificationFailed, Err: err}
+	}
 	dir := a.MCPGuestBinaryDir
 	if dir == "" {
 		exe, err := os.Executable()
@@ -36,8 +41,8 @@ func (a *Adapter) loadMCPGuestBinaries() ([]mcpGuestBinary, error) {
 		artifact string
 		target   string
 	}{
-		{TorioMCPBrokerArtifact, TorioMCPBrokerPath},
-		{TorioMCPRelayArtifact, TorioMCPRelayPath},
+		{profile.MCPBrokerArtifact(), TorioMCPBrokerPath},
+		{profile.MCPRelayArtifact(), TorioMCPRelayPath},
 	}
 	binaries := make([]mcpGuestBinary, 0, len(specs))
 	for _, spec := range specs {

@@ -1,24 +1,31 @@
 # Torio product Lima template (embedded).
 # Pins and layout come from the promoted Gate 0 path, recorded at
 # archive/pre-oss:docs/spike-results/v1-onboarding-20260727T115633Z/FINDINGS.md.
-# internal/lima.Init substitutes the operator user, cpus, memory, disk and the
-# operator shell helper before limactl create. Their tokens are deliberately not
-# spelled out here: substitution is a plain string replace over the whole file,
-# so any occurrence — including one inside a comment or a guard — is rewritten.
-# No secrets. No broad macOS home/project mount. No rootful Docker for hermes.
+# internal/lima.Init substitutes the operator user, cpus, memory, disk, the
+# operator shell helper and the host-derived pins before limactl create. Their
+# tokens are deliberately not spelled out here: substitution is a plain string
+# replace over the whole file, so any occurrence — including one inside a
+# comment or a guard — is rewritten.
+#
+# The hypervisor driver, guest architecture and image come from
+# internal/lima.Profile, which is also what verifyCompatibleConfig checks the
+# created instance against. Writing them here as literals would give the
+# renderer and the verifier separate opinions about the same instance.
+#
+# No secrets. No broad host home/project mount. No rootful Docker for hermes.
 minimumLimaVersion: "2.0.0"
 
-vmType: vz
-arch: aarch64
+vmType: __TORIO_VMTYPE__
+arch: __TORIO_ARCH__
 
 cpus: __TORIO_CPUS__
 memory: __TORIO_MEMORY__
 disk: __TORIO_DISK__
 
 images:
-  - location: "https://cloud-images.ubuntu.com/releases/noble/release-20260705/ubuntu-24.04-server-cloudimg-arm64.img"
-    arch: aarch64
-    digest: "sha256:7df0201546f75b8bcc1044594c806c35749421ad3c9bc1be2a3ab806cfae39cc"
+  - location: "__TORIO_IMAGE_URL__"
+    arch: __TORIO_ARCH__
+    digest: "__TORIO_IMAGE_DIGEST__"
     variant: server
 
 mounts: []

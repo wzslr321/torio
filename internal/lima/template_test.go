@@ -26,7 +26,7 @@ func TestValidateOperatorUserAcceptsSafeNames(t *testing.T) {
 // on every boot. The session it opens carries the operator's forwarded agent, so
 // nothing writable by the operator or by hermes may sit on that path.
 func TestRenderTemplateInstallsTheOperatorShellHelper(t *testing.T) {
-	body, err := renderTemplate(InitOptions{OperatorUser: "operator"})
+	body, err := renderTemplate(InitOptions{OperatorUser: "operator"}, testProfile)
 	if err != nil {
 		t.Fatalf("renderTemplate: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestRenderTemplateInstallsTheOperatorShellHelper(t *testing.T) {
 }
 
 func TestRenderTemplateInstallsTheProjectEnterHelper(t *testing.T) {
-	body, err := renderTemplate(InitOptions{OperatorUser: "operator"})
+	body, err := renderTemplate(InitOptions{OperatorUser: "operator"}, testProfile)
 	if err != nil {
 		t.Fatalf("renderTemplate: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestRenderTemplateInstallsTheProjectEnterHelper(t *testing.T) {
 // be executed.
 func TestRenderedTemplateAddsTheOperatorToTorioProjects(t *testing.T) {
 	const operator = "operator"
-	body, err := renderTemplate(InitOptions{OperatorUser: operator})
+	body, err := renderTemplate(InitOptions{OperatorUser: operator}, testProfile)
 	if err != nil {
 		t.Fatalf("renderTemplate: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestRenderedTemplateValidatesWithInstalledLima(t *testing.T) {
 	if err != nil {
 		t.Skip("limactl is not installed")
 	}
-	body, err := renderTemplate(InitOptions{OperatorUser: "operator"})
+	body, err := renderTemplate(InitOptions{OperatorUser: "operator"}, testProfile)
 	if err != nil {
 		t.Fatalf("renderTemplate: %v", err)
 	}

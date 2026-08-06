@@ -85,7 +85,7 @@ you pushed. It does not know, and it will not guess.
 
 ## No editor integration, and no host mount {#no-editor-integration}
 
-Torio integrates with no editor and mounts no macOS directory into the VM. Both
+Torio integrates with no editor and mounts no host directory into the VM. Both
 are deliberate. A broad host mount would carry host Git configuration, hooks,
 and keys across the VM boundary — the same reason a workspace is never seeded
 from a host checkout. So checkouts exist only on the VM's native filesystem,

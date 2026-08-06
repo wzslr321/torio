@@ -27,7 +27,7 @@ func bootstrapHappyScript() []scriptedResponse {
 		{result: stdoutResult(PromotedHermesCommit + "\n")},                  // 8 git rev-parse HEAD
 		{result: exitResult(0, "", "")},                                      // 9 test -x launcher (shim reconcile)
 		{result: stdoutResult(hermesTarget + "\n")},                          // 10 readlink shim
-		{result: stdoutResult("aarch64\n")},                                  // 11 uname -m
+		{result: stdoutResult(testProfile.Arch + "\n")},                      // 11 uname -m (this host's guest arch)
 		{result: stdoutResult("Hermes Agent v0.19.0 (2026.7.20)\n")},         // 12 hermes --version
 		{result: stdoutResult("git version 2.43.0\n")},                       // 13 git --version
 		{result: stdoutResult("directory\n")},                                // 14 stat HermesHome type
@@ -254,7 +254,9 @@ func TestBootstrapRejectsEmptyOperator(t *testing.T) {
 
 func TestBootstrapArchMismatchFailsClosed(t *testing.T) {
 	s := bootstrapHappyScript()
-	s[11] = scriptedResponse{result: stdoutResult("x86_64\n")}
+	// An architecture no profile pins. Naming the *other* supported host would
+	// make this test pass on one platform and assert nothing on the other.
+	s[11] = scriptedResponse{result: stdoutResult("riscv64\n")}
 	fr := &fakeRunner{script: s}
 	a := New(fr)
 
@@ -497,7 +499,7 @@ func TestBootstrapRejectsTruncatedProbeOutput(t *testing.T) {
 	// Bounded, truncated guest output is untrustworthy: a verify probe that was
 	// cut off must fail closed rather than be parsed as ground truth.
 	s := bootstrapHappyScript()
-	s[11] = scriptedResponse{result: execx.Result{ExitCode: 0, Stdout: []byte("aarch64\n"), StdoutTruncated: true}}
+	s[11] = scriptedResponse{result: execx.Result{ExitCode: 0, Stdout: []byte(testProfile.Arch + "\n"), StdoutTruncated: true}}
 	fr := &fakeRunner{script: s}
 	a := New(fr)
 
