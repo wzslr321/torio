@@ -10,7 +10,9 @@ import (
 
 // instanceRecord is the subset of `limactl list --json` fields the V1 adapter
 // needs — the top-level name and status, verified against real output from an
-// installed Lima 2.2.0 (archive/pre-v1:docs/spike-results/evidence/etap-0d-lima-adapter/).
+// installed Lima 2.2.0. That output is NDJSON: one JSON object per line, not a
+// JSON array, which is why Status runs a streaming json.Decoder loop instead of
+// unmarshalling a single document (TestStatusMultipleInstancesNDJSON).
 // Unknown fields are ignored (this is external tool output the adapter
 // consumes, not an authority document it produces — contrast with
 // internal/config's DisallowUnknownFields on its own on-disk documents).

@@ -61,19 +61,22 @@ func validateProjectPath(projectPath string) error {
 // OperatorShellSpec builds the exact, evidence-pinned argv for an ephemeral
 // operator shell into projectPath.
 //
-// The flags are the promoted Gate-0 shape
-// (archive/pre-v1:docs/spike-results/v1-operator-shell-20260727T132420Z/FINDINGS.md):
+// The flags are the shape proven against Lima 2.2.0 and OpenSSH 10.2p1:
 //
 //	ssh -F ~/.lima/<instance>/ssh.config \
 //	  -o ControlMaster=no -o ControlPath=none -o ForwardAgent=yes -A \
 //	  lima-<instance> …
 //
 // The -o overrides MUST follow -F: Lima's own ssh.config sets
-// ControlMaster/ControlPersist, and a stale multiplexing socket otherwise wins
-// and poisons agent forwarding — the regression the spike proved. -t forces a
-// TTY because a remote command is present, and -n is deliberately absent: the
-// spike needed it only for a backgrounded session, and it would redirect the
-// operator's stdin from /dev/null.
+// ControlMaster/ControlPersist, so an override placed ahead of -F is the one
+// that loses, and the session then rides a multiplexed connection whose master
+// was opened without agent forwarding. In this order it was measured with a
+// stale mux socket already open and the forwarded agent still reached the
+// guest. -t forces a TTY because a remote command is present, and -n is
+// deliberately absent: it is required only to background a session, and here it
+// would redirect the operator's stdin from /dev/null.
+//
+// TestOperatorShellSpecBuildsThePromotedArgv pins this argv element by element.
 //
 // The remote side is the fixed guest helper plus the validated project path.
 // There is no caller-supplied remote command string, and no environment is

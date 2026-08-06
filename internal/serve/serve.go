@@ -11,13 +11,17 @@
 // output. It renders no CLI output and makes no exit-code decisions; that is
 // internal/cli's job.
 //
-// Discovery that fixes this design (sanitized evidence under
-// archive/pre-v1:docs/spike-results/evidence/d5-serve-discovery-*):
+// Discovery that fixes this design, probed against a live Hermes Agent v0.19.0
+// backend on the guest:
 //   - `hermes serve` defaults to --host 127.0.0.1 --port 9119 and exposes an
 //     unauthenticated readiness endpoint GET /api/status -> 200 (JSON with a
-//     version). --skip-build serves the backend without an npm build step.
-//   - `hermes serve --stop/--status` use naive process matching (they count the
-//     querying process itself) and are unreliable, so the process is managed via
+//     version). /api/health, /api/info and /api/version all answer 401, so
+//     /api/status is the only endpoint usable as an unauthenticated probe.
+//     --skip-build serves the backend without an npm build step.
+//   - `hermes serve --stop/--status` use naive process matching and are
+//     unreliable: --status counted the querying process itself, and --stop
+//     killed the real backend, then failed to kill its own query process
+//     ("Operation not permitted") and exited 1. So the process is managed via
 //     systemd and readiness is proven by systemd state + the HTTP probe.
 //   - The `hermes` user is uid-distinct and needs linger enabled for a
 //     Restart=always user service to run without a login session; user systemctl

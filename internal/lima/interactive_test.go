@@ -27,10 +27,12 @@ func operatorShellHost(t *testing.T) string {
 	return home
 }
 
-// TestOperatorShellSpecBuildsThePromotedArgv pins the exact argv proven by the
-// promoted Gate-0 spike (archive/pre-v1:docs/spike-results/v1-operator-shell-20260727T132420Z):
-// -F first, then the -o overrides, then -A. The remote side is a fixed guest
-// helper plus the project path — two argv elements, never a command string.
+// TestOperatorShellSpecBuildsThePromotedArgv pins the exact argv proven against
+// Lima 2.2.0 and OpenSSH 10.2p1: -F first, then the -o overrides, then -A. That
+// order is what kept agent forwarding working when a stale ControlMaster socket
+// was already open; reversed, Lima's own ssh.config wins and the session gets no
+// agent. The remote side is a fixed guest helper plus the project path — two
+// argv elements, never a command string.
 func TestOperatorShellSpecBuildsThePromotedArgv(t *testing.T) {
 	home := operatorShellHost(t)
 

@@ -24,9 +24,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import validate_artifacts as v  # noqa: E402
 
-# The block exactly as it stood before the correction, at 6ff120b. Pasted
-# unchanged during Task 23 it pinned a working, guessable token and nothing
-# reported an error — see archive/pre-oss:docs/v1-evidence/FINDINGS-run-a.md.
+# The block exactly as it stood before the correction, at 6ff120b. During the
+# Task 23 end-to-end run an operator followed it literally, and the heredoc
+# assigned HERMES_DASHBOARD_SESSION_TOKEN the placeholder string itself: a live
+# backend ended up with a working, guessable session token. Nothing failed, no
+# check reported it, and it was found only because a human noticed. That is the
+# incident the rule below exists for, so the failing text is pinned verbatim.
 PRE_FIX_BLOCK = """\
 ```bash
 limactl shell torio            # interactive shell in the VM (Lima user)

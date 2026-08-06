@@ -218,11 +218,12 @@ func TestStatusRejectsRecordWithEmptyStatus(t *testing.T) {
 
 // fixtureInstanceJSON returns a single-line `limactl list --json` record for
 // name/status, shaped like the real output captured from `limactl list
-// --json` against a live Lima 2.2.0 instance (see
-// archive/pre-v1:docs/spike-results/evidence/etap-0d-lima-adapter/limactl-list-json.txt for
-// the verbatim evidence). The V1 adapter reads only the top-level
+// --json` against a live Lima 2.2.0 instance: one object per line with no
+// enclosing array, `name` and `status` at the top level, and the rest of the
+// instance under a nested `config`. The V1 adapter reads only the top-level
 // name/status; the surrounding fields mirror the real record so the fixture
-// stays representative of the actual NDJSON shape.
+// stays representative of the actual NDJSON shape rather than of the minimum
+// that happens to parse.
 func fixtureInstanceJSON(name, status string) string {
 	return `{"name":"` + name + `","hostname":"lima-` + name + `","status":"` + status + `","dir":"/Users/USER/.lima/` + name + `","vmType":"vz","arch":"aarch64","cpus":4,"memory":8589934592,"disk":64424509440,"sshLocalPort":54250,"config":{"vmType":"vz","os":"Linux","arch":"aarch64","cpus":4,"memory":"8GiB","disk":"60GiB"},"sshAddress":"127.0.0.1","protected":false,"limaVersion":"2.2.0"}`
 }

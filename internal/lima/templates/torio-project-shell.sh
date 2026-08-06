@@ -12,9 +12,10 @@
 # (internal/lima.validateProjectPath). This script validates it again, because
 # the host is a caller and not a trusted input source. Everything else about the
 # session is fixed here rather than passed in: the operator's own identity under
-# the shared project group, never sudo and never root, matching the promoted
-# Gate-0 evidence in
-# archive/pre-v1:docs/spike-results/v1-operator-shell-20260727T132420Z/FINDINGS.md.
+# the shared project group, never sudo and never root. That shape was measured
+# on a live guest: entering through `sg torio-projects` reached the checkout and
+# wrote in it without sudo, and the checkout was left carrying no root-owned
+# files afterwards, which is what keeps `hermes` able to keep working in it.
 set -euo pipefail
 
 workspace='/home/hermes/projects'

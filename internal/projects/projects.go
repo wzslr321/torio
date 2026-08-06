@@ -24,11 +24,14 @@ const (
 	// workspaceRoot is the fixed parent of every attached checkout. Bootstrap
 	// already proves it exists as hermes:torio-projects 2770 on native ext4.
 	workspaceRoot = lima.HermesWorkspacePath
-	// sharedGroup is the group the operator and `hermes` both belong to. The
-	// promoted Gate-0 operator-shell spike
-	// (archive/pre-v1:docs/spike-results/v1-operator-shell-20260727T132420Z) established it as
-	// the only way both identities can work one checkout without sudo — and
-	// established just as firmly that `hermes` must never be in the docker group.
+	// sharedGroup is the group the operator and `hermes` both belong to, and the
+	// only way found to let both identities work one checkout without sudo:
+	// workspaceRoot is 2770 hermes:torio-projects, so setgid puts every file
+	// created below it in the group and both members can write it. Membership is
+	// deliberately narrow — the operator's login identity and `hermes`, never
+	// "every uid >= 500", which on Ubuntu also sweeps in systemd dynamic users.
+	// It is also why `hermes` is never in the docker group: that group is
+	// root-equivalent, so it would give the agent the whole guest.
 	sharedGroup = "torio-projects"
 )
 

@@ -32,6 +32,16 @@
 
 ### Internal
 
+- Nine comments cited a findings document under `docs/spike-results/` or
+  `docs/v1-evidence/` at an archive tag instead of stating what was found. Each
+  now carries the fact and its consequence inline — the SSH flag order and the
+  Lima and OpenSSH versions it was proven against, the NDJSON framing of
+  `limactl list --json`, the readiness endpoint and the two unreliable
+  lifecycle flags, the shared-group and no-Docker rules, and the pasted
+  placeholder that produced a live guessable session token — and points at the
+  test that pins it where one exists. The addresses would not have survived the
+  history rewrite, and a reader had to fetch a tag to learn why the code is
+  shaped the way it is.
 - Removed the `spikes/` tree and every coupling to it: the `make validate` step
   that ran the dogfood driver's structural assertions, the `spikes/**`
   paths-ignore entry in the platform-e2e trigger, two dead `.gitignore` rules,

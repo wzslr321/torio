@@ -1,6 +1,10 @@
 # Torio product Lima template (embedded).
-# Pins and layout come from the promoted Gate 0 path, recorded at
-# archive/pre-oss:docs/spike-results/v1-onboarding-20260727T115633Z/FINDINGS.md.
+# The layout is the one a fresh-VM onboarding run on Lima 2.2.0 settled on: no
+# host mounts, no persistent agent forwarding, no user or system containerd, and
+# a dated Ubuntu 24.04 image release rather than a floating `/release/` URL, so
+# two machines created weeks apart boot the same guest. Docker is absent on
+# purpose — adding `hermes` to the docker group is root-equivalent and would
+# void the VM boundary, so a container runtime for agents needs its own ADR.
 # internal/lima.Init substitutes the operator user, cpus, memory, disk, the
 # operator shell helper and the host-derived pins before limactl create. Their
 # tokens are deliberately not spelled out here: substitution is a plain string
