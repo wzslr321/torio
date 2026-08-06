@@ -38,8 +38,8 @@ type Profile struct {
 	// Arch is both what Lima records in its instance config and what `uname -m`
 	// prints inside the guest. Lima and the kernel agree on these spellings, so
 	// one field serves the config check and the guest probe. Confirmed on both
-	// platforms rather than assumed: spike 003 recorded `reported_arch=x86_64`
-	// alongside `guest_arch=x86_64`.
+	// platforms rather than assumed: a live x86_64 guest reported
+	// `reported_arch=x86_64` alongside `guest_arch=x86_64`.
 	Arch string
 
 	// ImageURL and ImageDigest pin the guest image built for Arch. Both

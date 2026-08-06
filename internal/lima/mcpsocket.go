@@ -114,8 +114,8 @@ func (a *Adapter) verifyBrokerSockets(ctx context.Context, rep *MCPBrokerReport)
 	if listing.exit != 0 {
 		return a.brokerFailed(rep, name, "could not enumerate broker sockets", "verify "+TorioMCPSocketDir+" on the guest")
 	}
-	sockets := strings.Fields(strings.TrimSpace(listing.out))
-	if len(sockets) == 0 {
+	listingFields := strings.Fields(strings.TrimSpace(listing.out))
+	if len(listingFields) == 0 {
 		return a.brokerFailed(rep, name, "broker runtime directory contains no service sockets",
 			"the broker unit is stopped, starting, or rejected its policy; inspect its service logs")
 	}

@@ -69,8 +69,3 @@ func TestWriteFilePrivateOverwritesAtomically(t *testing.T) {
 		t.Errorf("directory has %d entries, want exactly 1 (no temp leftovers): %v", len(entries), entries)
 	}
 }
-
-// Note: the trusted-file mode/type/ownership rules that statPrivate used to
-// approximate are now enforced by openTrustedFile (no-follow open + fstat) and
-// unit-tested purely in trust_unit_test.go (verifyTrusted). Integration coverage
-// through the public API lives in trust_test.go.

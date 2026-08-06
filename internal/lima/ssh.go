@@ -38,18 +38,7 @@ func guestShellArgs() []string {
 // command is not an SSH/adapter failure: the caller reads Result.ExitCode,
 // the same contract as execx itself.
 func (a *Adapter) SSH(ctx context.Context, command []string) (execx.Result, error) {
-	const op = "ssh"
-
-	prefix := guestShellArgs()
-	args := make([]string, 0, len(command)+len(prefix)+1)
-	args = append(args, prefix...)
-	args = append(args, command...)
-
-	res, err := a.runRaw(ctx, args...)
-	if err != nil {
-		return execx.Result{}, classifyRunErr(op, err)
-	}
-	return res, nil
+	return a.SSHInput(ctx, nil, command)
 }
 
 // SSHInput is SSH with a fed standard input: stdin is delivered verbatim to the
@@ -66,7 +55,7 @@ func (a *Adapter) SSHInput(ctx context.Context, stdin []byte, command []string) 
 	args = append(args, prefix...)
 	args = append(args, command...)
 
-	res, err := a.Runner.Run(ctx, execx.Command{Name: a.bin(), Args: args, Stdin: stdin})
+	res, err := a.Runner.Run(ctx, execx.Command{Name: bin, Args: args, Stdin: stdin})
 	if err != nil {
 		return execx.Result{}, classifyRunErr(op, err)
 	}

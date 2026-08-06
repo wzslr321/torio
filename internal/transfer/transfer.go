@@ -98,9 +98,9 @@ var (
 // Entry is one staged file: its slash-separated path relative to the source
 // root, its size, and the sha256 of its content.
 type Entry struct {
-	Path   string `json:"path"`
-	Size   int64  `json:"size"`
-	Sha256 string `json:"sha256"`
+	Path   string
+	Size   int64
+	Sha256 string
 }
 
 // Manifest is the ordered set of files a transfer covers. Entries are sorted by

@@ -386,7 +386,7 @@ func TestAddRequiresABootstrapVerifiedVM(t *testing.T) {
 func TestAddRequiresAConfiguredOperatorIdentity(t *testing.T) {
 	g := readyFake()
 
-	_, err := New(g, emptyRegistry()).Add(context.Background(), addRequest())
+	_, err := New(g, emptyRegistry(), lima.BootstrapOptions{}).Add(context.Background(), addRequest())
 	assertKind(t, err, KindPrecondition)
 	if len(g.calls) != 0 {
 		t.Fatalf("guest commands ran without an operator identity: %v", g.calls)

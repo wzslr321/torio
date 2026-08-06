@@ -13,7 +13,7 @@ import (
 func TestInitFreshBrainUsesStagingCommitAndRegistersProject(t *testing.T) {
 	g := readyFake()
 
-	report, err := New(g).Init(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
@@ -44,7 +44,7 @@ func TestInitFreshBrainUsesStagingCommitAndRegistersProject(t *testing.T) {
 func TestInitIsIdempotentAndDoesNotDuplicateProject(t *testing.T) {
 	g := initializedFake()
 
-	report, err := New(g).Init(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
@@ -60,7 +60,7 @@ func TestInitCreatesMissingCanonicalDirectoryBeforeScaffolding(t *testing.T) {
 	g := readyFake()
 	g.pathExists = false
 
-	report, err := New(g).Init(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
@@ -79,7 +79,7 @@ func TestInitDoesNotTrustProjectListWhenShowIsUnavailable(t *testing.T) {
 	g := initializedFake()
 	g.showBrokenCLI = true
 
-	report, err := New(g).Init(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
@@ -95,7 +95,7 @@ func TestInitRefusesNonemptyUnmanagedDirectory(t *testing.T) {
 	g := readyFake()
 	g.empty = false
 
-	_, err := New(g).Init(context.Background())
+	_, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	assertKind(t, err, KindConflict)
 	if g.saw("tee "+stagingPath) || g.saw("git -C "+stagingPath) || g.saw("hermes project create") {
 		t.Fatalf("conflicting init mutated guest: %v", g.calls)
@@ -106,7 +106,7 @@ func TestInitRefusesPartialScaffold(t *testing.T) {
 	g := initializedFake()
 	g.scaffold = false
 
-	_, err := New(g).Init(context.Background())
+	_, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	assertKind(t, err, KindConflict)
 	if g.saw("tee "+stagingPath) || g.saw("mv -T "+stagingPath) {
 		t.Fatalf("partial scaffold was overwritten: %v", g.calls)
@@ -127,7 +127,7 @@ func TestStatusReportsDriftForPathAndPartialScaffold(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			g := initializedFake()
 			tc.mutate(g)
-			report, err := New(g).Status(context.Background())
+			report, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
 			if err != nil {
 				t.Fatalf("Status() error = %v", err)
 			}
@@ -146,7 +146,7 @@ func TestInitSurfacesGitFailuresBeforePromotion(t *testing.T) {
 		t.Run(fragment, func(t *testing.T) {
 			g := readyFake()
 			g.setFailure(fragment, 1)
-			_, err := New(g).Init(context.Background())
+			_, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 			assertKind(t, err, KindGit)
 			if g.saw("mv -T "+stagingPath) || g.saw("hermes project create") {
 				t.Fatalf("failed Git setup was promoted or registered: %v", g.calls)
@@ -162,7 +162,7 @@ func TestInitSurfacesHermesRegistrationFailureAfterSafePromotion(t *testing.T) {
 	g := readyFake()
 	g.setFailure("hermes project create", 1)
 
-	report, err := New(g).Init(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	assertKind(t, err, KindRegistration)
 	if !report.Created {
 		t.Fatalf("report.Created = false, want true after promoted scaffold")
@@ -177,7 +177,7 @@ func TestStatusIsBoundedAggregateOnlyAndRedactsNames(t *testing.T) {
 	g.gitDirty = true
 	g.setCounts(1234, 56, 987654)
 
-	report, err := New(g).Status(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
@@ -200,7 +200,7 @@ func TestStatusFailsClosedOnTruncatedAggregateWithoutLeakingPayload(t *testing.T
 	g := initializedFake()
 	g.truncateOn = "find " + Path + " -type f -name *.md"
 
-	_, err := New(g).Status(context.Background())
+	_, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
 	assertKind(t, err, KindVerification)
 	if strings.Contains(err.Error(), "private-note-name") {
 		t.Fatalf("truncation error leaked a note name: %v", err)
@@ -211,7 +211,7 @@ func TestStatusRequiresRunningVM(t *testing.T) {
 	g := initializedFake()
 	g.state = lima.StateStopped
 
-	_, err := New(g).Status(context.Background())
+	_, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
 	assertKind(t, err, KindPrecondition)
 	if len(g.calls) != 0 {
 		t.Fatalf("status reached stopped guest: %v", g.calls)
@@ -226,7 +226,7 @@ func TestStatusRequiresBootstrapVerificationBeforeGuestWork(t *testing.T) {
 		Err:  errors.New("host mount present"),
 	}
 
-	_, err := New(g).Status(context.Background())
+	_, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
 	assertKind(t, err, KindPrecondition)
 	if len(g.calls) != 0 {
 		t.Fatalf("status reached unverified guest: %v", g.calls)
@@ -241,7 +241,7 @@ func TestInitRequiresBootstrapVerificationBeforeGuestWrites(t *testing.T) {
 		Err:  errors.New("brain path ownership drift"),
 	}
 
-	_, err := New(g).Init(context.Background())
+	_, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	assertKind(t, err, KindPrecondition)
 	if len(g.calls) != 0 {
 		t.Fatalf("init wrote to unverified guest: %v", g.calls)
@@ -253,7 +253,7 @@ func TestStatusFailsClosedWhenPasswordlessSudoPreflightFails(t *testing.T) {
 	g.pathExists = false
 	g.setFailure("sudo -n -- true", 1)
 
-	report, err := New(g).Status(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
 	assertKind(t, err, KindGuestCommand)
 	if report.State == StateUninitialized {
 		t.Fatalf("sudo failure was misreported as uninitialized: %#v", report)
@@ -268,7 +268,7 @@ func TestStatusFailsClosedWhenRootPathProbeHasUnexpectedExit(t *testing.T) {
 	g.pathExists = false
 	g.setFailure("test -d "+Path, 2)
 
-	report, err := New(g).Status(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
 	assertKind(t, err, KindGuestCommand)
 	if report.State == StateUninitialized {
 		t.Fatalf("path probe failure was misreported as uninitialized: %#v", report)
@@ -280,7 +280,7 @@ func TestInitRejectsWrongExistingProjectWithoutCreatingDuplicate(t *testing.T) {
 	g.registered = false
 	g.wrongProject = true
 
-	_, err := New(g).Init(context.Background())
+	_, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	assertKind(t, err, KindRegistration)
 	if g.saw("hermes project create") {
 		t.Fatalf("init duplicated a conflicting slug: %v", g.calls)
@@ -291,7 +291,7 @@ func TestStatusRejectsBrainPresentOnlyAsNonPrimaryProjectFolder(t *testing.T) {
 	g := initializedFake()
 	g.projectShow = "name: Second Brain\nprimary: /home/hermes/other\nfolders:\n  - " + Path + "\n"
 
-	report, err := New(g).Status(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
@@ -319,7 +319,7 @@ func TestStatusReportsUninitializedWhenProjectShowExitsZeroWithoutOutput(t *test
 			g := readyFake()
 			tc.mutate(g)
 
-			report, err := New(g).Status(context.Background())
+			report, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
 			if err != nil {
 				t.Fatalf("Status() error = %v", err)
 			}
@@ -344,7 +344,7 @@ func TestInitRegistersProjectWhenProjectShowExitsZeroWithoutOutput(t *testing.T)
 	g := readyFake()
 	g.pathExists = false
 
-	report, err := New(g).Init(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
@@ -363,7 +363,7 @@ func TestStatusReportsConflictWhenProjectSlugPointsElsewhere(t *testing.T) {
 	g.registered = false
 	g.wrongProject = true
 
-	report, err := New(g).Status(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
@@ -382,7 +382,7 @@ func TestInitRefusesConcurrentGuestLockBeforeStagingWork(t *testing.T) {
 	g := readyFake()
 	g.lockHeld = true
 
-	_, err := New(g).Init(context.Background())
+	_, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	assertKind(t, err, KindConflict)
 	if g.saw("rm -rf -- "+stagingPath) || g.saw("tee "+stagingPath) || g.saw("mv -T "+stagingPath) {
 		t.Fatalf("contending init touched shared staging: %v", g.calls)
@@ -398,12 +398,12 @@ func TestInitGuestLockPreventsVerifyThenPromoteInterleaving(t *testing.T) {
 	}
 	firstDone := make(chan error, 1)
 	go func() {
-		_, err := New(g).Init(context.Background())
+		_, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 		firstDone <- err
 	}()
 	<-g.blocked
 
-	_, secondErr := New(g).Init(context.Background())
+	_, secondErr := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	close(g.unblock)
 	firstErr := <-firstDone
 
@@ -418,7 +418,7 @@ func TestInitRecoversOwnedStaleGuestLock(t *testing.T) {
 	g.lockHeld = true
 	g.lockStale = true
 
-	report, err := New(g).Init(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
@@ -513,7 +513,7 @@ func skillDescription(frontmatter string) string {
 func TestInitInstallsRetrievalSkillOnlyAfterTheBrainFullySucceeds(t *testing.T) {
 	g := readyFake()
 
-	report, err := New(g).Init(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
@@ -574,7 +574,7 @@ func TestInitDoesNotInstallRetrievalSkillForAPartialBrain(t *testing.T) {
 			g := tc.guest()
 			tc.mutate(g)
 
-			report, err := New(g).Init(context.Background())
+			report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 			assertKind(t, err, tc.want)
 			if report.SkillUpdated {
 				t.Fatalf("report.SkillUpdated = true for a failed Init")
@@ -598,7 +598,7 @@ func TestInitDoesNotInstallRetrievalSkillForAPartialBrain(t *testing.T) {
 func TestInitLeavesACurrentRetrievalSkillUntouched(t *testing.T) {
 	g := initializedFake().withInstalledSkill(t)
 
-	report, err := New(g).Init(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
@@ -658,7 +658,7 @@ func TestStatusReportsRetrievalSkillStateFromTheGuest(t *testing.T) {
 			g := initializedFake()
 			tc.mutate(t, g)
 
-			report, err := New(g).Status(context.Background())
+			report, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
 			if err != nil {
 				t.Fatalf("Status() error = %v", err)
 			}
@@ -692,7 +692,7 @@ func TestInitRepairsADriftedRetrievalSkill(t *testing.T) {
 			g := initializedFake().withInstalledSkill(t)
 			tc.mutate(g)
 
-			report, err := New(g).Init(context.Background())
+			report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 			if err != nil {
 				t.Fatalf("Init() error = %v", err)
 			}
@@ -723,7 +723,7 @@ func TestInitRefusesToWriteThroughASymlinkedSkillPath(t *testing.T) {
 				g.skillDirSymlink = true
 			}
 
-			_, err := New(g).Init(context.Background())
+			_, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 			assertKind(t, err, KindConflict)
 			if g.saw("tee "+skillStagingPath) || g.saw("mv -T "+skillStagingPath) {
 				t.Fatalf("init wrote through a symlinked skill path: %v", g.calls)
@@ -767,7 +767,7 @@ func TestRetrievalSkillInstallsUnderTheGlobalHermesSkillsRoot(t *testing.T) {
 func TestInitRetiresThePreCategorySkillInstallation(t *testing.T) {
 	g := initializedFake()
 	g.legacySkillPresent = true
-	if _, err := New(g).Init(context.Background()); err != nil {
+	if _, err := New(g, lima.BootstrapOptions{}).Init(context.Background()); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 	if !g.saw("rm -f -- " + legacySkillPath + "/SKILL.md") {
@@ -788,7 +788,7 @@ func TestInitRetiresThePreCategorySkillInstallation(t *testing.T) {
 func TestStatusReportsDriftWhileThePreCategorySkillSurvives(t *testing.T) {
 	g := initializedFake().withInstalledSkill(t)
 	g.legacySkillPresent = true
-	report, err := New(g).Status(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
@@ -833,7 +833,7 @@ func TestInitDoesNotReportDriftItJustRepaired(t *testing.T) {
 	g := initializedFake().withInstalledSkill(t)
 	g.legacySkillPresent = true
 
-	report, err := New(g).Init(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
@@ -851,7 +851,7 @@ func TestStatusStillReportsDriftNobodyRepaired(t *testing.T) {
 	g := initializedFake().withInstalledSkill(t)
 	g.legacySkillPresent = true
 
-	report, err := New(g).Status(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
@@ -872,7 +872,7 @@ func TestInitRebuildsAnEmptyBrainThatIsStillRegistered(t *testing.T) {
 	g := readyFake()
 	g.registered = true
 
-	report, err := New(g).Init(context.Background())
+	report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
@@ -896,7 +896,7 @@ func TestInitStillRefusesWhenTheSlugBelongsToAnotherPath(t *testing.T) {
 	g := readyFake()
 	g.wrongProject = true
 
-	_, err := New(g).Init(context.Background())
+	_, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	assertKind(t, err, KindConflict)
 	if g.saw("mv -T " + stagingPath + " " + Path) {
 		t.Errorf("init scaffolded under a slug owned by another path: %v", g.calls)

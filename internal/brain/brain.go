@@ -34,11 +34,8 @@ const (
 	// carry a DESCRIPTION.md whose text is NOT subject to the 60-character cap
 	// that truncates skill descriptions, and a top-level skill cannot have one.
 	//
-	// The bundled competitor exploits exactly that: `note-taking/obsidian`
-	// describes itself in 59 characters, sits 15th, and its category adds 133
-	// uncapped characters. In Task 23 Run B the session reached for it first,
-	// resolved a vault path that does not exist on this guest, and only
-	// recovered to the real Brain afterwards.
+	// The bundled note-taking/obsidian skill sorts 15th and adds 133 uncapped
+	// characters through its category.
 	//
 	// "brain" sorts near the front and gives the skill a category description.
 	// Neither is enforcement — see EnvironmentHint for what carries the rule

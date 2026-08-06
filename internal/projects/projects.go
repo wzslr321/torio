@@ -39,8 +39,8 @@ const (
 // GIT_TERMINAL_PROMPT=0 refuses a credential prompt outright, and BatchMode=yes
 // does the same for SSH, so a repository the guest cannot already read fails
 // instead of hanging on a prompt no one is there to answer.
-// StrictHostKeyChecking=accept-new is the promoted spike's setting: it pins the
-// host key on first contact and refuses a changed one afterwards.
+// StrictHostKeyChecking=accept-new pins the host key on first contact and
+// refuses a changed one afterwards.
 var gitNoninteractiveEnv = []string{
 	"env",
 	"GIT_TERMINAL_PROMPT=0",

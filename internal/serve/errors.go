@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/wzslr321/torio/internal/execx"
-	"github.com/wzslr321/torio/internal/lima"
 )
 
 // ErrorKind classifies a serve-lifecycle failure so internal/cli can map it onto
@@ -78,12 +77,6 @@ func fromGuestErr(op string, err error) *Error {
 	if errors.Is(err, context.Canceled) {
 		return &Error{Op: op, Kind: KindCancelled, Err: err}
 	}
-	// A classified *lima.Error carries its own kind; still fold to transport for
-	// the serve surface, keeping the underlying (redacted) message.
-	var lerr *lima.Error
-	if errors.As(err, &lerr) {
-		return &Error{Op: op, Kind: KindTransport, Err: err}
-	}
 	return &Error{Op: op, Kind: KindTransport, Err: err}
 }
 
@@ -92,8 +85,6 @@ func fromGuestErr(op string, err error) *Error {
 func cmdErr(what string, res execx.Result) error {
 	return fmt.Errorf("%s exited %d: %s", what, res.ExitCode, bound(string(res.Stderr)))
 }
-
-func errf(format string, args ...any) error { return fmt.Errorf(format, args...) }
 
 // bound caps a derived string so an error/detail can never carry an unbounded
 // blob into the JSON envelope.

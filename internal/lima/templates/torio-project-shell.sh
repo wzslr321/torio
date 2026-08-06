@@ -53,8 +53,7 @@ fi
 [ -d "$project" ] || die 'project directory does not exist'
 
 # The session carries the operator's own identity. A root session would leave
-# root-owned files in a checkout that hermes has to keep working in, which is
-# exactly what the promoted spike checked for.
+# root-owned files in a checkout that hermes has to keep working in.
 [ "$(id -u)" -ne 0 ] || die 'refusing to open a project session as root'
 command -v sg >/dev/null 2>&1 || die 'sg is missing on this guest'
 
@@ -67,8 +66,8 @@ export PS1="torio:${project_id}"':\W\$ '
 
 printf 'torio: project %s. Push capability is forwarded from your Mac for this session only and ends when you exit.\n' "$project_id"
 
-# sg's -c runs its argument through sh, so bash is forced explicitly (promoted
-# spike). That argument is a fixed constant: the project reaches the session as
-# the inherited working directory and the prompt as the exported PS1, so nothing
+# sg's -c runs its argument through sh, so bash is forced explicitly. That
+# argument is a fixed constant: the project reaches the session as the
+# inherited working directory and the prompt as the exported PS1, so nothing
 # derived from the argument is ever concatenated into a command.
 exec sg "$group" -c 'exec bash --norc -i'

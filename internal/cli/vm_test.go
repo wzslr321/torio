@@ -7,19 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
-)
-
-const (
-	cliTestMCPBrokerBinary = "broker-guest-payload"
-	cliTestMCPRelayBinary  = "relay-guest-payload"
 )
 
 // testProfile is the profile the production adapter resolves on this machine.
@@ -77,25 +70,12 @@ func runVMWithFake(t *testing.T, args []string, fake execx.Runner) (int, string,
 func runVMWithFakeBoundJSON(t *testing.T, args []string, fake execx.Runner) (int, string, string, bool) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	mcpArtifacts := t.TempDir()
-	for name, body := range map[string]string{
-		testProfile.MCPBrokerArtifact(): cliTestMCPBrokerBinary,
-		testProfile.MCPRelayArtifact():  cliTestMCPRelayBinary,
-	} {
-		if err := os.WriteFile(filepath.Join(mcpArtifacts, name), []byte(body), 0o755); err != nil {
-			t.Fatalf("write MCP guest fixture %s: %v", name, err)
-		}
-	}
 	var stdout, stderr bytes.Buffer
 	a := &app{
-		stdout: &stdout,
-		stderr: &stderr,
-		build:  testBuild(),
-		newLima: func() *lima.Adapter {
-			adapter := lima.New(fake)
-			adapter.MCPGuestBinaryDir = mcpArtifacts
-			return adapter
-		},
+		stdout:             &stdout,
+		stderr:             &stderr,
+		build:              testBuild(),
+		newLima:            func() *lima.Adapter { return lima.New(fake) },
 		lookupOperatorUser: func() (string, error) { return "testop", nil },
 	}
 	code := runWithApp(context.Background(), a, args)

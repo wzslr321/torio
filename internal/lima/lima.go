@@ -40,12 +40,6 @@ type Adapter struct {
 	// Runner executes limactl. Tests inject a fake; production wires
 	// execx.ExecRunner.
 	Runner execx.Runner
-	// Bin overrides the limactl executable name/path. Empty uses "limactl".
-	Bin string
-	// MCPGuestBinaryDir is the directory containing the two MCP guest payloads
-	// shipped beside the host CLI. Empty resolves beside the running
-	// executable. Tests set it to a private fixture directory.
-	MCPGuestBinaryDir string
 	// Profile carries the host-derived instance pins. New resolves it from the
 	// running platform; tests set it explicitly so a pin assertion states which
 	// host it is about rather than inheriting whichever machine ran it.
@@ -67,7 +61,7 @@ type Adapter struct {
 // host during startup, so the deep failure is a backstop and not the path an
 // operator meets.
 func New(runner execx.Runner) *Adapter {
-	a := &Adapter{Runner: runner, Bin: bin}
+	a := &Adapter{Runner: runner}
 	if p, err := HostProfile(); err == nil {
 		a.Profile = p
 	}
@@ -85,13 +79,6 @@ func (a *Adapter) profile() (Profile, error) {
 	return a.Profile, nil
 }
 
-func (a *Adapter) bin() string {
-	if a.Bin != "" {
-		return a.Bin
-	}
-	return bin
-}
-
 // run executes `limactl <args...>` with a fixed, explicit --tty=false so
 // subcommands that could open an editor or prompt (list/create/start/stop/
 // shell) never depend on stdout TTY auto-detection: every invocation is
@@ -105,5 +92,5 @@ func (a *Adapter) run(ctx context.Context, args ...string) (execx.Result, error)
 // for top-level, read-only invocations (--version) that carry no
 // interactivity risk and whose argv is a stable, documented contract.
 func (a *Adapter) runRaw(ctx context.Context, args ...string) (execx.Result, error) {
-	return a.Runner.Run(ctx, execx.Command{Name: a.bin(), Args: args})
+	return a.Runner.Run(ctx, execx.Command{Name: bin, Args: args})
 }

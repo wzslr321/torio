@@ -101,7 +101,7 @@ func Load(opts Options) (rt Runtime, err error) {
 	// For the default (non-explicit) config, ConfigDir is the trusted app
 	// directory holding the config document; validate it if it exists. An
 	// explicit --config is an operator-provided path whose parent mode is not
-	// enforced in D3.0 (ADR-0001 decision 1) — only the file itself is checked.
+	// enforced (ADR-0001 decision 1) — only the file itself is checked.
 	if !paths.explicitConfig {
 		if err := statTrustedDirIfExists(paths.ConfigDir); err != nil {
 			return Runtime{}, err

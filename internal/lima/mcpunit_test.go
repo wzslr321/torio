@@ -27,17 +27,6 @@ func TestMCPBrokerUnitCreatesTheClientRuntimeDirectory(t *testing.T) {
 	}
 }
 
-func TestProbeMCPBrokerUnitRejectsAnUntrustedSystemUnitDirectory(t *testing.T) {
-	fr := &fakeRunner{script: []scriptedResponse{
-		{result: exitResult(1, "directory hermes:hermes 755\n", "no such file")},
-	}}
-	rep := &MCPBrokerInstallReport{}
-
-	if _, _, err := New(fr).probeMCPBrokerUnit(context.Background(), rep, "install:unit", mcpBrokerUnit()); err == nil {
-		t.Fatal("an agent-owned /etc/systemd/system was accepted as a safe root staging directory")
-	}
-}
-
 func TestVerifyMCPBrokerUnitRejectsRootOwnedContentDrift(t *testing.T) {
 	fr := &fakeRunner{script: []scriptedResponse{
 		{result: stdoutResult("directory root:root 755\nregular file root:root 644\n")},

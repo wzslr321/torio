@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
-	"github.com/wzslr321/torio/internal/lima"
 )
 
 // ErrorKind is the stable classification consumed by internal/cli.
@@ -45,10 +43,6 @@ func fromGuestErr(op string, err error) *Error {
 		return &Error{Op: op, Kind: KindTimeout, Err: err}
 	case errors.Is(err, context.Canceled):
 		return &Error{Op: op, Kind: KindCancelled, Err: err}
-	}
-	var lerr *lima.Error
-	if errors.As(err, &lerr) {
-		return &Error{Op: op, Kind: KindTransport, Err: err}
 	}
 	return &Error{Op: op, Kind: KindTransport, Err: err}
 }

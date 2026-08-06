@@ -26,6 +26,8 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/wzslr321/torio/internal/mcpbroker"
 )
 
 // Exit codes follow the table in docs/contracts/cli.md so an operator debugging
@@ -56,12 +58,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	os.Exit(run(ctx, os.Args[1:], socketDir, os.Stdin, os.Stdout, os.Stderr))
+	os.Exit(run(ctx, os.Args[1:], mcpbroker.SocketDir, os.Stdin, os.Stdout, os.Stderr))
 }
 
 // run is the whole command with its I/O and socket directory injected, so tests
 // drive it against a temp dir. socketBase is a parameter only for that reason;
-// production always passes the fixed socketDir.
+// production always passes the fixed mcpbroker.SocketDir.
 //
 // stdout carries the MCP protocol stream and nothing else. Every diagnostic in
 // this command goes to stderr, including usage.
@@ -69,7 +71,7 @@ func run(ctx context.Context, args []string, socketBase string, stdin io.Reader,
 	if len(args) != 1 {
 		return usage(stderr, fmt.Sprintf("expects exactly one argument, the MCP service name (got %d)", len(args)))
 	}
-	path, err := socketPath(socketBase, args[0])
+	path, err := mcpbroker.SocketPath(socketBase, args[0])
 	if err != nil {
 		return usage(stderr, err.Error())
 	}

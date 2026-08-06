@@ -77,15 +77,6 @@ type Decision struct {
 	Allowed bool
 	// Reason explains the verdict.
 	Reason Reason
-	// Writes reports that the granted tool is one the policy document marks as
-	// writing. It is meaningful only when Allowed is true: nothing is known
-	// about a tool that was never granted, so a denial reports false rather than
-	// letting a caller read the zero value as a fact.
-	//
-	// It exists so a caller can gate write tools on something Allow itself does
-	// not know about — an operator's time-bounded window. Without it that gate
-	// has no way to tell a write from a read at decision time.
-	Writes bool
 }
 
 // Allow reports whether service may invoke tool.
@@ -104,11 +95,10 @@ func (s Set) Allow(service, tool string) Decision {
 	if !ok {
 		return Decision{Reason: ReasonUnknownService}
 	}
-	writes, granted := svc.tools[tool]
-	if !granted {
+	if _, granted := svc.tools[tool]; !granted {
 		return Decision{Reason: ReasonToolNotGranted}
 	}
-	return Decision{Allowed: true, Reason: ReasonGranted, Writes: writes}
+	return Decision{Allowed: true, Reason: ReasonGranted}
 }
 
 // Grant is the complete effective grant of a Set, in a form a caller can render

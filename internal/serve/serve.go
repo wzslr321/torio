@@ -30,10 +30,12 @@ package serve
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/wzslr321/torio/internal/execx"
+	"github.com/wzslr321/torio/internal/guestexec"
 	"github.com/wzslr321/torio/internal/lima"
 )
 
@@ -112,7 +114,7 @@ func (a *Adapter) runtimeDir(ctx context.Context, op string) (string, *Error) {
 	uidStr := strings.TrimSpace(string(res.Stdout))
 	uid, perr := strconv.Atoi(uidStr)
 	if perr != nil || uid < 0 {
-		return "", &Error{Op: op, Kind: KindGuestCommandFailed, Err: errf("could not resolve the hermes uid")}
+		return "", &Error{Op: op, Kind: KindGuestCommandFailed, Err: fmt.Errorf("could not resolve the hermes uid")}
 	}
 	return "/run/user/" + strconv.Itoa(uid), nil
 }
@@ -120,26 +122,12 @@ func (a *Adapter) runtimeDir(ctx context.Context, op string) (string, *Error) {
 // userctl builds `sudo -n -u hermes -- env XDG_RUNTIME_DIR=<rt> systemctl --user <args...>`.
 // systemctl --user needs the runtime directory to reach the user manager.
 func userctl(rt string, args ...string) []string {
-	base := []string{"sudo", "-n", "-u", lima.HermesUser, "--", "env", "XDG_RUNTIME_DIR=" + rt, "systemctl", "--user"}
-	return append(base, args...)
+	return userEnv(rt, append([]string{"systemctl", "--user"}, args...)...)
 }
 
 // userEnv builds `sudo -n -u hermes -- env XDG_RUNTIME_DIR=<rt> <args...>` for a
 // non-systemctl guest command that still needs the user runtime dir (journalctl
 // --user, systemd-analyze --user).
 func userEnv(rt string, args ...string) []string {
-	base := []string{"sudo", "-n", "-u", lima.HermesUser, "--", "env", "XDG_RUNTIME_DIR=" + rt}
-	return append(base, args...)
-}
-
-// userExec builds `sudo -n -u hermes -- <args...>` for a plain guest command run
-// as the hermes identity (no user-manager runtime dir needed).
-func userExec(args ...string) []string {
-	return append([]string{"sudo", "-n", "-u", lima.HermesUser, "--"}, args...)
-}
-
-// rootExec builds `sudo -n -- <args...>` for a system command run as the Lima
-// login user with root (loginctl linger management).
-func rootExec(args ...string) []string {
-	return append([]string{"sudo", "-n", "--"}, args...)
+	return guestexec.UserExec(append([]string{"env", "XDG_RUNTIME_DIR=" + rt}, args...)...)
 }

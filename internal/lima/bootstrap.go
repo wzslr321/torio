@@ -3,6 +3,7 @@ package lima
 import (
 	"context"
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 
@@ -36,30 +37,10 @@ import (
 // `sudo -u hermes -- hermes …`; the bare `hermes` name resolves through a fixed
 // symlink on sudo's secure_path.
 //
-// Reconcile is idempotent and limited to the narrowly declared Hermes install and
-// PATH/shim setup:
-//   - when the pinned launcher is missing, install Hermes Agent at the Gate-0
-//     commit via the upstream install script (typed argv, no pipe), then verify
-//     git HEAD and launcher executability;
-//   - ensure /usr/local/bin/hermes is a symlink to the pinned launcher, but only
-//     after confirming the launcher exists (a missing launcher after reconcile is
-//     reported as drift, never papered over with a dangling shim).
-//
-// Verification proves (never merely trusts an exit code) every postcondition and
-// fails closed on any mismatch or unverifiable state:
-//   - the hermes user exists;
-//   - group torio-projects exists and hermes is a member;
-//   - the operator (Lima login user) is a member of torio-projects;
-//   - hermes is NOT in the docker group;
-//   - uname -m is the host profile's guest architecture;
-//   - `hermes --version` works through the documented stable command path;
-//   - git --version works;
-//   - each required path is a directory with the expected owner, group, and mode
-//     on native ext4;
-//   - no host-share mount (9p/virtiofs/fuse/nfs/cifs) is present;
-//   - the operator shell helper is a root-owned, non-writable regular file at
-//     OperatorShellHelper — the guest side of `torio project shell`, provisioned
-//     by the template and never reconciled here.
+// Reconcile is idempotent and limited to the narrowly declared Hermes install
+// and PATH/shim setup. Verification proves (never merely trusts an exit code)
+// every postcondition in the body below and fails closed on any mismatch or
+// unverifiable state.
 //
 // A rerun is success only when all postconditions are proven. A drift
 // (architecture/version/image/mount/ownership) is reported, not repaired.
@@ -82,7 +63,6 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 	}
 	switch st {
 	case StateRunning:
-		// proceed
 	case StateStopped:
 		return rep, &Error{Op: bootstrapOp, Kind: KindNotRunning, Err: fmt.Errorf("instance %q is stopped; run `torio vm start` first", InstanceName)}
 	default:
@@ -93,7 +73,6 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 		return rep, &Error{Op: bootstrapOp, Kind: KindVerificationFailed, Err: err}
 	}
 
-	// --- Verify guest identity layout (read-only, fail closed) ---
 	if err := a.verifyHermesUser(ctx, &rep); err != nil {
 		return rep, err
 	}
@@ -110,7 +89,6 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 		return rep, err
 	}
 
-	// --- Reconcile (idempotent, narrow) ---
 	if err := a.reconcileHermesInstall(ctx, &rep); err != nil {
 		return rep, err
 	}
@@ -118,7 +96,6 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 		return rep, err
 	}
 
-	// --- Verify runtime and filesystem postconditions ---
 	if err := a.verifyArch(ctx, &rep); err != nil {
 		return rep, err
 	}
@@ -183,11 +160,10 @@ const (
 
 // bootstrapPathSpec is one required guest path and its expected ownership/mode.
 type bootstrapPathSpec struct {
-	path   string
-	owner  string
-	group  string
-	modes  []string // accepted stat -c %a values (0710 may appear as 710)
-	setgid bool     // when true, mode must have the setgid bit (2xxx)
+	path  string
+	owner string
+	group string
+	modes []string // accepted stat -c %a values (0710 may appear as 710)
 
 	// allowStricter accepts a mode that grants strictly less than the spec.
 	// Set it only where the surrendered permission is one nothing outside the
@@ -196,13 +172,13 @@ type bootstrapPathSpec struct {
 }
 
 // bootstrapRequiredPaths are the persistent Hermes directories that must resolve
-// on the VM's native Linux filesystem with the V1 layout (ADR-0003 / Gate 0
-// FINDINGS). Owned paths are inspected via sudo.
+// on the VM's native Linux filesystem with the V1 layout (ADR-0003). Owned
+// paths are inspected via sudo.
 var bootstrapRequiredPaths = []bootstrapPathSpec{
 	{path: HermesHome, owner: HermesUser, group: TorioProjectsGroup, modes: []string{"710", "0710"}},
 	{path: HermesProfilePath, owner: HermesUser, group: HermesUser, modes: []string{"750", "0750"}, allowStricter: true},
 	{path: HermesBrainPath, owner: HermesUser, group: HermesUser, modes: []string{"750", "0750"}, allowStricter: true},
-	{path: HermesWorkspacePath, owner: HermesUser, group: TorioProjectsGroup, modes: []string{"2770"}, setgid: true},
+	{path: HermesWorkspacePath, owner: HermesUser, group: TorioProjectsGroup, modes: []string{"2770"}},
 }
 
 // operatorShellHelperSpec is the required guest state of the operator shell
@@ -229,15 +205,18 @@ const operatorShellHelperRemediation = "restart the VM so provisioning reinstall
 
 const projectEnterHelperRemediation = "restart the VM so provisioning reinstalls " + ProjectEnterHelper + " as root:root 0755"
 
-const projectEnterInstallScript = `
-tmp="$(mktemp /usr/local/bin/.torio-project-enter.XXXXXX)"
+// projectEnterInstallScript is built from ProjectEnterHelper so the staging
+// pattern, the final destination and the synced directory cannot name
+// different paths.
+var projectEnterInstallScript = `
+tmp="$(mktemp ` + path.Dir(ProjectEnterHelper) + `/.` + path.Base(ProjectEnterHelper) + `.XXXXXX)"
 trap 'rm -f -- "$tmp"' EXIT
 cat >"$tmp"
 chown root:root "$tmp"
 chmod 0755 "$tmp"
 sync -f "$tmp"
-mv -T -- "$tmp" /usr/local/bin/torio-project-enter
-sync -f /usr/local/bin
+mv -T -- "$tmp" ` + ProjectEnterHelper + `
+sync -f ` + path.Dir(ProjectEnterHelper) + `
 trap - EXIT
 `
 
@@ -246,7 +225,7 @@ trap - EXIT
 const hostShareFSTypes = "9p,virtiofs,fuse,fuse.virtiofs,nfs,cifs"
 
 // nativeFSTypes are the accepted on-VM block-backed filesystem types for the
-// required paths. ext4 is the verified target (etap-0b); the near neighbours are
+// required paths. ext4 is the verified target; the near neighbours are
 // admitted so a benign reformat is not a false drift, while every host-share
 // type is still rejected.
 var nativeFSTypes = map[string]bool{"ext4": true, "ext3": true, "ext2": true, "xfs": true, "btrfs": true}
@@ -689,18 +668,28 @@ func (a *Adapter) verifyNoHostMounts(ctx context.Context, rep *BootstrapReport) 
 // else. `stat` does not dereference by default, so this reads the path itself.
 func (a *Adapter) verifyOperatorShellHelper(ctx context.Context, rep *BootstrapReport) error {
 	const name = "operator_shell_helper"
-	spec := operatorShellHelperSpec
-
-	st, err := a.guestProbe(ctx, rep, name, "stat", "-c", "%F", spec.path)
+	st, err := a.guestProbe(ctx, rep, name, "stat", "-c", "%F", operatorShellHelperSpec.path)
 	if err != nil {
 		return err
 	}
+	return a.verifyRootHelperFile(ctx, rep, name, "operator shell helper", operatorShellHelperSpec, st,
+		"a writable helper is a privilege-escalation path into a session that carries the operator's forwarded agent",
+		operatorShellHelperRemediation)
+}
+
+// verifyRootHelperFile is the shared tail of the guest helper checks. Given the
+// result of `stat -c %F` on spec.path, it proves the path is a regular file
+// (not a symlink pointing the real content somewhere unowned), owned root:root,
+// writable by nobody else, and within spec's accepted modes. what names the
+// helper in failure details, writableRisk says what a foreign-writable file
+// would allow, and remediation is the single repair for every drift.
+func (a *Adapter) verifyRootHelperFile(ctx context.Context, rep *BootstrapReport, name, what string, spec bootstrapPathSpec, st execx.Result, writableRisk, remediation string) error {
 	kind := strings.TrimSpace(string(st.Stdout))
 	if st.ExitCode != 0 || kind == "" {
-		return a.verifyFailed(rep, name, "no operator shell helper at "+spec.path, operatorShellHelperRemediation)
+		return a.verifyFailed(rep, name, "no "+what+" at "+spec.path, remediation)
 	}
 	if kind != "regular file" {
-		return a.verifyFailed(rep, name, fmt.Sprintf("helper is a %s, want a regular file", kind), operatorShellHelperRemediation)
+		return a.verifyFailed(rep, name, fmt.Sprintf("helper is a %s, want a regular file", kind), remediation)
 	}
 
 	og, err := a.guestProbe(ctx, rep, name, "stat", "-c", "%U:%G %a", spec.path)
@@ -708,28 +697,28 @@ func (a *Adapter) verifyOperatorShellHelper(ctx context.Context, rep *BootstrapR
 		return err
 	}
 	if og.ExitCode != 0 {
-		return a.verifyFailed(rep, name, "could not read helper ownership/mode", operatorShellHelperRemediation)
+		return a.verifyFailed(rep, name, "could not read helper ownership/mode", remediation)
 	}
 	owner, group, mode, ok := parseStatOwnership(string(og.Stdout))
 	if !ok {
-		return a.verifyFailed(rep, name, "unparseable helper ownership/mode", operatorShellHelperRemediation)
+		return a.verifyFailed(rep, name, "unparseable helper ownership/mode", remediation)
 	}
 	if owner != spec.owner || group != spec.group {
 		return a.verifyFailed(rep, name,
 			fmt.Sprintf("helper owner:group %s:%s, want %s:%s", owner, group, spec.owner, spec.group),
-			"a helper the operator or hermes owns can be rewritten between sessions; "+operatorShellHelperRemediation)
+			"a helper the operator or hermes owns can be rewritten between sessions; "+remediation)
 	}
 	writable, parsed := modeGrantsForeignWrite(mode)
 	if !parsed {
-		return a.verifyFailed(rep, name, "unparseable helper mode "+mode, operatorShellHelperRemediation)
+		return a.verifyFailed(rep, name, "unparseable helper mode "+mode, remediation)
 	}
 	if writable {
 		return a.verifyFailed(rep, name,
 			fmt.Sprintf("helper mode %s is group- or world-writable", mode),
-			"a writable helper is a privilege-escalation path into a session that carries the operator's forwarded agent; "+operatorShellHelperRemediation)
+			writableRisk+"; "+remediation)
 	}
 	if !modeMatches(spec, mode) {
-		return a.verifyFailed(rep, name, fmt.Sprintf("helper mode %s, want one of %v", mode, spec.modes), operatorShellHelperRemediation)
+		return a.verifyFailed(rep, name, fmt.Sprintf("helper mode %s, want one of %v", mode, spec.modes), remediation)
 	}
 
 	rep.record(name, true, fmt.Sprintf("%s:%s %s", owner, group, mode))
@@ -770,46 +759,10 @@ func (a *Adapter) verifyProjectEnterHelper(ctx context.Context, rep *BootstrapRe
 		if err != nil {
 			return err
 		}
-		kind = strings.TrimSpace(string(st.Stdout))
 	}
-	if st.ExitCode != 0 || kind == "" {
-		return a.verifyFailed(rep, name, "no project enter helper at "+spec.path, projectEnterHelperRemediation)
-	}
-	if kind != "regular file" {
-		return a.verifyFailed(rep, name, fmt.Sprintf("helper is a %s, want a regular file", kind), projectEnterHelperRemediation)
-	}
-
-	og, err := a.guestProbe(ctx, rep, name, "stat", "-c", "%U:%G %a", spec.path)
-	if err != nil {
-		return err
-	}
-	if og.ExitCode != 0 {
-		return a.verifyFailed(rep, name, "could not read helper ownership/mode", projectEnterHelperRemediation)
-	}
-	owner, group, mode, ok := parseStatOwnership(string(og.Stdout))
-	if !ok {
-		return a.verifyFailed(rep, name, "unparseable helper ownership/mode", projectEnterHelperRemediation)
-	}
-	if owner != spec.owner || group != spec.group {
-		return a.verifyFailed(rep, name,
-			fmt.Sprintf("helper owner:group %s:%s, want %s:%s", owner, group, spec.owner, spec.group),
-			"a helper the operator or hermes owns can be rewritten between sessions; "+projectEnterHelperRemediation)
-	}
-	writable, parsed := modeGrantsForeignWrite(mode)
-	if !parsed {
-		return a.verifyFailed(rep, name, "unparseable helper mode "+mode, projectEnterHelperRemediation)
-	}
-	if writable {
-		return a.verifyFailed(rep, name,
-			fmt.Sprintf("helper mode %s is group- or world-writable", mode),
-			"a writable helper could replace the command run in an operator-controlled workspace session; "+projectEnterHelperRemediation)
-	}
-	if !modeMatches(spec, mode) {
-		return a.verifyFailed(rep, name, fmt.Sprintf("helper mode %s, want one of %v", mode, spec.modes), projectEnterHelperRemediation)
-	}
-
-	rep.record(name, true, fmt.Sprintf("%s:%s %s", owner, group, mode))
-	return nil
+	return a.verifyRootHelperFile(ctx, rep, name, "project enter helper", spec, st,
+		"a writable helper could replace the command run in an operator-controlled workspace session",
+		projectEnterHelperRemediation)
 }
 
 // hasGroup reports whether a space-separated `id -nG` group list contains group.
@@ -850,7 +803,6 @@ func modeGrantsForeignWrite(mode string) (writable, parsed bool) {
 }
 
 // modeMatches reports whether the observed stat mode satisfies the path spec.
-// modeMatches reports whether the guest mode satisfies spec.
 //
 // An exact match always passes. A spec may additionally accept a mode that
 // grants strictly less, because two of the required directories are tightened

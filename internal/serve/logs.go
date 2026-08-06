@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 )
 
@@ -46,7 +47,7 @@ func (a *Adapter) Logs(ctx context.Context, lines int) (LogsReport, error) {
 		return rep, e
 	}
 	if !inst {
-		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: errf("unit %q is not installed", UnitName)}
+		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: fmt.Errorf("unit %q is not installed", UnitName)}
 	}
 
 	res, e := a.sh(ctx, op, userEnv(rt, "journalctl", "--user", "-u", UnitName, "-n", strconv.Itoa(lines), "--no-pager"))

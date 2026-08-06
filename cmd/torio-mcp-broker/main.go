@@ -116,7 +116,7 @@ func main() {
 
 	os.Exit(run(ctx, os.Args[1:], daemonConfig{
 		policyDir:   policyDir,
-		socketDir:   socketDir,
+		socketDir:   mcpbroker.SocketDir,
 		clientGroup: clientGroup,
 		stdout:      os.Stdout,
 		stderr:      os.Stderr,

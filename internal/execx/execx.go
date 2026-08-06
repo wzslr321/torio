@@ -104,8 +104,7 @@ func (r *ExecRunner) Run(ctx context.Context, cmd Command) (Result, error) {
 	}
 	if cmd.Stdin != nil {
 		// A bytes.Reader delivers the payload and then EOF, so a filter like
-		// `tee` writes exactly these bytes and exits. We never wire the parent's
-		// os.Stdin to the child.
+		// `tee` writes exactly these bytes and exits.
 		c.Stdin = bytes.NewReader(cmd.Stdin)
 	}
 

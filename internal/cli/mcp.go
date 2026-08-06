@@ -62,13 +62,13 @@ func newMCPStatusCmd(a *app) *cobra.Command {
 // which boundary was proven, and they are the same values a reader of ADR-0004
 // will be looking for.
 type mcpStatusData struct {
-	Instance     string         `json:"instance"`
-	Checks       []mcpCheckData `json:"checks"`
-	Policy       mcpPolicyData  `json:"policy"`
-	BrokerUser   string         `json:"broker_user"`
-	BrokerHome   string         `json:"broker_home"`
-	ClientsGroup string         `json:"clients_group"`
-	AgentUser    string         `json:"agent_user"`
+	Instance     string        `json:"instance"`
+	Checks       []checkData   `json:"checks"`
+	Policy       mcpPolicyData `json:"policy"`
+	BrokerUser   string        `json:"broker_user"`
+	BrokerHome   string        `json:"broker_home"`
+	ClientsGroup string        `json:"clients_group"`
+	AgentUser    string        `json:"agent_user"`
 }
 
 // mcpPolicyData is the grant, in the envelope. The checks already say the policy
@@ -82,7 +82,7 @@ type mcpPolicyData struct {
 	Services []mcpPolicyServiceData `json:"services"`
 }
 
-// mcpPolicyServiceData is one service's grant. Unlike mcpCheckData, these fields
+// mcpPolicyServiceData is one service's grant. Unlike checkData, these fields
 // are values from the policy documents rather than derived markers, and they are
 // safe to carry for a specific reason: a service name has passed
 // mcpbroker.ValidateServiceName and an endpoint the policy schema's endpoint
@@ -109,23 +109,10 @@ func mcpPolicyPayload(g lima.PolicyGrant) mcpPolicyData {
 	return mcpPolicyData{Digest: g.Digest, Services: services}
 }
 
-// mcpCheckData is one proven boundary in the envelope. Detail is a short derived
-// value — a uid, a mode, a count — never a raw output blob and never a guest
-// filename.
-type mcpCheckData struct {
-	Name   string `json:"name"`
-	OK     bool   `json:"ok"`
-	Detail string `json:"detail"`
-}
-
 func mcpStatusPayload(rep lima.MCPBrokerReport) mcpStatusData {
-	checks := make([]mcpCheckData, 0, len(rep.Checks))
-	for _, c := range rep.Checks {
-		checks = append(checks, mcpCheckData{Name: c.Name, OK: c.OK, Detail: c.Detail})
-	}
 	return mcpStatusData{
 		Instance:     rep.Instance,
-		Checks:       checks,
+		Checks:       checkPayload(rep.Checks),
 		Policy:       mcpPolicyPayload(rep.Policy),
 		BrokerUser:   lima.TorioMCPUser,
 		BrokerHome:   lima.TorioMCPHome,
@@ -141,11 +128,7 @@ func mcpReportDetails(rep lima.MCPBrokerReport) map[string]any {
 	if len(rep.Checks) == 0 {
 		return nil
 	}
-	checks := make([]map[string]any, 0, len(rep.Checks))
-	for _, c := range rep.Checks {
-		checks = append(checks, map[string]any{"name": c.Name, "ok": c.OK, "detail": c.Detail})
-	}
-	return map[string]any{"instance": rep.Instance, "checks": checks}
+	return map[string]any{"instance": rep.Instance, "checks": checkDetails(rep.Checks)}
 }
 
 // emitMCPStatus renders a proven boundary. JSON mode emits exactly one success
@@ -156,14 +139,8 @@ func (a *app) emitMCPStatus(rep lima.MCPBrokerReport) error {
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("mcp.status", mcpStatusPayload(rep)))
 	}
-	for _, c := range rep.Checks {
-		mark := "ok"
-		if !c.OK {
-			mark = "FAIL"
-		}
-		if _, err := fmt.Fprintf(a.stdout, "[%s] %s: %s\n", mark, c.Name, c.Detail); err != nil {
-			return err
-		}
+	if err := a.writeCheckLines(rep.Checks); err != nil {
+		return err
 	}
 	if _, err := fmt.Fprintf(a.stdout,
 		"\nBroker boundary holds on %s.\n"+
@@ -237,27 +214,23 @@ func newMCPInstallCmd(a *app) *cobra.Command {
 
 // mcpInstallData is the `data` object of a successful `mcp install`.
 type mcpInstallData struct {
-	Instance        string         `json:"instance"`
-	Changed         bool           `json:"changed"`
-	RestartRequired bool           `json:"restart_required"`
-	Checks          []mcpCheckData `json:"checks"`
-	Policy          mcpPolicyData  `json:"policy"`
-	BrokerUser      string         `json:"broker_user"`
-	BrokerHome      string         `json:"broker_home"`
-	ClientsGroup    string         `json:"clients_group"`
-	PolicyDir       string         `json:"policy_dir"`
+	Instance        string        `json:"instance"`
+	Changed         bool          `json:"changed"`
+	RestartRequired bool          `json:"restart_required"`
+	Checks          []checkData   `json:"checks"`
+	Policy          mcpPolicyData `json:"policy"`
+	BrokerUser      string        `json:"broker_user"`
+	BrokerHome      string        `json:"broker_home"`
+	ClientsGroup    string        `json:"clients_group"`
+	PolicyDir       string        `json:"policy_dir"`
 }
 
 func mcpInstallPayload(rep lima.MCPBrokerInstallReport) mcpInstallData {
-	checks := make([]mcpCheckData, 0, len(rep.Checks))
-	for _, c := range rep.Checks {
-		checks = append(checks, mcpCheckData{Name: c.Name, OK: c.OK, Detail: c.Detail})
-	}
 	return mcpInstallData{
 		Instance:        rep.Instance,
 		Changed:         rep.Changed,
 		RestartRequired: rep.RestartRequired,
-		Checks:          checks,
+		Checks:          checkPayload(rep.Checks),
 		Policy:          mcpPolicyPayload(rep.Policy),
 		BrokerUser:      lima.TorioMCPUser,
 		BrokerHome:      lima.TorioMCPHome,
@@ -270,15 +243,11 @@ func mcpInstallDetails(rep lima.MCPBrokerInstallReport) map[string]any {
 	if len(rep.Checks) == 0 {
 		return nil
 	}
-	checks := make([]map[string]any, 0, len(rep.Checks))
-	for _, c := range rep.Checks {
-		checks = append(checks, map[string]any{"name": c.Name, "ok": c.OK, "detail": c.Detail})
-	}
 	return map[string]any{
 		"instance":         rep.Instance,
 		"changed":          rep.Changed,
 		"restart_required": rep.RestartRequired,
-		"checks":           checks,
+		"checks":           checkDetails(rep.Checks),
 	}
 }
 
@@ -290,14 +259,8 @@ func (a *app) emitMCPInstall(rep lima.MCPBrokerInstallReport) error {
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("mcp.install", mcpInstallPayload(rep)))
 	}
-	for _, c := range rep.Checks {
-		mark := "ok"
-		if !c.OK {
-			mark = "FAIL"
-		}
-		if _, err := fmt.Fprintf(a.stdout, "[%s] %s: %s\n", mark, c.Name, c.Detail); err != nil {
-			return err
-		}
+	if err := a.writeCheckLines(rep.Checks); err != nil {
+		return err
 	}
 	if _, err := fmt.Fprintf(a.stdout,
 		"\nBroker boundary provisioned on %s (changed: %t).\n"+

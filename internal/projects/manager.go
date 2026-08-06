@@ -13,6 +13,7 @@ import (
 
 	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
+	"github.com/wzslr321/torio/internal/guestexec"
 	"github.com/wzslr321/torio/internal/lima"
 	"github.com/wzslr321/torio/internal/serve"
 )
@@ -52,15 +53,11 @@ type Manager struct {
 // New builds a Manager over a guest and a config registry. The bootstrap
 // options carry the pins and the Lima login identity; the latter is the second
 // trusted identity of every shared checkout.
-func New(guest Guest, registry Registry, opts ...lima.BootstrapOptions) *Manager {
-	var bootstrapOpts lima.BootstrapOptions
-	if len(opts) > 0 {
-		bootstrapOpts = opts[0]
-	}
+func New(guest Guest, registry Registry, opts lima.BootstrapOptions) *Manager {
 	return &Manager{
 		guest:         guest,
 		registry:      registry,
-		bootstrapOpts: bootstrapOpts,
+		bootstrapOpts: opts,
 		agent:         hostSSHAgent{runner: &execx.ExecRunner{}},
 	}
 }
@@ -80,7 +77,6 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 	const op = "add"
 	var report AddReport
 
-	// --- validate before any I/O ---
 	entry := config.Project{ID: req.ID, DisplayName: req.DisplayName, Remote: req.Remote}
 	if err := validateProject(entry); err != nil {
 		return report, &Error{Op: op, Kind: KindInvalidConfig, Err: err}
@@ -113,7 +109,6 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 		}
 	}
 
-	// --- guest preconditions ---
 	if err := m.requirePrepared(ctx, op); err != nil {
 		return report, err
 	}
@@ -129,7 +124,6 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 		return report, &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("workspace path for %q exists and is not a directory", req.ID)}
 	}
 
-	// --- noninteractive remote preflight, as hermes ---
 	if err := m.preflightRemote(ctx, op, entry.Remote); err != nil {
 		return report, err
 	}
@@ -159,7 +153,6 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 		report.Adopted = true
 	}
 
-	// --- shared access for the two trusted identities ---
 	if err := m.ensureSharedPermissions(ctx, op, workspace); err != nil {
 		return report, err
 	}
@@ -169,7 +162,6 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 		}
 	}
 
-	// --- verify every postcondition before trusting the checkout ---
 	final, err := m.inspectCheckout(ctx, op, workspace, entry.Remote)
 	if err != nil {
 		return report, err
@@ -178,12 +170,10 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 		return report, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("checkout for %q did not satisfy the attachment postconditions: %s", req.ID, strings.Join(final.issues(), ", "))}
 	}
 
-	// --- Hermes registration ---
 	if err := m.ensureHermesProject(ctx, op, report.Project, &report); err != nil {
 		return report, err
 	}
 
-	// --- config, last ---
 	if err := m.persist(op, entry, req.AllowDuplicateRemote); err != nil {
 		m.rollbackAfterConfigFailure(ctx, op, &report)
 		return report, err
@@ -551,7 +541,7 @@ func (m *Manager) requirePrepared(ctx context.Context, op string) error {
 			Err:  fmt.Errorf("VM %q is not bootstrap-verified; run `torio vm bootstrap`: %w", lima.InstanceName, err),
 		}
 	}
-	return m.mustRun(ctx, op, KindGuestCommand, "verify passwordless sudo", rootExec("true"))
+	return m.mustRun(ctx, op, KindGuestCommand, "verify passwordless sudo", guestexec.RootExec("true"))
 }
 
 func (m *Manager) requireOperatorUser(op string) error {
@@ -623,19 +613,19 @@ func (m *Manager) inspectCheckout(ctx context.Context, op, workspace, remote str
 		return st, nil
 	}
 
-	meta, err := m.run(ctx, op, rootExec("stat", "-c", "%U:%G %a", workspace))
+	meta, err := m.run(ctx, op, guestexec.RootExec("stat", "-c", "%U:%G %a", workspace))
 	if err != nil {
 		return st, err
 	}
 	if meta.ExitCode != 0 {
 		return st, commandError(op, KindGuestCommand, "inspect checkout ownership", meta.ExitCode)
 	}
-	st.Owner, st.Group, st.Mode = parseOwnershipMode(string(meta.Stdout))
+	st.Owner, st.Group, st.Mode = guestexec.ParseOwnershipMode(string(meta.Stdout))
 	st.SharedPermissions = st.Owner == lima.HermesUser && st.Group == sharedGroup && sharedModeOK(st.Mode)
 
 	// The top level must be the derived path itself: a checkout nested inside
 	// another repository would let that repository's config govern ours.
-	top, err := m.run(ctx, op, userExec("git", "-C", workspace, "rev-parse", "--show-toplevel"))
+	top, err := m.run(ctx, op, guestexec.UserExec("git", "-C", workspace, "rev-parse", "--show-toplevel"))
 	if err != nil {
 		return st, err
 	}
@@ -646,13 +636,13 @@ func (m *Manager) inspectCheckout(ctx context.Context, op, workspace, remote str
 
 	// The raw stored URL, not the effective one: an insteadOf rewrite must not
 	// be able to make a different remote look like ours.
-	origin, err := m.run(ctx, op, userExec("git", "-C", workspace, "config", "--get", "remote.origin.url"))
+	origin, err := m.run(ctx, op, guestexec.UserExec("git", "-C", workspace, "config", "--get", "remote.origin.url"))
 	if err != nil {
 		return st, err
 	}
 	st.OriginMatches = origin.ExitCode == 0 && strings.TrimSpace(string(origin.Stdout)) == remote
 
-	shallow, err := m.run(ctx, op, userExec("git", "-C", workspace, "rev-parse", "--is-shallow-repository"))
+	shallow, err := m.run(ctx, op, guestexec.UserExec("git", "-C", workspace, "rev-parse", "--is-shallow-repository"))
 	if err != nil {
 		return st, err
 	}
@@ -668,7 +658,7 @@ func (m *Manager) inspectCheckout(ctx context.Context, op, workspace, remote str
 		return st, &Error{Op: op, Kind: KindVerification, Err: errors.New("could not determine whether the checkout is a shallow clone")}
 	}
 
-	worktree, err := m.run(ctx, op, userExec("git", "-C", workspace, "status", "--porcelain=v1", "--untracked-files=normal"))
+	worktree, err := m.run(ctx, op, guestexec.UserExec("git", "-C", workspace, "status", "--porcelain=v1", "--untracked-files=normal"))
 	if err != nil {
 		return st, err
 	}
@@ -679,7 +669,7 @@ func (m *Manager) inspectCheckout(ctx context.Context, op, workspace, remote str
 
 	// `--get-regexp` exits 0 only when it matched something, so exit 1 is the
 	// proof we want. Any other exit is unverifiable state and fails closed.
-	cred, err := m.run(ctx, op, userExec("git", "-C", workspace, "config", "--local", "--get-regexp", `^credential\.`))
+	cred, err := m.run(ctx, op, guestexec.UserExec("git", "-C", workspace, "config", "--local", "--get-regexp", `^credential\.`))
 	if err != nil {
 		return st, err
 	}
@@ -716,20 +706,20 @@ func requireAdoptable(op, id string, st CheckoutStatus) error {
 }
 
 // ensureSharedPermissions gives the checkout the group ownership, group write
-// and setgid the promoted operator-shell spike established, so `hermes` and the
+// and setgid of the shared-workspace layout, so `hermes` and the
 // operator can both work the tree and new files stay in the shared group. It
 // changes metadata only — no content, no history, nothing removed.
 func (m *Manager) ensureSharedPermissions(ctx context.Context, op, workspace string) error {
 	if err := m.mustRun(ctx, op, KindGuestCommand, "set shared checkout ownership",
-		rootExec("chown", "-R", lima.HermesUser+":"+sharedGroup, "--", workspace)); err != nil {
+		guestexec.RootExec("chown", "-R", lima.HermesUser+":"+sharedGroup, "--", workspace)); err != nil {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "set shared checkout permissions",
-		rootExec("chmod", "-R", "g+rwX", "--", workspace)); err != nil {
+		guestexec.RootExec("chmod", "-R", "g+rwX", "--", workspace)); err != nil {
 		return err
 	}
 	return m.mustRun(ctx, op, KindGuestCommand, "set setgid on checkout directories",
-		rootExec("find", workspace, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"))
+		guestexec.RootExec("find", workspace, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"))
 }
 
 // ensureSafeDirectory records the checkout as safe for one trusted identity.
@@ -747,7 +737,7 @@ func (m *Manager) ensureSafeDirectory(ctx context.Context, op, user, workspace s
 		return nil
 	}
 	if err := m.mustRun(ctx, op, KindGit, "add a safe.directory entry",
-		userExecAs(user, "git", "config", "--global", "--add", "safe.directory", workspace)); err != nil {
+		guestexec.UserExecAs(user, "git", "config", "--global", "--add", "safe.directory", workspace)); err != nil {
 		return err
 	}
 	present, err = m.safeDirectoryPresent(ctx, op, user, workspace)
@@ -761,7 +751,7 @@ func (m *Manager) ensureSafeDirectory(ctx context.Context, op, user, workspace s
 }
 
 func (m *Manager) safeDirectoryPresent(ctx context.Context, op, user, workspace string) (bool, error) {
-	res, err := m.run(ctx, op, userExecAs(user, "git", "config", "--global", "--get-all", "safe.directory"))
+	res, err := m.run(ctx, op, guestexec.UserExecAs(user, "git", "config", "--global", "--get-all", "safe.directory"))
 	if err != nil {
 		return false, err
 	}
@@ -795,7 +785,7 @@ func (m *Manager) ensureHermesProject(ctx context.Context, op string, p Project,
 		// Ours, archived by an earlier `remove`. Restoring is how Hermes undoes
 		// that, and it touches nothing on the filesystem.
 		if err := m.mustRun(ctx, op, KindRegistration, "restore the archived Hermes project",
-			userExec("hermes", "project", "restore", p.ID)); err != nil {
+			guestexec.UserExec("hermes", "project", "restore", p.ID)); err != nil {
 			return err
 		}
 		report.HermesRestored = true
@@ -803,7 +793,7 @@ func (m *Manager) ensureHermesProject(ctx context.Context, op string, p Project,
 		// Creating is safe only because `show` just proved the slug free: on a
 		// taken slug the CLI silently creates `<slug>-2` instead of failing.
 		if err := m.mustRun(ctx, op, KindRegistration, "register the Hermes project",
-			userExec("hermes", "project", "create", p.DisplayName, p.Path, "--slug", p.ID)); err != nil {
+			guestexec.UserExec("hermes", "project", "create", p.DisplayName, p.Path, "--slug", p.ID)); err != nil {
 			return err
 		}
 		report.HermesCreated = true
@@ -824,7 +814,7 @@ func (m *Manager) ensureHermesProject(ctx context.Context, op string, p Project,
 // filesystem, which is what makes it the right non-destructive undo.
 func (m *Manager) archiveHermesProject(ctx context.Context, op string, p Project) error {
 	if err := m.mustRun(ctx, op, KindRegistration, "archive the Hermes project",
-		userExec("hermes", "project", "archive", p.ID)); err != nil {
+		guestexec.UserExec("hermes", "project", "archive", p.ID)); err != nil {
 		return err
 	}
 	after, err := m.hermesStatus(ctx, op, p.ID, p.Path)
@@ -840,7 +830,7 @@ func (m *Manager) archiveHermesProject(ctx context.Context, op string, p Project
 // activate sets the active Hermes project and confirms it from the printed
 // line. `hermes project use` cannot report failure through its exit code.
 func (m *Manager) activate(ctx context.Context, op string, p Project) error {
-	res, err := m.run(ctx, op, userExec("hermes", "project", "use", p.ID))
+	res, err := m.run(ctx, op, guestexec.UserExec("hermes", "project", "use", p.ID))
 	if err != nil {
 		return err
 	}
@@ -882,12 +872,12 @@ func (m *Manager) activate(ctx context.Context, op string, p Project) error {
 // which is exactly what a list of slugs can answer.
 func (m *Manager) hermesStatus(ctx context.Context, op, id, workspace string) (HermesStatus, error) {
 	var st HermesStatus
-	show, err := m.run(ctx, op, userExec("hermes", "project", "show", id))
+	show, err := m.run(ctx, op, guestexec.UserExec("hermes", "project", "show", id))
 	if err != nil {
 		return st, err
 	}
 	if strings.TrimSpace(string(show.Stdout)) == "" {
-		list, listErr := m.run(ctx, op, userExec("hermes", "project", "list"))
+		list, listErr := m.run(ctx, op, guestexec.UserExec("hermes", "project", "list"))
 		if listErr != nil {
 			return st, listErr
 		}
@@ -1079,7 +1069,7 @@ func (m *Manager) CheckServiceEnv(ctx context.Context) (ServiceEnvCheck, error) 
 	const op = shellOp
 	var unavailable ServiceEnvCheck
 
-	uid, err := m.run(ctx, op, userExec("id", "-u", lima.HermesUser))
+	uid, err := m.run(ctx, op, guestexec.UserExec("id", "-u", lima.HermesUser))
 	if err != nil || uid.ExitCode != 0 {
 		return unavailable, nil
 	}
@@ -1089,7 +1079,7 @@ func (m *Manager) CheckServiceEnv(ctx context.Context) (ServiceEnvCheck, error) 
 	}
 
 	show, err := m.run(ctx, op,
-		userExecAs(lima.HermesUser, "env", "XDG_RUNTIME_DIR="+runtimeDir,
+		guestexec.UserExecAs(lima.HermesUser, "env", "XDG_RUNTIME_DIR="+runtimeDir,
 			"systemctl", "--user", "show", serve.UnitName, "--property=Environment"))
 	if err != nil || show.ExitCode != 0 {
 		return unavailable, nil
@@ -1130,12 +1120,12 @@ func findProject(f config.File, id string) (config.Project, bool) {
 }
 
 func (m *Manager) run(ctx context.Context, op string, argv []string) (execx.Result, error) {
-	res, err := m.guest.SSH(ctx, argv)
-	if err != nil {
+	res, err := guestexec.Run(ctx, m.guest, argv)
+	switch {
+	case errors.Is(err, guestexec.ErrTruncated):
+		return execx.Result{}, &Error{Op: op, Kind: KindVerification, Err: err}
+	case err != nil:
 		return execx.Result{}, fromGuestErr(op, err)
-	}
-	if res.StdoutTruncated || res.StderrTruncated {
-		return execx.Result{}, &Error{Op: op, Kind: KindVerification, Err: errors.New("bounded guest output was truncated")}
 	}
 	return res, nil
 }
@@ -1154,7 +1144,7 @@ func (m *Manager) mustRun(ctx context.Context, op string, kind ErrorKind, action
 // testRoot runs `test <flag> <path>` and maps its two documented exits. Any
 // other exit is unverifiable and fails closed.
 func (m *Manager) testRoot(ctx context.Context, op, flag, path string) (bool, error) {
-	res, err := m.run(ctx, op, rootExec("test", flag, path))
+	res, err := m.run(ctx, op, guestexec.RootExec("test", flag, path))
 	if err != nil {
 		return false, err
 	}
@@ -1173,32 +1163,7 @@ func (m *Manager) testRoot(ctx context.Context, op, flag, path string) (bool, er
 func (m *Manager) gitExec(args ...string) []string {
 	argv := append([]string(nil), gitNoninteractiveEnv...)
 	argv = append(argv, "git")
-	return userExec(append(argv, args...)...)
-}
-
-func rootExec(args ...string) []string {
-	return append([]string{"sudo", "-n", "--"}, args...)
-}
-
-func userExec(args ...string) []string {
-	return userExecAs(lima.HermesUser, args...)
-}
-
-func userExecAs(user string, args ...string) []string {
-	return append([]string{"sudo", "-n", "-u", user, "--"}, args...)
-}
-
-// parseOwnershipMode parses `stat -c '%U:%G %a'` output.
-func parseOwnershipMode(out string) (owner, group, mode string) {
-	fields := strings.Fields(strings.TrimSpace(out))
-	if len(fields) != 2 {
-		return "", "", ""
-	}
-	parts := strings.SplitN(fields[0], ":", 2)
-	if len(parts) != 2 {
-		return "", "", ""
-	}
-	return parts[0], parts[1], fields[1]
+	return guestexec.UserExec(append(argv, args...)...)
 }
 
 // sharedModeOK reports whether a directory mode carries the setgid bit and full

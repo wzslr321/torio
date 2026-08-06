@@ -20,7 +20,7 @@ import (
 // Gate 0 pin 91546b8; picks up the openclaw EXDEV fsync fix).
 const PromotedHermesCommit = "0a62610f10cc34d696b2239b2c69fa1ba0f1ca63"
 
-// Default VM resources for torio vm init (FINDINGS: product disk SHOULD be 60GiB).
+// Default VM resources for torio vm init (product disk SHOULD be 60GiB).
 const (
 	DefaultCPUs   = 4
 	DefaultMemory = "8GiB"

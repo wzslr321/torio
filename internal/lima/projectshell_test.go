@@ -134,8 +134,8 @@ func TestProjectShellHelperNeverDumpsTheSessionEnvironment(t *testing.T) {
 }
 
 // TestProjectShellHelperEntersTheGroupWithoutPrivilege proves the session is the
-// operator's own identity under the shared project group — the promoted spike's
-// shape — and never a privileged one. sudo or su here would hand the forwarded
+// operator's own identity under the shared project group, and never a
+// privileged one. sudo or su here would hand the forwarded
 // agent to root and leave root-owned files in a checkout hermes has to keep
 // working in.
 func TestProjectShellHelperEntersTheGroupWithoutPrivilege(t *testing.T) {

@@ -61,7 +61,7 @@ func (a *Adapter) Init(ctx context.Context, opts InitOptions) (InitResult, error
 	}
 	defer func() { _ = os.Remove(path) }()
 
-	// Exact Gate 0 argv: --tty=false before the template path (FINDINGS.md).
+	// --tty=false must precede the template path.
 	res, err := a.runRaw(ctx, "create", "--name="+InstanceName, "--tty=false", path)
 	if err != nil {
 		return out, classifyRunErr(op, err)

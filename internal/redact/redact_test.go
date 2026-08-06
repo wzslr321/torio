@@ -14,6 +14,7 @@ var canaries = map[string]string{
 	"slack":       "xoxb-0123456789abcdef",
 	"aws":         "AKIA0123456789ABCDEF",
 	"private-key": "-----BEGIN OPENSSH PRIVATE KEY-----",
+	"bearer":      "Bearer 0123456789abcdef.token-value",
 }
 
 // TestCanariesMatchProductionMatchers pins each positive fixture to the
@@ -29,9 +30,13 @@ func TestCanariesMatchProductionMatchers(t *testing.T) {
 		"slack":       patterns[2],
 		"aws":         patterns[3],
 		"private-key": patterns[4],
+		"bearer":      patterns[5],
 	}
 	if len(want) != len(canaries) {
 		t.Fatalf("pinned matchers (%d) and canaries (%d) are out of sync", len(want), len(canaries))
+	}
+	if len(want) != len(patterns) {
+		t.Fatalf("pinned matchers (%d) and production patterns (%d) are out of sync: every pattern needs a canary, or a new pattern ships untested", len(want), len(patterns))
 	}
 	for name, secret := range canaries {
 		p, ok := want[name]

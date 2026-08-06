@@ -37,7 +37,7 @@ type app struct {
 	configPath string
 	logger     *slog.Logger
 
-	// runtime is the resolved D2 configuration (paths + config document). It is
+	// runtime is the resolved configuration (paths + config document). It is
 	// populated by PersistentPreRunE and consumed by command execution.
 	runtime config.Runtime
 
@@ -127,7 +127,7 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 	// test VM to the operator's daily one.
 	instance, err := config.ResolveInstance(config.Options{})
 	if err != nil {
-		return fail(a.stdout, a.stderr, firstNonFlag(args), a.jsonOut || wantsJSON(args), usageError(err.Error()))
+		return fail(a.stdout, a.stderr, firstNonFlag(args), wantsJSON(args), usageError(err.Error()))
 	}
 	lima.InstanceName = instance
 
@@ -137,7 +137,7 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 	// had already been told to install Lima and create a VM that could never
 	// verify. This is a precondition of the machine, not a usage mistake.
 	if _, err := lima.HostProfile(); err != nil {
-		return fail(a.stdout, a.stderr, firstNonFlag(args), a.jsonOut || wantsJSON(args),
+		return fail(a.stdout, a.stderr, firstNonFlag(args), wantsJSON(args),
 			&CLIError{Exit: ExitPrecondition, Code: "unsupported_host", Message: err.Error()})
 	}
 
@@ -183,7 +183,7 @@ func newRootCmd(a *app) *cobra.Command {
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			a.logger = newLogger(a.stderr, a.verbose)
 
-			// Resolve the D2 configuration: the XDG config path plus --config,
+			// Resolve the configuration: the XDG config path plus --config,
 			// loading and strictly validating the on-disk config document. A
 			// resolution/validation failure is a usage/schema error (exit 2).
 			// config.Load never surfaces secret-shaped material, and the final

@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -42,7 +43,7 @@ func (a *Adapter) activate(ctx context.Context, op, verb string) (StatusReport, 
 		return rep, e
 	}
 	if !inst {
-		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: errf("unit %q is not installed; run `torio serve install` first", UnitName)}
+		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: fmt.Errorf("unit %q is not installed; run `torio serve install` first", UnitName)}
 	}
 	rep.Installed = true
 	if en, e := a.enabledState(ctx, op, rt); e != nil {
@@ -66,7 +67,7 @@ func (a *Adapter) activate(ctx context.Context, op, verb string) (StatusReport, 
 	rep.ActiveState = act
 	rep.Active = act == "active"
 	if !rep.Active {
-		return rep, &Error{Op: op, Kind: KindPostconditionFailed, Err: errf("service is %q after %s, want active", act, verb)}
+		return rep, &Error{Op: op, Kind: KindPostconditionFailed, Err: fmt.Errorf("service is %q after %s, want active", act, verb)}
 	}
 
 	// Postcondition 2: prove the loopback endpoint is actually serving, polling
@@ -136,7 +137,7 @@ func (a *Adapter) Stop(ctx context.Context) (StopReport, error) {
 		return rep, e
 	}
 	if !inst {
-		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: errf("unit %q is not installed", UnitName)}
+		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: fmt.Errorf("unit %q is not installed", UnitName)}
 	}
 
 	act, e := a.activeState(ctx, op, rt)
@@ -163,7 +164,7 @@ func (a *Adapter) Stop(ctx context.Context) (StopReport, error) {
 	rep.ActiveState = post
 	rep.Active = post == "active"
 	if rep.Active {
-		return rep, &Error{Op: op, Kind: KindPostconditionFailed, Err: errf("service is %q after stop, want inactive", post)}
+		return rep, &Error{Op: op, Kind: KindPostconditionFailed, Err: fmt.Errorf("service is %q after stop, want inactive", post)}
 	}
 	return rep, nil
 }

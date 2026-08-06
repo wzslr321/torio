@@ -281,9 +281,6 @@ func limaInstanceExists(instanceName string) (bool, error) {
 	return false, nil
 }
 
-// requireHypervisor fails the guest stage before Lima is asked to boot anything.
-// Without it the failure surfaces as `limactl start` exiting after the host
-// agent quits with an empty error list, which says nothing about the cause.
 func supportedHost() bool {
 	switch runtime.GOOS + "/" + runtime.GOARCH {
 	case "darwin/arm64", "linux/amd64":
@@ -293,6 +290,9 @@ func supportedHost() bool {
 	}
 }
 
+// requireHypervisor fails the guest stage before Lima is asked to boot anything.
+// Without it the failure surfaces as `limactl start` exiting after the host
+// agent quits with an empty error list, which says nothing about the cause.
 func requireHypervisor() {
 	GinkgoHelper()
 	switch runtime.GOOS {

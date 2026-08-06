@@ -72,16 +72,13 @@ type serverConfig struct {
 	// can name the file an operator has to edit; a denial that says only "denied"
 	// costs somebody an afternoon.
 	policyPath string
-	// upstream carries traffic to the service's MCP server.
-	upstream upstream
-	// audit is where decisions are recorded.
-	audit *auditSink
+	upstream   upstream
+	audit      *auditSink
 	// peerUID reports the uid the kernel attributes to a connection.
 	peerUID func(*net.UnixConn) (uint32, error)
 	// log receives diagnostics. Nothing derived from a client message is ever
 	// passed to it — see the rule at logRefusal.
-	log *slog.Logger
-	// callTimeout bounds one upstream call.
+	log         *slog.Logger
 	callTimeout time.Duration
 }
 

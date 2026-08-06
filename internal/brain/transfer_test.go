@@ -29,7 +29,7 @@ func TestImportDryRunPreflightsWithoutTransferringContent(t *testing.T) {
 	writeHostTransferFile(t, source, "ignored.docx", "doc", 0o600)
 
 	g := readyFake()
-	report, err := New(g).Import(context.Background(), ImportOptions{
+	report, err := New(g, lima.BootstrapOptions{}).Import(context.Background(), ImportOptions{
 		Source: source,
 		DryRun: true,
 	})
@@ -63,7 +63,7 @@ func TestImportRejectsUnsafeIntoBeforeGuestAccess(t *testing.T) {
 	for _, into := range []string{"/absolute", ".", "..", "../escape", "a/../../escape", "a/./b", "a\\b", "a\nb", ".git", "notes/.git/data"} {
 		t.Run(strings.ReplaceAll(into, "/", "_"), func(t *testing.T) {
 			g := readyFake()
-			_, err := New(g).Import(context.Background(), ImportOptions{
+			_, err := New(g, lima.BootstrapOptions{}).Import(context.Background(), ImportOptions{
 				Source: source,
 				Into:   into,
 				DryRun: true,
@@ -83,7 +83,7 @@ func TestImportSourceFailureDoesNotLeakHostPath(t *testing.T) {
 	source := filepath.Join(t.TempDir(), marker)
 	g := readyFake()
 
-	_, err := New(g).Import(context.Background(), ImportOptions{Source: source, DryRun: true})
+	_, err := New(g, lima.BootstrapOptions{}).Import(context.Background(), ImportOptions{Source: source, DryRun: true})
 	if err == nil {
 		t.Fatal("Import accepted a missing source")
 	}
@@ -101,7 +101,7 @@ func TestImportFirstRunStagesVerifiesAndPromotesOneManagedBrain(t *testing.T) {
 	writeHostTransferFile(t, source, "attachments/diagram.png", "png", 0o600)
 
 	g := readyFake()
-	report, err := New(g).Import(context.Background(), ImportOptions{Source: source})
+	report, err := New(g, lima.BootstrapOptions{}).Import(context.Background(), ImportOptions{Source: source})
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestImportFirstRunPostExchangeFailureRestoresEmptyBrain(t *testing.T) {
 	g := readyFake()
 	g.importFiles = 1
 	g.setFailure("tee "+skillStagingPath, 1)
-	_, err := New(g).Import(context.Background(), ImportOptions{Source: source})
+	_, err := New(g, lima.BootstrapOptions{}).Import(context.Background(), ImportOptions{Source: source})
 	if err == nil {
 		t.Fatal("Import skill activation failure returned nil")
 	}
@@ -159,7 +159,7 @@ func TestImportTransferFailureLeavesExistingBrainAndCleansStaging(t *testing.T) 
 
 	g := readyFake()
 	g.copyToErr = context.DeadlineExceeded
-	_, err := New(g).Import(context.Background(), ImportOptions{Source: source})
+	_, err := New(g, lima.BootstrapOptions{}).Import(context.Background(), ImportOptions{Source: source})
 	if err == nil {
 		t.Fatal("Import transfer failure returned nil")
 	}
@@ -181,7 +181,7 @@ func TestImportNonPristineCollisionRefusesBeforeContentTransfer(t *testing.T) {
 	g := initializedFake()
 	g.gitDirty = true
 	g.privateExists = map[string]bool{Path + "/notes/existing.md": true}
-	_, err := New(g).Import(context.Background(), ImportOptions{Source: source})
+	_, err := New(g, lima.BootstrapOptions{}).Import(context.Background(), ImportOptions{Source: source})
 	if err == nil {
 		t.Fatal("Import accepted a collision in a non-pristine Brain")
 	}
@@ -204,7 +204,7 @@ func TestImportExistingBrainUsesAtomicDirectoryExchange(t *testing.T) {
 	g.gitDirty = true
 	g.importFiles = 1
 	g.privateExists = map[string]bool{}
-	report, err := New(g).Import(context.Background(), ImportOptions{Source: source})
+	report, err := New(g, lima.BootstrapOptions{}).Import(context.Background(), ImportOptions{Source: source})
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestImportIntoRequiresOneNewContainedSubtree(t *testing.T) {
 	g.gitDirty = true
 	g.privateExists = map[string]bool{Path + "/archive/existing": true}
 
-	_, err := New(g).Import(context.Background(), ImportOptions{
+	_, err := New(g, lima.BootstrapOptions{}).Import(context.Background(), ImportOptions{
 		Source: source,
 		Into:   "archive/existing",
 	})
@@ -247,7 +247,7 @@ func TestImportIntoRequiresOneNewContainedSubtree(t *testing.T) {
 	g.gitDirty = true
 	g.importFiles = 1
 	g.privateExists = map[string]bool{}
-	_, err = New(g).Import(context.Background(), ImportOptions{
+	_, err = New(g, lima.BootstrapOptions{}).Import(context.Background(), ImportOptions{
 		Source: source,
 		Into:   "archive/new-vault",
 	})
@@ -266,7 +266,7 @@ func TestImportChecksumMismatchNeverPromotes(t *testing.T) {
 	g := readyFake()
 	g.importFiles = 1
 	g.setFailure("sha256sum --quiet --strict -c "+importManifestPath, 1)
-	_, err := New(g).Import(context.Background(), ImportOptions{Source: source})
+	_, err := New(g, lima.BootstrapOptions{}).Import(context.Background(), ImportOptions{Source: source})
 	if err == nil {
 		t.Fatal("Import accepted a checksum mismatch")
 	}
@@ -287,7 +287,7 @@ func TestImportPostExchangeFailureAtomicallyRollsBack(t *testing.T) {
 	g.importFiles = 1
 	g.privateExists = map[string]bool{}
 	g.setFailure("tee "+skillStagingPath, 1)
-	_, err := New(g).Import(context.Background(), ImportOptions{Source: source})
+	_, err := New(g, lima.BootstrapOptions{}).Import(context.Background(), ImportOptions{Source: source})
 	if err == nil {
 		t.Fatal("Import skill activation failure returned nil")
 	}
@@ -311,7 +311,7 @@ func TestImportCancellationAfterExchangeUsesFreshRollbackContext(t *testing.T) {
 	g.cancel = cancel
 	g.cancelOn = "tee " + skillStagingPath
 
-	_, err := New(g).Import(ctx, ImportOptions{Source: source})
+	_, err := New(g, lima.BootstrapOptions{}).Import(ctx, ImportOptions{Source: source})
 	if err == nil {
 		t.Fatal("Import cancellation returned nil")
 	}
@@ -334,9 +334,15 @@ func TestImportRollbackFailureRetainsTheOldBrainRecoveryCandidate(t *testing.T) 
 	g.failExchangeAt = 2
 	g.setFailure("tee "+skillStagingPath, 1)
 
-	_, err := New(g).Import(context.Background(), ImportOptions{Source: source})
+	_, err := New(g, lima.BootstrapOptions{}).Import(context.Background(), ImportOptions{Source: source})
 	if err == nil || !strings.Contains(err.Error(), "rollback") {
 		t.Fatalf("Import rollback failure = %v, want bounded rollback error", err)
+	}
+	// The rollback failure must wrap the original import failure, not replace
+	// it: both are already-redacted brain Errors, and the original is what the
+	// operator has to fix first.
+	if !strings.Contains(err.Error(), "exited 1") {
+		t.Fatalf("Import rollback failure = %v, want it to carry the original import failure", err)
 	}
 	for _, call := range g.calls[g.firstIndex("renameat2")+1:] {
 		joined := strings.Join(call.argv, " ")
@@ -353,7 +359,7 @@ func TestImportMayReplaceOnlyTheExactPristineScaffold(t *testing.T) {
 	g := initializedFake()
 	g.importFiles = 1
 	g.privateExists = map[string]bool{Path + "/README.md": true}
-	report, err := New(g).Import(context.Background(), ImportOptions{Source: source})
+	report, err := New(g, lima.BootstrapOptions{}).Import(context.Background(), ImportOptions{Source: source})
 	if err != nil {
 		t.Fatalf("Import over pristine scaffold: %v", err)
 	}
@@ -368,7 +374,7 @@ func TestImportMayReplaceOnlyTheExactPristineScaffold(t *testing.T) {
 	g.importFiles = 1
 	g.privateExists = map[string]bool{Path + "/README.md": true}
 	g.pristineTree = false
-	_, err = New(g).Import(context.Background(), ImportOptions{Source: source})
+	_, err = New(g, lima.BootstrapOptions{}).Import(context.Background(), ImportOptions{Source: source})
 	if err == nil {
 		t.Fatal("Import treated a non-canonical one-commit tree as pristine")
 	}
@@ -397,7 +403,7 @@ func TestImportStagesWherePayloadTransportCanActuallyWrite(t *testing.T) {
 	writeHostTransferFile(t, source, "attachments/diagram.png", "png", 0o600)
 
 	g := readyFake()
-	if _, err := New(g).Import(context.Background(), ImportOptions{Source: source}); err != nil {
+	if _, err := New(g, lima.BootstrapOptions{}).Import(context.Background(), ImportOptions{Source: source}); err != nil {
 		t.Fatalf("Import: %v", err)
 	}
 

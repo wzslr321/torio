@@ -463,6 +463,16 @@ func (a *Adapter) verifyBrokerHome(ctx context.Context, rep *MCPBrokerReport) er
 	return nil
 }
 
+func nonEmptyLines(s string) []string {
+	var lines []string
+	for _, line := range strings.Split(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
 func (a *Adapter) verifyMCPBrokerUnit(ctx context.Context, rep *MCPBrokerReport) error {
 	const name = "broker_unit"
 	metadata, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%F %U:%G %a", "/etc/systemd/system", TorioMCPBrokerUnitPath)

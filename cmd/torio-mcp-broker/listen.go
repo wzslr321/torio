@@ -6,21 +6,10 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"path/filepath"
 	"syscall"
 
 	"github.com/wzslr321/torio/internal/mcpbroker"
 )
-
-// socketDir is where the broker publishes one socket per service (ADR-0004 §3).
-// It is fixed in the binary for the same reason it is fixed in the relay: the
-// guest layout is Torio's, not the caller's, and an overridable base would let
-// anything that can set argv or the environment move the boundary.
-const socketDir = "/run/torio-mcp"
-
-// socketSuffix keeps the service name and the file name distinct, so a name is
-// never mistaken for a whole path.
-const socketSuffix = ".sock"
 
 // socketMode is the mode ADR-0004 §3 requires: the owner (torio-mcp) and the
 // client group (torio-mcp-clients), nobody else. Group membership is the entire
@@ -56,7 +45,7 @@ func classify(exit int, format string, args ...any) *listenError {
 // group.
 //
 // base and gid are parameters so tests can bind under a temp directory and prove
-// the chown against a group they really belong to; production passes socketDir
+// the chown against a group they really belong to; production passes mcpbroker.SocketDir
 // and the gid of torio-mcp-clients. gid < 0 leaves group ownership alone, which
 // is only for tests — on the guest, a socket that did not reach the client group
 // is a boundary that was not built.
@@ -65,10 +54,10 @@ func classify(exit int, format string, args ...any) *listenError {
 // is worse than none: it answers a stat with the right owner and the right mode
 // while refusing, or accepting, the wrong callers.
 func listenService(base, service string, gid int) (*net.UnixListener, error) {
-	if err := mcpbroker.ValidateServiceName(service); err != nil {
+	path, err := mcpbroker.SocketPath(base, service)
+	if err != nil {
 		return nil, classify(exitUsage, "%v", err)
 	}
-	path := filepath.Join(base, service+socketSuffix)
 
 	if err := clearStaleSocket(path); err != nil {
 		return nil, err

@@ -10,8 +10,8 @@ import (
 	"github.com/wzslr321/torio/internal/serve"
 )
 
-// newServeCmd builds the `torio serve` parent and its lifecycle subcommands for the
-// loopback-only Hermes backend (Demo A D5). Like `torio vm`, the parent takes no
+// newServeCmd builds the `torio serve` parent and its lifecycle subcommands for
+// the loopback-only Hermes backend. Like `torio vm`, the parent takes no
 // action itself: an absent/unknown subcommand is a usage error.
 func newServeCmd(a *app) *cobra.Command {
 	s := &cobra.Command{
@@ -169,8 +169,6 @@ func newServeLogsCmd(a *app) *cobra.Command {
 	c.Flags().IntVar(&lines, "lines", serve.DefaultLogLines, "number of recent journal lines (bounded)")
 	return c
 }
-
-// --- envelope data ---
 
 type serveInstallData struct {
 	UnitPath      string `json:"unit_path"`

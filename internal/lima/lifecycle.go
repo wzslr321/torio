@@ -91,8 +91,8 @@ func (a *Adapter) refreshSession(ctx context.Context, op string) error {
 // Stopped instance returns success without invoking `limactl stop` again), a
 // missing instance is KindNotFound, and an ambiguous state (Broken/Unknown)
 // fails closed rather than being silently mutated. `stop` is graceful — it
-// never passes --force and never removes the instance or its data
-// (docs/contracts/cli.md: "stop nie usuwa VM ani danych"). As with Start, a
+// never passes --force, and per docs/contracts/cli.md it removes neither the
+// VM nor its data. As with Start, a
 // clean exit from `stop` is not accepted as proof: Stop re-queries and requires
 // the observed post-state to be Stopped, else fails closed
 // (KindPostconditionFailed).

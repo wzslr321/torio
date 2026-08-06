@@ -19,7 +19,7 @@ const (
 )
 
 // OperatorShellHelper is the fixed guest entry point of an operator session.
-// It is the guest-side counterpart of the promoted spike's
+// It is the guest-side counterpart of
 // `sg torio-projects -c 'cd <project> …'`: it takes exactly one argument, the
 // project path, and drops the operator into that checkout under the shared
 // project group. Keeping it a constant is what makes the remote side a fixed

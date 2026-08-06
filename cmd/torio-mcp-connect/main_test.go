@@ -13,8 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wzslr321/torio/internal/mcpbroker"
 	"time"
+
+	"github.com/wzslr321/torio/internal/mcpbroker"
 )
 
 // The service name is the only untrusted input this binary has, and it is the
@@ -49,9 +50,9 @@ func TestSocketPathRejectsNonSlugService(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := socketPath("/run/torio-mcp", tc.service)
+			got, err := mcpbroker.SocketPath("/run/torio-mcp", tc.service)
 			if err == nil {
-				t.Fatalf("socketPath(%q) = %q, want rejection", tc.service, got)
+				t.Fatalf("mcpbroker.SocketPath(%q) = %q, want rejection", tc.service, got)
 			}
 		})
 	}
@@ -89,15 +90,15 @@ func TestSocketPathIsContainedInBase(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.service, func(t *testing.T) {
-			got, err := socketPath(base, tc.service)
+			got, err := mcpbroker.SocketPath(base, tc.service)
 			if err != nil {
-				t.Fatalf("socketPath(%q): %v", tc.service, err)
+				t.Fatalf("mcpbroker.SocketPath(%q): %v", tc.service, err)
 			}
 			if got != tc.want {
-				t.Errorf("socketPath(%q) = %q, want %q", tc.service, got, tc.want)
+				t.Errorf("mcpbroker.SocketPath(%q) = %q, want %q", tc.service, got, tc.want)
 			}
 			if dir := filepath.Dir(got); dir != base {
-				t.Errorf("socketPath(%q) resolved outside base: parent %q", tc.service, dir)
+				t.Errorf("mcpbroker.SocketPath(%q) resolved outside base: parent %q", tc.service, dir)
 			}
 		})
 	}
@@ -234,8 +235,8 @@ func TestPermissionDeniedNamesBothCauses(t *testing.T) {
 	if !strings.Contains(msg, "torio-mcp-clients") {
 		t.Errorf("stderr = %q, want it to name the group that grants access", msg)
 	}
-	if !strings.Contains(msg, socketDir) {
-		t.Errorf("stderr = %q, want it to name %s, the other thing that produces this error", msg, socketDir)
+	if !strings.Contains(msg, mcpbroker.SocketDir) {
+		t.Errorf("stderr = %q, want it to name %s, the other thing that produces this error", msg, mcpbroker.SocketDir)
 	}
 }
 
@@ -499,7 +500,7 @@ func TestRelayLeavesNothingRunningAfterACleanSession(t *testing.T) {
 func TestSocketPathFitsSunPath(t *testing.T) {
 	const sunPathLimit = 104
 	longest := strings.Repeat("a", mcpbroker.MaxServiceNameLen)
-	path, err := socketPath(socketDir, longest)
+	path, err := mcpbroker.SocketPath(mcpbroker.SocketDir, longest)
 	if err != nil {
 		t.Fatalf("socketPath rejected the longest accepted name: %v", err)
 	}

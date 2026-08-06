@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/wzslr321/torio/internal/execx"
+	"github.com/wzslr321/torio/internal/guestexec"
 	"github.com/wzslr321/torio/internal/lima"
 )
 
@@ -29,12 +31,8 @@ type Manager struct {
 	bootstrapOpts lima.BootstrapOptions
 }
 
-func New(guest Guest, opts ...lima.BootstrapOptions) *Manager {
-	var bootstrapOpts lima.BootstrapOptions
-	if len(opts) > 0 {
-		bootstrapOpts = opts[0]
-	}
-	return &Manager{guest: guest, bootstrapOpts: bootstrapOpts}
+func New(guest Guest, opts lima.BootstrapOptions) *Manager {
+	return &Manager{guest: guest, bootstrapOpts: opts}
 }
 
 // Init creates a fresh scaffold through a private sibling staging directory,
@@ -55,7 +53,7 @@ func (m *Manager) Init(ctx context.Context) (report InitReport, retErr error) {
 	promoted := false
 	defer func() {
 		if !promoted {
-			_, _ = m.run(ctx, op, rootExec("rm", "-rf", "--", stagingPath))
+			_, _ = m.run(ctx, op, guestexec.RootExec("rm", "-rf", "--", stagingPath))
 		}
 		if err := m.releaseInitLock(ctx, op, lockToken); retErr == nil && err != nil {
 			retErr = err
@@ -68,7 +66,7 @@ func (m *Manager) Init(ctx context.Context) (report InitReport, retErr error) {
 	}
 	if !status.PathExists {
 		if err := m.mustRun(ctx, op, KindGuestCommand, "create canonical Brain directory",
-			rootExec("install", "-d", "-o", lima.HermesUser, "-g", lima.HermesUser, "-m", "0750", Path)); err != nil {
+			guestexec.RootExec("install", "-d", "-o", lima.HermesUser, "-g", lima.HermesUser, "-m", "0750", Path)); err != nil {
 			return report, err
 		}
 		status, err = m.inspectStatus(ctx, op)
@@ -102,7 +100,6 @@ func (m *Manager) Init(ctx context.Context) (report InitReport, retErr error) {
 		}
 		return report, &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("canonical Brain directory is non-empty or has unsafe drift; refusing to adopt or overwrite it")}
 	case StateUninitialized:
-		// proceed
 	default:
 		return report, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("unrecognized Brain state")}
 	}
@@ -111,7 +108,7 @@ func (m *Manager) Init(ctx context.Context) (report InitReport, retErr error) {
 		return report, err
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "clean private staging",
-		rootExec("rm", "-rf", "--", stagingPath)); err != nil {
+		guestexec.RootExec("rm", "-rf", "--", stagingPath)); err != nil {
 		return report, err
 	}
 
@@ -120,7 +117,7 @@ func (m *Manager) Init(ctx context.Context) (report InitReport, retErr error) {
 		dirs = append(dirs, stagingPath+"/"+name)
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "create private scaffold staging",
-		rootExec(append([]string{"install", "-d", "-o", lima.HermesUser, "-g", lima.HermesUser, "-m", "0750"}, dirs...)...)); err != nil {
+		guestexec.RootExec(append([]string{"install", "-d", "-o", lima.HermesUser, "-g", lima.HermesUser, "-m", "0750"}, dirs...)...)); err != nil {
 		return report, err
 	}
 
@@ -130,31 +127,31 @@ func (m *Manager) Init(ctx context.Context) (report InitReport, retErr error) {
 			return report, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("embedded scaffold unavailable")}
 		}
 		if err := m.mustRunInput(ctx, op, KindGuestCommand, "write scaffold file", payload,
-			userExec("tee", stagingPath+"/"+name)); err != nil {
+			guestexec.UserExec("tee", stagingPath+"/"+name)); err != nil {
 			return report, err
 		}
 		if err := m.mustRun(ctx, op, KindGuestCommand, "set scaffold file permissions",
-			rootExec("chmod", "0640", stagingPath+"/"+name)); err != nil {
+			guestexec.RootExec("chmod", "0640", stagingPath+"/"+name)); err != nil {
 			return report, err
 		}
 	}
 
 	if err := m.mustRun(ctx, op, KindGit, "git init",
-		userExec("git", "-C", stagingPath, "init", "--initial-branch=main")); err != nil {
+		guestexec.UserExec("git", "-C", stagingPath, "init", "--initial-branch=main")); err != nil {
 		return report, err
 	}
 	if err := m.mustRun(ctx, op, KindGit, "git add",
-		userExec("git", "-C", stagingPath, "add", "--", "README.md", "AGENTS.md", "todo.md")); err != nil {
+		guestexec.UserExec("git", "-C", stagingPath, "add", "--", "README.md", "AGENTS.md", "todo.md")); err != nil {
 		return report, err
 	}
 	if err := m.mustRun(ctx, op, KindGit, "git commit",
-		userExec("git", "-C", stagingPath,
+		guestexec.UserExec("git", "-C", stagingPath,
 			"-c", "user.name=torio",
 			"-c", "user.email=torio@localhost",
 			"commit", "-m", "Initialize Torio Second Brain")); err != nil {
 		return report, err
 	}
-	if err := m.verifyStagedRepository(ctx, op); err != nil {
+	if err := m.verifySnapshotRepository(ctx, op, stagingPath, "staged Brain repository"); err != nil {
 		return report, err
 	}
 	if err := m.refreshInitLock(ctx, op, lockToken); err != nil {
@@ -162,11 +159,11 @@ func (m *Manager) Init(ctx context.Context) (report InitReport, retErr error) {
 	}
 
 	if err := m.mustRun(ctx, op, KindConflict, "remove verified empty canonical directory",
-		rootExec("rmdir", Path)); err != nil {
+		guestexec.RootExec("rmdir", Path)); err != nil {
 		return report, err
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "promote Brain scaffold",
-		rootExec("mv", "-T", stagingPath, Path)); err != nil {
+		guestexec.RootExec("mv", "-T", stagingPath, Path)); err != nil {
 		return report, err
 	}
 	promoted = true
@@ -241,21 +238,21 @@ func (m *Manager) installSkill(ctx context.Context, op string) (updated bool, re
 
 	defer func() {
 		if retErr != nil {
-			_, _ = m.run(ctx, op, rootExec("rm", "-f", "--", skillStagingPath))
+			_, _ = m.run(ctx, op, guestexec.RootExec("rm", "-f", "--", skillStagingPath))
 		}
 	}()
 	if err := m.removeLegacySkill(ctx, op); err != nil {
 		return false, err
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "create retrieval skill category directory",
-		rootExec("install", "-d", "-o", lima.HermesUser, "-g", lima.HermesUser, "-m", "0750", SkillCategoryPath)); err != nil {
+		guestexec.RootExec("install", "-d", "-o", lima.HermesUser, "-g", lima.HermesUser, "-m", "0750", SkillCategoryPath)); err != nil {
 		return false, err
 	}
 	if err := m.writeSkillFile(ctx, op, "retrieval skill category description", category, SkillCategoryFilePath); err != nil {
 		return false, err
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "create retrieval skill directory",
-		rootExec("install", "-d", "-o", lima.HermesUser, "-g", lima.HermesUser, "-m", "0750", SkillPath)); err != nil {
+		guestexec.RootExec("install", "-d", "-o", lima.HermesUser, "-g", lima.HermesUser, "-m", "0750", SkillPath)); err != nil {
 		return false, err
 	}
 	if err := m.writeSkillFile(ctx, op, "retrieval skill payload", payload, SkillFilePath); err != nil {
@@ -277,15 +274,15 @@ func (m *Manager) installSkill(ctx context.Context, op string) (updated bool, re
 // never be walked as a skill.
 func (m *Manager) writeSkillFile(ctx context.Context, op, what string, payload []byte, dest string) error {
 	if err := m.mustRunInput(ctx, op, KindGuestCommand, "write "+what, payload,
-		userExec("tee", skillStagingPath)); err != nil {
+		guestexec.UserExec("tee", skillStagingPath)); err != nil {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "set "+what+" permissions",
-		rootExec("chmod", "0640", skillStagingPath)); err != nil {
+		guestexec.RootExec("chmod", "0640", skillStagingPath)); err != nil {
 		return err
 	}
 	return m.mustRun(ctx, op, KindGuestCommand, "promote "+what,
-		rootExec("mv", "-T", skillStagingPath, dest))
+		guestexec.RootExec("mv", "-T", skillStagingPath, dest))
 }
 
 // removeLegacySkill retires the installation that releases before the category
@@ -312,10 +309,10 @@ func (m *Manager) removeLegacySkill(ctx context.Context, op string) error {
 		return nil
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "remove the superseded retrieval skill",
-		rootExec("rm", "-f", "--", legacySkillPath+"/SKILL.md")); err != nil {
+		guestexec.RootExec("rm", "-f", "--", legacySkillPath+"/SKILL.md")); err != nil {
 		return err
 	}
-	_, _ = m.run(ctx, op, rootExec("rmdir", "--", legacySkillPath))
+	_, _ = m.run(ctx, op, guestexec.RootExec("rmdir", "--", legacySkillPath))
 	return nil
 }
 
@@ -378,7 +375,7 @@ func (m *Manager) probeSkill(ctx context.Context, op, digest, categoryDigest str
 		{SkillFilePath, digest},
 		{SkillCategoryFilePath, categoryDigest},
 	} {
-		sum, err := m.run(ctx, op, userExec("sha256sum", "--", spec.path))
+		sum, err := m.run(ctx, op, guestexec.UserExec("sha256sum", "--", spec.path))
 		if err != nil {
 			return skillProbe{}, err
 		}
@@ -406,14 +403,14 @@ func (m *Manager) skillOwnershipSecure(ctx context.Context, op string) (bool, er
 		{SkillPath, "750"},
 		{SkillFilePath, "640"},
 	} {
-		meta, err := m.run(ctx, op, rootExec("stat", "-c", "%U:%G %a", spec.path))
+		meta, err := m.run(ctx, op, guestexec.RootExec("stat", "-c", "%U:%G %a", spec.path))
 		if err != nil {
 			return false, err
 		}
 		if meta.ExitCode != 0 {
 			return false, nil
 		}
-		owner, group, mode := parseOwnershipMode(string(meta.Stdout))
+		owner, group, mode := guestexec.ParseOwnershipMode(string(meta.Stdout))
 		if owner != lima.HermesUser || group != lima.HermesUser || (mode != spec.mode && mode != "0"+spec.mode) {
 			return false, nil
 		}
@@ -444,12 +441,7 @@ func newStatusReport() StatusReport {
 }
 
 func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, error) {
-	report := StatusReport{
-		Path:       Path,
-		GitState:   GitMissing,
-		SkillState: SkillNotInstalled,
-		Issues:     []string{},
-	}
+	report := newStatusReport()
 	registered, projectConflict, err := m.projectStatus(ctx, op)
 	if err != nil {
 		return report, err
@@ -505,14 +497,14 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 	}
 	report.PathExists = true
 
-	meta, err := m.run(ctx, op, rootExec("stat", "-c", "%U:%G %a", Path))
+	meta, err := m.run(ctx, op, guestexec.RootExec("stat", "-c", "%U:%G %a", Path))
 	if err != nil {
 		return report, err
 	}
 	if meta.ExitCode != 0 {
 		return report, commandError(op, KindGuestCommand, "inspect canonical Brain directory", meta.ExitCode)
 	}
-	report.Owner, report.Group, report.Mode = parseOwnershipMode(string(meta.Stdout))
+	report.Owner, report.Group, report.Mode = guestexec.ParseOwnershipMode(string(meta.Stdout))
 	report.PathSecure = report.Owner == lima.HermesUser &&
 		report.Group == lima.HermesUser &&
 		(report.Mode == "750" || report.Mode == "0750")
@@ -520,7 +512,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 		report.Issues = append(report.Issues, "owner_group_or_mode_mismatch")
 	}
 
-	fs, err := m.run(ctx, op, rootExec("findmnt", "-n", "-o", "FSTYPE", "-T", Path))
+	fs, err := m.run(ctx, op, guestexec.RootExec("findmnt", "-n", "-o", "FSTYPE", "-T", Path))
 	if err != nil {
 		return report, err
 	}
@@ -538,7 +530,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 		return report, nil
 	}
 
-	emptyRes, err := m.run(ctx, op, userExec("find", Path, "-mindepth", "1", "-maxdepth", "1", "-printf", ".", "-quit"))
+	emptyRes, err := m.run(ctx, op, guestexec.UserExec("find", Path, "-mindepth", "1", "-maxdepth", "1", "-printf", ".", "-quit"))
 	if err != nil {
 		return report, err
 	}
@@ -572,7 +564,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 		return report, nil
 	}
 
-	symlinks, err := m.run(ctx, op, userExec("find", Path, "-type", "l", "-printf", ".", "-quit"))
+	symlinks, err := m.run(ctx, op, guestexec.UserExec("find", Path, "-type", "l", "-printf", ".", "-quit"))
 	if err != nil {
 		return report, err
 	}
@@ -608,7 +600,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 		report.Issues = append(report.Issues, "canonical_scaffold_incomplete")
 	}
 
-	head, err := m.run(ctx, op, userExec("git", "-C", Path, "rev-parse", "--verify", "HEAD"))
+	head, err := m.run(ctx, op, guestexec.UserExec("git", "-C", Path, "rev-parse", "--verify", "HEAD"))
 	if err != nil {
 		return report, err
 	}
@@ -616,7 +608,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 	if !gitRepo {
 		report.Issues = append(report.Issues, "git_repository_missing")
 	} else {
-		remotes, runErr := m.run(ctx, op, userExec("git", "-C", Path, "remote"))
+		remotes, runErr := m.run(ctx, op, guestexec.UserExec("git", "-C", Path, "remote"))
 		if runErr != nil {
 			return report, runErr
 		}
@@ -627,7 +619,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 		if report.GitHasRemote {
 			report.Issues = append(report.Issues, "git_remote_present")
 		}
-		worktree, runErr := m.run(ctx, op, userExec("git", "-C", Path, "status", "--porcelain=v1", "--untracked-files=normal"))
+		worktree, runErr := m.run(ctx, op, guestexec.UserExec("git", "-C", Path, "status", "--porcelain=v1", "--untracked-files=normal"))
 		if runErr != nil {
 			return report, runErr
 		}
@@ -641,7 +633,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 		}
 	}
 
-	md, err := m.run(ctx, op, userExec("find", Path, "-type", "f", "-name", "*.md", "-printf", "."))
+	md, err := m.run(ctx, op, guestexec.UserExec("find", Path, "-type", "f", "-name", "*.md", "-printf", "."))
 	if err != nil {
 		return report, err
 	}
@@ -651,7 +643,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 	report.MarkdownFiles = len(md.Stdout)
 
 	if attachmentsPresent {
-		attachments, runErr := m.run(ctx, op, userExec("find", Path+"/attachments", "-type", "f", "-printf", "."))
+		attachments, runErr := m.run(ctx, op, guestexec.UserExec("find", Path+"/attachments", "-type", "f", "-printf", "."))
 		if runErr != nil {
 			return report, runErr
 		}
@@ -661,7 +653,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 		report.AttachmentFiles = len(attachments.Stdout)
 	}
 
-	size, err := m.run(ctx, op, userExec("du", "-sb", "--", Path))
+	size, err := m.run(ctx, op, guestexec.UserExec("du", "-sb", "--", Path))
 	if err != nil {
 		return report, err
 	}
@@ -698,25 +690,7 @@ func (m *Manager) requireBootstrapVerified(ctx context.Context, op string) error
 }
 
 func (m *Manager) requireRootAccess(ctx context.Context, op string) error {
-	return m.mustRun(ctx, op, KindGuestCommand, "verify passwordless sudo", rootExec("true"))
-}
-
-func (m *Manager) verifyStagedRepository(ctx context.Context, op string) error {
-	head, err := m.run(ctx, op, userExec("git", "-C", stagingPath, "rev-parse", "--verify", "HEAD"))
-	if err != nil {
-		return err
-	}
-	if head.ExitCode != 0 || strings.TrimSpace(string(head.Stdout)) == "" {
-		return commandError(op, KindGit, "verify initial scaffold commit", head.ExitCode)
-	}
-	remote, err := m.run(ctx, op, userExec("git", "-C", stagingPath, "remote"))
-	if err != nil {
-		return err
-	}
-	if remote.ExitCode != 0 || strings.TrimSpace(string(remote.Stdout)) != "" {
-		return &Error{Op: op, Kind: KindGit, Err: fmt.Errorf("staged Brain repository must have no remote")}
-	}
-	return nil
+	return m.mustRun(ctx, op, KindGuestCommand, "verify passwordless sudo", guestexec.RootExec("true"))
 }
 
 func (m *Manager) ensureProject(ctx context.Context, op string) error {
@@ -731,7 +705,7 @@ func (m *Manager) ensureProject(ctx context.Context, op string) error {
 		return nil
 	}
 	if err := m.mustRun(ctx, op, KindRegistration, "register Hermes Project",
-		userExec("hermes", "project", "create", ProjectName, Path, "--slug", ProjectSlug)); err != nil {
+		guestexec.UserExec("hermes", "project", "create", ProjectName, Path, "--slug", ProjectSlug)); err != nil {
 		return err
 	}
 	registered, conflict, err = m.projectStatus(ctx, op)
@@ -745,7 +719,7 @@ func (m *Manager) ensureProject(ctx context.Context, op string) error {
 }
 
 func (m *Manager) projectStatus(ctx context.Context, op string) (registered, conflict bool, err error) {
-	show, err := m.run(ctx, op, userExec("hermes", "project", "show", ProjectSlug))
+	show, err := m.run(ctx, op, guestexec.UserExec("hermes", "project", "show", ProjectSlug))
 	if err != nil {
 		return false, false, err
 	}
@@ -759,7 +733,7 @@ func (m *Manager) projectStatus(ctx context.Context, op string) (registered, con
 		case strings.TrimSpace(string(show.Stdout)) == "":
 			// No project block was printed: the slug is free, not conflicting.
 			return false, false, nil
-		case pathMentioned(string(show.Stdout), Path):
+		case singlePrimaryPathIs(string(show.Stdout), Path):
 			return true, false, nil
 		default:
 			// A project block exists but its primary path is not ours.
@@ -770,7 +744,7 @@ func (m *Manager) projectStatus(ctx context.Context, op string) (registered, con
 	// itself is broken or missing (e.g. 127, or argparse's 2). A successful list
 	// proves the Hermes Project CLI is available, but list output is never used
 	// for path matching: it carries slugs and names, not primary paths.
-	list, err := m.run(ctx, op, userExec("hermes", "project", "list"))
+	list, err := m.run(ctx, op, guestexec.UserExec("hermes", "project", "list"))
 	if err != nil {
 		return false, false, err
 	}
@@ -781,7 +755,7 @@ func (m *Manager) projectStatus(ctx context.Context, op string) (registered, con
 }
 
 func (m *Manager) testPath(ctx context.Context, op, flag, path string) (bool, error) {
-	res, err := m.run(ctx, op, userExec("test", flag, path))
+	res, err := m.run(ctx, op, guestexec.UserExec("test", flag, path))
 	if err != nil {
 		return false, err
 	}
@@ -796,7 +770,7 @@ func (m *Manager) testPath(ctx context.Context, op, flag, path string) (bool, er
 }
 
 func (m *Manager) testRootPath(ctx context.Context, op, flag, path string) (bool, error) {
-	res, err := m.run(ctx, op, rootExec("test", flag, path))
+	res, err := m.run(ctx, op, guestexec.RootExec("test", flag, path))
 	if err != nil {
 		return false, err
 	}
@@ -816,23 +790,23 @@ func (m *Manager) acquireInitLock(ctx context.Context, op string) (string, error
 		return "", &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("generate Brain lock token")}
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		mkdir, runErr := m.run(ctx, op, userExec("mkdir", "-m", "0700", lockPath))
+		mkdir, runErr := m.run(ctx, op, guestexec.UserExec("mkdir", "-m", "0700", lockPath))
 		if runErr != nil {
 			return "", runErr
 		}
 		if mkdir.ExitCode == 0 {
 			if err := m.mustRunInput(ctx, op, KindGuestCommand, "record Brain init lock owner",
-				[]byte(token+"\n"), userExec("tee", lockPath+"/token")); err != nil {
-				_, _ = m.run(ctx, op, rootExec("rm", "-rf", "--", lockPath))
+				[]byte(token+"\n"), guestexec.UserExec("tee", lockPath+"/token")); err != nil {
+				_, _ = m.run(ctx, op, guestexec.RootExec("rm", "-rf", "--", lockPath))
 				return "", err
 			}
 			if err := m.mustRun(ctx, op, KindGuestCommand, "protect Brain init lock token",
-				rootExec("chmod", "0600", lockPath+"/token")); err != nil {
-				_, _ = m.run(ctx, op, rootExec("rm", "-rf", "--", lockPath))
+				guestexec.RootExec("chmod", "0600", lockPath+"/token")); err != nil {
+				_, _ = m.run(ctx, op, guestexec.RootExec("rm", "-rf", "--", lockPath))
 				return "", err
 			}
 			if err := m.verifyInitLock(ctx, op, token); err != nil {
-				_, _ = m.run(ctx, op, rootExec("rm", "-rf", "--", lockPath))
+				_, _ = m.run(ctx, op, guestexec.RootExec("rm", "-rf", "--", lockPath))
 				return "", err
 			}
 			return token, nil
@@ -862,15 +836,15 @@ func (m *Manager) recoverStaleInitLock(ctx context.Context, op, recoveryToken st
 	if !exists {
 		return true, nil
 	}
-	meta, err := m.run(ctx, op, rootExec("stat", "-c", "%U:%G %a", lockPath))
+	meta, err := m.run(ctx, op, guestexec.RootExec("stat", "-c", "%U:%G %a", lockPath))
 	if err != nil {
 		return false, err
 	}
-	owner, group, mode := parseOwnershipMode(string(meta.Stdout))
+	owner, group, mode := guestexec.ParseOwnershipMode(string(meta.Stdout))
 	if meta.ExitCode != 0 || owner != lima.HermesUser || group != lima.HermesUser || (mode != "700" && mode != "0700") {
 		return false, &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("Brain init lock has unexpected ownership or mode; refusing recovery")}
 	}
-	stale, err := m.run(ctx, op, rootExec(
+	stale, err := m.run(ctx, op, guestexec.RootExec(
 		"find", lockPath, "-maxdepth", "0", "-mmin", "+"+staleLockAge, "-print", "-quit",
 	))
 	if err != nil {
@@ -886,7 +860,7 @@ func (m *Manager) recoverStaleInitLock(ctx context.Context, op, recoveryToken st
 		return false, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("unexpected Brain init lock age result")}
 	}
 	quarantine := lockPath + ".stale-" + recoveryToken
-	mv, err := m.run(ctx, op, rootExec("mv", "-T", lockPath, quarantine))
+	mv, err := m.run(ctx, op, guestexec.RootExec("mv", "-T", lockPath, quarantine))
 	if err != nil {
 		return false, err
 	}
@@ -894,22 +868,22 @@ func (m *Manager) recoverStaleInitLock(ctx context.Context, op, recoveryToken st
 		return false, &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("Brain init lock changed during stale recovery")}
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "remove quarantined stale Brain init lock",
-		rootExec("rm", "-rf", "--", quarantine)); err != nil {
+		guestexec.RootExec("rm", "-rf", "--", quarantine)); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
 func (m *Manager) verifyInitLock(ctx context.Context, op, token string) error {
-	meta, err := m.run(ctx, op, rootExec("stat", "-c", "%U:%G %a", lockPath))
+	meta, err := m.run(ctx, op, guestexec.RootExec("stat", "-c", "%U:%G %a", lockPath))
 	if err != nil {
 		return err
 	}
-	owner, group, mode := parseOwnershipMode(string(meta.Stdout))
+	owner, group, mode := guestexec.ParseOwnershipMode(string(meta.Stdout))
 	if meta.ExitCode != 0 || owner != lima.HermesUser || group != lima.HermesUser || (mode != "700" && mode != "0700") {
 		return &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("Brain init lock ownership or mode changed")}
 	}
-	current, err := m.run(ctx, op, userExec("cat", lockPath+"/token"))
+	current, err := m.run(ctx, op, guestexec.UserExec("cat", lockPath+"/token"))
 	if err != nil {
 		return err
 	}
@@ -923,7 +897,7 @@ func (m *Manager) refreshInitLock(ctx context.Context, op, token string) error {
 	if err := m.verifyInitLock(ctx, op, token); err != nil {
 		return err
 	}
-	return m.mustRun(ctx, op, KindGuestCommand, "refresh Brain init lock", userExec("touch", lockPath))
+	return m.mustRun(ctx, op, KindGuestCommand, "refresh Brain init lock", guestexec.UserExec("touch", lockPath))
 }
 
 func (m *Manager) releaseInitLock(ctx context.Context, op, token string) error {
@@ -931,10 +905,10 @@ func (m *Manager) releaseInitLock(ctx context.Context, op, token string) error {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "remove Brain init lock token",
-		rootExec("rm", "-f", "--", lockPath+"/token")); err != nil {
+		guestexec.RootExec("rm", "-f", "--", lockPath+"/token")); err != nil {
 		return err
 	}
-	return m.mustRun(ctx, op, KindGuestCommand, "release Brain init lock", rootExec("rmdir", lockPath))
+	return m.mustRun(ctx, op, KindGuestCommand, "release Brain init lock", guestexec.RootExec("rmdir", lockPath))
 }
 
 func newLockToken() (string, error) {
@@ -946,23 +920,23 @@ func newLockToken() (string, error) {
 }
 
 func (m *Manager) run(ctx context.Context, op string, argv []string) (execx.Result, error) {
-	res, err := m.guest.SSH(ctx, argv)
-	if err != nil {
+	res, err := guestexec.Run(ctx, m.guest, argv)
+	switch {
+	case errors.Is(err, guestexec.ErrTruncated):
+		return execx.Result{}, &Error{Op: op, Kind: KindVerification, Err: err}
+	case err != nil:
 		return execx.Result{}, fromGuestErr(op, err)
-	}
-	if res.StdoutTruncated || res.StderrTruncated {
-		return execx.Result{}, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("bounded guest output was truncated")}
 	}
 	return res, nil
 }
 
 func (m *Manager) runInput(ctx context.Context, op string, stdin []byte, argv []string) (execx.Result, error) {
-	res, err := m.guest.SSHInput(ctx, stdin, argv)
-	if err != nil {
+	res, err := guestexec.RunInput(ctx, m.guest, stdin, argv)
+	switch {
+	case errors.Is(err, guestexec.ErrTruncated):
+		return execx.Result{}, &Error{Op: op, Kind: KindVerification, Err: err}
+	case err != nil:
 		return execx.Result{}, fromGuestErr(op, err)
-	}
-	if res.StdoutTruncated || res.StderrTruncated {
-		return execx.Result{}, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("bounded guest output was truncated")}
 	}
 	return res, nil
 }
@@ -987,26 +961,6 @@ func (m *Manager) mustRunInput(ctx context.Context, op string, kind ErrorKind, a
 		return commandError(op, kind, action, res.ExitCode)
 	}
 	return nil
-}
-
-func rootExec(args ...string) []string {
-	return append([]string{"sudo", "-n", "--"}, args...)
-}
-
-func userExec(args ...string) []string {
-	return append([]string{"sudo", "-n", "-u", lima.HermesUser, "--"}, args...)
-}
-
-func parseOwnershipMode(out string) (owner, group, mode string) {
-	fields := strings.Fields(strings.TrimSpace(out))
-	if len(fields) != 2 {
-		return "", "", ""
-	}
-	parts := strings.SplitN(fields[0], ":", 2)
-	if len(parts) != 2 {
-		return "", "", ""
-	}
-	return parts[0], parts[1], fields[1]
 }
 
 func nativeFilesystem(fstype string) bool {
@@ -1042,7 +996,7 @@ func parseTotalBytes(res execx.Result) (int64, error) {
 	return n, nil
 }
 
-func pathMentioned(output, path string) bool {
+func singlePrimaryPathIs(output, path string) bool {
 	found := false
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)

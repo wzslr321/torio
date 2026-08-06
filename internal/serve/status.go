@@ -3,10 +3,13 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/wzslr321/torio/internal/execx"
+	"github.com/wzslr321/torio/internal/guestexec"
 )
 
 // StatusReport is the structured readiness of the backend. It proves both the
@@ -29,31 +32,31 @@ type StatusReport struct {
 // result (bounded output that was cut is untrustworthy, per the bootstrap rule).
 // A clean non-zero exit is NOT an error here — the caller interprets ExitCode.
 func (a *Adapter) sh(ctx context.Context, op string, argv []string) (execx.Result, *Error) {
-	res, err := a.Guest.SSH(ctx, argv)
-	if err != nil {
+	res, err := guestexec.Run(ctx, a.Guest, argv)
+	switch {
+	case errors.Is(err, guestexec.ErrTruncated):
+		return execx.Result{}, &Error{Op: op, Kind: KindGuestCommandFailed, Err: err}
+	case err != nil:
 		return execx.Result{}, fromGuestErr(op, err)
-	}
-	if res.StdoutTruncated || res.StderrTruncated {
-		return execx.Result{}, &Error{Op: op, Kind: KindGuestCommandFailed, Err: errf("guest output was truncated")}
 	}
 	return res, nil
 }
 
 // shInput is sh with a fed stdin (writing the generated unit via `tee`).
 func (a *Adapter) shInput(ctx context.Context, op string, stdin []byte, argv []string) (execx.Result, *Error) {
-	res, err := a.Guest.SSHInput(ctx, stdin, argv)
-	if err != nil {
+	res, err := guestexec.RunInput(ctx, a.Guest, stdin, argv)
+	switch {
+	case errors.Is(err, guestexec.ErrTruncated):
+		return execx.Result{}, &Error{Op: op, Kind: KindGuestCommandFailed, Err: err}
+	case err != nil:
 		return execx.Result{}, fromGuestErr(op, err)
-	}
-	if res.StdoutTruncated || res.StderrTruncated {
-		return execx.Result{}, &Error{Op: op, Kind: KindGuestCommandFailed, Err: errf("guest output was truncated")}
 	}
 	return res, nil
 }
 
 // installed reports whether the unit file exists on the guest.
 func (a *Adapter) installed(ctx context.Context, op string) (bool, *Error) {
-	res, e := a.sh(ctx, op, userExec("test", "-f", unitPath))
+	res, e := a.sh(ctx, op, guestexec.UserExec("test", "-f", unitPath))
 	if e != nil {
 		return false, e
 	}
@@ -89,7 +92,7 @@ func (a *Adapter) enabledState(ctx context.Context, op, rt string) (string, *Err
 // discarded — we never carry the raw body (which can be large) around; only the
 // short derived version survives.
 func (a *Adapter) probeEndpoint(ctx context.Context, op string) (int, string, *Error) {
-	argv := userExec("curl", "-s", "-m", "5", "-w", "\n%{http_code}", EndpointURL())
+	argv := guestexec.UserExec("curl", "-s", "-m", "5", "-w", "\n%{http_code}", EndpointURL())
 	res, e := a.sh(ctx, op, argv)
 	if e != nil {
 		return 0, "", e
@@ -134,9 +137,9 @@ func endpointReady(code int, version string) bool {
 // unexpected listener on the port), so the operator can tell the two apart.
 func endpointUnreadyErr(code int, version string) error {
 	if code == 200 && version == "" {
-		return errf("service active but %s answered 200 without a parseable Hermes version — not the expected backend", StatusPath)
+		return fmt.Errorf("service active but %s answered 200 without a parseable Hermes version — not the expected backend", StatusPath)
 	}
-	return errf("service active but %s answered %d, not 200", StatusPath, code)
+	return fmt.Errorf("service active but %s answered %d, not 200", StatusPath, code)
 }
 
 // Status reports the backend's readiness: the unit's installed/enabled state,
@@ -188,9 +191,9 @@ func (a *Adapter) Status(ctx context.Context) (StatusReport, error) {
 
 	switch {
 	case !rep.Installed:
-		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: errf("unit %q is not installed; run `torio serve install`", UnitName)}
+		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: fmt.Errorf("unit %q is not installed; run `torio serve install`", UnitName)}
 	case !rep.Active:
-		return rep, &Error{Op: op, Kind: KindInactive, Err: errf("service is %q, not active; run `torio serve start`", act)}
+		return rep, &Error{Op: op, Kind: KindInactive, Err: fmt.Errorf("service is %q, not active; run `torio serve start`", act)}
 	case !rep.EndpointReady:
 		return rep, &Error{Op: op, Kind: KindEndpointUnready, Err: endpointUnreadyErr(code, version)}
 	}

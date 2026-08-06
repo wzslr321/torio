@@ -35,13 +35,6 @@ func TestContextIsPropagatedNotReplaced(t *testing.T) {
 	}
 }
 
-func TestNewDefaultsBinToLimactl(t *testing.T) {
-	a := New(&fakeRunner{})
-	if a.bin() != "limactl" {
-		t.Fatalf("bin() = %q, want %q", a.bin(), "limactl")
-	}
-}
-
 // The instance name must reach limactl from the resolved value, never from a
 // literal. This is the guard ADR-0001 promises: a new call site that hardcodes
 // "torio" would work in production and silently ignore the operator's choice,

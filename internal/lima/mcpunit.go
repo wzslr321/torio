@@ -9,7 +9,6 @@ const (
 	TorioMCPBrokerUnitName = "torio-mcp-broker.service"
 	TorioMCPBrokerPath     = "/usr/local/bin/torio-mcp-broker"
 	TorioMCPBrokerUnitPath = "/etc/systemd/system/" + TorioMCPBrokerUnitName
-	mcpBrokerStagingPath   = "/etc/systemd/system/torio-mcp-broker-staging.service"
 )
 
 //go:embed templates/torio-mcp-broker.service

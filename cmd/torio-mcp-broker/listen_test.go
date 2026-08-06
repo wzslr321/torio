@@ -75,7 +75,7 @@ func TestListenRefusesWhenTheClientGroupCannotBeSet(t *testing.T) {
 	if !strings.Contains(err.Error(), "group") {
 		t.Errorf("error = %q, want it to name the group as the problem", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, testService+socketSuffix)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, testService+mcpbroker.SocketSuffix)); !os.IsNotExist(err) {
 		t.Error("a socket was left behind after the boundary failed to be built")
 	}
 }
@@ -86,7 +86,7 @@ func TestListenRefusesWhenTheClientGroupCannotBeSet(t *testing.T) {
 // serves MCP again until somebody deletes a file by hand.
 func TestListenReplacesAStaleSocket(t *testing.T) {
 	dir := shortTempDir(t)
-	path := filepath.Join(dir, testService+socketSuffix)
+	path := filepath.Join(dir, testService+mcpbroker.SocketSuffix)
 
 	dead, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
@@ -116,7 +116,7 @@ func TestListenReplacesAStaleSocket(t *testing.T) {
 // newcomer while the old one held the credentials and the policy it started with.
 func TestListenRefusesWhenAnotherBrokerIsListening(t *testing.T) {
 	dir := shortTempDir(t)
-	path := filepath.Join(dir, testService+socketSuffix)
+	path := filepath.Join(dir, testService+mcpbroker.SocketSuffix)
 
 	live, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
@@ -146,7 +146,7 @@ func TestListenRefusesWhenAnotherBrokerIsListening(t *testing.T) {
 // at a path in /run.
 func TestListenRefusesAPathThatIsNotASocket(t *testing.T) {
 	dir := shortTempDir(t)
-	path := filepath.Join(dir, testService+socketSuffix)
+	path := filepath.Join(dir, testService+mcpbroker.SocketSuffix)
 	if err := os.WriteFile(path, []byte("not a socket"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -169,18 +169,6 @@ func TestListenRejectsANonSlugService(t *testing.T) {
 		if _, err := listenService(dir, service, -1); err == nil {
 			t.Errorf("listenService(%q) succeeded, want rejection", service)
 		}
-	}
-}
-
-// The longest name the rule accepts must still produce an address the kernel can
-// hold. If either the directory or the bound grows, this fails here rather than
-// as an EINVAL on a guest somebody is debugging.
-func TestSocketPathFitsSunPath(t *testing.T) {
-	const sunPathLimit = 104
-	longest := filepath.Join(socketDir, strings.Repeat("a", mcpbroker.MaxServiceNameLen)+socketSuffix)
-	if len(longest)+1 > sunPathLimit { // +1 for the NUL the kernel stores
-		t.Errorf("longest socket path is %d bytes, over the %d-byte sun_path limit: %s",
-			len(longest)+1, sunPathLimit, longest)
 	}
 }
 

@@ -289,31 +289,19 @@ func (a *app) emitVMState(command string, state lima.State) error {
 // carries the proven checks plus the persistent Hermes locations the operator
 // needs for the connection handoff — no secrets, no raw output.
 type vmBootstrapData struct {
-	Instance      string        `json:"instance"`
-	Checks        []vmCheckData `json:"checks"`
-	GuestUser     string        `json:"guest_user"`
-	HermesHome    string        `json:"hermes_home"`
-	ProfilePath   string        `json:"profile_path"`
-	BrainPath     string        `json:"brain_path"`
-	WorkspacePath string        `json:"workspace_path"`
-}
-
-// vmCheckData is one bootstrap check in the envelope. Detail is a short derived
-// value (a parsed version, an fstype), never a raw output blob.
-type vmCheckData struct {
-	Name   string `json:"name"`
-	OK     bool   `json:"ok"`
-	Detail string `json:"detail"`
+	Instance      string      `json:"instance"`
+	Checks        []checkData `json:"checks"`
+	GuestUser     string      `json:"guest_user"`
+	HermesHome    string      `json:"hermes_home"`
+	ProfilePath   string      `json:"profile_path"`
+	BrainPath     string      `json:"brain_path"`
+	WorkspacePath string      `json:"workspace_path"`
 }
 
 func bootstrapData(rep lima.BootstrapReport) vmBootstrapData {
-	checks := make([]vmCheckData, 0, len(rep.Checks))
-	for _, c := range rep.Checks {
-		checks = append(checks, vmCheckData{Name: c.Name, OK: c.OK, Detail: c.Detail})
-	}
 	return vmBootstrapData{
 		Instance:      rep.Instance,
-		Checks:        checks,
+		Checks:        checkPayload(rep.Checks),
 		GuestUser:     lima.HermesUser,
 		HermesHome:    lima.HermesHome,
 		ProfilePath:   lima.HermesProfilePath,
@@ -329,11 +317,7 @@ func bootstrapReportDetails(rep lima.BootstrapReport) map[string]any {
 	if len(rep.Checks) == 0 {
 		return nil
 	}
-	checks := make([]map[string]any, 0, len(rep.Checks))
-	for _, c := range rep.Checks {
-		checks = append(checks, map[string]any{"name": c.Name, "ok": c.OK, "detail": c.Detail})
-	}
-	return map[string]any{"instance": rep.Instance, "checks": checks}
+	return map[string]any{"instance": rep.Instance, "checks": checkDetails(rep.Checks)}
 }
 
 // emitVMBootstrap renders a successful bootstrap. JSON mode emits exactly one
@@ -344,14 +328,8 @@ func (a *app) emitVMBootstrap(rep lima.BootstrapReport) error {
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("vm.bootstrap", bootstrapData(rep)))
 	}
-	for _, c := range rep.Checks {
-		mark := "ok"
-		if !c.OK {
-			mark = "FAIL"
-		}
-		if _, err := fmt.Fprintf(a.stdout, "[%s] %s: %s\n", mark, c.Name, c.Detail); err != nil {
-			return err
-		}
+	if err := a.writeCheckLines(rep.Checks); err != nil {
+		return err
 	}
 	_, err := fmt.Fprintf(a.stdout,
 		"\nHermes path ready on %s.\n"+

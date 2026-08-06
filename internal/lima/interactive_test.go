@@ -92,12 +92,10 @@ func TestProjectEnterSpecBuildsAnInteractiveSessionWithoutAgentForwarding(t *tes
 	}
 }
 
-// TestOperatorShellSpecPutsOverridesAfterTheConfigFlag pins the ordering rule
-// the spike had to discover: -F first, every -o after it. Lima's generated
-// ssh.config enables ControlMaster/ControlPersist, so an override placed before
-// -F loses, a stale multiplexing socket is reused, and agent forwarding is
-// silently poisoned (FINDINGS "Regression: stale ControlMaster mux does not
-// poison -A agent").
+// TestOperatorShellSpecPutsOverridesAfterTheConfigFlag pins the ordering rule:
+// -F first, every -o after it. Lima's generated ssh.config enables
+// ControlMaster/ControlPersist, so an override placed before -F loses, a stale
+// multiplexing socket is reused, and agent forwarding is silently poisoned.
 func TestOperatorShellSpecPutsOverridesAfterTheConfigFlag(t *testing.T) {
 	operatorShellHost(t)
 
@@ -131,7 +129,7 @@ func TestOperatorShellSpecPutsOverridesAfterTheConfigFlag(t *testing.T) {
 }
 
 // TestOperatorShellSpecNeverBackgroundsTheSession pins the other half of the
-// spike's ssh findings: -n is required only for a backgrounded session, and it
+// ssh rule: -n is required only for a backgrounded session, and it
 // redirects stdin from /dev/null. This session is the operator's foreground
 // terminal, so -n (and its relatives) must never appear.
 func TestOperatorShellSpecNeverBackgroundsTheSession(t *testing.T) {

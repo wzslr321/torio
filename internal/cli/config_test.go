@@ -143,7 +143,6 @@ func TestConfigSecretShapedValueDoesNotLeak(t *testing.T) {
 	cfgHome := t.TempDir()
 	writeCLIConfig(t, cfgHome, `{"schema_version":"2","default_timeout":"`+canary+`"}`)
 
-	// Human path.
 	code, _, stderr := runVersionWithXDG(t, []string{"version"}, cfgHome)
 	if code != int(ExitUsage) {
 		t.Fatalf("human: exit = %d, want %d", code, int(ExitUsage))
@@ -187,7 +186,6 @@ func TestConfigJSONEscapedSecretDoesNotLeak(t *testing.T) {
 	cfgHome := t.TempDir()
 	writeCLIConfig(t, cfgHome, body)
 
-	// Human path.
 	code, _, stderr := runVersionWithXDG(t, []string{"version"}, cfgHome)
 	if code != int(ExitUsage) {
 		t.Fatalf("human: exit = %d, want %d", code, int(ExitUsage))
