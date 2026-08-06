@@ -25,11 +25,10 @@
 
 ### Changed
 
-- `README.md` is now the project's full front page rather than a pointer to the
-  site. It carries the flow as a diagram, the shortest true path from nothing to
-  a working box, the complete 25-command leaf surface, the four global flags,
-  the exit-code table, and the supported host matrix — so a reader can decide
-  whether to install Torio without following a link.
+- `README.md` is now the project's front page: the flow as a diagram, the
+  shortest true path from nothing to a working box, the boundary, the supported
+  host matrix, and a roadmap. The full command surface, the global flags and the
+  exit-code table live in the site reference rather than in two places at once.
 
 ### Internal
 
