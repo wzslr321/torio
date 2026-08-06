@@ -32,11 +32,7 @@ SECRET_PATTERNS = {
 
 MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
-# A credential the documentation hands over as a ready-to-paste literal. The
-# Task 23 dogfood pasted `HERMES_DASHBOARD_SESSION_TOKEN=PASTE-YOUR-TOKEN-HERE`
-# out of the how-to unchanged: the backend started, Desktop connected, every
-# documented check passed, and the deployment was guarded by a token printed in
-# the docs. Nothing failed, which is exactly why nothing caught it.
+# A credential the documentation hands over as a ready-to-paste literal.
 #
 # A documented assignment must stop at `=` and let the operator type the value,
 # so an unread instruction produces something that does not work rather than
@@ -198,8 +194,8 @@ def validate_no_version_labels() -> list[str]:
 def validate_links() -> list[str]:
     errors: list[str] = []
     for path in sorted(ROOT.rglob("*.md")):
-        # Runtime worktrees/state are ignored by git and must not affect design validation.
-        if any(part in {".worktrees", "state", "artifacts"} for part in path.parts):
+        # Runtime artifacts are ignored by git and must not affect design validation.
+        if "artifacts" in path.parts:
             continue
         # Site page sources render to site/*.html; their links are resolved
         # against the built site, not the repository tree. scripts/check_site_links.py

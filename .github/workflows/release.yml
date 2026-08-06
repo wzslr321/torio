@@ -59,7 +59,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
-          go-version: "1.26.5"
+          go-version-file: go.mod
           check-latest: false
 
       - name: Resolve version
@@ -90,7 +90,8 @@ jobs:
           make validate
           make e2e
           go test ./...
-          go vet ./...
+          go test -race ./...
+          make vet
 
       # One archive per supported host, into one dist/ with a single
       # SHA256SUMS covering both. The platform list lives in
@@ -138,19 +139,24 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Tag and version reach the shell through env, never by interpolating
+      # `${{ … }}` into the script: a crafted tag name would otherwise be
+      # pasted into bash as code. The Resolve version step above already does
+      # it this way.
       - name: Upload release assets
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
         run: |
           set -euo pipefail
-          TAG="${{ steps.meta.outputs.tag }}"
           # Create release if missing; upload assets. Never runs on plain PRs.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --title "$TAG" --generate-notes
           fi
           gh release upload "$TAG" \
-            "dist/torio_${{ steps.meta.outputs.version }}_darwin_arm64.tar.gz" \
-            "dist/torio_${{ steps.meta.outputs.version }}_linux_amd64.tar.gz" \
+            "dist/torio_${VERSION}_darwin_arm64.tar.gz" \
+            "dist/torio_${VERSION}_linux_amd64.tar.gz" \
             dist/SHA256SUMS \
             --clobber

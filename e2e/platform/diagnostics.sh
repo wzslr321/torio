@@ -37,7 +37,7 @@ if [[ -d "${instance_dir}" ]]; then
     cp "${log}" "${ARTIFACT_DIR}/$(basename "${log}")" || true
   done
   shopt -u nullglob
-  cp -f "${instance_dir}/ha.sock" "${ARTIFACT_DIR}/hostagent-socket-path.txt" 2>/dev/null || true
+  printf '%s\n' "${instance_dir}/ha.sock" > "${ARTIFACT_DIR}/hostagent-socket-path.txt"
   if [[ -f "${instance_dir}/ha.stderr.log" ]]; then
     cp -f "${instance_dir}/ha.stderr.log" "${ARTIFACT_DIR}/hostagent-stderr.log" || true
   fi

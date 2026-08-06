@@ -51,7 +51,7 @@ class ParseSourceTests(unittest.TestCase):
 
 class IncludeTests(unittest.TestCase):
     def test_include_marker_is_replaced_by_block_body(self):
-        blocks = {"tunnel": bd.Block(id="tunnel", meta={}, body="Open the forward.")}
+        blocks = {"tunnel": bd.Block(body="Open the forward.")}
         out = bd.expand_includes("Before\n\n<!-- include: tunnel -->\n\nAfter", blocks, where="p.md")
         self.assertIn("Open the forward.", out)
         self.assertIn("Before", out)
@@ -59,7 +59,7 @@ class IncludeTests(unittest.TestCase):
         self.assertNotIn("include:", out)
 
     def test_same_block_can_be_included_by_two_pages(self):
-        blocks = {"shared": bd.Block(id="shared", meta={}, body="One source.")}
+        blocks = {"shared": bd.Block(body="One source.")}
         a = bd.expand_includes("<!-- include: shared -->", blocks, where="a.md")
         b = bd.expand_includes("<!-- include: shared -->", blocks, where="b.md")
         self.assertEqual(a, b)
@@ -72,8 +72,8 @@ class IncludeTests(unittest.TestCase):
 
     def test_includes_nest(self):
         blocks = {
-            "outer": bd.Block(id="outer", meta={}, body="A\n\n<!-- include: inner -->"),
-            "inner": bd.Block(id="inner", meta={}, body="B"),
+            "outer": bd.Block(body="A\n\n<!-- include: inner -->"),
+            "inner": bd.Block(body="B"),
         }
         out = bd.expand_includes("<!-- include: outer -->", blocks, where="p.md")
         self.assertIn("A", out)
@@ -81,35 +81,35 @@ class IncludeTests(unittest.TestCase):
 
     def test_include_can_shift_heading_level(self):
         blocks = {
-            "t": bd.Block(id="t", meta={}, body="## Title {#t}\n\nBody\n\n### Sub\n"),
+            "t": bd.Block(body="## Title {#t}\n\nBody\n\n### Sub\n"),
         }
         out = bd.expand_includes("<!-- include: t level=3 -->", blocks, where="p.md")
         self.assertIn("### Title {#t}", out)
         self.assertIn("#### Sub", out)
 
     def test_include_without_level_keeps_authored_depth(self):
-        blocks = {"t": bd.Block(id="t", meta={}, body="## Title\n")}
+        blocks = {"t": bd.Block(body="## Title\n")}
         out = bd.expand_includes("<!-- include: t -->", blocks, where="p.md")
         self.assertIn("## Title", out)
         self.assertNotIn("### Title", out)
 
     def test_heading_shift_does_not_touch_fenced_content(self):
         blocks = {
-            "t": bd.Block(id="t", meta={}, body="## Title\n\n```text\n# not a heading\n```\n"),
+            "t": bd.Block(body="## Title\n\n```text\n# not a heading\n```\n"),
         }
         out = bd.expand_includes("<!-- include: t level=3 -->", blocks, where="p.md")
         self.assertIn("# not a heading", out)
         self.assertNotIn("## not a heading", out)
 
     def test_include_can_override_the_top_heading(self):
-        blocks = {"b": bd.Block(id="b", meta={}, body="## Build it {#build}\n\nBody\n")}
+        blocks = {"b": bd.Block(body="## Build it {#build}\n\nBody\n")}
         out = bd.expand_includes('<!-- include: b heading="Step 1 — Build it" -->', blocks, where="p.md")
         self.assertIn("## Step 1 — Build it {#build}", out)
         self.assertNotIn("## Build it {#build}", out)
         self.assertIn("Body", out)
 
     def test_heading_override_applies_after_level_shift(self):
-        blocks = {"b": bd.Block(id="b", meta={}, body="## Build it {#build}\n\n### Sub\n")}
+        blocks = {"b": bd.Block(body="## Build it {#build}\n\n### Sub\n")}
         out = bd.expand_includes(
             '<!-- include: b level=3 heading="Step 1" -->', blocks, where="p.md"
         )
@@ -118,8 +118,8 @@ class IncludeTests(unittest.TestCase):
 
     def test_include_cycle_is_an_error_not_a_hang(self):
         blocks = {
-            "a": bd.Block(id="a", meta={}, body="<!-- include: b -->"),
-            "b": bd.Block(id="b", meta={}, body="<!-- include: a -->"),
+            "a": bd.Block(body="<!-- include: b -->"),
+            "b": bd.Block(body="<!-- include: a -->"),
         }
         with self.assertRaises(bd.BuildError):
             bd.expand_includes("<!-- include: a -->", blocks, where="p.md")
@@ -169,18 +169,14 @@ class BlockPortabilityTests(unittest.TestCase):
     """Blocks render into runbook Markdown too, so they must stay portable."""
 
     def test_site_relative_html_link_in_a_block_is_rejected(self):
-        blocks = {"b": bd.Block(id="b", meta={}, body="See [ref](reference.html#boundaries).")}
+        blocks = {"b": bd.Block(body="See [ref](reference.html#boundaries).")}
         problems = bd.check_block_portability(blocks)
         self.assertEqual(len(problems), 1)
         self.assertIn("reference.html", problems[0])
 
     def test_fragment_and_absolute_links_are_allowed(self):
         blocks = {
-            "b": bd.Block(
-                id="b",
-                meta={},
-                body="See [here](#tunnel) and [there](https://example.com).",
-            )
+            "b": bd.Block(body="See [here](#tunnel) and [there](https://example.com).")
         }
         self.assertEqual(bd.check_block_portability(blocks), [])
 

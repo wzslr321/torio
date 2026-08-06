@@ -204,9 +204,12 @@ install_from_archive() {
   extract="${tmp}/extract"
   mkdir -p "$extract"
   tar -xzf "$archive" -C "$extract"
-  [[ -f "${extract}/torio" ]] || die "archive missing torio binary"
+  # die exits, which skips the RETURN trap; remove the temp dir first.
+  if [[ ! -f "${extract}/torio" ]]; then
+    rm -rf "$tmp"
+    die "archive missing torio binary"
+  fi
   mkdir -p "$prefix"
-  # Install by atomic rename after copy to temp in prefix.
   local staged="${prefix}/.torio.new.$$"
   cp "${extract}/torio" "$staged"
   chmod 755 "$staged"

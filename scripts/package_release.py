@@ -147,11 +147,6 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def archive_members(archive: Path) -> list[str]:
-    with tarfile.open(archive, "r:gz") as tf:
-        return sorted(m.name for m in tf.getmembers())
-
-
 def default_release_readme(version: str, platform: str) -> str:
     label = PLATFORM_LABELS[platform]
     supported = ", ".join(PLATFORM_LABELS[p] for p in SUPPORTED_PLATFORMS)
@@ -176,6 +171,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--binary", required=True, type=Path, help="Path to built torio binary")
     p.add_argument("--license", type=Path, default=Path("LICENSE"), help="LICENSE file")
+    # --readme exists as a deterministic test input; releases take the default.
     p.add_argument(
         "--readme",
         type=Path,
@@ -188,24 +184,26 @@ def main(argv: list[str] | None = None) -> int:
     try:
         readme = args.readme
         tmp_readme: Path | None = None
-        if readme is None:
-            fd, tmp_name = tempfile.mkstemp(prefix="torio-release-readme-", suffix=".md")
-            os.close(fd)
-            tmp_readme = Path(tmp_name)
-            tmp_readme.write_text(
-                default_release_readme(args.version, args.platform), encoding="utf-8"
+        try:
+            if readme is None:
+                fd, tmp_name = tempfile.mkstemp(prefix="torio-release-readme-", suffix=".md")
+                os.close(fd)
+                tmp_readme = Path(tmp_name)
+                tmp_readme.write_text(
+                    default_release_readme(args.version, args.platform), encoding="utf-8"
+                )
+                readme = tmp_readme
+            archive, sums = build_archive(
+                version=args.version,
+                platform=args.platform,
+                binary=args.binary,
+                license_path=args.license,
+                readme_path=readme,
+                out_dir=args.out,
             )
-            readme = tmp_readme
-        archive, sums = build_archive(
-            version=args.version,
-            platform=args.platform,
-            binary=args.binary,
-            license_path=args.license,
-            readme_path=readme,
-            out_dir=args.out,
-        )
-        if tmp_readme is not None:
-            tmp_readme.unlink(missing_ok=True)
+        finally:
+            if tmp_readme is not None:
+                tmp_readme.unlink(missing_ok=True)
     except PackageError as exc:
         print(f"package_release: {exc}", file=sys.stderr)
         return 2

@@ -24,12 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import validate_artifacts as v  # noqa: E402
 
-# The block exactly as it stood before the correction, at 6ff120b. During the
-# Task 23 end-to-end run an operator followed it literally, and the heredoc
-# assigned HERMES_DASHBOARD_SESSION_TOKEN the placeholder string itself: a live
-# backend ended up with a working, guessable session token. Nothing failed, no
-# check reported it, and it was found only because a human noticed. That is the
-# incident the rule below exists for, so the failing text is pinned verbatim.
+# A heredoc that assigns the placeholder itself produces a live, guessable token.
 PRE_FIX_BLOCK = """\
 ```bash
 limactl shell torio            # interactive shell in the VM (Lima user)
@@ -162,6 +157,12 @@ func newGroupRunCmd(a *app) *cobra.Command {
 """
 
 
+# A deliberate ratchet, updated on purpose when a command is added or removed:
+# the derivation reads internal/cli/, and this pin is what makes an accidental
+# change to the surface fail a test instead of passing silently.
+PINNED_COMMAND_COUNT = 25
+
+
 class CommandSurface(unittest.TestCase):
     def test_a_use_field_on_another_struct_is_not_a_command(self) -> None:
         # `projects.AddRequest{… Use: use}` is a field of a request object. It is
@@ -185,11 +186,9 @@ class CommandSurface(unittest.TestCase):
             v.command_paths({"a.go": ROOT_SOURCE, "b.go": DECOY_SOURCE, "c.go": GROUP_SOURCE}),
         )
 
-    def test_the_delivered_surface_is_twenty_five_commands(self) -> None:
-        # Derived from internal/cli/, not asserted from a list kept by hand: the
-        # point of the check is that nobody has to remember to update a list.
+    def test_the_command_surface_is_pinned(self) -> None:
         surface = v.command_surface()
-        self.assertEqual(25, len(surface))
+        self.assertEqual(PINNED_COMMAND_COUNT, len(surface))
         self.assertIn("torio vm bootstrap", surface)
         self.assertIn("torio version", surface)
 

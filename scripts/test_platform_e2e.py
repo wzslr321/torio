@@ -82,7 +82,7 @@ class PlatformE2EContractTests(unittest.TestCase):
 
     def test_workflow_makes_dev_kvm_usable_before_asking_lima_to_boot(self) -> None:
         # /dev/kvm is present on hosted Linux runners but not writable as
-        # delivered (measured in spike 003). Without the rule, qemu falls back
+        # delivered. Without the rule, qemu falls back
         # to TCG emulation, which does not fail so much as never finish -- the
         # job would burn its timeout and report nothing useful.
         text = WORKFLOW.read_text(encoding="utf-8")
@@ -115,6 +115,7 @@ class PlatformE2EContractTests(unittest.TestCase):
         self.assertIn("sha256sum -c -", text)
         self.assertIn("shasum -a 256 -c -", text)
         self.assertRegex(text, r"\*\) echo \"unsupported runner OS \$\{RUNNER_OS\}\" >&2; exit 1 ;;")
+        self.assertIn("retention-days: 7", text)
 
     def test_workflow_collects_diagnostics_before_anything_deletes_the_instance(self) -> None:
         # `limactl delete` destroys ha.stderr.log and the serial console log, the
@@ -182,17 +183,6 @@ class PlatformE2EContractTests(unittest.TestCase):
             re.compile(r"package:\n(?:.*\n)*?\s+needs: \[linux-e2e, darwin-e2e\]", re.MULTILINE),
         )
 
-    def test_workflow_installs_the_verified_lima_version(self) -> None:
-        text = WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("lima-2.2.0-Darwin-arm64.tar.gz", text)
-        self.assertIn(
-            "bbdef91774885a0d05f7b048c4eb89ae2bcf3a0c252ae7ca7934e63df76d93c3",
-            text,
-        )
-        self.assertRegex(text, r"shasum -a 256 -c")
-        self.assertIn("if: failure()", text)
-        self.assertIn("retention-days: 7", text)
-
     def test_ginkgo_journey_drives_the_real_vertical_product_slice(self) -> None:
         text = JOURNEY.read_text(encoding="utf-8")
         required = [
@@ -247,7 +237,6 @@ class PlatformE2EContractTests(unittest.TestCase):
         self.assertIn("go test -C e2e -count=1 -tags=platform_e2e", text)
         self.assertIn('-ginkgo.label-filter="$$PLATFORM_E2E_LABEL_FILTER"', text)
         self.assertIn("-ginkgo.junit-report=", text)
-        self.assertNotIn("bash e2e/platform/run.sh", text)
 
     def test_go_driver_strictly_validates_json_and_records_artifacts(self) -> None:
         driver = DRIVER.read_text(encoding="utf-8")
@@ -276,6 +265,17 @@ class PlatformE2EContractTests(unittest.TestCase):
         self.assertIn('journalctl --user -u hermes-serve.service', text)
         self.assertNotIn('/home/hermes/brain', text)
         self.assertNotIn('/home/hermes/projects', text)
+
+    def test_outer_diagnostics_record_the_hostagent_socket_path(self) -> None:
+        # ha.sock is a socket, so a non-recursive cp of it can never succeed;
+        # the artifact records the path itself.
+        text = DIAGNOSTICS.read_text(encoding="utf-8")
+        self.assertIn(
+            'printf \'%s\\n\' "${instance_dir}/ha.sock" '
+            '> "${ARTIFACT_DIR}/hostagent-socket-path.txt"',
+            text,
+        )
+        self.assertNotIn('cp -f "${instance_dir}/ha.sock"', text)
 
     def test_timeout_helper_returns_124_without_using_a_shell(self) -> None:
         proc = subprocess.run(

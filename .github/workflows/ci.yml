@@ -20,17 +20,22 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
-          go-version: "1.26.5"
+          go-version-file: go.mod
           check-latest: false
 
       - name: Validate docs and artifacts
         run: make validate
 
+      - name: Go formatting
+        run: make fmt-check
+
       - name: Go test
         run: go test ./...
 
+      # make vet also vets the separate e2e module under its build tags,
+      # which a bare `go vet ./...` never reaches.
       - name: Go vet
-        run: go vet ./...
+        run: make vet
 
   e2e:
     name: e2e / compiled CLI
@@ -42,7 +47,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
-          go-version: "1.26.5"
+          go-version-file: go.mod
           check-latest: false
 
       - name: Test compiled CLI lifecycle
@@ -58,7 +63,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
-          go-version: "1.26.5"
+          go-version-file: go.mod
           check-latest: false
 
       - name: Go test with race detector

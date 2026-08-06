@@ -5,15 +5,8 @@ name: platform-e2e
 #
 # It runs on Linux by default, and that is the point. Hosted macOS runners are
 # themselves VMs and report `kern.hv_support = 0`, so they can only ever run the
-# `host` half — no automated job in this repository had ever booted a guest.
-# Hosted Linux runners expose /dev/kvm, so the `guest` half becomes gateable for
-# the first time, at a tenth of the macOS billing rate on a private repository.
-# Spike 003 measured create 10s, boot 104s.
-#
-# macOS is still reachable, and the release workflow still uses it: it is the
-# only way to prove the darwin/arm64 archive installs and runs on darwin. There
-# it is worth ten times the rate a handful of times a year; on every pull
-# request it was not.
+# `host` half; hosted Linux runners expose /dev/kvm, so the `guest` half is
+# gateable there. Measured: create 10s, boot 104s.
 on:
   workflow_call:
     inputs:
@@ -87,11 +80,11 @@ jobs:
         timeout-minutes: 5
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
-          go-version: "1.26.5"
+          go-version-file: go.mod
           check-latest: false
 
       # /dev/kvm exists on hosted Linux runners but is not writable as
-      # delivered. Measured in spike 003, along with the rule that fixes it.
+      # delivered.
       #
       # The rule is applied *and* the mode is set directly, because `udevadm
       # trigger` is asynchronous: reading writability straight after it is a

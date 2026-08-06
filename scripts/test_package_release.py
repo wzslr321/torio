@@ -3,13 +3,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import re
 import sys
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -57,8 +60,6 @@ class PackageArchiveTests(unittest.TestCase):
             )
 
             self.assertEqual(archive.name, "torio_0.0.0_darwin_arm64.tar.gz")
-            members = pr.archive_members(archive)
-            self.assertEqual(members, ["LICENSE", "README.md", "torio"])
 
             with tarfile.open(archive, "r:gz") as tf:
                 names = {m.name for m in tf.getmembers()}
@@ -200,6 +201,41 @@ class PackageArchiveTests(unittest.TestCase):
             pr.asset_name("1.0.0", "linux/arm64")
         with self.assertRaises(pr.PackageError):
             pr.asset_name("1.0.0", "windows/amd64")
+
+
+class TempReadmeCleanupTests(unittest.TestCase):
+    def test_generated_readme_is_removed_when_packaging_fails(self):
+        """Without --readme, main() writes a temp README; a failing
+        build_archive must not leak it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            created: list[Path] = []
+            real_mkstemp = tempfile.mkstemp
+
+            def recording_mkstemp(*args, **kwargs):
+                kwargs["dir"] = str(root)
+                fd, name = real_mkstemp(*args, **kwargs)
+                created.append(Path(name))
+                return fd, name
+
+            stderr = io.StringIO()
+            with mock.patch.object(pr.tempfile, "mkstemp", recording_mkstemp), \
+                    contextlib.redirect_stderr(stderr):
+                rc = pr.main(
+                    [
+                        "--version",
+                        "1.0.0",
+                        "--platform",
+                        "darwin/arm64",
+                        "--binary",
+                        str(root / "missing-binary"),
+                        "--out",
+                        str(root / "dist"),
+                    ]
+                )
+            self.assertEqual(rc, 2)
+            self.assertEqual(len(created), 1)
+            self.assertFalse(created[0].exists(), "temp release README leaked")
 
 
 class SupportedPlatformsMatchTheProductTests(unittest.TestCase):

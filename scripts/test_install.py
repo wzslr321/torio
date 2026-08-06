@@ -195,6 +195,26 @@ class InstallerTests(unittest.TestCase):
         env.update(env_extra or {})
         return run(["bash", "-c", f"source {INSTALL_SH}\n{script}"], env=env)
 
+    def test_bad_archive_leaves_no_temp_directory(self):
+        """`die` exits, which skips the RETURN trap: the extract dir must be
+        removed on that path too, not only on normal return."""
+        import tarfile
+
+        member = self.root / "not-torio"
+        member.write_text("x", encoding="utf-8")
+        bad = self.root / "bad.tar.gz"
+        with tarfile.open(bad, "w:gz") as tf:
+            tf.add(member, arcname="not-torio")
+        tmpdir = self.root / "tmpdir"
+        tmpdir.mkdir()
+        proc = self._source_lib(
+            f"install_from_archive '{bad}' '{self.prefix}'",
+            {"TMPDIR": str(tmpdir)},
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("archive missing torio binary", proc.stderr)
+        self.assertEqual(list(tmpdir.iterdir()), [], "temp extract dir leaked")
+
     def test_repository_defaults_to_the_upstream_slug(self):
         proc = self._source_lib('require_platform; asset_urls 1.2.3')
         self.assertEqual(proc.returncode, 0, proc.stderr)

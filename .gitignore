@@ -8,24 +8,16 @@ __pycache__/
 *.py[cod]
 
 # Runtime/state
-.torio/
 *.db
 *.db-shm
 *.db-wal
-state/
-logs/
 artifacts/
 
 # Local configuration and secrets
 .env
 .env.*
-!.env.example
-config.local.yaml
 *.pem
 *.key
-
-# Worktrees
-.worktrees/
 
 # Editors / OS
 .DS_Store

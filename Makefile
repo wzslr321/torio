@@ -1,4 +1,4 @@
-.PHONY: validate test e2e platform-e2e fmt vet docs docs-check package-release
+.PHONY: validate nvim-smoke e2e platform-e2e fmt fmt-check vet docs docs-check package-release
 
 docs:
 	python3 scripts/build_docs.py
@@ -11,8 +11,8 @@ validate: docs-check
 	python3 scripts/validate_artifacts.py
 	python3 -m unittest discover -s scripts -p 'test_*.py'
 
-test: validate
-	@if command -v go >/dev/null 2>&1; then go test ./...; else echo "go not installed; documentation validation completed"; fi
+# Local-only check; CI has no Neovim and nothing else runs this smoke test.
+nvim-smoke:
 	@if command -v nvim >/dev/null 2>&1; then \
 		TORIO_NVIM_ROOT="$(CURDIR)/integrations/neovim" nvim --headless -u NONE -l integrations/neovim/tests/smoke.lua; \
 	else \
@@ -25,8 +25,17 @@ test: validate
 e2e:
 	go test -C e2e -count=1 -tags=e2e ./...
 
+# fmt fixes; fmt-check is the CI gate that fails on drift.
 fmt:
-	@if command -v go >/dev/null 2>&1; then gofmt -w $$(find . -name '*.go' -not -path './.worktrees/*'); fi
+	@if command -v go >/dev/null 2>&1; then find . -name '*.go' -exec gofmt -w {} +; fi
+
+fmt-check:
+	@drift="$$(find . -name '*.go' -exec gofmt -l {} +)"; \
+	if [ -n "$$drift" ]; then \
+		echo "gofmt drift; run 'make fmt':" >&2; \
+		echo "$$drift" >&2; \
+		exit 1; \
+	fi
 
 vet:
 	@if command -v go >/dev/null 2>&1; then go vet ./...; fi

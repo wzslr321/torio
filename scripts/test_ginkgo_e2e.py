@@ -12,8 +12,6 @@ E2E_GO_MOD = ROOT / "e2e" / "go.mod"
 SMOKE = ROOT / "e2e" / "vm_lifecycle_test.go"
 PLATFORM_SUITE = ROOT / "e2e" / "platform" / "platform_suite_test.go"
 PLATFORM_JOURNEY = ROOT / "e2e" / "platform" / "journey_test.go"
-PLATFORM_SHELL = ROOT / "e2e" / "platform" / "run.sh"
-ASSERT_JSON = ROOT / "e2e" / "platform" / "assert_json.py"
 MAKEFILE = ROOT / "Makefile"
 
 
@@ -48,8 +46,6 @@ class GinkgoE2EContractTests(unittest.TestCase):
         self.assertIn("configureProcessCancellation", driver)
         # Diagnostics stay the caller's job: the suite must not collect them.
         self.assertNotIn("e2e/platform/diagnostics.sh", journey)
-        self.assertFalse(PLATFORM_SHELL.exists())
-        self.assertFalse(ASSERT_JSON.exists())
 
     def test_make_targets_run_the_ginkgo_suites_through_go_test(self) -> None:
         makefile = MAKEFILE.read_text(encoding="utf-8")
