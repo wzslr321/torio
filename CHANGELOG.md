@@ -55,6 +55,19 @@
 - Replaced two drifted dependency counts in `CONTRIBUTING.md` and `e2e/go.mod`
   with the property they existed to state, so the next `go get` cannot stale
   them again.
+- Deleted `runLive` and `runLiveGeneration2` from
+  `spikes/002-remote-mcp-oauth-compatibility/live.go`. They orchestrated a full
+  live OAuth flow against a real provider, and nothing called or tested them —
+  the spike's "no live flow" claim held because the call site was missing, not
+  because the code was. Their two exclusive helpers and the three `liveConfig`
+  fields only they read went with them; every function left in the module is
+  reached by a test. `docs/releases/v0.2.0.md` now carries the correction for
+  the sentence that was untrue when it shipped, and the spike README says what
+  the harness proves and which of its pinned evidence conclusions that
+  supersedes.
+- `.gitignore` now covers the binary `go build` drops inside
+  `spikes/002-remote-mcp-oauth-compatibility/`, by exact path rather than by a
+  pattern that would hide real files added to a spike.
 
 No behaviour of the binary changes.
 

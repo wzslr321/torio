@@ -27,6 +27,10 @@ config.local.yaml
 # Worktrees and spikes
 .worktrees/
 spikes/output/
+# `go build` inside a spike module drops a binary named after that module's
+# directory. Only that exact name is ignored, per spike, so a real file added
+# there is still seen.
+/spikes/002-remote-mcp-oauth-compatibility/remote-mcp-oauth-compatibility
 
 # Editors / OS
 .DS_Store
