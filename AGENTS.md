@@ -82,15 +82,14 @@ and [`docs/03-architecture.md`](docs/03-architecture.md).
 - per-task workers or a verifier platform;
 - a Vault-class secret manager, or a domain network allowlist.
 
-> **Open question — the domain network allowlist.** The last item conflicts with
+> **Settled — the domain network allowlist.** The last item once conflicted with
 > the destination-allowlist half of
-> [ADR-0004](docs/adr/0004-mcp-credential-custody-and-egress.md), which is the
-> only part of the egress work that addresses data exfiltration at all. The
-> conflict was raised rather than resolved, and it stays open: either this
-> prohibition is amended, with the reasoning recorded in a new ADR, or the
-> allowlist is rejected and the documentation keeps saying plainly that
-> exfiltration is unsolved. **Until one is chosen, nothing is built on it.**
-> Choosing is the maintainer's call, not the implementer's.
+> [ADR-0004](docs/adr/0004-mcp-credential-custody-and-egress.md).
+> [ADR-0006](docs/adr/0006-destination-egress-allowlist-rejected.md) closes it:
+> the allowlist is rejected, this prohibition stands unamended, and the
+> documentation keeps saying plainly that exfiltration is unsolved. The uid-keyed
+> half of egress control is a separate question, was never prohibited here, and
+> remains proposed and unbuilt.
 
 ## 5. Security invariants
 

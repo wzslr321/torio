@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changed
+
+- Closed the open question about the domain network allowlist. The
+  destination-keyed egress allowlist is rejected and the `AGENTS.md` prohibition
+  stands unamended; exfiltration remains unsolved and the documentation keeps
+  saying so. Recorded in
+  [`docs/adr/0006-destination-egress-allowlist-rejected.md`](docs/adr/0006-destination-egress-allowlist-rejected.md).
+
 ### Fixed
 
 - `torio project add` no longer fails closed on a working guest running Hermes

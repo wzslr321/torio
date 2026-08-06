@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-Five records cover the decisions that govern the delivered binary.
+Six records cover the decisions that govern the delivered binary.
 
 | ADR | Decision |
 |---|---|
@@ -9,6 +9,7 @@ Five records cover the decisions that govern the delivered binary.
 | [0003](0003-ownership-split-and-operator-carried-write.md) | The guest holds the Brain and checkouts; write against an origin is carried by the operator's session |
 | [0004](0004-mcp-credential-custody-and-egress.md) | MCP credentials live under a separate guest identity; what is still unsolved is named |
 | [0005](0005-repository-and-documentation-governance.md) | English, five ADRs, and what leaves the tree instead of rotting in it |
+| [0006](0006-destination-egress-allowlist-rejected.md) | The destination allowlist is rejected; exfiltration stays unsolved and the documentation keeps saying so |
 
 ## Rules
 
