@@ -2,14 +2,6 @@
 
 - Status: Accepted
 - Date: 2026-08-05
-- Superseded in part by: [ADR-0007](0007-publication-by-rewritten-history.md),
-  which replaces the tag-form citation rule in §4 below — where a source comment
-  cited removed delivery evidence, the citation is rewritten to an address under
-  `archive/pre-oss`. ADR-0007 purges the evidence tree from every commit, so
-  those addresses no longer resolve; the mechanism is retired and the nine
-  comments that used it carry their facts inline instead. Nothing else here is
-  superseded. ADR-0007 also corrects two measurements below without replacing
-  them: §6's provenance-header counts, and the `spikes/` entry in `Applies to`.
 - Consolidates and amends: the rules that normative documents are corrected
   rather than archived, that exploration leaves the working tree, and that
   product documentation describes the delivered binary. The superseded originals

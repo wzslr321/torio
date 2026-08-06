@@ -33,16 +33,8 @@
 
 ### Internal
 
-- [ADR-0007](docs/adr/0007-publication-by-rewritten-history.md) records how this
-  project is published: a rewritten history pushed to a new, empty repository
-  rather than an in-place rewrite of the existing one, because GitHub creates a
-  `refs/pull/N/head` reference for every pull request ever opened and keeps
-  serving it after a force-push. It also lists what the rewrite purges, what it
-  deliberately keeps, and three errata to
-  [ADR-0005](docs/adr/0005-repository-and-documentation-governance.md)
-  — including the retirement of its tag-form citation rule, which the purge of
-  the evidence tree makes unresolvable. ADR-0005 gains a `Superseded in part by:`
-  header pointer for that rule, and nothing below its header changes.
+- 0.3.0 is published under a rewritten commit history. Historical and internal
+  records of that migration are not part of the public repository.
 - Nine source comments cited removed delivery evidence by address; each now
   carries its fact inline.
 - Removed the `spikes/` tree and every coupling to it: the `make validate` step
