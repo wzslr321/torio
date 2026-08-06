@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """Tests for the documentation-surface validator.
 
-Only the pasteable-credential rule is covered here. It is the one rule written
-in response to something that happened rather than something that was reasoned
+Two rules are covered here. The pasteable-credential rule is the one written in
+response to something that happened rather than something that was reasoned
 about, and the failure it prevents is silent, so it needs a test that pins both
 directions: the text that caused the incident must fail, and the corrected text
 must pass.
+
+The command-coverage rule is the other kind of silent failure: a subcommand can
+ship without a line of documentation and every existing check still passes. Its
+derivation reads Go source with regular expressions, so the cases that would
+make a naive reader wrong — a `Use:` field on something that is not a cobra
+command, a `Use:` in a comment — are pinned here too.
 """
 
 from __future__ import annotations
@@ -101,6 +107,99 @@ class PasteableCredentials(unittest.TestCase):
 
     def test_the_repository_hands_over_nothing(self) -> None:
         self.assertEqual([], v.validate_no_pasteable_credentials())
+
+
+# A constructor shaped exactly like the ones in internal/cli/: one cobra literal,
+# a nested struct literal inside the closure that happens to have a `Use` field,
+# and a commented-out one for good measure. A grep for `Use:` reports three
+# commands here; two of them do not exist.
+DECOY_SOURCE = """\
+func newThingCmd(a *app) *cobra.Command {
+	var use bool
+	cmd := &cobra.Command{
+		Use:   "thing <name> <remote>",
+		Short: "Do the thing",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Use: "ghost" is prose, not a command.
+			return service.Add(ctx, projects.AddRequest{
+				ID:  args[0],
+				Use: use,
+			})
+		},
+	}
+	return cmd
+}
+"""
+
+ROOT_SOURCE = """\
+func newRootCmd(a *app) *cobra.Command {
+	root := &cobra.Command{Use: "torio"}
+	root.AddCommand(newThingCmd(a))
+	root.AddCommand(newGroupCmd(a))
+	return root
+}
+"""
+
+GROUP_SOURCE = """\
+func newGroupCmd(a *app) *cobra.Command {
+	g := &cobra.Command{
+		Use:   "group",
+		Short: "Parent that takes no action itself",
+	}
+	g.AddCommand(newGroupRunCmd(a))
+	return g
+}
+
+func newGroupRunCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "run -- COMMAND...",
+		Short: "Run it",
+	}
+}
+"""
+
+
+class CommandSurface(unittest.TestCase):
+    def test_a_use_field_on_another_struct_is_not_a_command(self) -> None:
+        # `projects.AddRequest{… Use: use}` is a field of a request object. It is
+        # excluded because it is not at the top level of a cobra.Command literal,
+        # not because of anything about the file it lives in.
+        self.assertEqual(
+            ["torio thing"], v.command_paths({"decoy.go": DECOY_SOURCE + ROOT_SOURCE})
+        )
+
+    def test_argument_placeholders_are_not_part_of_the_name(self) -> None:
+        paths = v.command_paths(
+            {"a.go": ROOT_SOURCE, "b.go": DECOY_SOURCE, "c.go": GROUP_SOURCE}
+        )
+        self.assertEqual(["torio group run", "torio thing"], paths)
+
+    def test_only_leaves_are_commands_to_document(self) -> None:
+        # `torio group` takes no action of its own; the documented unit is the
+        # subcommand that does something.
+        self.assertNotIn(
+            "torio group",
+            v.command_paths({"a.go": ROOT_SOURCE, "b.go": DECOY_SOURCE, "c.go": GROUP_SOURCE}),
+        )
+
+    def test_the_delivered_surface_is_twenty_five_commands(self) -> None:
+        # Derived from internal/cli/, not asserted from a list kept by hand: the
+        # point of the check is that nobody has to remember to update a list.
+        surface = v.command_surface()
+        self.assertEqual(25, len(surface))
+        self.assertIn("torio vm bootstrap", surface)
+        self.assertIn("torio version", surface)
+
+    def test_an_undocumented_command_is_named(self) -> None:
+        self.assertEqual(
+            ["torio group run"],
+            v.undocumented_commands(
+                ["torio group run", "torio thing"], {"d.md": "Run `torio thing` first."}
+            ),
+        )
+
+    def test_the_repository_documents_every_command(self) -> None:
+        self.assertEqual([], v.validate_command_coverage())
 
 
 if __name__ == "__main__":

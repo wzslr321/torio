@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Added
+
+- The reference page lists all four global flags — `--json`, `--verbose`,
+  `--timeout` and `--config` — with what each one does. `--verbose` and
+  `--config` were real persistent flags documented only in
+  [`docs/contracts/cli.md`](docs/contracts/cli.md), so they reached neither the
+  site nor the runbook.
+- `make validate` now derives the command surface from `internal/cli/` and fails
+  when the binary exposes a command no source under `docs/content/` describes.
+  That the two agreed was luck: a new subcommand could ship undocumented and
+  nothing failed.
+
+### Fixed
+
+- The front page used `9119` for both ends of the SSH forward. Every
+  operational block forwards `19119` on the Mac to the guest's `9119`, so a
+  reader who started on the front page and continued into the tutorial was
+  given two different local ports — the exact symptom troubleshooting explains
+  as "you forwarded a different local port". The page now names `19119` as the
+  host end and keeps `9119` as the guest bind.
 ### Changed
 
 - `README.md` is now the project's full front page rather than a pointer to the

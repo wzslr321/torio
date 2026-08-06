@@ -28,7 +28,7 @@ moving parts, split across the two machines:
 <div class="stack-item"><b>Your <code>ssh -L</code></b><span>The one and only route from the Mac to the backend. You open it in a terminal you can see, and close it when you are done.</span></div>
 </div>
 </section>
-<p class="stack-pipe"><span>localhost:9119 → the VM's loopback</span></p>
+<p class="stack-pipe"><span>localhost:19119 → the VM's 127.0.0.1:9119</span></p>
 <section class="stack-zone">
 <p class="stack-where">Inside the Linux VM</p>
 <div class="stack-items">
@@ -63,10 +63,10 @@ leaving you to guess.
 <span class="tp">$</span> torio brain init       <span class="tok-comment"># your private, searchable Markdown vault</span>
 <span class="tp">$</span> torio project add my-service https://github.com/you/my-service --use
 <span class="term-note">— then, in a second terminal you leave open —</span>
-<span class="tp">$</span> ssh -L 9119:127.0.0.1:9119 …   <span class="tok-comment"># your tunnel; now Desktop can connect</span></code></pre>
+<span class="tp">$</span> ssh -L 19119:127.0.0.1:9119 …  <span class="tok-comment"># your tunnel; now Desktop can connect</span></code></pre>
 </div>
 
-From there you point Hermes Desktop at `http://127.0.0.1:9119`, paste the
+From there you point Hermes Desktop at `http://127.0.0.1:19119`, paste the
 session token the backend requires, and work. On the code side the loop is
 yours end to end: edit or ask for edits, run a check that reads rather than
 writes, read `git diff` — and when you decide something should leave the VM,

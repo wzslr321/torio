@@ -17,6 +17,7 @@ from __future__ import annotations
 import html
 import re
 import sys
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -102,6 +103,48 @@ USER_FACING_GLOBS = (
 COMMENT_PREFIXES = {".go": "//", ".sh": "#", ".py": "#"}
 
 GO_STRING_LITERAL = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+
+# Everything in a Go file that looks like code but is not: comments, strings,
+# rune literals. Masking these is what lets the command-surface derivation count
+# braces without a Go parser, and it is why a `Use:` written in a comment is not
+# a command.
+GO_LEXICAL_NOISE = re.compile(
+    r"//[^\n]*"
+    r"|/\*.*?\*/"
+    r'|"(?:[^"\\\n]|\\.)*"'
+    r"|`[^`]*`"
+    r"|'(?:[^'\\\n]|\\.)*'",
+    re.DOTALL,
+)
+
+# A top-level declaration, as gofmt writes it: `func` in column 0, body closed by
+# `}` in column 0. That is enough structure to attribute every literal and every
+# AddCommand call to the constructor that owns it.
+GO_TOP_LEVEL_FUNC = re.compile(r"^func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)", re.MULTILINE)
+GO_TOP_LEVEL_CLOSE = re.compile(r"^\}", re.MULTILINE)
+
+# `&cobra.Command{` or `cobra.Command{` — the opening of a command literal. The
+# brace is required: `func(cmd *cobra.Command, args []string)` is a parameter
+# list, not a command.
+COBRA_COMMAND_LITERAL = re.compile(r"\bcobra\.Command\{")
+
+# How a parent takes ownership of a child in this package: the child's
+# constructor is called inline. Reading the call rather than the variable is what
+# reconstructs `torio vm init` from a `Use:` that only says `init`.
+COBRA_ADD_COMMAND = re.compile(r"\.AddCommand\(\s*([A-Za-z_]\w*)\(")
+
+COBRA_USE_VALUE = re.compile(r'Use:\s*"((?:[^"\\]|\\.)*)"')
+
+# The constructor of the root command. The surface is what hangs off it, so a
+# command literal no parent ever adds is not part of the surface either.
+ROOT_COMMAND_CONSTRUCTOR = "newRootCmd"
+
+# Where the operator surface is authored. The comparison is against the source,
+# not against site/ or docs/runbooks/: those are generated, so checking them
+# would report the same gap twice and let a fix be applied to the wrong file.
+# docs/contracts/cli.md is normative but is not the operator surface — a command
+# documented only there still reaches no reader who is running the binary.
+COMMAND_DOC_GLOB = "docs/content/**/*.md"
 
 
 def _go_sources() -> list[Path]:
@@ -249,6 +292,141 @@ def validate_no_pasteable_credentials() -> list[str]:
     return errors
 
 
+def _mask_go_noise(text: str) -> str:
+    """`text` with comments and literals blanked out, index for index.
+
+    Braces can then be counted without a Go parser, and the value of a field can
+    still be read out of the original text at the same offset. Newlines survive
+    so line-anchored patterns keep working over the result.
+    """
+
+    def blank(match: re.Match[str]) -> str:
+        return "".join("\n" if ch == "\n" else "\0" for ch in match.group(0))
+
+    return GO_LEXICAL_NOISE.sub(blank, text)
+
+
+def _top_level_functions(masked: str) -> list[tuple[str, int, int]]:
+    """(name, start, end) for every top-level func, over masked source."""
+    spans: list[tuple[str, int, int]] = []
+    for match in GO_TOP_LEVEL_FUNC.finditer(masked):
+        close = GO_TOP_LEVEL_CLOSE.search(masked, match.end())
+        spans.append((match.group(1), match.start(), close.end() if close else len(masked)))
+    return spans
+
+
+def _command_use(masked: str, text: str, brace: int) -> str:
+    """The `Use` value of the cobra literal whose `{` sits at `brace`.
+
+    Only a field of the literal itself counts. `internal/cli/project.go` builds a
+    `projects.AddRequest{… Use: use}` inside the command's RunE closure: that
+    `Use` is two literals deeper, describes a request rather than a command, and
+    is excluded by depth — not by knowing which file it is in.
+    """
+    depth = 0
+    for i in range(brace, len(masked)):
+        char = masked[i]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        elif depth == 1 and masked.startswith("Use:", i):
+            if match := COBRA_USE_VALUE.match(text, i):
+                return match.group(1)
+    return ""
+
+
+def command_paths(sources: Mapping[str, str]) -> list[str]:
+    """Every leaf command the given Go sources build, as full command paths.
+
+    The tree is reconstructed from how a constructor is handed to a parent's
+    `AddCommand`, because a `Use` string only ever names its own segment: `init`
+    is a command under `vm` and under nothing else.
+
+    A parent is not a leaf. `torio vm` takes no action of its own — an absent or
+    unknown subcommand is a usage error — so the unit a document has to describe
+    is the subcommand beneath it.
+    """
+    constructors: dict[str, tuple[str, list[str]]] = {}
+    for text in sources.values():
+        masked = _mask_go_noise(text)
+        for name, start, end in _top_level_functions(masked):
+            body_masked, body_text = masked[start:end], text[start:end]
+            use = ""
+            if literal := COBRA_COMMAND_LITERAL.search(body_masked):
+                use = _command_use(body_masked, body_text, literal.end() - 1)
+            children = COBRA_ADD_COMMAND.findall(body_masked)
+            if use or children:
+                constructors[name] = (use, children)
+
+    paths: list[str] = []
+
+    def walk(name: str, prefix: list[str], seen: frozenset[str]) -> None:
+        if name in seen:
+            return
+        use, children = constructors.get(name, ("", []))
+        # `add <name> <remote>`, `import <host-directory>` and `ssh -- COMMAND...`
+        # each name one command; the rest of the string describes its arguments.
+        segments = use.split()
+        path = prefix + segments[:1]
+        if not children:
+            # Only a node that named itself is a command. A constructor these
+            # sources do not define names nothing, so it contributes nothing
+            # rather than silently duplicating its parent's path.
+            if segments:
+                paths.append(" ".join(path))
+            return
+        for child in children:
+            walk(child, path, seen | {name})
+
+    walk(ROOT_COMMAND_CONSTRUCTOR, [], frozenset())
+    return sorted(paths)
+
+
+def command_surface() -> list[str]:
+    """The delivered command surface, derived from internal/cli/.
+
+    Tests are excluded: a test builds command trees of its own, and none of them
+    is something an operator can run.
+    """
+    return command_paths(
+        {
+            str(path.relative_to(ROOT)): path.read_text(encoding="utf-8")
+            for path in sorted((ROOT / "internal" / "cli").rglob("*.go"))
+            if not path.name.endswith("_test.go")
+        }
+    )
+
+
+def undocumented_commands(commands: Iterable[str], documents: Mapping[str, str]) -> list[str]:
+    return sorted(c for c in commands if not any(c in text for text in documents.values()))
+
+
+def validate_command_coverage() -> list[str]:
+    """Every command the binary exposes is described on the operator surface.
+
+    That the two agreed before this check existed was luck: nothing failed when a
+    subcommand shipped undocumented, so nothing would have failed the next time.
+    """
+    surface = command_surface()
+    if not surface:
+        return [
+            "internal/cli/: no cobra command tree was found, so this check would "
+            "pass without proving anything"
+        ]
+    documents = {
+        str(path.relative_to(ROOT)): path.read_text(encoding="utf-8")
+        for path in sorted(ROOT.glob(COMMAND_DOC_GLOB))
+    }
+    return [
+        f"docs/content/: nothing documents {command!r}; the binary exposes a "
+        f"command the operator surface does not describe"
+        for command in undocumented_commands(surface, documents)
+    ]
+
+
 def main() -> int:
     checks = [
         ("relative Markdown links", validate_links),
@@ -256,6 +434,7 @@ def main() -> int:
         ("docs cited from Go exist", validate_go_doc_references),
         ("no version labels for the operator", validate_no_version_labels),
         ("no pasteable credentials in docs", validate_no_pasteable_credentials),
+        ("every command is documented", validate_command_coverage),
     ]
     errors: list[str] = []
     for name, check in checks:
