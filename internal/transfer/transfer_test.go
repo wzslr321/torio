@@ -54,9 +54,15 @@ func TestCollectStagesOnlyAllowlistedTypes(t *testing.T) {
 	}
 }
 
-// The exclusion list is the harness filter from the promoted Gate run
-// (archive/pre-oss:spikes/v1-brain-transfer/run.sh should_exclude), reproduced in Go and made
-// stricter: the whole .obsidian directory is out of V1, not only its plugins.
+// The exclusion list is the filter proven by the promoted Gate brain-transfer
+// run, reproduced in Go and made stricter. A transfer never carries repository
+// metadata (`.git`), credential directories (`.ssh`, `.aws`), or
+// credential-shaped basenames (`.env*`, `*.pem`, `id_rsa`) — a Brain is notes,
+// and anything that can authenticate is out of its payload by construction, not
+// by an operator remembering to clean the vault. The Gate filter excluded only
+// `.obsidian/plugins`, to keep executable plugin code out; this excludes the
+// whole `.obsidian` directory, because Obsidian's own configuration is out of
+// scope until an ADR reviews it file by file.
 func TestCollectExcludesRepositoriesCredentialsAndPluginCode(t *testing.T) {
 	src := t.TempDir()
 	writeFile(t, src, "keep.md", "keep", 0o644)

@@ -30,6 +30,18 @@
   the exit-code table, and the supported host matrix — so a reader can decide
   whether to install Torio without following a link.
 
+### Internal
+
+- Removed the `spikes/` tree and every coupling to it: the `make validate` step
+  that ran the dogfood driver's structural assertions, the `spikes/**`
+  paths-ignore entry in the platform-e2e trigger, two dead `.gitignore` rules,
+  and the `CONTRIBUTING.md` paragraph describing the `v1-e2e` harness. Each
+  spike had reached the ADR or contract it was run to settle, so the code was
+  answering a question nobody had left. The rule that a spike lives in
+  `spikes/` and never graduates into `internal/` unchanged stays in `AGENTS.md`
+  §7 and `CONTRIBUTING.md`: it governs a spike someone starts, not files that
+  happen to exist.
+
 ## 0.3.0 - 2026-08-06
 
 Detailed notes: [`docs/releases/v0.3.0.md`](docs/releases/v0.3.0.md).

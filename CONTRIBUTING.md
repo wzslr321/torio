@@ -58,8 +58,7 @@ host-free end-to-end suite through `make e2e`, and a separate `go test -race
 Locally:
 
 ```bash
-make validate             # docs --check, link check, artefacts, script tests,
-                          # and the dogfood driver's structural assertions
+make validate             # docs --check, link check, artefacts, script tests
 make e2e                  # compiled binary against an in-process limactl fake
 go test ./...
 go test -race ./...       # before reviewing concurrency or state changes
@@ -101,8 +100,8 @@ The journey is cut at the hypervisor boundary by the Ginkgo labels `host` and
 
 - **`host`** — release tarball, `scripts/install.sh`, real `limactl`, and
   `torio vm init` including the image pin and idempotence. Runs on any supported
-  host. Prose, generated pages and spikes cannot reach the packaged binary and
-  are filtered out.
+  host. Prose and generated pages cannot reach the packaged binary and are
+  filtered out.
 - **`guest`** — everything from `torio vm start` on: Hermes bootstrap, Brain,
   backend, project attach/show/remove. Needs a usable hypervisor:
   Virtualization.framework on macOS, `/dev/kvm` on Linux.
@@ -131,11 +130,6 @@ PLATFORM_E2E_LABEL_FILTER='!guest' make platform-e2e  # the host stage alone
 It refuses to run without a release-shaped binary, on an unsupported host, and
 when the instance already exists. If it creates one, it removes it with `limactl delete`
 even on failure. Do not point it at a machine whose state you want to keep.
-
-The harness in `spikes/v1-e2e/` is a different thing again: it needs a real Apple
-Silicon Mac, a provisioned VM, Hermes Desktop and a human. `make validate` runs
-only its structural assertions, which read the driver as text and never execute
-it.
 
 ## Review checklist
 

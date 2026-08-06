@@ -36,7 +36,6 @@ on:
       - "**.md"
       - "docs/**"
       - "site/**"
-      - "spikes/**"
       - "LICENSE"
   workflow_dispatch:
     inputs:
