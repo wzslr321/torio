@@ -56,7 +56,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: platform-e2e-${{ github.workflow }}-${{ github.ref }}
+  # The runner and the stage are part of the group because the release workflow
+  # calls this one twice in a single run — Linux for the guest journey, macOS
+  # for the darwin host stage. In a reusable workflow the `github` context is
+  # the caller's, so `github.workflow` and `github.ref` resolve to the same
+  # strings for both calls; a group built from those alone would place the two
+  # gates in one group and `cancel-in-progress` would have the second cancel the
+  # first. `package` needs both, so the tag would publish nothing.
+  #
+  # A pull request still gets exactly one group per ref: it takes the defaults,
+  # so a new push cancels the run it superseded, as before.
+  group: platform-e2e-${{ github.workflow }}-${{ github.ref }}-${{ inputs.runner || 'ubuntu-24.04' }}-${{ inputs.stage || 'full' }}
   cancel-in-progress: true
 
 jobs:

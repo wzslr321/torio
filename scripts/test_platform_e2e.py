@@ -155,6 +155,22 @@ class PlatformE2EContractTests(unittest.TestCase):
         self.assertIn('"sysctl", "-n", "kern.hv_support"', journey)
         self.assertIn('{label: "hv-support.txt"', journey)
 
+    def test_concurrency_group_separates_the_two_release_gates(self) -> None:
+        # The release calls this workflow twice in one run: the Linux guest gate
+        # and the darwin host gate. In a reusable workflow the `github` context
+        # is the caller's, so `github.workflow` and `github.ref` are the same
+        # string for both calls -- a group built from those alone would put the
+        # two gates in one concurrency group with cancel-in-progress, and the
+        # second to start would cancel the first. `package` needs both, so the
+        # tag would produce no assets at all.
+        text = WORKFLOW.read_text(encoding="utf-8")
+        group = next(
+            line for line in text.splitlines() if line.strip().startswith("group:")
+        )
+        self.assertIn("inputs.runner", group)
+        self.assertIn("inputs.stage", group)
+        self.assertIn("cancel-in-progress: true", text)
+
     def test_release_waits_for_the_same_real_platform_gate(self) -> None:
         text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("uses: ./.github/workflows/platform-e2e.yml", text)

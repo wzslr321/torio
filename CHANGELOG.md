@@ -1,6 +1,39 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-08-06
+
+Detailed notes: [`docs/releases/v0.3.0.md`](docs/releases/v0.3.0.md).
+
+### Added
+
+- Linux on x86_64 is a supported host. The matrix is `darwin/arm64` and
+  `linux/amd64`: `torio vm init` creates a `vz`/`aarch64` instance on macOS and
+  a `qemu`/`x86_64` one on Linux, both from the same pinned Ubuntu build, and
+  `torio vm bootstrap` verifies the guest architecture against the host's
+  profile rather than a literal. Intel Macs and arm64 Linux are deliberately
+  absent — `vz` requires Apple Silicon, and nothing here has ever booted an
+  arm64 Linux host
+  ([ADR-0002](docs/adr/0002-lima-vm-is-the-trust-boundary.md)).
+- A release carries one archive per supported host plus a single `SHA256SUMS`
+  covering both, regenerated from the built set so a rebuilt archive cannot keep
+  a stale line beside a fresh one. `scripts/install.sh` derives the asset name
+  from `uname` instead of assuming Darwin/arm64, and refuses a platform it has
+  no archive for.
+- An unsupported host is refused once, up front, with the `unsupported_host`
+  error code and the precondition exit code 3. The Lima adapter already failed
+  closed on its own, but only inside the first command that needed an instance
+  pin — after the operator had been told to install Lima and create a VM that
+  could never verify.
+
+### Fixed
+
+- `torio project add` no longer fails closed on a working guest running Hermes
+  Agent 0.19.1. That version exits non-zero from `hermes project show` for a
+  project that does not exist, where 0.19.0 exited 0; Torio read the non-zero
+  exit as a broken CLI, so adding the first project to a fresh VM could not
+  succeed. Existence now comes from `hermes project list` output rather than
+  from either exit code. `list` failing, or naming a slug `show` will not
+  describe, still fails closed.
 
 ### Changed
 
@@ -23,16 +56,6 @@
   question its "Blocked — egress control" section still presents as open. The
   header is a pointer; no superseded prose is rewritten. ADR-0004 is the only
   record in the tree that needs one.
-
-### Fixed
-
-- `torio project add` no longer fails closed on a working guest running Hermes
-  Agent 0.19.1. That version exits non-zero from `hermes project show` for a
-  project that does not exist, where 0.19.0 exited 0; Torio read the non-zero
-  exit as a broken CLI, so adding the first project to a fresh VM could not
-  succeed. Existence now comes from `hermes project list` output rather than
-  from either exit code. `list` failing, or naming a slug `show` will not
-  describe, still fails closed.
 
 ### Internal
 
@@ -69,7 +92,15 @@
   `spikes/002-remote-mcp-oauth-compatibility/`, by exact path rather than by a
   pattern that would hide real files added to a spike.
 
-No behaviour of the binary changes.
+Nothing under `Changed` or `Internal` alters the behaviour of the binary.
+
+### Not delivered
+
+- The MCP broker daemon, relay, OAuth lifecycle, and upstream transport remain
+  outside the release surface under ADR-0004.
+- Exfiltration is unsolved, and after ADR-0006 it has no owner and no plan. No
+  mechanism in this release partially mitigates it, and none may be described as
+  doing so.
 
 ## 0.2.0 - 2026-08-05
 

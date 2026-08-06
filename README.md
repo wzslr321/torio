@@ -105,7 +105,7 @@ The operational surface is this file plus
 engineering rules for contributors and agents live in [`AGENTS.md`](AGENTS.md).
 Release-level changes are summarized in [`CHANGELOG.md`](CHANGELOG.md), with
 detailed notes for the current candidate in
-[`docs/releases/v0.2.0.md`](docs/releases/v0.2.0.md).
+[`docs/releases/v0.3.0.md`](docs/releases/v0.3.0.md).
 
 A static, Diátaxis-organised documentation site lives in [`site/`](site/) —
 plain HTML and one CSS file, no runtime dependency. The complete first run is on
