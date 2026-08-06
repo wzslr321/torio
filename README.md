@@ -171,8 +171,11 @@ Torio does less than it will. Where it is going, roughly in order:
 - **Backends beyond Hermes.** Nothing in the boundary (a loopback service,
   read-only checkouts, operator-carried write) is Hermes-specific. The backend
   contract should say so in code.
-- **Editor integration, Neovim first.** Your own editor over SSH works today;
-  a first-class flow does not exist yet.
+- **Editor integration.** A Neovim panel already ships in
+  [`integrations/neovim`](integrations/neovim/README.md): `:Torio` lists
+  projects, opens routine or push-capable terminals, reports health, and shows
+  Hermes sessions. It is not packaged for a plugin manager yet, and no other
+  editor has an equivalent.
 
 If one of these is yours, [`CONTRIBUTING.md`](CONTRIBUTING.md) has the how and
 [`AGENTS.md`](AGENTS.md) has the boundaries no change may cross.
