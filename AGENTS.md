@@ -152,7 +152,7 @@ For every behaviour change:
 3. Implement the minimum.
 4. Run the test and the whole relevant package.
 5. Refactor with the tests green.
-6. Run `python3 scripts/validate_artifacts.py`, then `go test ./...`.
+6. Run `make validate`, then `go test ./...`.
 7. Make a small commit.
 
 No production code before a failing test. A spike may create throwaway code in
@@ -182,5 +182,5 @@ conclusion, and the effect on an ADR or contract.
 
 A task is done only when acceptance criteria are met, a test failed and then
 passed, regressions are green, output and logs carry no secrets, contracts and
-documentation are updated, `scripts/validate_artifacts.py` passes, and a reviewer
-can reproduce the result from the recorded commands.
+documentation are updated, `make validate` passes, and a reviewer can reproduce
+the result from the recorded commands.

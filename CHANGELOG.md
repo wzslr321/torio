@@ -12,6 +12,30 @@
   from either exit code. `list` failing, or naming a slug `show` will not
   describe, still fails closed.
 
+### Internal
+
+- Retired `spikes/003-linux-host-lima/` and its workflow. The spike's own header
+  set the condition — both go once the verdict reaches the ADR it changes — and
+  ADR-0002 now states the supported host matrix and the runner-nesting finding
+  that made the exercise worth running. The workflow could not fire again in any
+  case: its `pull_request` trigger was scoped to the spike's own paths.
+- Removed `scripts/README.md`. It documented one of eleven scripts and
+  advertised three checks (required files, a JSON Schema subset, examples) that
+  ADR-0005 removed and that the validator's own docstring says are gone.
+- Removed an unused expected-argv constant from `internal/lima/status_test.go`.
+- `AGENTS.md` §7 and §10 now name `make validate` rather than
+  `scripts/validate_artifacts.py`, which is one check inside it. Following the
+  contract literally skipped the docs-drift and site-link checks that CI
+  enforces.
+- Corrected the header of `internal/config/trust_other.go`, which justified
+  itself with a milestone label that no longer exists, named an unsupported host
+  (arm64 Linux), cited the wrong ADR, and deferred to a file not in the tree.
+- Replaced two drifted dependency counts in `CONTRIBUTING.md` and `e2e/go.mod`
+  with the property they existed to state, so the next `go get` cannot stale
+  them again.
+
+No behaviour of the binary changes.
+
 ## 0.2.0 - 2026-08-05
 
 Detailed notes: [`docs/releases/v0.2.0.md`](docs/releases/v0.2.0.md).

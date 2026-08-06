@@ -8,8 +8,6 @@ import (
 	"github.com/wzslr321/torio/internal/execx"
 )
 
-const listArgvExpected = "list --json --tty=false"
-
 func TestStatusNotFoundEmptyList(t *testing.T) {
 	fr := &fakeRunner{script: []scriptedResponse{
 		{result: stdoutResult("")},

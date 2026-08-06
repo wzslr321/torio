@@ -76,7 +76,7 @@ GO_DOC_REFERENCE = re.compile(r"(?<![:\w])docs/[A-Za-z0-9_./-]*\.md")
 
 # A product version label: a standalone V0/V1/v2 token. The lookbehind is what
 # separates a label from a path segment, an identifier, or a flag value — so
-# `archive/pre-v1`, `docs/adr/0015-torio-v1-…`, `IPv4` and Git's own
+# `archive/pre-v1`, `archive/pre-oss:docs/adr/0015-torio-v1-…`, `IPv4` and Git's own
 # `--porcelain=v1` are not labels and never trip this.
 VERSION_LABEL = re.compile(r"(?<![\w/=-])[Vv][0-9]+\b")
 

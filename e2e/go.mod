@@ -2,9 +2,9 @@
 //
 // They drive the compiled torio binary as a separate process and read its JSON
 // envelopes; they import no product package, so nothing is lost by keeping them
-// out of the root module. What is gained is that Ginkgo and Gomega -- and the
-// thirteen packages they pull in behind them -- stay out of the dependency
-// graph of the module that holds the MCP credential boundary.
+// out of the root module. What is gained is that Ginkgo and Gomega -- and
+// everything they pull in behind them -- stay out of the dependency graph of
+// the module that holds the MCP credential boundary.
 module github.com/wzslr321/torio/e2e
 
 go 1.26.0
