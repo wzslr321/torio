@@ -103,7 +103,3 @@ no dispatcher, no fleet of autonomous workers running while you sleep.
 <li><a class="mode-card" href="reference.html"><span class="name">Reference</span><span class="what">Every <code>torio</code> command, exit codes, and the fixed boundaries.</span></a></li>
 <li><a class="mode-card" href="explanation.html"><span class="name">Explanation</span><span class="what">Why Torio is narrow, and why credentials and Git writes stay human-only.</span></a></li>
 </ul>
-
-> **Not deployed yet.** This is the documentation source, prepared for
-> **Vercel**. No Vercel project and no `torio.dev` domain are connected or
-> configured here — see [Deployment](reference.html#deployment).
