@@ -25,6 +25,8 @@ the repository root also works, but then every command needs the prefix.
 
 <!-- include: cmd-vm -->
 
+<!-- include: cmd-backend -->
+
 <!-- include: cmd-serve -->
 
 <!-- include: cmd-brain -->

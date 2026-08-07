@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/wzslr321/torio/internal/backend"
+	"github.com/wzslr321/torio/internal/backend/claudecode"
 	"github.com/wzslr321/torio/internal/brain"
 	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
@@ -87,6 +88,7 @@ type app struct {
 // be what decides whether an instance can select it.
 func init() {
 	backend.Register(lima.Hermes())
+	backend.Register(claudecode.New())
 }
 
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer, build BuildInfo) int {
@@ -253,6 +255,7 @@ func newRootCmd(a *app) *cobra.Command {
 	root.AddCommand(newServeCmd(a))
 	root.AddCommand(newBrainCmd(a))
 	root.AddCommand(newProjectCmd(a))
+	root.AddCommand(newBackendCmd(a))
 	root.AddCommand(newMCPCmd(a))
 	return root
 }

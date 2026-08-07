@@ -247,4 +247,10 @@ type SessionSpec struct {
 	// Helper is the embedded helper content bootstrap installs when the path is
 	// absent and proves on every run.
 	Helper []byte
+	// LoginArgv is the fixed guest command that starts the backend outside a
+	// project, so an operator can grant it a credential. It is a constant argv
+	// built from the backend's own identity and install path — no caller value
+	// reaches it, which is why it needs no root-owned helper to launder it.
+	// Empty when the backend takes no credential of its own.
+	LoginArgv []string
 }

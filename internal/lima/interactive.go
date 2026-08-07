@@ -163,3 +163,50 @@ func ProjectEnterSpec(projectPath string) (execx.InteractiveCommand, error) {
 		},
 	}, nil
 }
+
+// backendLoginOp names the login-session operation in errors.
+const backendLoginOp = "backend_login"
+
+// BackendLoginSpec builds an interactive SSH command that runs a backend's own
+// fixed login argv on the guest.
+//
+// It carries no operator input at all: the argv is a constant the backend
+// declares, assembled from its identity and its pinned install path. That is
+// why this one needs no root-owned guest helper — a helper exists to stop a
+// host-composed value from becoming a remote command, and here there is no such
+// value to stop.
+//
+// The transport is the no-agent shape: no forwarding, no multiplexing, so a
+// login session cannot ride a push-capable connection and cannot itself reach a
+// Git remote.
+func BackendLoginSpec(argv []string) (execx.InteractiveCommand, error) {
+	if len(argv) == 0 {
+		return execx.InteractiveCommand{}, &Error{
+			Op:   backendLoginOp,
+			Kind: KindVerificationFailed,
+			Err:  fmt.Errorf("the backend declares no login command"),
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return execx.InteractiveCommand{}, &Error{Op: backendLoginOp, Kind: KindNotFound, Err: err}
+	}
+	sshConfig := filepath.Join(home, ".lima", InstanceName, "ssh.config")
+	if _, statErr := os.Stat(sshConfig); statErr != nil {
+		return execx.InteractiveCommand{}, &Error{
+			Op:   backendLoginOp,
+			Kind: KindNotFound,
+			Err:  fmt.Errorf("no lima ssh config at %s; run `torio vm start` first", sshConfig),
+		}
+	}
+	args := []string{
+		"-F", sshConfig,
+		"-o", "ControlMaster=no",
+		"-o", "ControlPath=none",
+		"-o", "ForwardAgent=no",
+		"-a",
+		"-t",
+		sshHostAlias(),
+	}
+	return execx.InteractiveCommand{Name: "ssh", Args: append(args, argv...)}, nil
+}

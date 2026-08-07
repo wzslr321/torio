@@ -160,7 +160,7 @@ func newGroupRunCmd(a *app) *cobra.Command {
 # A deliberate ratchet, updated on purpose when a command is added or removed:
 # the derivation reads internal/cli/, and this pin is what makes an accidental
 # change to the surface fail a test instead of passing silently.
-PINNED_COMMAND_COUNT = 25
+PINNED_COMMAND_COUNT = 27
 
 
 class CommandSurface(unittest.TestCase):
