@@ -1,5 +1,57 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **A backend contract, and a second backend behind it.** Torio ran one agent
+  and the name was hardwired into every layer. `internal/backend` now states
+  what Torio requires — an identity and its paths, an install and pin, a version
+  probe, credential presence — and three capabilities a backend *declares*:
+  a project registry, a guest service, an interactive session. Nil is a
+  first-class answer, and the rule that follows is the point: whatever a backend
+  declares, `vm bootstrap` and `serve status` must prove; whatever it declares
+  it has not got, they must not pretend to check
+  ([ADR-0009](docs/adr/0009-backend-contract-and-claude-code.md)).
+- **Claude Code as the second backend.** A process backend, not a service one:
+  no daemon, no readiness endpoint, no project registry. It runs as a dedicated
+  guest identity with no sudo and a closed group set, both proven rather than
+  assumed, from a version-pinned binary verified against the vendor's published
+  checksum and installed root-owned — which closes, for this backend, the
+  agent-writable shim that `SECURITY.md` records as a known path to root.
+- `torio project agent <id>` starts the backend inside a checkout as the backend
+  identity, on a transport that forwards no SSH agent and reuses no connection.
+  The triad is now `enter` (you, no push), `shell` (you, push), `agent` (the
+  agent, never push).
+- `torio backend status` and `torio backend login`: what this instance runs and
+  what it declares, and the terminal where an operator grants the box a
+  credential of its own. Torio stores, forwards and reads none of it.
+- `torio vm init --backend NAME` declares which agent an instance runs, fixed at
+  creation. A second backend means a second instance (`TORIO_INSTANCE`).
+
+### Changed
+
+- Config schema `"3"` carries the backend. `"2"` is still read: it predates the
+  field, names no backend, and an instance that names none is running Hermes —
+  which is what every existing box already is. An older binary refuses a `"3"`
+  document, which is the intended failure rather than a gap: it cannot know its
+  Hermes-shaped commands are aimed at a box running a different agent.
+- `vm bootstrap` and `serve status` carry `backend`, and `serve status` carries
+  `service_declared` first — on a backend with no service the remaining fields
+  are absent state, not a service that is down. Every existing Hermes-named key
+  is still emitted, unchanged, on a Hermes instance.
+- The Second Brain's vault, staging and lock follow the backend identity that
+  owns them, instead of being fixed at one backend's home.
+
+### Known
+
+- MCP inside a Claude Code box is a named hole, not a solved problem. The
+  backend is a native MCP client, an operator's tokens then live under the agent
+  identity, and invariant 9's "explicit, enumerable and verified" is not met for
+  it. What is provided is legibility: the configured servers are enumerated by
+  name, described everywhere as what is configured and never as what is
+  permitted. The fix is the broker, which needs an accepted ADR first.
+
 ## 0.3.1 - 2026-08-07
 
 The first release built from the public repository. 0.3.0's tag predates the

@@ -145,8 +145,9 @@ class PlatformE2EContractTests(unittest.TestCase):
         )
         self.assertRegex(journey, r'It\("starts a real VM", Label\(guestStage\)')
         for spec in (
-            "bootstraps Hermes and imports Brain content into the guest",
-            "installs and exercises the persistent Hermes backend",
+            "bootstraps the backend and imports Brain content into the guest",
+            "reports honestly about a service the backend does not declare",
+            "installs and exercises the persistent backend service",
             "attaches, verifies and removes a real Git project non-destructively",
             "stops services and the VM idempotently",
         ):

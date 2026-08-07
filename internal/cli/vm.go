@@ -357,27 +357,35 @@ func (a *app) emitVMState(command string, state lima.State) error {
 }
 
 // vmBootstrapData is the `data` object for a successful `vm bootstrap`. It
-// carries the proven checks plus the persistent Hermes locations the operator
-// needs for the connection handoff — no secrets, no raw output.
+// carries the proven checks plus the guest locations the operator needs for the
+// connection handoff — no secrets, no raw output.
+//
+// `hermes_home` is a legacy alias for `home`, emitted on every backend so no
+// existing reader breaks. New readers should use `home`, which is the identity's
+// home whichever backend owns it.
 type vmBootstrapData struct {
 	Instance      string      `json:"instance"`
+	Backend       string      `json:"backend"`
 	Checks        []checkData `json:"checks"`
 	GuestUser     string      `json:"guest_user"`
+	Home          string      `json:"home"`
 	HermesHome    string      `json:"hermes_home"`
 	ProfilePath   string      `json:"profile_path"`
 	BrainPath     string      `json:"brain_path"`
 	WorkspacePath string      `json:"workspace_path"`
 }
 
-func bootstrapData(rep lima.BootstrapReport) vmBootstrapData {
+func bootstrapData(rep lima.BootstrapReport, id backend.Identity) vmBootstrapData {
 	return vmBootstrapData{
 		Instance:      rep.Instance,
+		Backend:       id.Name,
 		Checks:        checkPayload(rep.Checks),
-		GuestUser:     lima.HermesUser,
-		HermesHome:    lima.HermesHome,
-		ProfilePath:   lima.HermesProfilePath,
-		BrainPath:     lima.HermesBrainPath,
-		WorkspacePath: lima.HermesWorkspacePath,
+		GuestUser:     id.GuestUser,
+		Home:          id.Home,
+		HermesHome:    id.Home,
+		ProfilePath:   id.ProfilePath,
+		BrainPath:     id.BrainPath,
+		WorkspacePath: id.WorkspacePath,
 	}
 }
 
@@ -397,20 +405,44 @@ func bootstrapReportDetails(rep lima.BootstrapReport) map[string]any {
 // stable command path). The post-bootstrap action to reach Hermes stays operator-controlled.
 func (a *app) emitVMBootstrap(rep lima.BootstrapReport) error {
 	if a.jsonOut {
-		return writeJSON(a.stdout, successEnvelope("vm.bootstrap", bootstrapData(rep)))
+		return writeJSON(a.stdout, successEnvelope("vm.bootstrap", bootstrapData(rep, a.backend.Identity())))
 	}
 	if err := a.writeCheckLines(rep.Checks); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintf(a.stdout,
-		"\nHermes path ready on %s.\n"+
-			"Persistent Hermes home:    %s\n"+
+	id := a.backend.Identity()
+	if _, err := fmt.Fprintf(a.stdout,
+		"\nBackend %s ready on %s.\n"+
+			"Guest identity:            %s\n"+
+			"Persistent home:           %s\n"+
 			"Persistent profile:        %s\n"+
 			"Persistent Second Brain:   %s\n"+
-			"Persistent workspace:      %s\n"+
-			"Reach Hermes (operator-controlled): torio vm ssh -- sudo -u %s -- hermes --version\n",
-		rep.Instance, lima.HermesHome, lima.HermesProfilePath, lima.HermesBrainPath, lima.HermesWorkspacePath, lima.HermesUser)
-	return err
+			"Persistent workspace:      %s\n",
+		id.Name, rep.Instance, id.GuestUser, id.Home, id.ProfilePath, id.BrainPath, id.WorkspacePath); err != nil {
+		return err
+	}
+	return a.writeBootstrapNextStep(rep)
+}
+
+// writeBootstrapNextStep prints the one thing the operator should do next, which
+// differs by what the backend declares and by what bootstrap just observed. A
+// backend with a credential it has not been granted yet needs a login before
+// anything else is worth trying.
+func (a *app) writeBootstrapNextStep(rep lima.BootstrapReport) error {
+	id := a.backend.Identity()
+	if credentialState(checkDetail(rep, id.Name+"_auth")) == "absent" {
+		_, err := fmt.Fprintf(a.stdout, "next: torio backend login\n")
+		return err
+	}
+	if a.backend.Service() != nil {
+		_, err := fmt.Fprintf(a.stdout, "next: torio serve install\n")
+		return err
+	}
+	if a.backend.Session() != nil {
+		_, err := fmt.Fprintf(a.stdout, "next: torio project add <id> <remote>, then torio project agent <id>\n")
+		return err
+	}
+	return nil
 }
 
 // emitVMSSH renders an ssh Result. A non-zero remote exit is never reported as
