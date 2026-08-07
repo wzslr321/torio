@@ -196,16 +196,6 @@ func newRootCmd(a *app) *cobra.Command {
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			a.logger = newLogger(a.stderr, a.verbose)
 
-			// The backend is resolved before anything else reads it, and a
-			// backend this build does not know is a usage error rather than a
-			// silent fallback: a config written by a newer Torio must not run
-			// its commands against a different agent than it names.
-			b, err := backend.Lookup(backend.DefaultName)
-			if err != nil {
-				return usageError(err.Error())
-			}
-			a.backend = b
-
 			// Resolve the configuration: the XDG config path plus --config,
 			// loading and strictly validating the on-disk config document. A
 			// resolution/validation failure is a usage/schema error (exit 2).
@@ -229,11 +219,23 @@ func newRootCmd(a *app) *cobra.Command {
 			}
 			a.timeout = timeout
 
+			// The backend is resolved once the document is in hand, before any
+			// command can touch the guest. A name this build does not know is a
+			// usage error rather than a silent fallback: a document written by a
+			// newer Torio must not have its commands run against a different
+			// agent than it names.
+			b, err := backend.Lookup(rt.File.Backend)
+			if err != nil {
+				return usageError(err.Error())
+			}
+			a.backend = b
+
 			a.logger.Debug("dispatching command", "command", cmd.Name(), "json", a.jsonOut)
 			a.logger.Debug("configuration resolved",
 				"config_file", rt.Paths.ConfigFile,
 				"config_loaded", rt.ConfigLoaded)
 			a.logger.Debug("operation bounded", "timeout", a.timeout)
+			a.logger.Debug("backend resolved", "backend", b.Identity().Name)
 			return nil
 		},
 	}

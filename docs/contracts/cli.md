@@ -114,7 +114,7 @@ torio version [--json]
 ### VM
 
 ```text
-torio vm init [--cpus N] [--memory SIZE] [--disk SIZE]
+torio vm init [--backend NAME] [--cpus N] [--memory SIZE] [--disk SIZE]
 torio vm start
 torio vm stop
 torio vm bootstrap
@@ -129,6 +129,15 @@ torio vm ssh -- COMMAND...
   `qemu`/`x86_64` on Linux; see ADR-0002). A
   non-matching instance is **fail-closed** (exit 6): there is no `--force`, and
   Torio never recreates, resets or deletes an existing VM.
+- `--backend NAME` declares which agent backend this instance runs, and is
+  recorded in the instance's config before the VM is created. It defaults to
+  `hermes`, which is also what an instance that declares nothing runs. A rerun
+  without the flag keeps the declaration; a rerun naming a *different* backend
+  is a usage error (`BACKEND_MISMATCH`, exit 2), because the guest is
+  provisioned for one agent identity and re-declaring it would leave a guest
+  built for one being driven as another. A second backend means a second
+  instance (`TORIO_INSTANCE`)
+  ([ADR-0009](../adr/0009-backend-contract-and-claude-code.md)).
 - `--cpus`/`--memory`/`--disk` size the VM at **creation**; defaults are 4 vCPU,
   `8GiB` and `60GiB`. These are the only operator values substituted into the
   template besides the login identity, and `--memory`/`--disk` must be single

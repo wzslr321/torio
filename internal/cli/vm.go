@@ -8,6 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/wzslr321/torio/internal/backend"
+	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
 )
@@ -75,6 +77,7 @@ func newVMInitCmd(a *app) *cobra.Command {
 	var cpus int
 	var memory string
 	var disk string
+	var backendName string
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create or verify the Torio VM from the trusted template",
@@ -83,6 +86,11 @@ func newVMInitCmd(a *app) *cobra.Command {
 			"(image digest, empty mounts, no persistent SSH agent forwarding). " +
 			"Incompatible existing instances fail closed — there is no --force and Torio " +
 			"never recreates or deletes them.\n\n" +
+			"An instance runs one agent backend, chosen here and recorded in this " +
+			"instance's config. Running a second backend means a second instance " +
+			"(TORIO_INSTANCE), never a second agent inside one VM: two agent " +
+			"identities sharing one workspace would contend over the same checkouts " +
+			"and make every custody statement ambiguous.\n\n" +
 			"Defaults: 4 CPUs, 8GiB memory, 60GiB disk. Next step after success: torio vm start.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -97,11 +105,19 @@ func newVMInitCmd(a *app) *cobra.Command {
 					Message: err.Error(),
 				}
 			}
+			// The backend is settled and recorded before the VM exists. It is a
+			// creation-time fact about the instance: the guest is provisioned
+			// for one identity, so a box that came up for one backend cannot be
+			// re-declared as another by editing a document afterwards.
+			if err := a.declareBackend(backendName); err != nil {
+				return err
+			}
 			res, err := a.newLima().Init(ctx, lima.InitOptions{
 				CPUs:         cpus,
 				Memory:       memory,
 				Disk:         disk,
 				OperatorUser: opUser,
+				Backend:      a.backend,
 			})
 			if err != nil {
 				return mapLimaError("vm.init", err)
@@ -112,12 +128,66 @@ func newVMInitCmd(a *app) *cobra.Command {
 	cmd.Flags().IntVar(&cpus, "cpus", 0, "vCPU count (default 4)")
 	cmd.Flags().StringVar(&memory, "memory", "", "memory size, e.g. 8GiB (default 8GiB)")
 	cmd.Flags().StringVar(&disk, "disk", "", "disk size, e.g. 60GiB (default 60GiB)")
+	cmd.Flags().StringVar(&backendName, "backend", "", "agent backend for this instance (default hermes); fixed at creation")
 	return cmd
+}
+
+// declareBackend settles which backend this instance runs and records it before
+// anything creates a VM for it.
+//
+// A rerun with no flag keeps what the instance already declares, so init stays
+// idempotent. A flag naming a different backend than the instance already
+// declares is a usage error: switching the agent a provisioned guest runs is
+// not an edit, it is a new instance, and silently accepting the flag would
+// leave a guest built for one identity being driven as another.
+func (a *app) declareBackend(name string) error {
+	if name == "" {
+		return nil
+	}
+	if _, err := backend.Lookup(name); err != nil {
+		return usageError(err.Error())
+	}
+	current := a.runtime.File.Backend
+	if current == "" && name == backend.DefaultName {
+		// Nothing to record: an absent declaration already means the default.
+		return nil
+	}
+	if current != "" && current != name {
+		return &CLIError{
+			Exit:    ExitUsage,
+			Code:    "BACKEND_MISMATCH",
+			Command: "vm.init",
+			Message: fmt.Sprintf("instance %q already declares backend %q; --backend %q would re-point a provisioned guest. Use a separate instance (TORIO_INSTANCE) for a different backend.",
+				lima.InstanceName, current, name),
+		}
+	}
+	if current == name {
+		return nil
+	}
+	file := a.runtime.File
+	file.SchemaVersion = config.ConfigSchemaVersion
+	file.Backend = name
+	if err := config.WriteFile(a.runtime.Paths.ConfigFile, file); err != nil {
+		return &CLIError{
+			Exit:    ExitUsage,
+			Code:    "BACKEND_DECLARATION_FAILED",
+			Command: "vm.init",
+			Message: err.Error(),
+		}
+	}
+	a.runtime.File = file
+	b, err := backend.Lookup(name)
+	if err != nil {
+		return usageError(err.Error())
+	}
+	a.backend = b
+	return nil
 }
 
 // vmInitData is the `data` object for a successful `vm init`.
 type vmInitData struct {
 	Name          string `json:"name"`
+	Backend       string `json:"backend"`
 	Created       bool   `json:"created"`
 	Unchanged     bool   `json:"unchanged"`
 	ImageLocation string `json:"image_location"`
@@ -130,6 +200,7 @@ func (a *app) emitVMInit(res lima.InitResult) error {
 	if a.jsonOut {
 		data := vmInitData{
 			Name:          lima.InstanceName,
+			Backend:       a.backend.Identity().Name,
 			Created:       res.Created,
 			Unchanged:     !res.Created,
 			ImageLocation: res.ImageLocation,

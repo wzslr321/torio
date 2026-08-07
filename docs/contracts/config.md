@@ -85,15 +85,34 @@ Fields:
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `schema_version` | string | yes | `"2"`. Any other value is rejected, with no migration. |
+| `schema_version` | string | yes | `"3"` is written. `"2"` is still read and normalized to `"3"` on the next write. Any other value is rejected, with no migration. |
+| `backend` | string | no | The agent backend this instance runs, fixed at `vm init`. Omitted means `hermes`. A name this binary has no implementation for is rejected, and the error names the ones it has. |
 | `default_timeout` | string (Go duration) | no | Default operation timeout; validated > 0 and ≤ the policy maximum. Feeds the timeout policy when `--timeout` is not given explicitly (the flag wins). |
 | `projects` | array | no | The project registry — see below. Omitted normalizes to an empty registry. |
+
+### Versions and what an older binary does
+
+A `"2"` document predates instances declaring a backend. It names none, and an
+instance that names none is running Hermes — which is what every instance
+created before the field already is. Reading the absence as anything else would
+re-point a working box at a different agent on upgrade.
+
+A `"2"` document carrying a `backend` field is rejected. A document means what
+its declared version says it means, and one that mixes the two was written by
+something that understood neither.
+
+An older binary reading a `"3"` document fails closed, by its own version gate
+and by the strict decoder on `backend`. That is the intended failure: an old
+binary cannot know its Hermes-shaped commands are pointed at a box running a
+different agent, so it must stop rather than guess
+([ADR-0009](../adr/0009-backend-contract-and-claude-code.md)).
 
 A valid document:
 
 ```json
 {
-  "schema_version": "2",
+  "schema_version": "3",
+  "backend": "hermes",
   "default_timeout": "45s",
   "projects": [
     {
@@ -111,8 +130,9 @@ The registry is the **non-secret** source of truth about attached projects
 ([ADR-0003](../adr/0003-ownership-split-and-operator-carried-write.md)).
 
 **A workspace path is not a field.** It is derived from `id` as
-`/home/hermes/projects/<id>` by the projects layer, so the config cannot point a
-project at an arbitrary guest path. A project object carrying a `path` field is
+`<backend workspace root>/<id>` — `/home/hermes/projects/<id>` on a Hermes
+instance — by the projects layer, so the config cannot point a project at an
+arbitrary guest path. A project object carrying a `path` field is
 rejected like any unknown field.
 
 | Field | Type | Required | Rule |

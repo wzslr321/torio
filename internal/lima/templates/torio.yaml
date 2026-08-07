@@ -49,30 +49,22 @@ provision:
       set -euxo pipefail
       export DEBIAN_FRONTEND=noninteractive
       apt-get update -y
-      apt-get install -y --no-install-recommends git curl ca-certificates xz-utils sudo uidmap dbus-user-session ripgrep ffmpeg build-essential python3-dev libffi-dev
+      apt-get install -y --no-install-recommends git curl ca-certificates xz-utils sudo uidmap dbus-user-session
 
       if ! getent group torio-projects >/dev/null; then
         groupadd --system torio-projects
       fi
 
-      # Dedicated hermes service identity — NEVER rootful docker group (ADR-0003).
-      if ! id -u hermes >/dev/null 2>&1; then
-        useradd --create-home --shell /bin/bash --user-group hermes
-      fi
-      usermod -aG torio-projects hermes
-      if id -nG hermes | tr ' ' '\n' | grep -qx docker; then
-        gpasswd -d hermes docker || true
-      fi
-
-      chown hermes:torio-projects /home/hermes
-      chmod 0710 /home/hermes
-      install -d -o hermes -g torio-projects -m 2770 /home/hermes/projects
-      install -d -o hermes -g hermes -m 0750 /home/hermes/.hermes
-      install -d -o hermes -g hermes -m 0750 /home/hermes/brain
-
-      # Rootful Docker Engine is intentionally NOT installed. hermes must not
-      # gain root-equivalent docker.sock access. Future container use requires
-      # a hermes-owned rootless runtime behind a separate ADR.
+      # The backend's own identity and layout. Substituted from the backend this
+      # instance declares, so a guest is provisioned for exactly one agent: a
+      # second agent identity inside torio-projects would widen who can read
+      # every checkout, for a backend nothing on this box will ever run.
+      #
+      # Rootful Docker Engine is intentionally NOT installed for any backend. An
+      # agent identity must not gain root-equivalent docker.sock access. Future
+      # container use requires an agent-owned rootless runtime behind a separate
+      # ADR (ADR-0003).
+      __TORIO_BACKEND_PROVISION__
 
   # The guest entry point of `torio project shell` (internal/lima.OperatorShellHelper).
   # A data file rather than a script, so Lima owns the ownership and mode and

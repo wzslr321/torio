@@ -135,6 +135,12 @@ type Backend interface {
 	Service() *ServiceSpec
 	// Session is the backend's interactive session, nil when it declares none.
 	Session() *SessionSpec
+
+	// ProvisionScript is the guest identity and directory layout this backend
+	// needs, as plain shell substituted into the VM template at creation. It
+	// runs as root on every boot, so every step must be idempotent, and it is
+	// the only place a backend shapes the guest before bootstrap can verify it.
+	ProvisionScript() string
 }
 
 // Transport is the one-shot guest command channel a capability surface uses.

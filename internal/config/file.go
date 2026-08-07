@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -22,7 +23,25 @@ import (
 // predates the registry still refuses this document — by its own version gate
 // and by DisallowUnknownFields on "projects" — so it can never misread a
 // registry as settings-only.
-const ConfigSchemaVersion = "2"
+const ConfigSchemaVersion = "3"
+
+// readableSchemaVersions are the document versions this binary understands. "2"
+// is read but never written: it predates an instance declaring which agent
+// backend it runs, and a document that names none is an instance running the
+// default one. Reading it as anything else would re-point an existing box at a
+// different agent on upgrade, so the absence is given the only meaning it can
+// safely have and the document is rewritten as "3" the next time it changes.
+//
+// The converse is deliberate too. A binary that predates "3" refuses a "3"
+// document, by its own version gate and by DisallowUnknownFields on `backend`.
+// That is the desired failure: an older binary cannot know its Hermes-shaped
+// commands are pointed at a box running a different agent, so it must stop
+// rather than guess.
+var readableSchemaVersions = []string{"2", "3"}
+
+// readableSchemaVersion reports whether v is a document version this binary
+// understands.
+func readableSchemaVersion(v string) bool { return slices.Contains(readableSchemaVersions, v) }
 
 // File is the validated, typed content of the on-disk config document. It holds
 // only non-secret operator intent: runtime settings plus the active project
@@ -35,15 +54,37 @@ type File struct {
 	// Timeout is the parsed default operation timeout, or 0 when the document
 	// omits default_timeout. When set it is bounded by policy (see Validate).
 	Timeout time.Duration
+	// Backend is the agent backend this instance runs, empty for a document
+	// that predates the field. Empty means the default backend; which names are
+	// valid is resolved by the backend registry, not here — this package
+	// validates the shape of the name, never its meaning.
+	Backend string
 	// Projects is the attached project registry. It is empty for a document
 	// without projects.
 	Projects []Project
 }
 
+// backendNamePattern is the shape a backend name may take. It is an identifier
+// in a document Torio reads and echoes back in errors, so it is constrained
+// here for the same reason a project id is; whether a well-shaped name is one
+// this binary has an implementation for is the caller's question.
+var backendNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$`)
+
 // fileJSON is the wire form of File. Unknown fields are rejected by the
 // decoder (DisallowUnknownFields) at every level, so the schema fails closed —
 // including a project object that tries to smuggle in a workspace path.
 type fileJSON struct {
+	SchemaVersion  string        `json:"schema_version"`
+	DefaultTimeout string        `json:"default_timeout,omitempty"`
+	Backend        string        `json:"backend,omitempty"`
+	Projects       []projectJSON `json:"projects"`
+}
+
+// fileJSONV2 is the wire form of the version that predates the backend field.
+// It exists as its own type so a document declaring "2" while carrying
+// `backend` is rejected by the strict decoder rather than quietly accepted: a
+// document must mean what its declared version says it means.
+type fileJSONV2 struct {
 	SchemaVersion  string        `json:"schema_version"`
 	DefaultTimeout string        `json:"default_timeout,omitempty"`
 	Projects       []projectJSON `json:"projects"`
@@ -172,7 +213,7 @@ func WriteFile(path string, f File) (err error) {
 		return fmt.Errorf("config: %w", err)
 	}
 
-	wire := fileJSON{SchemaVersion: out.SchemaVersion, Projects: []projectJSON{}}
+	wire := fileJSON{SchemaVersion: out.SchemaVersion, Backend: out.Backend, Projects: []projectJSON{}}
 	if out.Timeout != 0 {
 		wire.DefaultTimeout = out.Timeout.String()
 	}
@@ -216,7 +257,7 @@ func verifyPersisted(path string, want File) error {
 		return fmt.Errorf("config: written config did not validate on read back: %w", err)
 	}
 	if got.SchemaVersion != want.SchemaVersion || got.Timeout != want.Timeout ||
-		!slices.Equal(got.Projects, want.Projects) {
+		got.Backend != want.Backend || !slices.Equal(got.Projects, want.Projects) {
 		// Neither document is echoed: both may carry operator-controlled text.
 		return errors.New("config: written config does not match the document that was persisted")
 	}
@@ -233,9 +274,12 @@ func verifyPersisted(path string, want File) error {
 func (f File) Validate() (err error) {
 	defer func() { err = redactErr(err) }()
 
-	if f.SchemaVersion != ConfigSchemaVersion {
-		return fmt.Errorf("schema_version %q is not supported (want %q)",
-			f.SchemaVersion, ConfigSchemaVersion)
+	if !readableSchemaVersion(f.SchemaVersion) {
+		return fmt.Errorf("schema_version %q is not supported (want one of %v)",
+			f.SchemaVersion, readableSchemaVersions)
+	}
+	if f.Backend != "" && !backendNamePattern.MatchString(f.Backend) {
+		return fmt.Errorf("backend %q is not a valid backend name", f.Backend)
 	}
 
 	if f.Timeout != 0 {
@@ -273,16 +317,26 @@ func parseFile(data []byte) (f File, err error) {
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return File{}, fmt.Errorf("invalid JSON: %w", err)
 	}
-	if probe.SchemaVersion != ConfigSchemaVersion {
-		return File{}, fmt.Errorf("schema_version %q is not supported (want %q)",
-			probe.SchemaVersion, ConfigSchemaVersion)
+	if !readableSchemaVersion(probe.SchemaVersion) {
+		return File{}, fmt.Errorf("schema_version %q is not supported (want one of %v)",
+			probe.SchemaVersion, readableSchemaVersions)
 	}
 
 	var raw fileJSON
-	if err := decodeStrict(data, &raw); err != nil {
+	if probe.SchemaVersion == "2" {
+		var legacy fileJSONV2
+		if err := decodeStrict(data, &legacy); err != nil {
+			return File{}, err
+		}
+		raw = fileJSON{SchemaVersion: legacy.SchemaVersion, DefaultTimeout: legacy.DefaultTimeout, Projects: legacy.Projects}
+	} else if err := decodeStrict(data, &raw); err != nil {
 		return File{}, err
 	}
-	f = File{SchemaVersion: ConfigSchemaVersion}
+	// The document is normalized to the current version on the way in, so a
+	// document read as "2" is written back as "3" the next time anything
+	// changes. Nothing downstream has a reason to know which version was on
+	// disk; what matters is that reading an older one is lossless.
+	f = File{SchemaVersion: ConfigSchemaVersion, Backend: raw.Backend}
 	if err := f.setTimeout(raw.DefaultTimeout); err != nil {
 		return File{}, err
 	}

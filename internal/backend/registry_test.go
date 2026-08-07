@@ -22,6 +22,7 @@ func (stub) ProbeAuth(context.Context, StepRunner) error        { return nil }
 func (stub) Registry() ProjectRegistry                          { return nil }
 func (stub) Service() *ServiceSpec                              { return nil }
 func (stub) Session() *SessionSpec                              { return nil }
+func (stub) ProvisionScript() string                            { return "" }
 
 // TestLookupEmptyNameResolvesTheDefault pins the compatibility rule: a config
 // document written before instances declared a backend names none, and such an

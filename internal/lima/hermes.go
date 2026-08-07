@@ -269,6 +269,34 @@ func (hermesBackend) VerifyGuardrails(context.Context, backend.StepRunner) error
 // that offline which is worth putting in a report.
 func (hermesBackend) ProbeAuth(context.Context, backend.StepRunner) error { return nil }
 
+// ProvisionScript is the guest identity and layout this backend needs, in the
+// form the Lima template substitutes into its system provisioning. It is plain
+// shell run once at creation and again on every boot, so every step is written
+// to be idempotent.
+//
+// The build dependencies are here rather than in the template's base package
+// list because they are this backend's: an instance running a different agent
+// should not carry a compiler toolchain and ffmpeg for a Python install it will
+// never perform.
+func (hermesBackend) ProvisionScript() string {
+	return `apt-get install -y --no-install-recommends ` + strings.Join(hermesBuildDeps, " ") + `
+
+if ! id -u ` + HermesUser + ` >/dev/null 2>&1; then
+  useradd --create-home --shell /bin/bash --user-group ` + HermesUser + `
+fi
+usermod -aG ` + TorioProjectsGroup + ` ` + HermesUser + `
+if id -nG ` + HermesUser + ` | tr ' ' '\n' | grep -qx ` + dockerGroup + `; then
+  gpasswd -d ` + HermesUser + ` ` + dockerGroup + ` || true
+fi
+
+chown ` + HermesUser + `:` + TorioProjectsGroup + ` ` + HermesHome + `
+chmod 0710 ` + HermesHome + `
+install -d -o ` + HermesUser + ` -g ` + TorioProjectsGroup + ` -m 2770 ` + HermesWorkspacePath + `
+install -d -o ` + HermesUser + ` -g ` + HermesUser + ` -m 0750 ` + HermesProfilePath + `
+install -d -o ` + HermesUser + ` -g ` + HermesUser + ` -m 0750 ` + HermesBrainPath + `
+`
+}
+
 func (hermesBackend) Registry() backend.ProjectRegistry { return hermesRegistry{} }
 
 // Session is nil: Hermes' interactive surface is the service, reached by a

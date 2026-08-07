@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/wzslr321/torio/internal/backend"
 )
 
 // The promoted Gate 0 image pin is now per-host and lives in Profile: the two
@@ -63,6 +65,12 @@ const (
 	placeholderEnterContent = "__TORIO_PROJECT_ENTER__"
 	// The host-derived pins. They are substituted from the same Profile that
 	// verifyCompatibleConfig checks the created instance against.
+	// placeholderBackendProvision carries the declared backend's own guest
+	// identity and directory layout. It is a placeholder rather than a fixed
+	// block because which identity the guest is built for is the one thing a
+	// second backend must change about provisioning.
+	placeholderBackendProvision = "__TORIO_BACKEND_PROVISION__"
+
 	placeholderVMType      = "__TORIO_VMTYPE__"
 	placeholderArch        = "__TORIO_ARCH__"
 	placeholderImageURL    = "__TORIO_IMAGE_URL__"
@@ -77,6 +85,12 @@ type InitOptions struct {
 	Memory       string
 	Disk         string
 	OperatorUser string
+	// Backend is the agent backend this instance is created for. Its
+	// provisioning block becomes the guest's identity and layout, so the VM
+	// comes up built for exactly one agent. A nil Backend is the default one,
+	// which is what every instance created before instances declared a backend
+	// is running.
+	Backend backend.Backend
 }
 
 // InitResult reports whether a VM was created and which image pin applies.
@@ -87,6 +101,9 @@ type InitResult struct {
 }
 
 func (o InitOptions) withDefaults() InitOptions {
+	if o.Backend == nil {
+		o.Backend = Hermes()
+	}
 	if o.CPUs == 0 {
 		o.CPUs = DefaultCPUs
 	}
@@ -148,6 +165,7 @@ func renderTemplate(opts InitOptions, profile Profile) ([]byte, error) {
 		placeholderArch, profile.Arch,
 		placeholderImageURL, profile.ImageURL,
 		placeholderImageDigest, profile.ImageDigest,
+		placeholderBackendProvision, indentBlock(opts.Backend.ProvisionScript(), "      "),
 	)
 	text = replacer.Replace(text)
 	// The helper is injected after every other substitution, so the bytes that
@@ -170,7 +188,8 @@ func renderTemplate(opts InitOptions, profile Profile) ([]byte, error) {
 		strings.Contains(text, placeholderVMType) ||
 		strings.Contains(text, placeholderArch) ||
 		strings.Contains(text, placeholderImageURL) ||
-		strings.Contains(text, placeholderImageDigest) {
+		strings.Contains(text, placeholderImageDigest) ||
+		strings.Contains(text, placeholderBackendProvision) {
 		return nil, fmt.Errorf("template placeholder left unsubstituted")
 	}
 	if !strings.Contains(text, "path: "+OperatorShellHelper) {
@@ -272,4 +291,23 @@ func writePrivateTemplate(content []byte) (path string, err error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// indentBlock re-indents a multi-line provisioning block to sit inside the
+// template's YAML script literal. A backend writes plain shell; where that
+// shell lands in the document is the template's problem, not the backend's.
+func indentBlock(text, indent string) string {
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			lines[i] = ""
+			continue
+		}
+		// The first line already sits at the placeholder's own indentation.
+		if i == 0 {
+			continue
+		}
+		lines[i] = indent + line
+	}
+	return strings.Join(lines, "\n")
 }

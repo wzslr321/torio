@@ -28,6 +28,7 @@ func (processBackend) ProbeAuth(context.Context, backend.StepRunner) error      
 func (processBackend) Registry() backend.ProjectRegistry                          { return nil }
 func (processBackend) Service() *backend.ServiceSpec                              { return nil }
 func (processBackend) Session() *backend.SessionSpec                              { return nil }
+func (processBackend) ProvisionScript() string                                    { return "" }
 
 // TestStatusOnAServicelessBackendAnswersInsteadOfFailing pins the honesty rule
 // in the direction that is easy to get wrong. A backend that runs no service is
