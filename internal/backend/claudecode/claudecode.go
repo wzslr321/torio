@@ -99,6 +99,22 @@ install -d -o root -g root -m 0755 ` + installDir + `
 `
 }
 
+// BrainSkill declares no skill root, and the reason is content rather than
+// plumbing.
+//
+// Claude Code does discover skills, under ~/.claude/skills, and the plumbing to
+// install one there is in place. What does not exist yet is a retrieval skill
+// written for it: the one Torio ships names another backend's tools and another
+// backend's vault path, so installing it here would tell the agent to call
+// tools it does not have against a directory that does not exist. That is worse
+// than installing nothing, and `brain status` says "not applicable" rather than
+// reporting a missing thing.
+//
+// The vault is still a vault without it — a git-versioned directory the agent
+// can read, in a checkout-shaped layout it already knows how to search. Writing
+// the skill is a content task, and it gets its own change.
+func (claudeBackend) BrainSkill() backend.BrainSkill { return backend.BrainSkill{} }
+
 // Registry is nil: Claude Code keeps no project registry. A project is a
 // directory it is started in, and its per-project state is files inside that
 // directory. There is nothing for Torio to register a checkout with, and

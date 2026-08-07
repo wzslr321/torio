@@ -29,6 +29,7 @@ func (processBackend) Registry() backend.ProjectRegistry                        
 func (processBackend) Service() *backend.ServiceSpec                              { return nil }
 func (processBackend) Session() *backend.SessionSpec                              { return nil }
 func (processBackend) ProvisionScript() string                                    { return "" }
+func (processBackend) BrainSkill() backend.BrainSkill                             { return backend.BrainSkill{} }
 
 // TestStatusOnAServicelessBackendAnswersInsteadOfFailing pins the honesty rule
 // in the direction that is easy to get wrong. A backend that runs no service is

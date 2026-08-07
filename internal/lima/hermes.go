@@ -297,6 +297,14 @@ install -d -o ` + HermesUser + ` -g ` + HermesUser + ` -m 0750 ` + HermesBrainPa
 `
 }
 
+// BrainSkill points at the profile's skill root and the category the retrieval
+// skill is grouped under. The category is not tidiness: Hermes renders a
+// static, alphabetically ordered index, and a top-level skill sorted near the
+// end of it lost a routing contest against a bundled competitor.
+func (hermesBackend) BrainSkill() backend.BrainSkill {
+	return backend.BrainSkill{Root: HermesProfilePath + "/skills", Category: "brain"}
+}
+
 func (hermesBackend) Registry() backend.ProjectRegistry { return hermesRegistry{} }
 
 // Session is nil: Hermes' interactive surface is the service, reached by a

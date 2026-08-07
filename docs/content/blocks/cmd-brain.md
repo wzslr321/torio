@@ -34,3 +34,22 @@ limactl copy torio:/home/hermes/brain/ <host-destination>/
 
 That is your command, not a Torio feature: nothing verifies the result, and
 Torio does not call it a backup.
+
+### On a backend that keeps no registry or no skills {#brain-backends}
+
+The vault, its git history and the import pipeline are the same on every
+backend: the vault lives in the backend identity's own home, owned by it, and
+`brain import` verifies and promotes exactly as it does elsewhere.
+
+Two things are per-backend, and `brain status` reports each as a state rather
+than as a fault:
+
+- **Registration.** A backend that keeps no project registry has nothing to
+  register the vault with. The vault is reached by path, so nothing is lost.
+- **The retrieval skill.** Torio installs it only where the backend discovers
+  skills *and* a skill exists that is written for that backend. The one Torio
+  ships names another backend's tools and vault path; installing it elsewhere
+  would tell an agent to call tools it does not have. The state is then
+  `not_applicable`, which is deliberately not `not_installed` — reporting a
+  missing thing where nothing is missing teaches operators to ignore the report
+  that matters.

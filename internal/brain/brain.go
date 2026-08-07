@@ -154,9 +154,15 @@ const (
 type SkillState string
 
 const (
-	SkillNotInstalled SkillState = "not_installed"
-	SkillInstalled    SkillState = "installed"
-	SkillDrift        SkillState = "drift"
+	// SkillNotApplicable means the backend discovers no skills, so there is
+	// nowhere to install a retrieval surface and nothing was expected. It is
+	// deliberately not "not_installed": that would report a missing thing where
+	// nothing is missing, and an operator who learns to ignore it would ignore
+	// the real one too.
+	SkillNotApplicable SkillState = "not_applicable"
+	SkillNotInstalled  SkillState = "not_installed"
+	SkillInstalled     SkillState = "installed"
+	SkillDrift         SkillState = "drift"
 )
 
 // StatusReport contains only derived metadata and aggregate counts. It never

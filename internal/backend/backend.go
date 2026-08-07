@@ -136,6 +136,10 @@ type Backend interface {
 	// Session is the backend's interactive session, nil when it declares none.
 	Session() *SessionSpec
 
+	// BrainSkill is where this backend discovers skills, so Torio can install
+	// the vault's retrieval skill somewhere the agent will actually find it.
+	BrainSkill() BrainSkill
+
 	// ProvisionScript is the guest identity and directory layout this backend
 	// needs, as plain shell substituted into the VM template at creation. It
 	// runs as root on every boot, so every step must be idempotent, and it is
@@ -235,6 +239,22 @@ type ServiceSpec struct {
 // EndpointURL is the loopback readiness URL probed on the guest.
 func (s *ServiceSpec) EndpointURL() string {
 	return "http://" + s.BindHost + ":" + strconv.Itoa(s.BindPort) + s.StatusPath
+}
+
+// BrainSkill is a backend's skill-discovery layout.
+//
+// Root is the directory the backend walks for skills. An empty Root means the
+// backend discovers none, and Torio installs none: the vault is still a vault,
+// and `brain status` reports that it has no retrieval surface rather than
+// reporting one as missing.
+//
+// Category groups the skill inside that root, and exists because one backend
+// renders a static, alphabetically ordered skill index whose position decides
+// whether a skill is seen at all. A backend that has no such index leaves it
+// empty and the skill sits directly under Root.
+type BrainSkill struct {
+	Root     string
+	Category string
 }
 
 // SessionSpec is a backend an operator opens an interactive session with,

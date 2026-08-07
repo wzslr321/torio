@@ -71,9 +71,9 @@ func (m *Manager) Import(ctx context.Context, opts ImportOptions) (report Transf
 		return report, &Error{Op: op, Kind: KindPrecondition, Err: err}
 	}
 	if into != "" {
-		report.FinalPath = Path + "/" + into
+		report.FinalPath = m.vault() + "/" + into
 	} else {
-		report.FinalPath = Path
+		report.FinalPath = m.vault()
 	}
 	var hostRoot, hostPayload string
 	if !opts.DryRun {
@@ -116,7 +116,7 @@ func (m *Manager) Import(ctx context.Context, opts ImportOptions) (report Transf
 			// No destination files exist, so the manifest is conflict-free.
 		case StateInitialized:
 			// Known asymmetry, not drift: the dry run counts per-file conflicts
-			// under Path/<into>, while a real run with --into refuses whenever
+			// under m.vault()/<into>, while a real run with --into refuses whenever
 			// the subtree exists at all (it must be one new contained subtree).
 			report.Conflicts, err = m.importConflicts(ctx, op, manifest, into)
 			if err != nil {
@@ -172,7 +172,7 @@ func (m *Manager) Import(ctx context.Context, opts ImportOptions) (report Transf
 	}
 	if existing {
 		if into != "" {
-			exists, err := m.testPrivatePath(ctx, op, "-e", Path+"/"+into)
+			exists, err := m.testPrivatePath(ctx, op, "-e", m.vault()+"/"+into)
 			if err != nil {
 				return report, err
 			}
@@ -255,7 +255,7 @@ func (m *Manager) prepareGuestImport(ctx context.Context, op, hostPayload string
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "create private import staging",
-		guestexec.RootExec("install", "-d", "-o", lima.HermesUser, "-g", lima.TorioProjectsGroup, "-m", "0750",
+		guestexec.RootExec("install", "-d", "-o", m.agentUser(), "-g", lima.TorioProjectsGroup, "-m", "0750",
 			importStagingPath)); err != nil {
 		return err
 	}
@@ -269,7 +269,7 @@ func (m *Manager) prepareGuestImport(ctx context.Context, op, hostPayload string
 		return &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("private transfer manifest could not be rendered")}
 	}
 	if err := m.mustRunInput(ctx, op, KindGuestCommand, "write private transfer manifest", checksums,
-		guestexec.UserExecAs(lima.HermesUser, "dd", "of="+importManifestPath, "status=none", "conv=fsync")); err != nil {
+		guestexec.UserExecAs(m.agentUser(), "dd", "of="+importManifestPath, "status=none", "conv=fsync")); err != nil {
 		return err
 	}
 	if err := m.guest.CopyToGuest(ctx, hostPayload, importPayloadPath); err != nil {
@@ -314,7 +314,7 @@ func (m *Manager) guestSessionUser(ctx context.Context, op string) (string, erro
 // that will be moved into place, with nothing rewritten afterwards.
 func (m *Manager) adoptGuestPayload(ctx context.Context, op string) error {
 	if err := m.mustRun(ctx, op, KindGuestCommand, "adopt the copied payload",
-		guestexec.RootExec("chown", "-R", "--", lima.HermesUser+":"+lima.HermesUser, importPayloadPath)); err != nil {
+		guestexec.RootExec("chown", "-R", "--", m.agentUser()+":"+m.agentUser(), importPayloadPath)); err != nil {
 		return err
 	}
 	return m.mustRun(ctx, op, KindGuestCommand, "normalize copied payload permissions",
@@ -323,8 +323,8 @@ func (m *Manager) adoptGuestPayload(ctx context.Context, op string) error {
 
 func (m *Manager) verifyGuestPayload(ctx context.Context, op string, manifest *transfer.Manifest) error {
 	for _, argv := range [][]string{
-		guestexec.UserExecAs(lima.HermesUser, "find", importPayloadPath, "-type", "l", "-printf", ".", "-quit"),
-		guestexec.UserExecAs(lima.HermesUser, "find", importPayloadPath, "!", "-type", "d", "!", "-type", "f", "-printf", ".", "-quit"),
+		guestexec.UserExecAs(m.agentUser(), "find", importPayloadPath, "-type", "l", "-printf", ".", "-quit"),
+		guestexec.UserExecAs(m.agentUser(), "find", importPayloadPath, "!", "-type", "d", "!", "-type", "f", "-printf", ".", "-quit"),
 	} {
 		res, err := m.run(ctx, op, argv)
 		if err != nil {
@@ -334,14 +334,14 @@ func (m *Manager) verifyGuestPayload(ctx context.Context, op string, manifest *t
 			return &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("guest staging contains a link or special file")}
 		}
 	}
-	count, err := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "find", importPayloadPath, "-type", "f", "-printf", "."))
+	count, err := m.run(ctx, op, guestexec.UserExecAs(m.agentUser(), "find", importPayloadPath, "-type", "f", "-printf", "."))
 	if err != nil {
 		return err
 	}
 	if count.ExitCode != 0 || !onlyDots(count.Stdout) || len(count.Stdout) != manifest.Files() {
 		return &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("guest staging file count does not match the private manifest")}
 	}
-	sum, err := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "sha256sum", "--quiet", "--strict", "-c", importManifestPath))
+	sum, err := m.run(ctx, op, guestexec.UserExecAs(m.agentUser(), "sha256sum", "--quiet", "--strict", "-c", importManifestPath))
 	if err != nil {
 		return err
 	}
@@ -358,7 +358,7 @@ func (m *Manager) movePayloadIntoContainedCandidate(ctx context.Context, op, int
 	target := importCandidatePath + "/" + into
 	if parent := path.Dir(target); parent != importCandidatePath {
 		if err := m.mustRun(ctx, op, KindGuestCommand, "create contained import parent",
-			guestexec.RootExec("install", "-d", "-o", lima.HermesUser, "-g", lima.HermesUser, "-m", "0750", parent)); err != nil {
+			guestexec.RootExec("install", "-d", "-o", m.agentUser(), "-g", m.agentUser(), "-m", "0750", parent)); err != nil {
 			return err
 		}
 	}
@@ -370,14 +370,14 @@ func (m *Manager) movePayloadIntoContainedCandidate(ctx context.Context, op, int
 // `rev-parse --verify HEAD` answers a non-empty commit and `git remote` prints
 // nothing. what names the repository in the failure messages.
 func (m *Manager) verifySnapshotRepository(ctx context.Context, op, dir, what string) error {
-	head, err := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "git", "-C", dir, "rev-parse", "--verify", "HEAD"))
+	head, err := m.run(ctx, op, guestexec.UserExecAs(m.agentUser(), "git", "-C", dir, "rev-parse", "--verify", "HEAD"))
 	if err != nil {
 		return err
 	}
 	if head.ExitCode != 0 || strings.TrimSpace(string(head.Stdout)) == "" {
 		return &Error{Op: op, Kind: KindGit, Err: fmt.Errorf("%s has no verified snapshot", what)}
 	}
-	remote, err := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "git", "-C", dir, "remote"))
+	remote, err := m.run(ctx, op, guestexec.UserExecAs(m.agentUser(), "git", "-C", dir, "remote"))
 	if err != nil {
 		return err
 	}
@@ -395,7 +395,7 @@ func (m *Manager) buildFirstImportCandidate(ctx context.Context, op, into string
 		}
 	} else {
 		if err := m.mustRun(ctx, op, KindGuestCommand, "create import candidate",
-			guestexec.RootExec("install", "-d", "-o", lima.HermesUser, "-g", lima.HermesUser, "-m", "0750", importCandidatePath)); err != nil {
+			guestexec.RootExec("install", "-d", "-o", m.agentUser(), "-g", m.agentUser(), "-m", "0750", importCandidatePath)); err != nil {
 			return err
 		}
 		if err := m.movePayloadIntoContainedCandidate(ctx, op, into); err != nil {
@@ -408,7 +408,7 @@ func (m *Manager) buildFirstImportCandidate(ctx context.Context, op, into string
 		dirs = append(dirs, importCandidatePath+"/"+name)
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "complete canonical candidate directories",
-		guestexec.RootExec(append([]string{"install", "-d", "-o", lima.HermesUser, "-g", lima.HermesUser, "-m", "0750"}, dirs...)...)); err != nil {
+		guestexec.RootExec(append([]string{"install", "-d", "-o", m.agentUser(), "-g", m.agentUser(), "-m", "0750"}, dirs...)...)); err != nil {
 		return err
 	}
 	for _, name := range canonicalFiles {
@@ -425,7 +425,7 @@ func (m *Manager) buildFirstImportCandidate(ctx context.Context, op, into string
 			return &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("embedded scaffold unavailable")}
 		}
 		if err := m.mustRunInput(ctx, op, KindGuestCommand, "write missing candidate scaffold file", payload,
-			guestexec.UserExecAs(lima.HermesUser, "tee", target)); err != nil {
+			guestexec.UserExecAs(m.agentUser(), "tee", target)); err != nil {
 			return err
 		}
 		if err := m.mustRun(ctx, op, KindGuestCommand, "protect candidate scaffold file",
@@ -434,15 +434,15 @@ func (m *Manager) buildFirstImportCandidate(ctx context.Context, op, into string
 		}
 	}
 	if err := m.mustRun(ctx, op, KindGit, "initialize imported Brain repository",
-		guestexec.UserExecAs(lima.HermesUser, "git", "-C", importCandidatePath, "init", "--initial-branch=main")); err != nil {
+		guestexec.UserExecAs(m.agentUser(), "git", "-C", importCandidatePath, "init", "--initial-branch=main")); err != nil {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGit, "stage imported Brain snapshot",
-		guestexec.UserExecAs(lima.HermesUser, "git", "-C", importCandidatePath, "add", "-A")); err != nil {
+		guestexec.UserExecAs(m.agentUser(), "git", "-C", importCandidatePath, "add", "-A")); err != nil {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGit, "commit imported Brain snapshot",
-		guestexec.UserExecAs(lima.HermesUser, "git", "-C", importCandidatePath,
+		guestexec.UserExecAs(m.agentUser(), "git", "-C", importCandidatePath,
 			"-c", "user.name=torio",
 			"-c", "user.email=torio@localhost",
 			"commit", "-m", "Import Torio Second Brain")); err != nil {
@@ -453,19 +453,19 @@ func (m *Manager) buildFirstImportCandidate(ctx context.Context, op, into string
 
 func (m *Manager) buildExistingImportCandidate(ctx context.Context, op, into string, replacePristine bool) error {
 	if err := m.mustRun(ctx, op, KindGuestCommand, "create existing-Brain candidate",
-		guestexec.RootExec("install", "-d", "-o", lima.HermesUser, "-g", lima.HermesUser, "-m", "0750", importCandidatePath)); err != nil {
+		guestexec.RootExec("install", "-d", "-o", m.agentUser(), "-g", m.agentUser(), "-m", "0750", importCandidatePath)); err != nil {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "copy existing Brain into private candidate",
-		guestexec.RootExec("cp", "-a", "--", Path+"/.", importCandidatePath+"/")); err != nil {
+		guestexec.RootExec("cp", "-a", "--", m.vault()+"/.", importCandidatePath+"/")); err != nil {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGit, "stage pre-import checkpoint",
-		guestexec.UserExecAs(lima.HermesUser, "git", "-C", importCandidatePath, "add", "-A")); err != nil {
+		guestexec.UserExecAs(m.agentUser(), "git", "-C", importCandidatePath, "add", "-A")); err != nil {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGit, "commit pre-import checkpoint",
-		guestexec.UserExecAs(lima.HermesUser, "git", "-C", importCandidatePath,
+		guestexec.UserExecAs(m.agentUser(), "git", "-C", importCandidatePath,
 			"-c", "user.name=torio",
 			"-c", "user.email=torio@localhost",
 			"commit", "--allow-empty", "-m", "Checkpoint before Torio Brain import")); err != nil {
@@ -490,11 +490,11 @@ func (m *Manager) buildExistingImportCandidate(ctx context.Context, op, into str
 		}
 	}
 	if err := m.mustRun(ctx, op, KindGit, "stage imported Brain snapshot",
-		guestexec.UserExecAs(lima.HermesUser, "git", "-C", importCandidatePath, "add", "-A")); err != nil {
+		guestexec.UserExecAs(m.agentUser(), "git", "-C", importCandidatePath, "add", "-A")); err != nil {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGit, "commit imported Brain snapshot",
-		guestexec.UserExecAs(lima.HermesUser, "git", "-C", importCandidatePath,
+		guestexec.UserExecAs(m.agentUser(), "git", "-C", importCandidatePath,
 			"-c", "user.name=torio",
 			"-c", "user.email=torio@localhost",
 			"commit", "-m", "Import Torio Second Brain")); err != nil {
@@ -507,14 +507,14 @@ func (m *Manager) isPristineScaffold(ctx context.Context, op string, status Stat
 	if status.GitState != GitClean || status.MarkdownFiles != len(canonicalFiles) || status.AttachmentFiles != 0 {
 		return false, nil
 	}
-	count, err := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "git", "-C", Path, "rev-list", "--count", "HEAD"))
+	count, err := m.run(ctx, op, guestexec.UserExecAs(m.agentUser(), "git", "-C", m.vault(), "rev-list", "--count", "HEAD"))
 	if err != nil {
 		return false, err
 	}
 	if count.ExitCode != 0 || strings.TrimSpace(string(count.Stdout)) != "1" {
 		return false, nil
 	}
-	tree, err := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "git", "-C", Path, "ls-tree", "-r", "--name-only", "HEAD"))
+	tree, err := m.run(ctx, op, guestexec.UserExecAs(m.agentUser(), "git", "-C", m.vault(), "ls-tree", "-r", "--name-only", "HEAD"))
 	if err != nil {
 		return false, err
 	}
@@ -537,7 +537,7 @@ func (m *Manager) isPristineScaffold(ctx context.Context, op string, status Stat
 			return false, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("embedded scaffold unavailable")}
 		}
 		expected := sha256.Sum256(payload)
-		sum, err := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "sha256sum", "--", Path+"/"+name))
+		sum, err := m.run(ctx, op, guestexec.UserExecAs(m.agentUser(), "sha256sum", "--", m.vault()+"/"+name))
 		if err != nil {
 			return false, err
 		}
@@ -551,7 +551,7 @@ func (m *Manager) isPristineScaffold(ctx context.Context, op string, status Stat
 
 func (m *Manager) exchangeImportCandidate(ctx context.Context, op string) error {
 	res, err := m.guest.SSH(ctx, guestexec.RootExec(
-		"python3", "-c", renameExchangeProgram, Path, importCandidatePath,
+		"python3", "-c", renameExchangeProgram, m.vault(), importCandidatePath,
 	))
 	if err != nil {
 		return &Error{Op: op, Kind: KindTransport, Err: fmt.Errorf("atomic Brain directory exchange could not start")}
@@ -563,7 +563,7 @@ func (m *Manager) exchangeImportCandidate(ctx context.Context, op string) error 
 }
 
 func (m *Manager) importConflicts(ctx context.Context, op string, manifest *transfer.Manifest, into string) (int, error) {
-	base := Path
+	base := m.vault()
 	if into != "" {
 		base += "/" + into
 	}
@@ -584,7 +584,7 @@ func (m *Manager) importConflicts(ctx context.Context, op string, manifest *tran
 // failure must not wrap execx's argv-bearing diagnostic because argv contains a
 // private Brain filename.
 func (m *Manager) testPrivatePath(ctx context.Context, op, flag, privatePath string) (bool, error) {
-	res, err := m.guest.SSH(ctx, guestexec.UserExecAs(lima.HermesUser, "test", flag, privatePath))
+	res, err := m.guest.SSH(ctx, guestexec.UserExecAs(m.agentUser(), "test", flag, privatePath))
 	if err != nil {
 		return false, &Error{Op: op, Kind: KindTransport, Err: fmt.Errorf("private path preflight failed")}
 	}
