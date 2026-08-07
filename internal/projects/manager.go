@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/guestexec"
 	"github.com/wzslr321/torio/internal/lima"
-	"github.com/wzslr321/torio/internal/serve"
 )
 
 // Guest is the narrow, typed VM boundary used by the project manager. Every
@@ -40,6 +40,39 @@ type SSHAgent interface {
 	Socket() string
 	// Identities returns how many identities the agent currently holds.
 	Identities(ctx context.Context) (int, error)
+}
+
+// backend is the agent backend this instance runs. It arrives with the
+// bootstrap options rather than as its own constructor argument because every
+// guest command here is already bounded by the same pins.
+func (m *Manager) backend() backend.Backend {
+	if m.bootstrapOpts.Backend == nil {
+		return lima.Hermes()
+	}
+	return m.bootstrapOpts.Backend
+}
+
+// identity is the guest identity that owns the checkouts.
+func (m *Manager) identity() backend.Identity { return m.backend().Identity() }
+
+// registry is the backend's project-registration surface, nil when the backend
+// declares none. A nil registry is a shape, not a failure: the checkout is
+// still cloned, verified and recorded, and the report says the backend keeps no
+// registry rather than reporting an absent registration as drift.
+func (m *Manager) projectRegistry() backend.ProjectRegistry { return m.backend().Registry() }
+
+// mapRegistryErr classifies a registry failure. Output that could not be parsed
+// is unverifiable state; everything else is a registration the backend could
+// not carry out.
+func (m *Manager) mapRegistryErr(op string, err error) error {
+	var re *backend.RegistryError
+	if errors.As(err, &re) {
+		if re.Malformed {
+			return &Error{Op: op, Kind: KindVerification, Err: re.Err}
+		}
+		return &Error{Op: op, Kind: KindRegistration, Err: re.Err}
+	}
+	return fromGuestErr(op, err)
 }
 
 // Manager owns attaching, verifying and forgetting guest projects.
@@ -87,7 +120,7 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 		// has no reason to care, this boundary does.
 		return report, &Error{Op: op, Kind: KindInvalidConfig, Err: errors.New("display name must not start with '-'")}
 	}
-	workspace, err := derivePath(req.ID)
+	workspace, err := derivePath(m.identity().WorkspacePath, req.ID)
 	if err != nil {
 		return report, &Error{Op: op, Kind: KindInvalidConfig, Err: err}
 	}
@@ -156,7 +189,7 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 	if err := m.ensureSharedPermissions(ctx, op, workspace); err != nil {
 		return report, err
 	}
-	for _, user := range []string{lima.HermesUser, m.bootstrapOpts.OperatorUser} {
+	for _, user := range []string{m.identity().GuestUser, m.bootstrapOpts.OperatorUser} {
 		if err := m.ensureSafeDirectory(ctx, op, user, workspace); err != nil {
 			return report, err
 		}
@@ -170,7 +203,7 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 		return report, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("checkout for %q did not satisfy the attachment postconditions: %s", req.ID, strings.Join(final.issues(), ", "))}
 	}
 
-	if err := m.ensureHermesProject(ctx, op, report.Project, &report); err != nil {
+	if err := m.ensureRegistered(ctx, op, report.Project, &report); err != nil {
 		return report, err
 	}
 
@@ -200,7 +233,7 @@ func (m *Manager) List() ([]Project, error) {
 	}
 	out := make([]Project, 0, len(current.Projects))
 	for _, p := range current.Projects {
-		workspace, err := derivePath(p.ID)
+		workspace, err := derivePath(m.identity().WorkspacePath, p.ID)
 		if err != nil {
 			return nil, &Error{Op: op, Kind: KindVerification, Err: err}
 		}
@@ -233,13 +266,13 @@ func (m *Manager) Show(ctx context.Context, id string) (ShowReport, error) {
 	report.Checkout = checkout
 	report.Issues = checkout.issues()
 
-	hermes, err := m.hermesStatus(ctx, op, id, workspace)
+	hermes, err := m.registryStatus(ctx, op, id, workspace)
 	if err != nil {
 		return report, err
 	}
 	report.Hermes = hermes
 	switch {
-	case hermes.conflicts():
+	case hermes.Conflicts():
 		report.Issues = append(report.Issues, "hermes_project_slug_conflict")
 	case !hermes.Present:
 		report.Issues = append(report.Issues, "hermes_project_absent")
@@ -265,11 +298,11 @@ func (m *Manager) Use(ctx context.Context, id string) (UseReport, error) {
 	if err := m.requirePrepared(ctx, op); err != nil {
 		return report, err
 	}
-	hermes, err := m.hermesStatus(ctx, op, id, workspace)
+	hermes, err := m.registryStatus(ctx, op, id, workspace)
 	if err != nil {
 		return report, err
 	}
-	if !hermes.registered() {
+	if !hermes.Registered() {
 		return report, &Error{Op: op, Kind: KindRegistration, Err: fmt.Errorf("no Hermes project for %q points at the derived workspace path; re-run `project add` to reconcile it", id)}
 	}
 	if err := m.activate(ctx, op, report.Project); err != nil {
@@ -299,19 +332,19 @@ func (m *Manager) Remove(ctx context.Context, id string) (RemoveReport, error) {
 		return report, err
 	}
 
-	hermes, err := m.hermesStatus(ctx, op, id, workspace)
+	hermes, err := m.registryStatus(ctx, op, id, workspace)
 	if err != nil {
 		return report, err
 	}
 	switch {
-	case hermes.conflicts():
+	case hermes.Conflicts():
 		return report, &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("the Hermes project holding slug %q points elsewhere; refusing to archive it", id)}
 	case !hermes.Present:
 		report.HermesAbsent = true
 	case hermes.Archived:
 		report.HermesAlreadyArchived = true
 	default:
-		if err := m.archiveHermesProject(ctx, op, report.Project); err != nil {
+		if err := m.archiveRegistered(ctx, op, report.Project); err != nil {
 			return report, err
 		}
 		report.HermesArchived = true
@@ -513,7 +546,7 @@ func (m *Manager) requireForwardableAgent(ctx context.Context, op string) error 
 // resolve looks a registered project up and derives its workspace path. An ID
 // that is not in the registry is a conflict, not a silent empty result.
 func (m *Manager) resolve(op, id string) (config.Project, string, error) {
-	workspace, err := derivePath(id)
+	workspace, err := derivePath(m.identity().WorkspacePath, id)
 	if err != nil {
 		return config.Project{}, "", &Error{Op: op, Kind: KindInvalidConfig, Err: err}
 	}
@@ -621,11 +654,11 @@ func (m *Manager) inspectCheckout(ctx context.Context, op, workspace, remote str
 		return st, commandError(op, KindGuestCommand, "inspect checkout ownership", meta.ExitCode)
 	}
 	st.Owner, st.Group, st.Mode = guestexec.ParseOwnershipMode(string(meta.Stdout))
-	st.SharedPermissions = st.Owner == lima.HermesUser && st.Group == sharedGroup && sharedModeOK(st.Mode)
+	st.SharedPermissions = st.Owner == m.identity().GuestUser && st.Group == sharedGroup && sharedModeOK(st.Mode)
 
 	// The top level must be the derived path itself: a checkout nested inside
 	// another repository would let that repository's config govern ours.
-	top, err := m.run(ctx, op, guestexec.UserExec("git", "-C", workspace, "rev-parse", "--show-toplevel"))
+	top, err := m.run(ctx, op, guestexec.UserExecAs(m.identity().GuestUser, "git", "-C", workspace, "rev-parse", "--show-toplevel"))
 	if err != nil {
 		return st, err
 	}
@@ -636,13 +669,13 @@ func (m *Manager) inspectCheckout(ctx context.Context, op, workspace, remote str
 
 	// The raw stored URL, not the effective one: an insteadOf rewrite must not
 	// be able to make a different remote look like ours.
-	origin, err := m.run(ctx, op, guestexec.UserExec("git", "-C", workspace, "config", "--get", "remote.origin.url"))
+	origin, err := m.run(ctx, op, guestexec.UserExecAs(m.identity().GuestUser, "git", "-C", workspace, "config", "--get", "remote.origin.url"))
 	if err != nil {
 		return st, err
 	}
 	st.OriginMatches = origin.ExitCode == 0 && strings.TrimSpace(string(origin.Stdout)) == remote
 
-	shallow, err := m.run(ctx, op, guestexec.UserExec("git", "-C", workspace, "rev-parse", "--is-shallow-repository"))
+	shallow, err := m.run(ctx, op, guestexec.UserExecAs(m.identity().GuestUser, "git", "-C", workspace, "rev-parse", "--is-shallow-repository"))
 	if err != nil {
 		return st, err
 	}
@@ -658,7 +691,7 @@ func (m *Manager) inspectCheckout(ctx context.Context, op, workspace, remote str
 		return st, &Error{Op: op, Kind: KindVerification, Err: errors.New("could not determine whether the checkout is a shallow clone")}
 	}
 
-	worktree, err := m.run(ctx, op, guestexec.UserExec("git", "-C", workspace, "status", "--porcelain=v1", "--untracked-files=normal"))
+	worktree, err := m.run(ctx, op, guestexec.UserExecAs(m.identity().GuestUser, "git", "-C", workspace, "status", "--porcelain=v1", "--untracked-files=normal"))
 	if err != nil {
 		return st, err
 	}
@@ -669,7 +702,7 @@ func (m *Manager) inspectCheckout(ctx context.Context, op, workspace, remote str
 
 	// `--get-regexp` exits 0 only when it matched something, so exit 1 is the
 	// proof we want. Any other exit is unverifiable state and fails closed.
-	cred, err := m.run(ctx, op, guestexec.UserExec("git", "-C", workspace, "config", "--local", "--get-regexp", `^credential\.`))
+	cred, err := m.run(ctx, op, guestexec.UserExecAs(m.identity().GuestUser, "git", "-C", workspace, "config", "--local", "--get-regexp", `^credential\.`))
 	if err != nil {
 		return st, err
 	}
@@ -711,7 +744,7 @@ func requireAdoptable(op, id string, st CheckoutStatus) error {
 // changes metadata only — no content, no history, nothing removed.
 func (m *Manager) ensureSharedPermissions(ctx context.Context, op, workspace string) error {
 	if err := m.mustRun(ctx, op, KindGuestCommand, "set shared checkout ownership",
-		guestexec.RootExec("chown", "-R", lima.HermesUser+":"+sharedGroup, "--", workspace)); err != nil {
+		guestexec.RootExec("chown", "-R", m.identity().GuestUser+":"+sharedGroup, "--", workspace)); err != nil {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "set shared checkout permissions",
@@ -768,77 +801,82 @@ func (m *Manager) safeDirectoryPresent(ctx context.Context, op, user, workspace 
 	return false, nil
 }
 
-// ensureHermesProject reconciles the Hermes project for p. Every decision comes
-// from `hermes project show` stdout, never from an exit code: this CLI exits 0
-// even when it fails, so a clean exit proves nothing at all.
-func (m *Manager) ensureHermesProject(ctx context.Context, op string, p Project, report *AddReport) error {
-	st, err := m.hermesStatus(ctx, op, p.ID, p.Path)
+// ensureRegistered reconciles the backend's registration for p. A backend that
+// declares no registry has nothing to reconcile and the report says so.
+//
+// The reconcile never trusts an exit code: it reads the state, acts once, and
+// re-reads to prove the state it wanted. Creating is safe only because the
+// first read proved the id free — one backend silently creates `<id>-2` on a
+// taken id instead of failing.
+func (m *Manager) ensureRegistered(ctx context.Context, op string, p Project, report *AddReport) error {
+	reg := m.projectRegistry()
+	if reg == nil {
+		return nil
+	}
+	report.RegistryDeclared = true
+
+	st, err := m.registryStatus(ctx, op, p.ID, p.Path)
 	if err != nil {
 		return err
 	}
 	switch {
-	case st.conflicts():
-		return &Error{Op: op, Kind: KindRegistration, Err: fmt.Errorf("a Hermes project already holds slug %q with a different primary path", p.ID)}
-	case st.registered():
+	case st.Conflicts():
+		return &Error{Op: op, Kind: KindRegistration, Err: fmt.Errorf("a backend project already holds slug %q with a different primary path", p.ID)}
+	case st.Registered():
 		return nil
 	case st.Present && st.Archived:
-		// Ours, archived by an earlier `remove`. Restoring is how Hermes undoes
-		// that, and it touches nothing on the filesystem.
-		if err := m.mustRun(ctx, op, KindRegistration, "restore the archived Hermes project",
-			guestexec.UserExec("hermes", "project", "restore", p.ID)); err != nil {
-			return err
+		// Ours, archived by an earlier `remove`. Restoring is how the backend
+		// undoes that, and it touches nothing on the filesystem.
+		if err := reg.Restore(ctx, m.guest, p.ID); err != nil {
+			return m.mapRegistryErr(op, err)
 		}
 		report.HermesRestored = true
 	default:
-		// Creating is safe only because `show` just proved the slug free: on a
-		// taken slug the CLI silently creates `<slug>-2` instead of failing.
-		if err := m.mustRun(ctx, op, KindRegistration, "register the Hermes project",
-			guestexec.UserExec("hermes", "project", "create", p.DisplayName, p.Path, "--slug", p.ID)); err != nil {
-			return err
+		if err := reg.Create(ctx, m.guest, p.ID, p.DisplayName, p.Path); err != nil {
+			return m.mapRegistryErr(op, err)
 		}
 		report.HermesCreated = true
 	}
 
-	after, err := m.hermesStatus(ctx, op, p.ID, p.Path)
+	after, err := m.registryStatus(ctx, op, p.ID, p.Path)
 	if err != nil {
 		return err
 	}
-	if !after.registered() {
-		return &Error{Op: op, Kind: KindRegistration, Err: fmt.Errorf("the Hermes project for %q did not reach the expected state", p.ID)}
+	if !after.Registered() {
+		return &Error{Op: op, Kind: KindRegistration, Err: fmt.Errorf("the backend project for %q did not reach the expected state", p.ID)}
 	}
 	return nil
 }
 
-// archiveHermesProject archives the project and confirms the result by
-// re-reading it. Archiving is idempotent in Hermes and never touches the
-// filesystem, which is what makes it the right non-destructive undo.
-func (m *Manager) archiveHermesProject(ctx context.Context, op string, p Project) error {
-	if err := m.mustRun(ctx, op, KindRegistration, "archive the Hermes project",
-		guestexec.UserExec("hermes", "project", "archive", p.ID)); err != nil {
-		return err
+// archiveRegistered archives the project and confirms the result by re-reading
+// it. Archiving is idempotent and never touches the filesystem, which is what
+// makes it the right non-destructive undo.
+func (m *Manager) archiveRegistered(ctx context.Context, op string, p Project) error {
+	reg := m.projectRegistry()
+	if reg == nil {
+		return nil
 	}
-	after, err := m.hermesStatus(ctx, op, p.ID, p.Path)
+	if err := reg.Archive(ctx, m.guest, p.ID); err != nil {
+		return m.mapRegistryErr(op, err)
+	}
+	after, err := m.registryStatus(ctx, op, p.ID, p.Path)
 	if err != nil {
 		return err
 	}
 	if after.Present && !after.Archived {
-		return &Error{Op: op, Kind: KindRegistration, Err: fmt.Errorf("the Hermes project for %q is still active after archiving", p.ID)}
+		return &Error{Op: op, Kind: KindRegistration, Err: fmt.Errorf("the backend project for %q is still active after archiving", p.ID)}
 	}
 	return nil
 }
 
-// activate sets the active Hermes project and confirms it from the printed
-// line. `hermes project use` cannot report failure through its exit code.
+// activate makes the project the backend's active one.
 func (m *Manager) activate(ctx context.Context, op string, p Project) error {
-	res, err := m.run(ctx, op, guestexec.UserExec("hermes", "project", "use", p.ID))
-	if err != nil {
-		return err
+	reg := m.projectRegistry()
+	if reg == nil {
+		return &Error{Op: op, Kind: KindPrecondition, Err: fmt.Errorf("backend %q keeps no project registry, so it has no active project to set", m.identity().Name)}
 	}
-	if res.ExitCode != 0 {
-		return commandError(op, KindRegistration, "activate the Hermes project", res.ExitCode)
-	}
-	if strings.TrimSpace(string(res.Stdout)) != "Active project: "+p.ID {
-		return &Error{Op: op, Kind: KindRegistration, Err: fmt.Errorf("`hermes project use` did not confirm %q as the active project", p.ID)}
+	if err := reg.Activate(ctx, m.guest, p.ID); err != nil {
+		return m.mapRegistryErr(op, err)
 	}
 	return nil
 }
@@ -870,88 +908,15 @@ func (m *Manager) activate(ctx context.Context, op string, p Project) error {
 // `list` is still never a source of *state*: its output carries slugs and
 // names, never a path. It is used here only to answer an existence question,
 // which is exactly what a list of slugs can answer.
-func (m *Manager) hermesStatus(ctx context.Context, op, id, workspace string) (HermesStatus, error) {
-	var st HermesStatus
-	show, err := m.run(ctx, op, guestexec.UserExec("hermes", "project", "show", id))
+func (m *Manager) registryStatus(ctx context.Context, op, id, workspace string) (HermesStatus, error) {
+	reg := m.projectRegistry()
+	if reg == nil {
+		return HermesStatus{}, nil
+	}
+	st, err := reg.Status(ctx, m.guest, id, workspace)
 	if err != nil {
-		return st, err
+		return HermesStatus{}, m.mapRegistryErr(op, err)
 	}
-	if strings.TrimSpace(string(show.Stdout)) == "" {
-		list, listErr := m.run(ctx, op, guestexec.UserExec("hermes", "project", "list"))
-		if listErr != nil {
-			return st, listErr
-		}
-		if list.ExitCode != 0 {
-			return st, &Error{Op: op, Kind: KindRegistration, Err: errors.New("the Hermes project CLI is unavailable on the guest")}
-		}
-		if hermesProjectListed(string(list.Stdout), id) {
-			return st, commandError(op, KindRegistration, "inspect the Hermes project", show.ExitCode)
-		}
-		return st, nil
-	}
-	st, err = parseProjectShow(string(show.Stdout), id, workspace)
-	if err != nil {
-		return HermesStatus{}, &Error{Op: op, Kind: KindVerification, Err: err}
-	}
-	return st, nil
-}
-
-// hermesProjectListed reports whether `hermes project list` names slug.
-//
-// The listing prints one project per line with the slug first, and prints a
-// "No projects yet." sentence when there are none. Matching the first field
-// rather than searching the whole line is deliberate: a project *named* after
-// another project's slug must not answer for it, and a substring search would
-// let it.
-//
-// A slug cannot contain whitespace (it is the project-ID rule: lowercase
-// alphanumerics and hyphens), so the first whitespace-separated field is the
-// whole slug or nothing.
-func hermesProjectListed(out, slug string) bool {
-	for _, line := range strings.Split(out, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) > 0 && fields[0] == slug {
-			return true
-		}
-	}
-	return false
-}
-
-// parseProjectShow reads the block `hermes project show` prints: a
-// `<slug>  [<id>]` header carrying an ` (archived)` flag, and exactly one
-// `primary:` line. Anything else is unrecognized output, which is unverifiable
-// state and fails closed.
-func parseProjectShow(out, id, workspace string) (HermesStatus, error) {
-	var st HermesStatus
-	lines := strings.Split(out, "\n")
-
-	header := ""
-	for _, line := range lines {
-		if strings.TrimSpace(line) != "" {
-			header = strings.TrimSpace(line)
-			break
-		}
-	}
-	if !strings.HasPrefix(header, id+" ") {
-		return st, errors.New("`hermes project show` described a different project")
-	}
-	st.Present = true
-	st.Archived = strings.HasSuffix(header, "(archived)")
-
-	primary := ""
-	seen := 0
-	for _, line := range lines {
-		value, ok := strings.CutPrefix(strings.TrimSpace(line), "primary:")
-		if !ok {
-			continue
-		}
-		seen++
-		primary = strings.TrimSpace(value)
-	}
-	if seen != 1 {
-		return st, errors.New("`hermes project show` did not report exactly one primary path")
-	}
-	st.PrimaryMatches = primary == workspace
 	return st, nil
 }
 
@@ -994,7 +959,7 @@ func (m *Manager) rollbackAfterConfigFailure(ctx context.Context, op string, rep
 		report.Notes = append(report.Notes, "rerun_finishes")
 		return
 	}
-	if err := m.archiveHermesProject(ctx, op, report.Project); err != nil {
+	if err := m.archiveRegistered(ctx, op, report.Project); err != nil {
 		report.Notes = append(report.Notes, "hermes_project_left_registered")
 	} else {
 		report.Notes = append(report.Notes, "hermes_project_archived")
@@ -1069,7 +1034,7 @@ func (m *Manager) CheckServiceEnv(ctx context.Context) (ServiceEnvCheck, error) 
 	const op = shellOp
 	var unavailable ServiceEnvCheck
 
-	uid, err := m.run(ctx, op, guestexec.UserExec("id", "-u", lima.HermesUser))
+	uid, err := m.run(ctx, op, guestexec.UserExecAs(m.identity().GuestUser, "id", "-u", m.identity().GuestUser))
 	if err != nil || uid.ExitCode != 0 {
 		return unavailable, nil
 	}
@@ -1078,9 +1043,16 @@ func (m *Manager) CheckServiceEnv(ctx context.Context) (ServiceEnvCheck, error) 
 		return unavailable, nil
 	}
 
+	service := m.backend().Service()
+	if service == nil {
+		// The backend runs no persistent service, so there is no long-lived
+		// environment a forwarded agent could have leaked into. "Not checked" is
+		// the honest answer; "clean" would claim a check that never happened.
+		return unavailable, nil
+	}
 	show, err := m.run(ctx, op,
-		guestexec.UserExecAs(lima.HermesUser, "env", "XDG_RUNTIME_DIR="+runtimeDir,
-			"systemctl", "--user", "show", serve.UnitName, "--property=Environment"))
+		guestexec.UserExecAs(m.identity().GuestUser, "env", "XDG_RUNTIME_DIR="+runtimeDir,
+			"systemctl", "--user", "show", service.UnitName, "--property=Environment"))
 	if err != nil || show.ExitCode != 0 {
 		return unavailable, nil
 	}
@@ -1089,7 +1061,7 @@ func (m *Manager) CheckServiceEnv(ctx context.Context) (ServiceEnvCheck, error) 
 		return check, &Error{
 			Op:   op,
 			Kind: KindVerification,
-			Err: fmt.Errorf("the persistent Hermes service environment declares %s; ephemeral operator forwarding must never reach it (ADR-0003)",
+			Err: fmt.Errorf("the persistent backend service environment declares %s; ephemeral operator forwarding must never reach it (ADR-0003)",
 				agentSocketVar),
 		}
 	}
@@ -1163,7 +1135,7 @@ func (m *Manager) testRoot(ctx context.Context, op, flag, path string) (bool, er
 func (m *Manager) gitExec(args ...string) []string {
 	argv := append([]string(nil), gitNoninteractiveEnv...)
 	argv = append(argv, "git")
-	return guestexec.UserExec(append(argv, args...)...)
+	return guestexec.UserExecAs(m.identity().GuestUser, append(argv, args...)...)
 }
 
 // sharedModeOK reports whether a directory mode carries the setgid bit and full

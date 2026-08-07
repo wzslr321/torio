@@ -194,9 +194,17 @@ torio serve start|stop|restart|status
 torio serve logs [--lines N]
 ```
 
+- Every `serve` subcommand acts on the guest service the configured backend
+  **declares**. A backend that declares none (a process backend, such as Claude
+  Code) has no unit to manage: `serve status` exits 0 and reports
+  `service_declared:false` without running a single guest command, while
+  `install`, `start`, `stop`, `restart` and `logs` fail closed with
+  `NO_SERVICE` (exit 3) naming the backend. Asking after a service is a
+  question with an answer; asking Torio to manage one that was never declared
+  is an operator mistake ([ADR-0009](../adr/0009-backend-contract-and-claude-code.md)).
 - `serve install` manages its own **user** service (a custom systemd unit for the
-  `hermes` user) only after feature detection (`hermes serve --help`). It
-  generates a deterministic `hermes-serve.service` with a pinned loopback bind
+  backend identity). It generates a deterministic `hermes-serve.service` with a
+  pinned loopback bind
   (`--host 127.0.0.1 --port 9119`), `HERMES_HOME=/home/hermes/.hermes` and
   `Restart=always`, validates it with `systemd-analyze --user verify` **before
   activation**, then runs `daemon-reload` and `enable`. It ensures `linger` for
@@ -214,7 +222,9 @@ torio serve logs [--lines N]
 - `serve status` proves **both**: the user-systemd state and actual endpoint
   readiness over loopback. Exit 0 only when `active` and `/api/status == 200`; not
   installed or inactive → exit 3; active with a dead endpoint → exit 6. It
-  modifies nothing.
+  modifies nothing. Its data carries `backend` and `service_declared` first,
+  because those decide whether the remaining fields mean anything: on a backend
+  with no service the rest is absent state, not a service that is down.
 - `serve logs [--lines N]` returns bounded, redacted journal entries for the unit
   **only** (`journalctl --user -u hermes-serve.service -n N --no-pager`) — scoped
   to the unit and redacted through execx, so it does not expose Torio's own

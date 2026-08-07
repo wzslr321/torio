@@ -8,7 +8,6 @@ import (
 	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
-	"github.com/wzslr321/torio/internal/serve"
 )
 
 // The fixtures below describe one project. They are the values every test
@@ -278,7 +277,7 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 	// --- persistent backend environment (read-only) ---
 	case strings.Contains(joined, "id -u "+lima.HermesUser):
 		return okResult(f.hermesUID + "\n"), nil
-	case strings.Contains(joined, "systemctl --user show "+serve.UnitName):
+	case strings.Contains(joined, "systemctl --user show "+lima.HermesUnitName):
 		return okResult("Environment=" + f.serviceEnvironment + "\n"), nil
 
 	// --- hermes project ---

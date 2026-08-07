@@ -2,7 +2,6 @@ package serve
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -17,15 +16,19 @@ import (
 // active process with a dead endpoint is NOT ready
 // (docs/contracts/cli.md).
 type StatusReport struct {
-	Installed     bool
-	Enabled       bool
-	Active        bool
-	ActiveState   string // raw `systemctl --user is-active` value
-	EndpointReady bool
-	EndpointCode  int    // last HTTP status from the loopback probe (0 = no answer)
-	Version       string // parsed from /api/status when ready
-	Ready         bool   // Active && EndpointReady
-	URL           string // the loopback URL probed
+	// ServiceDeclared reports whether the configured backend runs a guest
+	// service at all. False makes every other field meaningless rather than
+	// false-and-alarming.
+	ServiceDeclared bool
+	Installed       bool
+	Enabled         bool
+	Active          bool
+	ActiveState     string // raw `systemctl --user is-active` value
+	EndpointReady   bool
+	EndpointCode    int    // last HTTP status from the loopback probe (0 = no answer)
+	Version         string // parsed from /api/status when ready
+	Ready           bool   // Active && EndpointReady
+	URL             string // the loopback URL probed
 }
 
 // sh runs a guest command through the transport and fails closed on a truncated
@@ -56,7 +59,7 @@ func (a *Adapter) shInput(ctx context.Context, op string, stdin []byte, argv []s
 
 // installed reports whether the unit file exists on the guest.
 func (a *Adapter) installed(ctx context.Context, op string) (bool, *Error) {
-	res, e := a.sh(ctx, op, guestexec.UserExec("test", "-f", unitPath))
+	res, e := a.sh(ctx, op, guestexec.UserExecAs(a.user(), "test", "-f", a.unitPath()))
 	if e != nil {
 		return false, e
 	}
@@ -66,7 +69,7 @@ func (a *Adapter) installed(ctx context.Context, op string) (bool, *Error) {
 // activeState returns the raw `systemctl --user is-active` value. is-active
 // exits non-zero when the unit is not active; that is not an adapter error.
 func (a *Adapter) activeState(ctx context.Context, op, rt string) (string, *Error) {
-	res, e := a.sh(ctx, op, userctl(rt, "is-active", UnitName))
+	res, e := a.sh(ctx, op, a.userctl(rt, "is-active", a.spec.UnitName))
 	if e != nil {
 		return "", e
 	}
@@ -76,14 +79,15 @@ func (a *Adapter) activeState(ctx context.Context, op, rt string) (string, *Erro
 // enabledState returns the raw `systemctl --user is-enabled` value ("" if the
 // query produced nothing, e.g. a missing unit).
 func (a *Adapter) enabledState(ctx context.Context, op, rt string) (string, *Error) {
-	res, e := a.sh(ctx, op, userctl(rt, "is-enabled", UnitName))
+	res, e := a.sh(ctx, op, a.userctl(rt, "is-enabled", a.spec.UnitName))
 	if e != nil {
 		return "", e
 	}
 	return strings.TrimSpace(string(res.Stdout)), nil
 }
 
-// probeEndpoint does one loopback HTTP probe of /api/status as the hermes user.
+// probeEndpoint does one loopback HTTP probe of the readiness endpoint as the
+// backend identity.
 // It returns the observed HTTP status code and the version parsed from the
 // response body (empty when absent/unparseable). curl's own non-zero exit (e.g.
 // connection refused) is NOT an adapter error — it means the endpoint is down,
@@ -92,7 +96,7 @@ func (a *Adapter) enabledState(ctx context.Context, op, rt string) (string, *Err
 // discarded — we never carry the raw body (which can be large) around; only the
 // short derived version survives.
 func (a *Adapter) probeEndpoint(ctx context.Context, op string) (int, string, *Error) {
-	argv := guestexec.UserExec("curl", "-s", "-m", "5", "-w", "\n%{http_code}", EndpointURL())
+	argv := guestexec.UserExecAs(a.user(), "curl", "-s", "-m", "5", "-w", "\n%{http_code}", a.EndpointURL())
 	res, e := a.sh(ctx, op, argv)
 	if e != nil {
 		return 0, "", e
@@ -104,42 +108,26 @@ func (a *Adapter) probeEndpoint(ctx context.Context, op string) (int, string, *E
 		return 0, "", nil
 	}
 	code, _ := strconv.Atoi(strings.TrimSpace(out[nl+1:]))
-	version, _ := parseStatusVersion(out[:nl])
+	version, _ := a.spec.ParseReady([]byte(out[:nl]))
 	return code, version, nil
-}
-
-// parseStatusVersion extracts the top-level "version" from the /api/status JSON.
-// A parseable version proves the readiness endpoint answered with real content,
-// not merely a socket accept.
-func parseStatusVersion(body string) (string, bool) {
-	var s struct {
-		Version string `json:"version"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(body)), &s); err != nil {
-		return "", false
-	}
-	if s.Version == "" {
-		return "", false
-	}
-	return s.Version, true
 }
 
 // endpointReady is the loopback readiness predicate. A bare HTTP 200 is not
 // enough — an unrelated process, stale listener, or proxy can accept the socket
-// and return 200 on port 9119. Readiness requires 200 AND a parseable non-empty
-// Hermes `version`, proving we reached the real /api/status document.
+// and return 200 on the bound port. Readiness requires 200 AND a version the
+// backend's own parser recognizes, proving we reached the real endpoint.
 func endpointReady(code int, version string) bool {
 	return code == 200 && version != ""
 }
 
 // endpointUnreadyErr builds the KindEndpointUnready message, distinguishing a
-// non-200 answer from a 200 that lacked a parseable Hermes version (an
-// unexpected listener on the port), so the operator can tell the two apart.
-func endpointUnreadyErr(code int, version string) error {
+// non-200 answer from a 200 that lacked a parseable version (an unexpected
+// listener on the port), so the operator can tell the two apart.
+func (a *Adapter) endpointUnreadyErr(code int, version string) error {
 	if code == 200 && version == "" {
-		return fmt.Errorf("service active but %s answered 200 without a parseable Hermes version — not the expected backend", StatusPath)
+		return fmt.Errorf("service active but %s answered 200 without a parseable version — not the expected backend", a.spec.StatusPath)
 	}
-	return fmt.Errorf("service active but %s answered %d, not 200", StatusPath, code)
+	return fmt.Errorf("service active but %s answered %d, not 200", a.spec.StatusPath, code)
 }
 
 // Status reports the backend's readiness: the unit's installed/enabled state,
@@ -153,7 +141,14 @@ func endpointUnreadyErr(code int, version string) error {
 // A ready backend returns a nil error.
 func (a *Adapter) Status(ctx context.Context) (StatusReport, error) {
 	const op = "status"
-	rep := StatusReport{URL: EndpointURL()}
+	if a.spec == nil {
+		// A backend that declares no service is not an unready one. The report
+		// says so and the command succeeds: an operator asking after a service
+		// that was never declared has been answered, and a fabricated failure
+		// here would teach them to ignore a real one later.
+		return StatusReport{ServiceDeclared: false}, nil
+	}
+	rep := StatusReport{URL: a.EndpointURL(), ServiceDeclared: true}
 
 	rt, e := a.runtimeDir(ctx, op)
 	if e != nil {
@@ -191,11 +186,11 @@ func (a *Adapter) Status(ctx context.Context) (StatusReport, error) {
 
 	switch {
 	case !rep.Installed:
-		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: fmt.Errorf("unit %q is not installed; run `torio serve install`", UnitName)}
+		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: fmt.Errorf("unit %q is not installed; run `torio serve install`", a.spec.UnitName)}
 	case !rep.Active:
 		return rep, &Error{Op: op, Kind: KindInactive, Err: fmt.Errorf("service is %q, not active; run `torio serve start`", act)}
 	case !rep.EndpointReady:
-		return rep, &Error{Op: op, Kind: KindEndpointUnready, Err: endpointUnreadyErr(code, version)}
+		return rep, &Error{Op: op, Kind: KindEndpointUnready, Err: a.endpointUnreadyErr(code, version)}
 	}
 	return rep, nil
 }

@@ -240,7 +240,7 @@ func newVMBootstrapCmd(a *app) *cobra.Command {
 					Message: err.Error(),
 				}
 			}
-			rep, err := a.newLima().Bootstrap(ctx, lima.BootstrapOptions{OperatorUser: opUser})
+			rep, err := a.newLima().Bootstrap(ctx, lima.BootstrapOptions{OperatorUser: opUser, Backend: a.backend})
 			if err != nil {
 				ce := mapLimaError("vm.bootstrap", err)
 				// Surface the checks recorded up to the failure (already bounded and

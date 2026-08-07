@@ -18,6 +18,9 @@ var endpointRetryDelay = 500 * time.Millisecond
 // process with a dead endpoint is a failure (docs/contracts/cli.md).
 // Start is idempotent — starting an already-running, ready backend succeeds.
 func (a *Adapter) Start(ctx context.Context) (StatusReport, error) {
+	if a.spec == nil {
+		return StatusReport{}, a.noServiceErr("start")
+	}
 	return a.activate(ctx, "start", "start")
 }
 
@@ -25,13 +28,16 @@ func (a *Adapter) Start(ctx context.Context) (StatusReport, error) {
 // as Start. Unlike Start it always cycles the process (systemctl restart).
 // Session/state persistence is the backend's own responsibility.
 func (a *Adapter) Restart(ctx context.Context) (StatusReport, error) {
+	if a.spec == nil {
+		return StatusReport{}, a.noServiceErr("restart")
+	}
 	return a.activate(ctx, "restart", "restart")
 }
 
 // activate runs `systemctl --user <verb> UNIT`, then verifies the active-state
 // and loopback-endpoint postconditions.
 func (a *Adapter) activate(ctx context.Context, op, verb string) (StatusReport, error) {
-	rep := StatusReport{URL: EndpointURL()}
+	rep := StatusReport{URL: a.EndpointURL()}
 
 	rt, e := a.runtimeDir(ctx, op)
 	if e != nil {
@@ -43,7 +49,7 @@ func (a *Adapter) activate(ctx context.Context, op, verb string) (StatusReport, 
 		return rep, e
 	}
 	if !inst {
-		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: fmt.Errorf("unit %q is not installed; run `torio serve install` first", UnitName)}
+		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: fmt.Errorf("unit %q is not installed; run `torio serve install` first", a.spec.UnitName)}
 	}
 	rep.Installed = true
 	if en, e := a.enabledState(ctx, op, rt); e != nil {
@@ -52,7 +58,7 @@ func (a *Adapter) activate(ctx context.Context, op, verb string) (StatusReport, 
 		rep.Enabled = en == "enabled"
 	}
 
-	if r, e := a.sh(ctx, op, userctl(rt, verb, UnitName)); e != nil {
+	if r, e := a.sh(ctx, op, a.userctl(rt, verb, a.spec.UnitName)); e != nil {
 		return rep, e
 	} else if r.ExitCode != 0 {
 		return rep, &Error{Op: op, Kind: KindGuestCommandFailed, Err: cmdErr("systemctl "+verb, r)}
@@ -81,7 +87,7 @@ func (a *Adapter) activate(ctx context.Context, op, verb string) (StatusReport, 
 	rep.Version = version
 	rep.Ready = rep.Active && rep.EndpointReady
 	if !rep.EndpointReady {
-		return rep, &Error{Op: op, Kind: KindEndpointUnready, Err: endpointUnreadyErr(code, version)}
+		return rep, &Error{Op: op, Kind: KindEndpointUnready, Err: a.endpointUnreadyErr(code, version)}
 	}
 	return rep, nil
 }
@@ -124,6 +130,9 @@ type StopReport struct {
 // code — it re-queries is-active and requires a non-active post-state, else fails
 // closed. Stop never removes the unit, profile, or state.
 func (a *Adapter) Stop(ctx context.Context) (StopReport, error) {
+	if a.spec == nil {
+		return StopReport{}, a.noServiceErr("stop")
+	}
 	const op = "stop"
 	rep := StopReport{}
 
@@ -137,7 +146,7 @@ func (a *Adapter) Stop(ctx context.Context) (StopReport, error) {
 		return rep, e
 	}
 	if !inst {
-		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: fmt.Errorf("unit %q is not installed", UnitName)}
+		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: fmt.Errorf("unit %q is not installed", a.spec.UnitName)}
 	}
 
 	act, e := a.activeState(ctx, op, rt)
@@ -151,7 +160,7 @@ func (a *Adapter) Stop(ctx context.Context) (StopReport, error) {
 		return rep, nil
 	}
 
-	if r, e := a.sh(ctx, op, userctl(rt, "stop", UnitName)); e != nil {
+	if r, e := a.sh(ctx, op, a.userctl(rt, "stop", a.spec.UnitName)); e != nil {
 		return rep, e
 	} else if r.ExitCode != 0 {
 		return rep, &Error{Op: op, Kind: KindGuestCommandFailed, Err: cmdErr("systemctl stop", r)}

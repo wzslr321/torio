@@ -8,7 +8,7 @@ import (
 
 func TestLogsBoundedByDefault(t *testing.T) {
 	f := newFake(defaultEnv())
-	a := New(f)
+	a := newTestAdapter(f)
 
 	rep, err := a.Logs(context.Background(), 0)
 	if err != nil {
@@ -31,7 +31,7 @@ func TestLogsBoundedByDefault(t *testing.T) {
 
 func TestLogsClampsExcessiveLineCount(t *testing.T) {
 	f := newFake(defaultEnv())
-	a := New(f)
+	a := newTestAdapter(f)
 
 	rep, err := a.Logs(context.Background(), 100000)
 	if err != nil {
@@ -46,7 +46,7 @@ func TestLogsNotInstalled(t *testing.T) {
 	env := defaultEnv()
 	env.installed = false
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 
 	_, err := a.Logs(context.Background(), 50)
 	assertKind(t, err, KindNotInstalled)
@@ -59,7 +59,7 @@ func TestLogsScopedToUnitNeverProfileData(t *testing.T) {
 	// Defense-in-depth: the journalctl invocation must be scoped to the unit and
 	// must not read arbitrary files/paths (no profile/KB path in the argv).
 	f := newFake(defaultEnv())
-	a := New(f)
+	a := newTestAdapter(f)
 	if _, err := a.Logs(context.Background(), 10); err != nil {
 		t.Fatalf("Logs: %v", err)
 	}

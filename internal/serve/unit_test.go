@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/wzslr321/torio/internal/brain"
+	"github.com/wzslr321/torio/internal/lima"
 )
 
 // TestRenderUnitMatchesGolden locks the exact bytes of the generated user unit.
@@ -63,7 +64,7 @@ func TestUnitCarriesTheBrainEnvironmentHint(t *testing.T) {
 		"bulk",          // the rule the bundled competitor lacks
 	} {
 		if !strings.Contains(u, want) {
-			t.Errorf("environment hint does not mention %q:\n%s", want, brain.EnvironmentHint)
+			t.Errorf("environment hint does not mention %q:\n%s", want, lima.HermesEnvironmentHint)
 		}
 	}
 }
@@ -72,7 +73,7 @@ func TestUnitCarriesTheBrainEnvironmentHint(t *testing.T) {
 // hint is worse than none: it would deliver half a sentence to every session.
 func TestEnvironmentHintSurvivesSystemdQuoting(t *testing.T) {
 	for _, forbidden := range []string{"\n", "\"", "$", "%", "\\"} {
-		if strings.Contains(brain.EnvironmentHint, forbidden) {
+		if strings.Contains(lima.HermesEnvironmentHint, forbidden) {
 			t.Errorf("environment hint contains %q, which systemd does not carry verbatim in a quoted value", forbidden)
 		}
 	}

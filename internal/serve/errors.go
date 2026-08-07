@@ -42,6 +42,13 @@ const (
 	// KindValidationFailed means the generated unit failed `systemd-analyze
 	// verify` before activation. Verification failed (exit 6).
 	KindValidationFailed ErrorKind = "validation_failed"
+	// KindNoService means the configured backend declares no guest service, so
+	// there is nothing to install, start, stop or read logs from. It is not a
+	// broken guest: it is a question that does not apply to this backend, and
+	// asking Torio to manage a service that was never declared is an operator
+	// precondition error (exit 3). `status` does not use it — a query about a
+	// service-less backend has a truthful answer and returns it.
+	KindNoService ErrorKind = "no_service"
 )
 
 // Error is a categorized serve-lifecycle failure. Its message and wrapped Err

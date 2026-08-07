@@ -97,15 +97,15 @@ Every implementation MUST preserve:
 
 1. Repositories, the Brain and state live on the VM's native filesystem, never on
    a broad host mount.
-2. The Hermes profile is not a sandbox; the boundary is the edge of the VM.
-3. The `hermes` service identity MUST NOT be in the `docker` group or reach
-   `docker.sock`.
-4. `/home/hermes/.hermes` (profile) and `/home/hermes/brain` (vault) are
-   distinguished in code and in documentation.
+2. An agent's own profile is not a sandbox; the boundary is the edge of the VM.
+3. An agent identity MUST NOT be in the `docker` group or reach `docker.sock`,
+   and MUST NOT be the Lima login user, which holds passwordless root.
+4. The agent's profile directory and the Brain vault are distinguished in code
+   and in documentation.
 5. A workspace path is derived from the project id, never supplied by the user.
 6. A Git remote MUST NOT contain a password, token, query or fragment.
-7. The persistent `hermes` identity has read-only access to an origin;
-   `ssh.forwardAgent` is disabled globally.
+7. The agent identity has read-only access to an origin; `ssh.forwardAgent` is
+   disabled globally.
 8. Write capability **against a Git remote** comes only from a `torio project
    shell` session and ends with it.
 9. Write capability granted by an MCP server is a **separate channel**: it does
@@ -119,11 +119,16 @@ Every implementation MUST preserve:
     stdout, logs or evidence.
 13. The Brain is not injected into a prompt — cross-project access goes through a
     retrieval skill.
+14. A backend declares which of a project registry, a guest service and an
+    interactive session it has. Verification proves exactly what is declared and
+    checks nothing on a backend's behalf: an absent capability is reported as a
+    state and leaves no passing check behind
+    ([ADR-0009](docs/adr/0009-backend-contract-and-claude-code.md)).
 
-A control MUST NOT live in a file the agent can write. Hermes hooks and
-`mcp_servers.<n>.tools.include` are both that trap. Where a check has to read
-such a file anyway, its own comment MUST say that it is a drift detector and not
-a boundary.
+A control MUST NOT live in a file the agent can write. Hermes hooks,
+`mcp_servers.<n>.tools.include` and a backend's own managed-settings file are
+all that trap. Where a check has to read such a file anyway, its own comment
+MUST say that it is a drift detector and not a boundary.
 
 ## 6. Implementation rules
 

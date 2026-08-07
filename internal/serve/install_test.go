@@ -27,7 +27,7 @@ func TestInstallFreshInstallsValidatesEnables(t *testing.T) {
 	env := defaultEnv()
 	env.existingAbsent = true // no unit yet → a fresh write
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 
 	rep, err := a.Install(context.Background())
 	if err != nil {
@@ -54,7 +54,7 @@ func TestInstallValidatesBeforeActivation(t *testing.T) {
 	env := defaultEnv()
 	env.existingAbsent = true
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 	if _, err := a.Install(context.Background()); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestInstallValidatesBeforeActivation(t *testing.T) {
 func TestInstallIdempotentWhenUnchanged(t *testing.T) {
 	// existing == rendered (defaultEnv): no rewrite, but still validated+enabled.
 	f := newFake(defaultEnv())
-	a := New(f)
+	a := newTestAdapter(f)
 
 	rep, err := a.Install(context.Background())
 	if err != nil {
@@ -95,7 +95,7 @@ func TestInstallEnablesLingerWhenAbsent(t *testing.T) {
 	env := defaultEnv()
 	env.lingerYes = false
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 	if _, err := a.Install(context.Background()); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestInstallEnablesLingerWhenAbsent(t *testing.T) {
 
 func TestInstallSkipsLingerWhenPresent(t *testing.T) {
 	f := newFake(defaultEnv()) // lingerYes true
-	a := New(f)
+	a := newTestAdapter(f)
 	if _, err := a.Install(context.Background()); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestInstallRejectsInvalidUnitBeforeActivation(t *testing.T) {
 	env.existingAbsent = true
 	env.verifyOK = false // systemd-analyze rejects the unit
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 
 	_, err := a.Install(context.Background())
 	assertKind(t, err, KindValidationFailed)
@@ -137,7 +137,7 @@ func TestInstallPostconditionEnableFails(t *testing.T) {
 	env := defaultEnv()
 	env.enabled = "disabled" // is-enabled still reports disabled after enable
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 
 	_, err := a.Install(context.Background())
 	assertKind(t, err, KindPostconditionFailed)
@@ -145,7 +145,7 @@ func TestInstallPostconditionEnableFails(t *testing.T) {
 
 func TestInstallTransportErrorIsTimeout(t *testing.T) {
 	f := &fakeGuest{env: defaultEnv(), transportErr: wrapErr(context.DeadlineExceeded)}
-	a := New(f)
+	a := newTestAdapter(f)
 	_, err := a.Install(context.Background())
 	assertKind(t, err, KindTimeout)
 }

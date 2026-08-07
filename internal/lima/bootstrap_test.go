@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/execx"
 )
 
@@ -291,7 +292,7 @@ func TestBootstrapHermesPinnedVersionMismatchIsDrift(t *testing.T) {
 	fr := &fakeRunner{script: s}
 	a := New(fr)
 
-	_, err := a.Bootstrap(context.Background(), BootstrapOptions{HermesVersion: "0.20.0"})
+	_, err := a.Bootstrap(context.Background(), BootstrapOptions{PinnedVersion: "0.20.0"})
 	assertKind(t, err, KindVerificationFailed)
 }
 
@@ -606,13 +607,13 @@ func checkDetail(rep BootstrapReport, name string) string {
 // error. Loosening must still fail, and so must tightening a path whose group
 // or world permission the operator depends on.
 func TestModeMatchesAcceptsAStricterModeOnlyWhereNobodyElseNeedsThePermission(t *testing.T) {
-	private := bootstrapPathSpec{modes: []string{"750", "0750"}, allowStricter: true}
-	shared := bootstrapPathSpec{modes: []string{"710", "0710"}}
+	private := backend.PathSpec{Modes: []string{"750", "0750"}, AllowStricter: true}
+	shared := backend.PathSpec{Modes: []string{"710", "0710"}}
 	helper := operatorShellHelperSpec
 
 	cases := []struct {
 		name string
-		spec bootstrapPathSpec
+		spec backend.PathSpec
 		mode string
 		want bool
 	}{
@@ -632,7 +633,7 @@ func TestModeMatchesAcceptsAStricterModeOnlyWhereNobodyElseNeedsThePermission(t 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := modeMatches(tc.spec, tc.mode); got != tc.want {
-				t.Errorf("modeMatches(%v, %q) = %v, want %v", tc.spec.modes, tc.mode, got, tc.want)
+				t.Errorf("modeMatches(%v, %q) = %v, want %v", tc.spec.Modes, tc.mode, got, tc.want)
 			}
 		})
 	}
@@ -650,13 +651,13 @@ func TestBootstrapRequiredPathsOptInToStrictnessDeliberately(t *testing.T) {
 		HermesWorkspacePath: false,
 	}
 	for _, spec := range bootstrapRequiredPaths {
-		expected, known := want[spec.path]
+		expected, known := want[spec.Path]
 		if !known {
-			t.Errorf("unexpected required path %q: decide whether a stricter mode is drift or hardening", spec.path)
+			t.Errorf("unexpected required path %q: decide whether a stricter mode is drift or hardening", spec.Path)
 			continue
 		}
-		if spec.allowStricter != expected {
-			t.Errorf("%s allowStricter = %v, want %v", spec.path, spec.allowStricter, expected)
+		if spec.AllowStricter != expected {
+			t.Errorf("%s allowStricter = %v, want %v", spec.Path, spec.AllowStricter, expected)
 		}
 	}
 }

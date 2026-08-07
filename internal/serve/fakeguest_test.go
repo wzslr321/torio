@@ -10,6 +10,22 @@ import (
 	"github.com/wzslr321/torio/internal/lima"
 )
 
+// The serve tests drive the Hermes service spec, which is what the golden unit
+// and every argv assertion below were written against. Deriving the names from
+// the spec (rather than restating them) keeps a spec change visible here.
+var (
+	hermesSpec  = lima.Hermes().Service()
+	UnitName    = hermesSpec.UnitName
+	unitDir     = hermesSpec.UnitDir
+	unitPath    = unitDir + "/" + UnitName
+	stagingPath = unitDir + "/" + strings.TrimSuffix(UnitName, ".service") + "-staging.service"
+)
+
+func renderUnit() []byte { return hermesSpec.RenderUnit() }
+
+// newTestAdapter builds the adapter under test over the Hermes backend.
+func newTestAdapter(g Guest) *Adapter { return New(g, lima.Hermes()) }
+
 // fakeGuest is a deterministic, local Guest test double. It never reaches a real
 // VM: a routing method answers each guest command by matching on the joined
 // argv, so serve's branching flows (install, start/stop/restart, status, logs)

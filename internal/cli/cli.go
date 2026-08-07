@@ -16,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/brain"
 	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
@@ -40,6 +41,11 @@ type app struct {
 	// runtime is the resolved configuration (paths + config document). It is
 	// populated by PersistentPreRunE and consumed by command execution.
 	runtime config.Runtime
+
+	// backend is the agent backend this instance runs. It is resolved once, in
+	// PersistentPreRunE, before any command can touch the guest: which agent a
+	// box runs decides what every later command is allowed to assume about it.
+	backend backend.Backend
 
 	// newLima builds the Lima adapter for a command run. It is the unexported
 	// test seam: production defaults to a real execx-backed adapter, tests
@@ -76,6 +82,13 @@ type app struct {
 // stdout carries human-readable or JSON machine output; stderr carries
 // diagnostics only. Errors are mapped to the contract exit-code table and, in
 // JSON mode, rendered as a single error envelope on stdout.
+// The backends this build knows. Registration happens here, in the composition
+// root, rather than in each implementation's init: importing a backend must not
+// be what decides whether an instance can select it.
+func init() {
+	backend.Register(lima.Hermes())
+}
+
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer, build BuildInfo) int {
 	a := &app{stdout: stdout, stderr: stderr, build: build}
 	return runWithApp(ctx, a, args)
@@ -90,7 +103,7 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 		a.newLima = defaultNewLima
 	}
 	if a.newServe == nil {
-		a.newServe = func() *serve.Adapter { return serve.New(a.newLima()) }
+		a.newServe = func() *serve.Adapter { return serve.New(a.newLima(), a.backend) }
 	}
 	if a.newBrain == nil {
 		a.newBrain = func(adapter *lima.Adapter, opts lima.BootstrapOptions) brainService {
@@ -182,6 +195,16 @@ func newRootCmd(a *app) *cobra.Command {
 		},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			a.logger = newLogger(a.stderr, a.verbose)
+
+			// The backend is resolved before anything else reads it, and a
+			// backend this build does not know is a usage error rather than a
+			// silent fallback: a config written by a newer Torio must not run
+			// its commands against a different agent than it names.
+			b, err := backend.Lookup(backend.DefaultName)
+			if err != nil {
+				return usageError(err.Error())
+			}
+			a.backend = b
 
 			// Resolve the configuration: the XDG config path plus --config,
 			// loading and strictly validating the on-disk config document. A

@@ -7,12 +7,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/execx"
 )
 
 // Bootstrap reconciles and verifies the already-created Torio target so an
-// operator has a usable Remote Second Brain V1 path: a stable non-interactive
-// `hermes` command and the V1 guest filesystem layout on native ext4.
+// operator has a usable guest: the configured backend installed at its pin and
+// reachable by a stable non-interactive command, and the guest filesystem
+// layout on a native filesystem.
 //
 // It is deliberately narrow. It operates ONLY on the existing InstanceName after
 // a verified Running precondition, through the same typed limactl/execx boundary
@@ -21,31 +23,28 @@ import (
 // re-images the VM; never installs a model/provider; never accepts secrets; and
 // never creates gateway/serve services.
 //
-// When the pinned Hermes Agent launcher is missing, bootstrap reconciles a
-// Gate-0-pinned install (PromotedHermesCommit at hermesAgentDir) using the
-// upstream install.sh script downloaded to a hermes-writable path — never
-// curl|bash pipe. Residual risk: install.sh content is not checksum-pinned;
-// the verifiable postcondition is git HEAD == PromotedHermesCommit and an
-// executable launcher at hermesTarget. Then it reconciles the PATH shim.
+// The steps below are the ones Torio owns for every backend: the shared group
+// exists, the operator is in it and the guest session actually carries it, the
+// architecture matches the host pin, git is present, the required paths resolve
+// on a native filesystem with the expected ownership, no host share is mounted
+// over the guest, and both session helpers are root-owned. Interleaved with
+// them, in a fixed order, are the backend's own steps — its identity, its
+// install and pin, its version, its guardrail files, its credential presence.
+// A backend proves what it declares and nothing is checked on its behalf.
 //
-// The intended guest identity is the dedicated non-root `hermes` service user
-// (uid distinct from the Lima login user): it owns the persistent profile under
-// /home/hermes/.hermes and the Second Brain vault under /home/hermes/brain, and
-// is a member of torio-projects (not the docker group — rootful Docker for
-// hermes is forbidden per ADR-0003). `limactl shell` logs in as the Lima user,
-// so the documented stable path reaches hermes explicitly via
-// `sudo -u hermes -- hermes …`; the bare `hermes` name resolves through a fixed
-// symlink on sudo's secure_path.
-//
-// Reconcile is idempotent and limited to the narrowly declared Hermes install
-// and PATH/shim setup. Verification proves (never merely trusts an exit code)
-// every postcondition in the body below and fails closed on any mismatch or
-// unverifiable state.
+// Reconcile is idempotent and limited to what the backend declares it installs.
+// Verification proves (never merely trusts an exit code) every postcondition
+// and fails closed on any mismatch or unverifiable state.
 //
 // A rerun is success only when all postconditions are proven. A drift
 // (architecture/version/image/mount/ownership) is reported, not repaired.
 func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (BootstrapReport, error) {
 	rep := BootstrapReport{Instance: InstanceName}
+	b := opts.Backend
+	if b == nil {
+		b = Hermes()
+	}
+	rep.Backend = b.Identity().Name
 
 	// Precondition: the target must exist and be Running. Not-found, Stopped and
 	// ambiguous states each fail closed with their own kind so the CLI can map
@@ -73,39 +72,44 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 		return rep, &Error{Op: bootstrapOp, Kind: KindVerificationFailed, Err: err}
 	}
 
-	if err := a.verifyHermesUser(ctx, &rep); err != nil {
+	// The backend's steps run against the same fail-closed machinery as ours:
+	// truncated output is not evidence, a failed check is recorded in the report
+	// the operator reads, and a failure carries a remediation.
+	r := &stepRunner{adapter: a, report: &rep, pinnedVersion: opts.PinnedVersion}
+
+	// Identity first, then the shared group it must be in, then the group's
+	// other member, then what the identity must NOT hold. Each agnostic step
+	// sits where its precondition has just been proven.
+	if err := b.VerifyIdentity(ctx, r); err != nil {
 		return rep, err
 	}
 	if err := a.verifyTorioProjectsGroup(ctx, &rep); err != nil {
 		return rep, err
 	}
-	if err := a.verifyHermesInTorioProjects(ctx, &rep); err != nil {
+	if err := b.VerifyMembership(ctx, r); err != nil {
 		return rep, err
 	}
 	if err := a.verifyOperatorInTorioProjects(ctx, &rep, opts.OperatorUser); err != nil {
 		return rep, err
 	}
-	if err := a.verifyHermesNotInDocker(ctx, &rep); err != nil {
+	if err := b.VerifyIsolation(ctx, r); err != nil {
 		return rep, err
 	}
 
-	if err := a.reconcileHermesInstall(ctx, &rep); err != nil {
-		return rep, err
-	}
-	if err := a.reconcileHermesShim(ctx, &rep); err != nil {
+	if err := b.Install(ctx, r); err != nil {
 		return rep, err
 	}
 
 	if err := a.verifyArch(ctx, &rep); err != nil {
 		return rep, err
 	}
-	if err := a.verifyHermes(ctx, &rep, opts.HermesVersion); err != nil {
+	if err := b.VerifyVersion(ctx, r); err != nil {
 		return rep, err
 	}
 	if err := a.verifyGit(ctx, &rep); err != nil {
 		return rep, err
 	}
-	if err := a.verifyPaths(ctx, &rep); err != nil {
+	if err := a.verifyPaths(ctx, &rep, b.RequiredPaths()); err != nil {
 		return rep, err
 	}
 	if err := a.verifyNoHostMounts(ctx, &rep); err != nil {
@@ -117,9 +121,56 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 	if err := a.verifyProjectEnterHelper(ctx, &rep); err != nil {
 		return rep, err
 	}
+	if err := a.verifyAgentSessionHelper(ctx, &rep, b.Session()); err != nil {
+		return rep, err
+	}
+
+	// Guardrails and credentials come last: neither is a precondition of the
+	// guest being correctly built, and the credential probe never fails a run —
+	// a box has to bootstrap before anyone can log in to it.
+	if err := b.VerifyGuardrails(ctx, r); err != nil {
+		return rep, err
+	}
+	if err := b.ProbeAuth(ctx, r); err != nil {
+		return rep, err
+	}
 
 	return rep, nil
 }
+
+// stepRunner is the bootstrap run handed to a backend. It is the only way a
+// backend reaches the guest, so a backend cannot acquire its own transport, its
+// own truncation policy, or its own idea of what a recorded check is.
+type stepRunner struct {
+	adapter       *Adapter
+	report        *BootstrapReport
+	pinnedVersion string
+}
+
+var _ backend.StepRunner = (*stepRunner)(nil)
+
+func (r *stepRunner) Probe(ctx context.Context, name string, argv ...string) (execx.Result, error) {
+	return r.adapter.guestProbe(ctx, r.report, name, argv...)
+}
+
+func (r *stepRunner) ProbeInput(ctx context.Context, name string, stdin []byte, argv []string) (execx.Result, error) {
+	res, err := r.adapter.SSHInput(ctx, stdin, argv)
+	if err != nil {
+		return execx.Result{}, err
+	}
+	if res.StdoutTruncated || res.StderrTruncated {
+		return execx.Result{}, r.adapter.verifyFailed(r.report, name, "guest output was truncated", "re-run with a smaller probe or inspect the guest manually")
+	}
+	return res, nil
+}
+
+func (r *stepRunner) Record(name string, ok bool, detail string) { r.report.record(name, ok, detail) }
+
+func (r *stepRunner) Fail(name, detail, remediation string) error {
+	return r.adapter.verifyFailed(r.report, name, detail, remediation)
+}
+
+func (r *stepRunner) PinnedVersion() string { return r.pinnedVersion }
 
 const bootstrapOp = "bootstrap"
 
@@ -158,45 +209,41 @@ const (
 	hermesInstallScriptURL  = "https://hermes-agent.nousresearch.com/install.sh"
 )
 
-// bootstrapPathSpec is one required guest path and its expected ownership/mode.
-type bootstrapPathSpec struct {
-	path  string
-	owner string
-	group string
-	modes []string // accepted stat -c %a values (0710 may appear as 710)
-
-	// allowStricter accepts a mode that grants strictly less than the spec.
-	// Set it only where the surrendered permission is one nothing outside the
-	// owning identity uses; see modeMatches.
-	allowStricter bool
+// hermesBuildDeps are the guest packages the Hermes install needs to build. They
+// are named once, here, and used both by the install step and by the template
+// that pre-installs them so a first bootstrap does not pay for a compile it
+// could have avoided.
+var hermesBuildDeps = []string{
+	"ripgrep", "ffmpeg", "build-essential", "python3-dev", "libffi-dev",
+	"curl", "ca-certificates", "git",
 }
 
 // bootstrapRequiredPaths are the persistent Hermes directories that must resolve
 // on the VM's native Linux filesystem with the V1 layout (ADR-0003). Owned
 // paths are inspected via sudo.
-var bootstrapRequiredPaths = []bootstrapPathSpec{
-	{path: HermesHome, owner: HermesUser, group: TorioProjectsGroup, modes: []string{"710", "0710"}},
-	{path: HermesProfilePath, owner: HermesUser, group: HermesUser, modes: []string{"750", "0750"}, allowStricter: true},
-	{path: HermesBrainPath, owner: HermesUser, group: HermesUser, modes: []string{"750", "0750"}, allowStricter: true},
-	{path: HermesWorkspacePath, owner: HermesUser, group: TorioProjectsGroup, modes: []string{"2770"}},
+var bootstrapRequiredPaths = []backend.PathSpec{
+	{Path: HermesHome, Owner: HermesUser, Group: TorioProjectsGroup, Modes: []string{"710", "0710"}},
+	{Path: HermesProfilePath, Owner: HermesUser, Group: HermesUser, Modes: []string{"750", "0750"}, AllowStricter: true},
+	{Path: HermesBrainPath, Owner: HermesUser, Group: HermesUser, Modes: []string{"750", "0750"}, AllowStricter: true},
+	{Path: HermesWorkspacePath, Owner: HermesUser, Group: TorioProjectsGroup, Modes: []string{"2770"}},
 }
 
 // operatorShellHelperSpec is the required guest state of the operator shell
 // helper (OperatorShellHelper), the fixed remote argv of `torio project shell`.
 // It is provisioned by the Lima template, never reconciled here: bootstrap
 // proves it, and a drift is reported rather than repaired.
-var operatorShellHelperSpec = bootstrapPathSpec{
-	path:  OperatorShellHelper,
-	owner: "root",
-	group: "root",
-	modes: []string{"755", "0755"},
+var operatorShellHelperSpec = backend.PathSpec{
+	Path:  OperatorShellHelper,
+	Owner: "root",
+	Group: "root",
+	Modes: []string{"755", "0755"},
 }
 
-var projectEnterHelperSpec = bootstrapPathSpec{
-	path:  ProjectEnterHelper,
-	owner: "root",
-	group: "root",
-	modes: []string{"755", "0755"},
+var projectEnterHelperSpec = backend.PathSpec{
+	Path:  ProjectEnterHelper,
+	Owner: "root",
+	Group: "root",
+	Modes: []string{"755", "0755"},
 }
 
 // operatorShellHelperRemediation is the one repair for every helper drift: the
@@ -205,20 +252,26 @@ const operatorShellHelperRemediation = "restart the VM so provisioning reinstall
 
 const projectEnterHelperRemediation = "restart the VM so provisioning reinstalls " + ProjectEnterHelper + " as root:root 0755"
 
-// projectEnterInstallScript is built from ProjectEnterHelper so the staging
-// pattern, the final destination and the synced directory cannot name
-// different paths.
-var projectEnterInstallScript = `
-tmp="$(mktemp ` + path.Dir(ProjectEnterHelper) + `/.` + path.Base(ProjectEnterHelper) + `.XXXXXX)"
+// rootHelperInstallScript builds the atomic install for a root-owned guest
+// helper. It is derived from the destination so the staging pattern, the final
+// destination and the synced directory cannot name different paths.
+func rootHelperInstallScript(dest string) string {
+	return `
+tmp="$(mktemp ` + path.Dir(dest) + `/.` + path.Base(dest) + `.XXXXXX)"
 trap 'rm -f -- "$tmp"' EXIT
 cat >"$tmp"
 chown root:root "$tmp"
 chmod 0755 "$tmp"
 sync -f "$tmp"
-mv -T -- "$tmp" ` + ProjectEnterHelper + `
-sync -f ` + path.Dir(ProjectEnterHelper) + `
+mv -T -- "$tmp" ` + dest + `
+sync -f ` + path.Dir(dest) + `
 trap - EXIT
 `
+}
+
+// projectEnterInstallScript is the install for the ordinary workspace-session
+// helper.
+var projectEnterInstallScript = rootHelperInstallScript(ProjectEnterHelper)
 
 // hostShareFSTypes is the findmnt -t filter for macOS host-share filesystems. A
 // broad host mount over the guest is an ADR-0002 violation and fails closed.
@@ -237,10 +290,15 @@ type BootstrapOptions struct {
 	// OperatorUser is the Lima login identity; required and validated against the
 	// strict allowlist before any guest work.
 	OperatorUser string
-	// HermesVersion, if non-empty, is the pinned Hermes version the observed
-	// `hermes --version` must contain; a mismatch is reported as drift. Empty is
-	// unpinned: the observed version is reported but not enforced.
-	HermesVersion string
+	// PinnedVersion, if non-empty, is the version the backend's observed version
+	// must equal; a mismatch is reported as drift. Empty is unpinned for this
+	// run: a backend that carries its own pin still enforces that one.
+	PinnedVersion string
+	// Backend is the agent backend this instance runs. A nil Backend is the
+	// Hermes backend: every instance created before an instance declared one
+	// runs Hermes, and reading an older config must not re-point a box at a
+	// different agent.
+	Backend backend.Backend
 }
 
 // CheckResult is one bootstrap postcondition or reconcile outcome. Detail is a
@@ -257,7 +315,9 @@ type CheckResult struct {
 // so the CLI can surface a precise, redacted diagnostic in error.details.
 type BootstrapReport struct {
 	Instance string
-	Checks   []CheckResult
+	// Backend is the identity name of the backend this run verified.
+	Backend string
+	Checks  []CheckResult
 }
 
 func (r *BootstrapReport) record(name string, ok bool, detail string) {
@@ -286,154 +346,6 @@ func (a *Adapter) guestProbe(ctx context.Context, rep *BootstrapReport, name str
 	return res, nil
 }
 
-// reconcileHermesInstall ensures the Gate-0-pinned Hermes Agent tree exists at
-// hermesAgentDir with HEAD == PromotedHermesCommit and an executable launcher.
-// When the launcher is already present, only the git pin is verified. When it is
-// missing, bootstrap runs apt-get deps, downloads install.sh to a hermes-writable
-// path (never curl|bash pipe), runs it with fixed flags, removes the script, and
-// verifies launcher + commit. install.sh content is not checksum-pinned; the
-// verifiable postcondition is git HEAD and launcher path.
-func (a *Adapter) reconcileHermesInstall(ctx context.Context, rep *BootstrapReport) error {
-	const name = "hermes_install"
-	present, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "test", "-x", hermesTarget)
-	if err != nil {
-		return err
-	}
-	if present.ExitCode == 0 {
-		return a.verifyHermesGitPin(ctx, rep, name)
-	}
-
-	if err := a.installHermesDeps(ctx, rep, name); err != nil {
-		return err
-	}
-	dl, err := a.guestProbe(ctx, rep, name,
-		"sudo", "-n", "-u", HermesUser, "--",
-		"curl", "-fsSL", "-o", hermesInstallScriptPath, hermesInstallScriptURL,
-	)
-	if err != nil {
-		return err
-	}
-	if dl.ExitCode != 0 {
-		return a.verifyFailed(rep, name, "could not download hermes install script", "check guest network and curl")
-	}
-	run, err := a.guestProbe(ctx, rep, name,
-		"sudo", "-n", "-u", HermesUser, "--",
-		"bash", hermesInstallScriptPath,
-		"--non-interactive", "--skip-setup", "--skip-browser",
-		"--dir", hermesAgentDir,
-		"--hermes-home", HermesProfilePath,
-		"--commit", PromotedHermesCommit,
-	)
-	if err != nil {
-		return err
-	}
-	if run.ExitCode != 0 {
-		return a.verifyFailed(rep, name, "hermes install script exited non-zero", "inspect the install script output on the guest")
-	}
-	rm, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "rm", "-f", hermesInstallScriptPath)
-	if err != nil {
-		return err
-	}
-	if rm.ExitCode != 0 {
-		return a.verifyFailed(rep, name, "could not remove downloaded install script", "remove "+hermesInstallScriptPath+" on the guest")
-	}
-	execOK, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "test", "-x", hermesTarget)
-	if err != nil {
-		return err
-	}
-	if execOK.ExitCode != 0 {
-		return a.verifyFailed(rep, name, "launcher not executable after install", "re-run bootstrap or inspect the hermes install on the guest")
-	}
-	return a.verifyHermesGitPin(ctx, rep, name)
-}
-
-func (a *Adapter) installHermesDeps(ctx context.Context, rep *BootstrapReport, name string) error {
-	upd, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "apt-get", "update", "-y")
-	if err != nil {
-		return err
-	}
-	if upd.ExitCode != 0 {
-		return a.verifyFailed(rep, name, "apt-get update failed", "fix guest apt sources and re-run bootstrap")
-	}
-	inst, err := a.guestProbe(ctx, rep, name,
-		"sudo", "-n", "apt-get", "install", "-y", "--no-install-recommends",
-		"ripgrep", "ffmpeg", "build-essential", "python3-dev", "libffi-dev",
-		"curl", "ca-certificates", "git",
-	)
-	if err != nil {
-		return err
-	}
-	if inst.ExitCode != 0 {
-		return a.verifyFailed(rep, name, "apt-get install of hermes build deps failed", "fix guest apt and re-run bootstrap")
-	}
-	return nil
-}
-
-func (a *Adapter) verifyHermesGitPin(ctx context.Context, rep *BootstrapReport, name string) error {
-	head, err := a.guestProbe(ctx, rep, name,
-		"sudo", "-n", "-u", HermesUser, "--",
-		"git", "-C", hermesAgentDir, "rev-parse", "HEAD",
-	)
-	if err != nil {
-		return err
-	}
-	observed := strings.TrimSpace(string(head.Stdout))
-	if head.ExitCode != 0 || observed == "" {
-		return a.verifyFailed(rep, name, "could not read hermes agent git HEAD", "confirm the install at "+hermesAgentDir)
-	}
-	if observed != PromotedHermesCommit {
-		return a.verifyFailed(rep, name,
-			fmt.Sprintf("hermes agent commit %q != pinned %q", observed, PromotedHermesCommit),
-			"reconcile the pinned hermes install; do not paper over commit drift")
-	}
-	rep.record(name, true, "commit="+PromotedHermesCommit)
-	return nil
-}
-
-func (a *Adapter) reconcileHermesShim(ctx context.Context, rep *BootstrapReport) error {
-	const name = "hermes_shim"
-	// Never create a dangling shim: confirm the pinned launcher exists first. A
-	// missing launcher is drift, not something to repair.
-	present, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "test", "-x", hermesTarget)
-	if err != nil {
-		return err
-	}
-	if present.ExitCode != 0 {
-		return a.verifyFailed(rep, name, "pinned hermes launcher not found at "+hermesTarget, "the hermes install drifted; re-provision the agent before bootstrap")
-	}
-	link, err := a.guestProbe(ctx, rep, name, "readlink", hermesShimPath)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(string(link.Stdout)) == hermesTarget {
-		rep.record(name, true, "shim already correct")
-		return nil
-	}
-	ln, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "ln", "-sfn", hermesTarget, hermesShimPath)
-	if err != nil {
-		return err
-	}
-	if ln.ExitCode != 0 {
-		return a.verifyFailed(rep, name, "could not install the hermes shim", "check write access to "+hermesShimPath)
-	}
-	rep.record(name, true, "shim installed")
-	return nil
-}
-
-func (a *Adapter) verifyHermesUser(ctx context.Context, rep *BootstrapReport) error {
-	const name = "hermes_user"
-	res, err := a.guestProbe(ctx, rep, name, "id", "-u", HermesUser)
-	if err != nil {
-		return err
-	}
-	uid := strings.TrimSpace(string(res.Stdout))
-	if res.ExitCode != 0 || uid == "" {
-		return a.verifyFailed(rep, name, "hermes user not found", "provision the hermes service user on the guest")
-	}
-	rep.record(name, true, "uid="+uid)
-	return nil
-}
-
 func (a *Adapter) verifyTorioProjectsGroup(ctx context.Context, rep *BootstrapReport) error {
 	const name = "torio_projects_group"
 	res, err := a.guestProbe(ctx, rep, name, "getent", "group", TorioProjectsGroup)
@@ -445,22 +357,6 @@ func (a *Adapter) verifyTorioProjectsGroup(ctx context.Context, rep *BootstrapRe
 		return a.verifyFailed(rep, name, "group torio-projects not found", "create the torio-projects group on the guest")
 	}
 	rep.record(name, true, TorioProjectsGroup)
-	return nil
-}
-
-func (a *Adapter) verifyHermesInTorioProjects(ctx context.Context, rep *BootstrapReport) error {
-	const name = "hermes_torio_projects"
-	res, err := a.guestProbe(ctx, rep, name, "id", "-nG", HermesUser)
-	if err != nil {
-		return err
-	}
-	if res.ExitCode != 0 {
-		return a.verifyFailed(rep, name, "cannot read hermes group membership", "confirm the hermes user exists on the guest")
-	}
-	if !hasGroup(string(res.Stdout), TorioProjectsGroup) {
-		return a.verifyFailed(rep, name, "hermes is not in torio-projects", "add hermes to the torio-projects group on the guest")
-	}
-	rep.record(name, true, "member")
 	return nil
 }
 
@@ -505,22 +401,6 @@ func (a *Adapter) verifyOperatorInTorioProjects(ctx context.Context, rep *Bootst
 	return nil
 }
 
-func (a *Adapter) verifyHermesNotInDocker(ctx context.Context, rep *BootstrapReport) error {
-	const name = "hermes_not_in_docker"
-	res, err := a.guestProbe(ctx, rep, name, "id", "-nG", HermesUser)
-	if err != nil {
-		return err
-	}
-	if res.ExitCode != 0 {
-		return a.verifyFailed(rep, name, "cannot read hermes group membership", "confirm the hermes user exists on the guest")
-	}
-	if hasGroup(string(res.Stdout), dockerGroup) {
-		return a.verifyFailed(rep, name, "hermes is in the docker group", "remove hermes from the docker group; rootful Docker for hermes is forbidden (ADR-0003)")
-	}
-	rep.record(name, true, "not a member")
-	return nil
-}
-
 // verifyArch proves the guest runs the architecture this host pins. Lima's
 // config spelling and the kernel's `uname -m` agree on both supported
 // platforms, so Profile.Arch serves the created-instance check and this guest
@@ -545,28 +425,6 @@ func (a *Adapter) verifyArch(ctx context.Context, rep *BootstrapReport) error {
 	return nil
 }
 
-func (a *Adapter) verifyHermes(ctx context.Context, rep *BootstrapReport, pinned string) error {
-	const name = "hermes_version"
-	// The documented stable command path: as the hermes user, via the bare
-	// `hermes` name resolved by the shim on sudo's secure_path.
-	res, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "-u", HermesUser, "--", "hermes", "--version")
-	if err != nil {
-		return err
-	}
-	if res.ExitCode != 0 {
-		return a.verifyFailed(rep, name, "`hermes --version` exited non-zero", "confirm the hermes shim and install on the guest")
-	}
-	version, okv := parseHermesVersion(string(res.Stdout))
-	if !okv {
-		return a.verifyFailed(rep, name, "`hermes --version` produced no recognizable version", "a clean exit is not proof; inspect the hermes install")
-	}
-	if pinned != "" && version != pinned {
-		return a.verifyFailed(rep, name, fmt.Sprintf("hermes version %q, pinned %q", version, pinned), "version drift: reconcile the pinned hermes install, do not paper over")
-	}
-	rep.record(name, true, version)
-	return nil
-}
-
 func (a *Adapter) verifyGit(ctx context.Context, rep *BootstrapReport) error {
 	const name = "git"
 	res, err := a.guestProbe(ctx, rep, name, "git", "--version")
@@ -581,17 +439,17 @@ func (a *Adapter) verifyGit(ctx context.Context, rep *BootstrapReport) error {
 	return nil
 }
 
-func (a *Adapter) verifyPaths(ctx context.Context, rep *BootstrapReport) error {
-	for _, spec := range bootstrapRequiredPaths {
-		name := "path:" + spec.path
-		st, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%F", spec.path)
+func (a *Adapter) verifyPaths(ctx context.Context, rep *BootstrapReport, specs []backend.PathSpec) error {
+	for _, spec := range specs {
+		name := "path:" + spec.Path
+		st, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%F", spec.Path)
 		if err != nil {
 			return err
 		}
 		if st.ExitCode != 0 || strings.TrimSpace(string(st.Stdout)) != "directory" {
 			return a.verifyFailed(rep, name, "not a directory", "create the persistent Hermes directory on the guest")
 		}
-		og, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%U:%G %a", spec.path)
+		og, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%U:%G %a", spec.Path)
 		if err != nil {
 			return err
 		}
@@ -602,13 +460,13 @@ func (a *Adapter) verifyPaths(ctx context.Context, rep *BootstrapReport) error {
 		if !ok {
 			return a.verifyFailed(rep, name, "unparseable ownership/mode", "verify the path exists on the guest")
 		}
-		if owner != spec.owner || group != spec.group {
-			return a.verifyFailed(rep, name, fmt.Sprintf("owner:group %s:%s, want %s:%s", owner, group, spec.owner, spec.group), "fix directory ownership on the guest")
+		if owner != spec.Owner || group != spec.Group {
+			return a.verifyFailed(rep, name, fmt.Sprintf("owner:group %s:%s, want %s:%s", owner, group, spec.Owner, spec.Group), "fix directory ownership on the guest")
 		}
 		if !modeMatches(spec, mode) {
-			return a.verifyFailed(rep, name, fmt.Sprintf("mode %s, want one of %v", mode, spec.modes), "fix directory permissions on the guest")
+			return a.verifyFailed(rep, name, fmt.Sprintf("mode %s, want one of %v", mode, spec.Modes), "fix directory permissions on the guest")
 		}
-		fm, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "findmnt", "-n", "-o", "FSTYPE,SOURCE", "-T", spec.path)
+		fm, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "findmnt", "-n", "-o", "FSTYPE,SOURCE", "-T", spec.Path)
 		if err != nil {
 			return err
 		}
@@ -668,7 +526,7 @@ func (a *Adapter) verifyNoHostMounts(ctx context.Context, rep *BootstrapReport) 
 // else. `stat` does not dereference by default, so this reads the path itself.
 func (a *Adapter) verifyOperatorShellHelper(ctx context.Context, rep *BootstrapReport) error {
 	const name = "operator_shell_helper"
-	st, err := a.guestProbe(ctx, rep, name, "stat", "-c", "%F", operatorShellHelperSpec.path)
+	st, err := a.guestProbe(ctx, rep, name, "stat", "-c", "%F", operatorShellHelperSpec.Path)
 	if err != nil {
 		return err
 	}
@@ -678,21 +536,21 @@ func (a *Adapter) verifyOperatorShellHelper(ctx context.Context, rep *BootstrapR
 }
 
 // verifyRootHelperFile is the shared tail of the guest helper checks. Given the
-// result of `stat -c %F` on spec.path, it proves the path is a regular file
+// result of `stat -c %F` on spec.Path, it proves the path is a regular file
 // (not a symlink pointing the real content somewhere unowned), owned root:root,
 // writable by nobody else, and within spec's accepted modes. what names the
 // helper in failure details, writableRisk says what a foreign-writable file
 // would allow, and remediation is the single repair for every drift.
-func (a *Adapter) verifyRootHelperFile(ctx context.Context, rep *BootstrapReport, name, what string, spec bootstrapPathSpec, st execx.Result, writableRisk, remediation string) error {
+func (a *Adapter) verifyRootHelperFile(ctx context.Context, rep *BootstrapReport, name, what string, spec backend.PathSpec, st execx.Result, writableRisk, remediation string) error {
 	kind := strings.TrimSpace(string(st.Stdout))
 	if st.ExitCode != 0 || kind == "" {
-		return a.verifyFailed(rep, name, "no "+what+" at "+spec.path, remediation)
+		return a.verifyFailed(rep, name, "no "+what+" at "+spec.Path, remediation)
 	}
 	if kind != "regular file" {
 		return a.verifyFailed(rep, name, fmt.Sprintf("helper is a %s, want a regular file", kind), remediation)
 	}
 
-	og, err := a.guestProbe(ctx, rep, name, "stat", "-c", "%U:%G %a", spec.path)
+	og, err := a.guestProbe(ctx, rep, name, "stat", "-c", "%U:%G %a", spec.Path)
 	if err != nil {
 		return err
 	}
@@ -703,9 +561,9 @@ func (a *Adapter) verifyRootHelperFile(ctx context.Context, rep *BootstrapReport
 	if !ok {
 		return a.verifyFailed(rep, name, "unparseable helper ownership/mode", remediation)
 	}
-	if owner != spec.owner || group != spec.group {
+	if owner != spec.Owner || group != spec.Group {
 		return a.verifyFailed(rep, name,
-			fmt.Sprintf("helper owner:group %s:%s, want %s:%s", owner, group, spec.owner, spec.group),
+			fmt.Sprintf("helper owner:group %s:%s, want %s:%s", owner, group, spec.Owner, spec.Group),
 			"a helper the operator or hermes owns can be rewritten between sessions; "+remediation)
 	}
 	writable, parsed := modeGrantsForeignWrite(mode)
@@ -718,7 +576,7 @@ func (a *Adapter) verifyRootHelperFile(ctx context.Context, rep *BootstrapReport
 			writableRisk+"; "+remediation)
 	}
 	if !modeMatches(spec, mode) {
-		return a.verifyFailed(rep, name, fmt.Sprintf("helper mode %s, want one of %v", mode, spec.modes), remediation)
+		return a.verifyFailed(rep, name, fmt.Sprintf("helper mode %s, want one of %v", mode, spec.Modes), remediation)
 	}
 
 	rep.record(name, true, fmt.Sprintf("%s:%s %s", owner, group, mode))
@@ -733,13 +591,13 @@ func (a *Adapter) verifyProjectEnterHelper(ctx context.Context, rep *BootstrapRe
 	const name = "project_enter_helper"
 	spec := projectEnterHelperSpec
 
-	st, err := a.guestProbe(ctx, rep, name, "stat", "-c", "%F", spec.path)
+	st, err := a.guestProbe(ctx, rep, name, "stat", "-c", "%F", spec.Path)
 	if err != nil {
 		return err
 	}
 	kind := strings.TrimSpace(string(st.Stdout))
 	if st.ExitCode == 1 && kind == "" {
-		absent, err := a.guestProbe(ctx, rep, name, "test", "!", "-e", spec.path)
+		absent, err := a.guestProbe(ctx, rep, name, "test", "!", "-e", spec.Path)
 		if err != nil {
 			return err
 		}
@@ -755,7 +613,7 @@ func (a *Adapter) verifyProjectEnterHelper(ctx context.Context, rep *BootstrapRe
 			return a.verifyFailed(rep, name, "could not install the missing project enter helper", "confirm passwordless root provisioning is intact and re-run bootstrap")
 		}
 		rep.record(name+"_installed", true, "installed embedded helper atomically")
-		st, err = a.guestProbe(ctx, rep, name, "stat", "-c", "%F", spec.path)
+		st, err = a.guestProbe(ctx, rep, name, "stat", "-c", "%F", spec.Path)
 		if err != nil {
 			return err
 		}
@@ -763,6 +621,61 @@ func (a *Adapter) verifyProjectEnterHelper(ctx context.Context, rep *BootstrapRe
 	return a.verifyRootHelperFile(ctx, rep, name, "project enter helper", spec, st,
 		"a writable helper could replace the command run in an operator-controlled workspace session",
 		projectEnterHelperRemediation)
+}
+
+// verifyAgentSessionHelper proves the guest entry point of the backend's own
+// interactive session. A backend that declares no session has nothing here to
+// check, and bootstrap records nothing rather than a check that passed
+// vacuously: an operator reading the report must not be able to mistake "there
+// is no such helper" for "the helper is fine".
+//
+// The helper runs as the operator and drops to the backend identity, so it is
+// part of the boundary in the same way the shell helper is: root-owned, a
+// regular file, writable by nobody else. It is installed from the embedded
+// bytes when absent and reported, never overwritten, when it has drifted.
+func (a *Adapter) verifyAgentSessionHelper(ctx context.Context, rep *BootstrapReport, session *backend.SessionSpec) error {
+	if session == nil {
+		return nil
+	}
+	const name = "agent_session_helper"
+	spec := backend.PathSpec{
+		Path:  session.HelperPath,
+		Owner: "root",
+		Group: "root",
+		Modes: []string{"755", "0755"},
+	}
+	remediation := "re-run `torio vm bootstrap` so it reinstalls " + spec.Path + " as root:root 0755"
+
+	st, err := a.guestProbe(ctx, rep, name, "stat", "-c", "%F", spec.Path)
+	if err != nil {
+		return err
+	}
+	kind := strings.TrimSpace(string(st.Stdout))
+	if st.ExitCode == 1 && kind == "" {
+		absent, err := a.guestProbe(ctx, rep, name, "test", "!", "-e", spec.Path)
+		if err != nil {
+			return err
+		}
+		if absent.ExitCode != 0 {
+			return a.verifyFailed(rep, name, "could not prove the helper path is absent", remediation)
+		}
+		installed, err := a.SSHInput(ctx, session.Helper,
+			[]string{"sudo", "-n", "/bin/bash", "-ceu", rootHelperInstallScript(spec.Path)})
+		if err != nil {
+			return err
+		}
+		if installed.ExitCode != 0 || installed.StdoutTruncated || installed.StderrTruncated {
+			return a.verifyFailed(rep, name, "could not install the missing agent session helper", "confirm passwordless root provisioning is intact and re-run bootstrap")
+		}
+		rep.record(name+"_installed", true, "installed embedded helper atomically")
+		st, err = a.guestProbe(ctx, rep, name, "stat", "-c", "%F", spec.Path)
+		if err != nil {
+			return err
+		}
+	}
+	return a.verifyRootHelperFile(ctx, rep, name, "agent session helper", spec, st,
+		"a writable helper could replace the command an operator opens an agent session with",
+		remediation)
 }
 
 // hasGroup reports whether a space-separated `id -nG` group list contains group.
@@ -821,20 +734,20 @@ func modeGrantsForeignWrite(mode string) (writable, parsed bool) {
 //
 // Owner bits must still match exactly. "Stricter" means withholding access from
 // others, never the owner locking itself out.
-func modeMatches(spec bootstrapPathSpec, mode string) bool {
-	for _, want := range spec.modes {
+func modeMatches(spec backend.PathSpec, mode string) bool {
+	for _, want := range spec.Modes {
 		if mode == want {
 			return true
 		}
 	}
-	if !spec.allowStricter {
+	if !spec.AllowStricter {
 		return false
 	}
 	got, err := strconv.ParseUint(mode, 8, 32)
 	if err != nil {
 		return false
 	}
-	for _, want := range spec.modes {
+	for _, want := range spec.Modes {
 		w, err := strconv.ParseUint(want, 8, 32)
 		if err != nil {
 			continue

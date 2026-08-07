@@ -149,7 +149,7 @@ func (a *app) brainService(command string) (brainService, error) {
 		}
 	}
 	adapter := a.newLima()
-	return a.newBrain(adapter, lima.BootstrapOptions{OperatorUser: operatorUser}), nil
+	return a.newBrain(adapter, lima.BootstrapOptions{OperatorUser: operatorUser, Backend: a.backend}), nil
 }
 
 type brainStatusData struct {

@@ -21,7 +21,7 @@ const (
 	// discovers skills by walking $HERMES_HOME/skills recursively and reading
 	// each SKILL.md, so one installed copy is visible in every session and
 	// every working directory. There is no project-local skills directory.
-	SkillName = "torio-brain"
+	SkillName = lima.HermesBrainSkillName
 	// SkillCategory is the directory the skill is grouped under, and it is a
 	// deliberate choice rather than a tidy-up.
 	//
@@ -65,29 +65,6 @@ const (
 	// old copy behind would therefore break retrieval completely — a worse
 	// outcome than never having moved it.
 	legacySkillPath = lima.HermesProfilePath + "/skills/" + SkillName
-
-	// EnvironmentHint is handed to the backend as HERMES_ENVIRONMENT_HINT, an
-	// explicit seam Hermes offers a host that wraps it: the text is appended to
-	// the stable system prompt of every session, uncapped, without forking the
-	// identity slot. Torio sets it on the user unit it already generates, so no
-	// file the operator owns is edited to deliver it.
-	//
-	// It exists because the skill index alone cannot be relied on. A hint is
-	// read whichever skill the model picks, and whether it picks one at all —
-	// so the vault path and the no-bulk-read rule stop depending on a routing
-	// contest against a bundled skill that recommends listing every note.
-	//
-	// This is a prompt instruction and nothing more. It does not enforce the
-	// rule: the agent runs as the same user that owns the vault, so no
-	// permission stops a bulk read. Do not describe it to an operator as a
-	// guarantee.
-	//
-	// Constraints from the transport: one line, and free of `$`, `%` and `"`,
-	// which systemd would expand or terminate the quoted value on.
-	EnvironmentHint = "This machine is managed by Torio. The user's private notes are one Markdown vault at " +
-		Path + "; there is no other vault, and no vault path to resolve from an environment variable " +
-		"or a fallback location. Read it with the " + SkillName + " skill: search for the few notes " +
-		"that answer the question, then read those. Never list or read the vault in bulk."
 
 	stagingPath = lima.HermesHome + "/.torio-brain-staging"
 	// skillStagingPath is deliberately outside the skill discovery root so a

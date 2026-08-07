@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/guestexec"
 	"github.com/wzslr321/torio/internal/lima"
@@ -33,6 +34,15 @@ type Manager struct {
 
 func New(guest Guest, opts lima.BootstrapOptions) *Manager {
 	return &Manager{guest: guest, bootstrapOpts: opts}
+}
+
+// backend is the agent backend this instance runs, arriving with the bootstrap
+// options the Brain is already bounded by.
+func (m *Manager) backend() backend.Backend {
+	if m.bootstrapOpts.Backend == nil {
+		return lima.Hermes()
+	}
+	return m.bootstrapOpts.Backend
 }
 
 // Init creates a fresh scaffold through a private sibling staging directory,
@@ -127,7 +137,7 @@ func (m *Manager) Init(ctx context.Context) (report InitReport, retErr error) {
 			return report, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("embedded scaffold unavailable")}
 		}
 		if err := m.mustRunInput(ctx, op, KindGuestCommand, "write scaffold file", payload,
-			guestexec.UserExec("tee", stagingPath+"/"+name)); err != nil {
+			guestexec.UserExecAs(lima.HermesUser, "tee", stagingPath+"/"+name)); err != nil {
 			return report, err
 		}
 		if err := m.mustRun(ctx, op, KindGuestCommand, "set scaffold file permissions",
@@ -137,15 +147,15 @@ func (m *Manager) Init(ctx context.Context) (report InitReport, retErr error) {
 	}
 
 	if err := m.mustRun(ctx, op, KindGit, "git init",
-		guestexec.UserExec("git", "-C", stagingPath, "init", "--initial-branch=main")); err != nil {
+		guestexec.UserExecAs(lima.HermesUser, "git", "-C", stagingPath, "init", "--initial-branch=main")); err != nil {
 		return report, err
 	}
 	if err := m.mustRun(ctx, op, KindGit, "git add",
-		guestexec.UserExec("git", "-C", stagingPath, "add", "--", "README.md", "AGENTS.md", "todo.md")); err != nil {
+		guestexec.UserExecAs(lima.HermesUser, "git", "-C", stagingPath, "add", "--", "README.md", "AGENTS.md", "todo.md")); err != nil {
 		return report, err
 	}
 	if err := m.mustRun(ctx, op, KindGit, "git commit",
-		guestexec.UserExec("git", "-C", stagingPath,
+		guestexec.UserExecAs(lima.HermesUser, "git", "-C", stagingPath,
 			"-c", "user.name=torio",
 			"-c", "user.email=torio@localhost",
 			"commit", "-m", "Initialize Torio Second Brain")); err != nil {
@@ -274,7 +284,7 @@ func (m *Manager) installSkill(ctx context.Context, op string) (updated bool, re
 // never be walked as a skill.
 func (m *Manager) writeSkillFile(ctx context.Context, op, what string, payload []byte, dest string) error {
 	if err := m.mustRunInput(ctx, op, KindGuestCommand, "write "+what, payload,
-		guestexec.UserExec("tee", skillStagingPath)); err != nil {
+		guestexec.UserExecAs(lima.HermesUser, "tee", skillStagingPath)); err != nil {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "set "+what+" permissions",
@@ -375,7 +385,7 @@ func (m *Manager) probeSkill(ctx context.Context, op, digest, categoryDigest str
 		{SkillFilePath, digest},
 		{SkillCategoryFilePath, categoryDigest},
 	} {
-		sum, err := m.run(ctx, op, guestexec.UserExec("sha256sum", "--", spec.path))
+		sum, err := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "sha256sum", "--", spec.path))
 		if err != nil {
 			return skillProbe{}, err
 		}
@@ -530,7 +540,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 		return report, nil
 	}
 
-	emptyRes, err := m.run(ctx, op, guestexec.UserExec("find", Path, "-mindepth", "1", "-maxdepth", "1", "-printf", ".", "-quit"))
+	emptyRes, err := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "find", Path, "-mindepth", "1", "-maxdepth", "1", "-printf", ".", "-quit"))
 	if err != nil {
 		return report, err
 	}
@@ -564,7 +574,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 		return report, nil
 	}
 
-	symlinks, err := m.run(ctx, op, guestexec.UserExec("find", Path, "-type", "l", "-printf", ".", "-quit"))
+	symlinks, err := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "find", Path, "-type", "l", "-printf", ".", "-quit"))
 	if err != nil {
 		return report, err
 	}
@@ -600,7 +610,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 		report.Issues = append(report.Issues, "canonical_scaffold_incomplete")
 	}
 
-	head, err := m.run(ctx, op, guestexec.UserExec("git", "-C", Path, "rev-parse", "--verify", "HEAD"))
+	head, err := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "git", "-C", Path, "rev-parse", "--verify", "HEAD"))
 	if err != nil {
 		return report, err
 	}
@@ -608,7 +618,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 	if !gitRepo {
 		report.Issues = append(report.Issues, "git_repository_missing")
 	} else {
-		remotes, runErr := m.run(ctx, op, guestexec.UserExec("git", "-C", Path, "remote"))
+		remotes, runErr := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "git", "-C", Path, "remote"))
 		if runErr != nil {
 			return report, runErr
 		}
@@ -619,7 +629,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 		if report.GitHasRemote {
 			report.Issues = append(report.Issues, "git_remote_present")
 		}
-		worktree, runErr := m.run(ctx, op, guestexec.UserExec("git", "-C", Path, "status", "--porcelain=v1", "--untracked-files=normal"))
+		worktree, runErr := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "git", "-C", Path, "status", "--porcelain=v1", "--untracked-files=normal"))
 		if runErr != nil {
 			return report, runErr
 		}
@@ -633,7 +643,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 		}
 	}
 
-	md, err := m.run(ctx, op, guestexec.UserExec("find", Path, "-type", "f", "-name", "*.md", "-printf", "."))
+	md, err := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "find", Path, "-type", "f", "-name", "*.md", "-printf", "."))
 	if err != nil {
 		return report, err
 	}
@@ -643,7 +653,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 	report.MarkdownFiles = len(md.Stdout)
 
 	if attachmentsPresent {
-		attachments, runErr := m.run(ctx, op, guestexec.UserExec("find", Path+"/attachments", "-type", "f", "-printf", "."))
+		attachments, runErr := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "find", Path+"/attachments", "-type", "f", "-printf", "."))
 		if runErr != nil {
 			return report, runErr
 		}
@@ -653,7 +663,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 		report.AttachmentFiles = len(attachments.Stdout)
 	}
 
-	size, err := m.run(ctx, op, guestexec.UserExec("du", "-sb", "--", Path))
+	size, err := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "du", "-sb", "--", Path))
 	if err != nil {
 		return report, err
 	}
@@ -693,7 +703,14 @@ func (m *Manager) requireRootAccess(ctx context.Context, op string) error {
 	return m.mustRun(ctx, op, KindGuestCommand, "verify passwordless sudo", guestexec.RootExec("true"))
 }
 
+// ensureProject registers the vault as a project with the backend, so a
+// cross-project retrieval skill has something to retrieve from. A backend that
+// declares no project registry has nothing to register the vault with, and the
+// vault is no less usable for it: the skill reaches a path, not a registration.
 func (m *Manager) ensureProject(ctx context.Context, op string) error {
+	if m.backend().Registry() == nil {
+		return nil
+	}
 	registered, conflict, err := m.projectStatus(ctx, op)
 	if err != nil {
 		return err
@@ -705,7 +722,7 @@ func (m *Manager) ensureProject(ctx context.Context, op string) error {
 		return nil
 	}
 	if err := m.mustRun(ctx, op, KindRegistration, "register Hermes Project",
-		guestexec.UserExec("hermes", "project", "create", ProjectName, Path, "--slug", ProjectSlug)); err != nil {
+		guestexec.UserExecAs(lima.HermesUser, "hermes", "project", "create", ProjectName, Path, "--slug", ProjectSlug)); err != nil {
 		return err
 	}
 	registered, conflict, err = m.projectStatus(ctx, op)
@@ -719,7 +736,10 @@ func (m *Manager) ensureProject(ctx context.Context, op string) error {
 }
 
 func (m *Manager) projectStatus(ctx context.Context, op string) (registered, conflict bool, err error) {
-	show, err := m.run(ctx, op, guestexec.UserExec("hermes", "project", "show", ProjectSlug))
+	if m.backend().Registry() == nil {
+		return false, false, nil
+	}
+	show, err := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "hermes", "project", "show", ProjectSlug))
 	if err != nil {
 		return false, false, err
 	}
@@ -744,7 +764,7 @@ func (m *Manager) projectStatus(ctx context.Context, op string) (registered, con
 	// itself is broken or missing (e.g. 127, or argparse's 2). A successful list
 	// proves the Hermes Project CLI is available, but list output is never used
 	// for path matching: it carries slugs and names, not primary paths.
-	list, err := m.run(ctx, op, guestexec.UserExec("hermes", "project", "list"))
+	list, err := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "hermes", "project", "list"))
 	if err != nil {
 		return false, false, err
 	}
@@ -755,7 +775,7 @@ func (m *Manager) projectStatus(ctx context.Context, op string) (registered, con
 }
 
 func (m *Manager) testPath(ctx context.Context, op, flag, path string) (bool, error) {
-	res, err := m.run(ctx, op, guestexec.UserExec("test", flag, path))
+	res, err := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "test", flag, path))
 	if err != nil {
 		return false, err
 	}
@@ -790,13 +810,13 @@ func (m *Manager) acquireInitLock(ctx context.Context, op string) (string, error
 		return "", &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("generate Brain lock token")}
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		mkdir, runErr := m.run(ctx, op, guestexec.UserExec("mkdir", "-m", "0700", lockPath))
+		mkdir, runErr := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "mkdir", "-m", "0700", lockPath))
 		if runErr != nil {
 			return "", runErr
 		}
 		if mkdir.ExitCode == 0 {
 			if err := m.mustRunInput(ctx, op, KindGuestCommand, "record Brain init lock owner",
-				[]byte(token+"\n"), guestexec.UserExec("tee", lockPath+"/token")); err != nil {
+				[]byte(token+"\n"), guestexec.UserExecAs(lima.HermesUser, "tee", lockPath+"/token")); err != nil {
 				_, _ = m.run(ctx, op, guestexec.RootExec("rm", "-rf", "--", lockPath))
 				return "", err
 			}
@@ -883,7 +903,7 @@ func (m *Manager) verifyInitLock(ctx context.Context, op, token string) error {
 	if meta.ExitCode != 0 || owner != lima.HermesUser || group != lima.HermesUser || (mode != "700" && mode != "0700") {
 		return &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("Brain init lock ownership or mode changed")}
 	}
-	current, err := m.run(ctx, op, guestexec.UserExec("cat", lockPath+"/token"))
+	current, err := m.run(ctx, op, guestexec.UserExecAs(lima.HermesUser, "cat", lockPath+"/token"))
 	if err != nil {
 		return err
 	}
@@ -897,7 +917,7 @@ func (m *Manager) refreshInitLock(ctx context.Context, op, token string) error {
 	if err := m.verifyInitLock(ctx, op, token); err != nil {
 		return err
 	}
-	return m.mustRun(ctx, op, KindGuestCommand, "refresh Brain init lock", guestexec.UserExec("touch", lockPath))
+	return m.mustRun(ctx, op, KindGuestCommand, "refresh Brain init lock", guestexec.UserExecAs(lima.HermesUser, "touch", lockPath))
 }
 
 func (m *Manager) releaseInitLock(ctx context.Context, op, token string) error {
