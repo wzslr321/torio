@@ -41,15 +41,22 @@ func sshHostAlias() string { return "lima-" + InstanceName }
 // could be read as a flag, a path segment, or shell syntax on the guest.
 var projectIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
-// validateProjectPath accepts exactly one project directory directly under
-// HermesWorkspacePath. The path is the only caller-shaped value in the argv and
-// it is handed to the guest helper, so anything ambiguous — a traversal, a
-// nested path, a leading dash, whitespace, shell syntax — fails closed here
-// rather than being escaped later.
-func validateProjectPath(projectPath string) error {
-	prefix := HermesWorkspacePath + "/"
+// validateProjectPath accepts exactly one project directory directly under the
+// backend's workspace root. The path is the only caller-shaped value in the
+// argv and it is handed to the guest helper, so anything ambiguous — a
+// traversal, a nested path, a leading dash, whitespace, shell syntax — fails
+// closed here rather than being escaped later.
+//
+// The root is passed in rather than fixed: it belongs to the backend the
+// instance runs, and a validator that knew only one backend's root would either
+// reject every path on the other or, worse, be widened until it accepted both.
+func validateProjectPath(workspaceRoot, projectPath string) error {
+	if workspaceRoot == "" {
+		return fmt.Errorf("no workspace root; the backend declares no workspace")
+	}
+	prefix := workspaceRoot + "/"
 	if !strings.HasPrefix(projectPath, prefix) {
-		return fmt.Errorf("project path %q is not a project under %s", projectPath, HermesWorkspacePath)
+		return fmt.Errorf("project path %q is not a project under %s", projectPath, workspaceRoot)
 	}
 	id := strings.TrimPrefix(projectPath, prefix)
 	if !projectIDPattern.MatchString(id) {
@@ -82,8 +89,8 @@ func validateProjectPath(projectPath string) error {
 // There is no caller-supplied remote command string, and no environment is
 // attached: a nil Env means the session inherits the operator's SSH_AUTH_SOCK,
 // TERM and locale instead of Torio composing a new one.
-func OperatorShellSpec(projectPath string) (execx.InteractiveCommand, error) {
-	if err := validateProjectPath(projectPath); err != nil {
+func OperatorShellSpec(workspaceRoot, projectPath string) (execx.InteractiveCommand, error) {
+	if err := validateProjectPath(workspaceRoot, projectPath); err != nil {
 		return execx.InteractiveCommand{}, &Error{Op: operatorShellOp, Kind: KindVerificationFailed, Err: err}
 	}
 
@@ -130,8 +137,8 @@ func OperatorShellSpec(projectPath string) (execx.InteractiveCommand, error) {
 // ProjectEnterSpec builds an interactive SSH command for ordinary project work
 // without forwarding the operator's SSH agent. Multiplexing is disabled so the
 // session cannot reuse a push-capable operator-shell connection.
-func ProjectEnterSpec(projectPath string) (execx.InteractiveCommand, error) {
-	if err := validateProjectPath(projectPath); err != nil {
+func ProjectEnterSpec(workspaceRoot, projectPath string) (execx.InteractiveCommand, error) {
+	if err := validateProjectPath(workspaceRoot, projectPath); err != nil {
 		return execx.InteractiveCommand{}, &Error{Op: projectEnterOp, Kind: KindVerificationFailed, Err: err}
 	}
 
@@ -209,4 +216,58 @@ func BackendLoginSpec(argv []string) (execx.InteractiveCommand, error) {
 		sshHostAlias(),
 	}
 	return execx.InteractiveCommand{Name: "ssh", Args: append(args, argv...)}, nil
+}
+
+// projectAgentOp names the agent-session operation in errors.
+const projectAgentOp = "project_agent"
+
+// ProjectAgentSpec builds an interactive SSH command that opens the backend's
+// own agent session inside a checkout.
+//
+// The transport is the enter shape, not the shell shape: no agent forwarding,
+// no multiplexing. That is the decision, not an omission. The agent works in a
+// tree it owns and commits there; pushing stays a human act from `project
+// shell`, so a session that runs an agent must not be able to reach a remote —
+// and must not be able to inherit a connection that can.
+//
+// helper is the backend's declared guest entry point. Like the other session
+// helpers it is root-owned and receives exactly one validated path; the command
+// it runs is a constant inside it.
+func ProjectAgentSpec(helper, workspaceRoot, projectPath string) (execx.InteractiveCommand, error) {
+	if helper == "" {
+		return execx.InteractiveCommand{}, &Error{
+			Op:   projectAgentOp,
+			Kind: KindVerificationFailed,
+			Err:  fmt.Errorf("the backend declares no agent session helper"),
+		}
+	}
+	if err := validateProjectPath(workspaceRoot, projectPath); err != nil {
+		return execx.InteractiveCommand{}, &Error{Op: projectAgentOp, Kind: KindVerificationFailed, Err: err}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return execx.InteractiveCommand{}, &Error{Op: projectAgentOp, Kind: KindNotFound, Err: err}
+	}
+	sshConfig := filepath.Join(home, ".lima", InstanceName, "ssh.config")
+	if _, statErr := os.Stat(sshConfig); statErr != nil {
+		return execx.InteractiveCommand{}, &Error{
+			Op:   projectAgentOp,
+			Kind: KindNotFound,
+			Err:  fmt.Errorf("no lima ssh config at %s; run `torio vm start` first", sshConfig),
+		}
+	}
+	return execx.InteractiveCommand{
+		Name: "ssh",
+		Args: []string{
+			"-F", sshConfig,
+			"-o", "ControlMaster=no",
+			"-o", "ControlPath=none",
+			"-o", "ForwardAgent=no",
+			"-a",
+			"-t",
+			sshHostAlias(),
+			helper,
+			projectPath,
+		},
+	}, nil
 }

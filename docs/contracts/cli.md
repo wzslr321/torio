@@ -298,6 +298,7 @@ torio project list
 torio project show <id>
 torio project use <id>
 torio project remove <id>
+torio project agent <id>
 torio project enter <id>
 torio project shell <id>
 ```
@@ -328,6 +329,15 @@ torio project shell <id>
 - `remove` archives the Hermes Project and drops the config entry. The checkout
   directory is **never** deleted, and the output says where it still is.
   There is no `--delete`.
+- `agent` starts the configured backend in the checkout, running as the
+  **backend's** guest identity rather than the operator's. The transport is
+  `enter`'s — agent forwarding and multiplexing both disabled — so an agent
+  session can neither reach a Git remote nor inherit a connection that can. The
+  remote argv is the backend's root-owned helper plus one validated project
+  path; the command the helper runs is a constant inside it. A backend that
+  declares no interactive session answers `BACKEND_NO_SESSION` (exit 3): a
+  service backend's surface is its service, not a terminal
+  ([ADR-0009](../adr/0009-backend-contract-and-claude-code.md)).
 - `enter` opens an ordinary interactive session in the checkout with agent
   forwarding and SSH multiplexing disabled. That session can edit and commit
   locally but receives no write capability toward the remote. It is preflighted
@@ -344,9 +354,9 @@ torio project shell <id>
   forward), but Torio **never performs a test push** to prove anything. The
   session is not bounded by `--timeout`: the operator ends it. Afterwards Torio
   makes no claim about what was pushed — check the remote yourself.
-- `enter` and `shell` are interactive and **do not support `--json`**: there is no
-  document to emit, so `--json` is a usage error (exit 2) rather than a silently
-  ignored flag.
+- `agent`, `enter` and `shell` are interactive and **do not support `--json`**:
+  there is no document to emit, so `--json` is a usage error (exit 2) rather than
+  a silently ignored flag.
 
 ### MCP
 

@@ -51,6 +51,7 @@ func newProjectCmd(a *app) *cobra.Command {
 	cmd.AddCommand(newProjectRemoveCmd(a))
 	cmd.AddCommand(newProjectEnterCmd(a))
 	cmd.AddCommand(newProjectShellCmd(a))
+	cmd.AddCommand(newProjectAgentCmd(a))
 	return cmd
 }
 
@@ -192,6 +193,79 @@ func newProjectRemoveCmd(a *app) *cobra.Command {
 // newProjectEnterCmd opens an ordinary interactive project session. The SSH
 // transport disables agent forwarding; project shell remains the explicit
 // push-capable boundary.
+// newProjectAgentCmd opens the backend's own session in a checkout. It
+// completes the triad: `enter` is you without push capability, `shell` is you
+// with it, `agent` is the agent, which never has it.
+//
+// It carries no machine output for the same reason `enter` does not: it hands
+// the operator's terminal to a remote process, so there is no document to emit.
+func newProjectAgentCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "agent <id>",
+		Short: "Open the backend's own session in a project checkout",
+		Long: "Start the configured backend inside the project checkout, running as the " +
+			"backend's guest identity rather than as you.\n\n" +
+			"No SSH agent is forwarded and the connection is never multiplexed, so the " +
+			"session cannot reach a Git remote and cannot inherit a connection that " +
+			"can. The agent edits and commits in a tree it owns; pushing stays yours, " +
+			"from `torio project shell <id>`, after you have read what it did.\n\n" +
+			"Inside the box the backend runs without permission prompts. That is not a " +
+			"weakening: the prompt was a control inside the agent's own process, and " +
+			"the box replaced it with ones the agent cannot reach — an unprivileged " +
+			"identity, a closed group set, no route to a remote, and the edge of the " +
+			"VM.\n\n" +
+			"A backend that declares no interactive session has nothing to open here. " +
+			"This command is interactive and does not support --json.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if a.jsonOut {
+				return &CLIError{
+					Exit:    ExitUsage,
+					Code:    "USAGE",
+					Command: "project.agent",
+					Message: "project agent is interactive and has no machine output; drop --json",
+				}
+			}
+			if a.backend.Session() == nil {
+				return &CLIError{
+					Exit:    ExitPrecondition,
+					Code:    "BACKEND_NO_SESSION",
+					Command: "project.agent",
+					Message: fmt.Sprintf("backend %q declares no interactive session; its surface is the guest service it runs (torio serve status)", a.backend.Identity().Name),
+				}
+			}
+			service, err := a.projectService("project.agent")
+			if err != nil {
+				return err
+			}
+			ctx, cancel := a.opContext(cmd)
+			session, err := service.EnterPreflight(ctx, args[0])
+			cancel()
+			if err != nil {
+				return mapProjectError("project.agent", err)
+			}
+			agentCmd, err := a.newAgentSpec(session.Project.Path)
+			if err != nil {
+				return mapLimaError("project.agent", err)
+			}
+			if _, err := fmt.Fprintf(a.stdout,
+				"%s: starting %s in %s as the backend identity\n"+
+					"  No SSH agent is forwarded. The agent can commit here; pushing is yours, from `torio project shell %s`\n",
+				session.Project.ID, a.backend.Identity().Name, session.Project.Path, session.Project.ID); err != nil {
+				return err
+			}
+			runErr := a.newInteractive().RunInteractive(cmd.Context(), agentCmd)
+			if _, err := fmt.Fprintf(a.stdout, "%s: agent session ended. Review what it did before you push.\n", session.Project.ID); err != nil {
+				return err
+			}
+			if runErr != nil {
+				return mapInteractiveSessionError("project.agent", "agent session", runErr)
+			}
+			return nil
+		},
+	}
+}
+
 func newProjectEnterCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "enter <id>",

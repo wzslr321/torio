@@ -72,6 +72,7 @@ type app struct {
 	// SSH agent) that a test must not depend on.
 	newEnterSpec   func(projectPath string) (execx.InteractiveCommand, error)
 	newShellSpec   func(projectPath string) (execx.InteractiveCommand, error)
+	newAgentSpec   func(projectPath string) (execx.InteractiveCommand, error)
 	newInteractive func() execx.InteractiveRunner
 
 	// lookupOperatorUser resolves the Lima login identity for `vm init`.
@@ -122,11 +123,28 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 			}, opts)
 		}
 	}
+	// The workspace root is read at call time, not at wiring time: the backend
+	// is resolved from the config document during pre-run, which happens after
+	// these seams are set.
 	if a.newShellSpec == nil {
-		a.newShellSpec = lima.OperatorShellSpec
+		a.newShellSpec = func(p string) (execx.InteractiveCommand, error) {
+			return lima.OperatorShellSpec(a.backend.Identity().WorkspacePath, p)
+		}
 	}
 	if a.newEnterSpec == nil {
-		a.newEnterSpec = lima.ProjectEnterSpec
+		a.newEnterSpec = func(p string) (execx.InteractiveCommand, error) {
+			return lima.ProjectEnterSpec(a.backend.Identity().WorkspacePath, p)
+		}
+	}
+	if a.newAgentSpec == nil {
+		a.newAgentSpec = func(p string) (execx.InteractiveCommand, error) {
+			session := a.backend.Session()
+			helper := ""
+			if session != nil {
+				helper = session.HelperPath
+			}
+			return lima.ProjectAgentSpec(helper, a.backend.Identity().WorkspacePath, p)
+		}
 	}
 	if a.newInteractive == nil {
 		a.newInteractive = func() execx.InteractiveRunner { return &execx.InteractiveExecRunner{} }
