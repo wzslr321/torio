@@ -145,6 +145,27 @@ even on failure. Do not point it at a machine whose state you want to keep.
 - Are credentials, tokens, raw private logs or Brain content absent from output,
   logs and test fixtures?
 
+### Copilot code review
+
+The same checklist is written out for Copilot, which reads three things on a
+pull request: [`AGENTS.md`](AGENTS.md),
+[`.github/copilot-instructions.md`](.github/copilot-instructions.md), and the
+path-scoped files in [`.github/instructions/`](.github/instructions) whose
+`applyTo` glob matches a changed file.
+
+`AGENTS.md` stays the contract. The Copilot files add only what a reviewer needs
+that a contributor does not: what to raise first, and what to stay quiet about.
+
+Two properties are worth knowing before changing them. Copilot reads these files
+from the **head** branch, so an edit takes effect on the pull request that makes
+it. And Copilot does not follow links out of them, so a rule that only points
+somewhere else never reaches the reviewer.
+
+Ask for the review on the pull request, or turn on automatic review in the
+repository's Copilot settings. When a rule produces noise, change the
+instruction file; a reviewer worth having is one whose comments are all worth
+reading.
+
 ## Architecture changes
 
 Add a new ADR. Never edit an accepted ADR to hide the decision it recorded — a
