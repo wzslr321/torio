@@ -30,8 +30,27 @@ on:
         type: string
         default: ""
   pull_request:
+    # What cannot reach the guest. This is a denylist of *places*, not of
+    # extensions, because `**.md` was wrong in both directions.
+    #
+    # Too broad: the retrieval skills and the Brain scaffold are Markdown that
+    # `//go:embed` compiles into the binary — `internal/lima/templates/skill/`,
+    # `internal/backend/claudecode/templates/skill/`, `internal/brain/templates/`.
+    # This journey is the only gate that proves those documents land on a real
+    # guest, and an extension filter skipped it for exactly the changes that
+    # alter what gets installed.
+    #
+    # Too narrow: content is not only Markdown. A pull request that added the
+    # Brain Kit booted two VMs on the strength of two plugin manifests and a
+    # sample attachment.
+    #
+    # A path missing from this list only costs a run. A path wrongly on it costs
+    # the proof, so add a directory here only when nothing in it can reach the
+    # binary or the guest.
     paths-ignore:
-      - "**.md"
+      - "*.md"
+      - ".claude-plugin/**"
+      - "brainkit/**"
       - "docs/**"
       - "site/**"
       - "LICENSE"
