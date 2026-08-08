@@ -132,6 +132,33 @@
 - Installing a retrieval skill for a backend with no skill category probed
   `/SKILL.md` and `test -f ""`. No shipped backend reached that path before; the
   Claude Code skill does.
+- `brain import` staged and swapped through the first backend's home on every
+  backend. The vault, the staging directory and the lock had already moved to
+  the identity that owns them; the import's own four paths had not. On a Claude
+  Code box the import therefore had root fabricate `/home/hermes`, staged
+  private vault bytes there, and parked the previous Brain beside them —
+  outside the boundary the owning identity keeps. All four are now derived.
+- `backend status` showed no MCP servers on a Hermes box that had them. The
+  check was declared and did run, but only inside `torio mcp status`, whose
+  report the status renderer never sees — so "none configured" and "three, one
+  of which bypasses the broker" were the same silence. Bootstrap now records it,
+  and records what it found without failing: the command that treats a bypass as
+  a failure is the one that verifies the boundary.
+- `backend status` said it read the guest and changed nothing while running the
+  same reconciling walk as `vm bootstrap`. On a drifted or fresh guest, asking
+  for status would download the pinned binary, repoint a root-owned symlink and
+  write managed settings. It now runs that walk with every repair turned off: a
+  guest that needs one is reported, naming `torio vm bootstrap` as the remedy.
+- `backend status` recovered the credential state by searching the check's prose
+  for "present". The two answers are now constants shared by the backend that
+  records one and the renderer that reads it, compared by equality, and anything
+  else reads as **unknown** rather than as a credential the box does not hold.
+- `torio brain --help` named the first backend's box and vault path. Help text is
+  built before the instance is resolved and `--help` never reaches that
+  resolution, so a Claude Code operator was told to run
+  `limactl copy torio:/home/hermes/brain/` — the wrong box and the wrong
+  directory, in a line that looks exactly right. The command now prints filled in
+  by `brain status`, which knows what it just read.
 
 ### Known
 
