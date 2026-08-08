@@ -201,14 +201,36 @@ type Paths struct {
 // HOME fallback) is rejected fail-closed rather than silently ignored or
 // coerced against CWD.
 func ResolvePaths(opts Options) (Paths, error) {
-	var p Paths
-
 	// Resolved first: a malformed instance name must stop the invocation before
 	// any location is derived from it.
 	instance, err := ResolveInstance(opts)
 	if err != nil {
 		return Paths{}, err
 	}
+	return resolvePathsFor(instance, opts)
+}
+
+// ResolveInstancePaths computes the Paths of a named instance's own documents.
+//
+// It ignores both TORIO_INSTANCE and an explicit --config, and that is the
+// whole reason it exists. A status poll asks about a specific box, so the
+// document that answers is the one that box owns: resolving through the
+// invocation's own selection would read one instance's document while reporting
+// on another's, and an explicit --config would answer for every box with the
+// same file. Everything else about resolution — the XDG base, the trusted
+// directory, the contained joins — is unchanged.
+func ResolveInstancePaths(instance string, opts Options) (Paths, error) {
+	if !ValidInstanceName(instance) {
+		return Paths{}, errors.New("instance name is not a valid instance name")
+	}
+	opts.ConfigPath = ""
+	return resolvePathsFor(instance, opts)
+}
+
+// resolvePathsFor derives every location from an instance name that has already
+// been resolved and validated.
+func resolvePathsFor(instance string, opts Options) (Paths, error) {
+	var p Paths
 	p.Instance = instance
 
 	// Config file (and its trusted directory): explicit override bypasses XDG.

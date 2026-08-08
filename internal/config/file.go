@@ -136,7 +136,27 @@ func Load(opts Options) (rt Runtime, err error) {
 	if err != nil {
 		return Runtime{}, err
 	}
+	return loadFrom(paths)
+}
 
+// LoadInstance loads the config document a named instance owns, ignoring both
+// TORIO_INSTANCE and --config (see ResolveInstancePaths).
+//
+// It is for a caller reporting on several boxes at once, which needs each box's
+// own declaration — above all which backend it runs. Every fail-closed rule
+// Load applies applies here too, and a caller that polls must treat a failure
+// as one box it could not read rather than as a reason to answer for none.
+func LoadInstance(instance string, opts Options) (rt Runtime, err error) {
+	defer func() { err = redactErr(err) }()
+
+	paths, err := ResolveInstancePaths(instance, opts)
+	if err != nil {
+		return Runtime{}, err
+	}
+	return loadFrom(paths)
+}
+
+func loadFrom(paths Paths) (rt Runtime, err error) {
 	rt = Runtime{Paths: paths}
 
 	// For the default (non-explicit) config, ConfigDir is the trusted app
