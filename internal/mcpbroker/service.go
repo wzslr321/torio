@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"sort"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -37,7 +38,11 @@ type ServiceConfig struct {
 	Upstream Upstream
 	Audit    Recorder
 	PeerUID  uint32
+	// CallTimeout bounds one external tool invocation. Zero selects 60 seconds.
+	CallTimeout time.Duration
 }
+
+const defaultCallTimeout = 60 * time.Second
 
 // NewServiceServer builds an MCP server whose advertised tool set is the exact
 // intersection required by policy. Every policy tool must exist upstream; a
@@ -52,6 +57,9 @@ func NewServiceServer(ctx context.Context, cfg ServiceConfig) (*mcp.Server, erro
 	}
 	if cfg.Audit == nil {
 		return nil, errors.New("MCP service needs an audit recorder")
+	}
+	if cfg.CallTimeout <= 0 {
+		cfg.CallTimeout = defaultCallTimeout
 	}
 
 	grant, ok := serviceGrant(cfg.Policy, cfg.Service)
@@ -100,7 +108,7 @@ func NewServiceServer(ctx context.Context, cfg ServiceConfig) (*mcp.Server, erro
 	sort.Strings(names)
 	for _, name := range names {
 		tool := *byName[name]
-		server.AddTool(&tool, forwardTool(cfg.Upstream))
+		server.AddTool(&tool, forwardTool(cfg.Upstream, cfg.CallTimeout))
 	}
 	return server, nil
 }
@@ -136,9 +144,11 @@ func listAllTools(ctx context.Context, upstream Upstream) ([]*mcp.Tool, error) {
 	}
 }
 
-func forwardTool(upstream Upstream) mcp.ToolHandler {
+func forwardTool(upstream Upstream, timeout time.Duration) mcp.ToolHandler {
 	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		result, err := upstream.CallTool(ctx, &mcp.CallToolParams{
+		callCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		result, err := upstream.CallTool(callCtx, &mcp.CallToolParams{
 			Meta:           request.Params.Meta,
 			Name:           request.Params.Name,
 			Arguments:      request.Params.Arguments,

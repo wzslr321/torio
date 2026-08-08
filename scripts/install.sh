@@ -3,7 +3,8 @@
 # Linux on x86_64. The list is the same one internal/lima.profiles carries; a
 # platform this installs for but the CLI has no pins for would produce a working
 # binary that refuses every command.
-# Downloads a release asset, verifies SHA256SUMS, then installs the binary.
+# Downloads a release asset, verifies SHA256SUMS, then installs the host binary
+# and its two Linux guest payloads into one prefix.
 # Never executes the downloaded binary before checksum verification.
 # Never modifies shell rc files; prints the exact PATH step instead.
 set -euo pipefail
@@ -64,14 +65,15 @@ die() { log "install.sh: $*"; exit 1; }
 # as a flag: an installer that let you ask for the wrong architecture would
 # happily place a binary that cannot execute.
 PLATFORM=""
+GUEST_ARCH=""
 
 require_platform() {
   local os arch
   os="$(uname -s)"
   arch="$(uname -m)"
   case "${os}/${arch}" in
-    Darwin/arm64) PLATFORM="darwin_arm64" ;;
-    Linux/x86_64) PLATFORM="linux_amd64" ;;
+    Darwin/arm64) PLATFORM="darwin_arm64"; GUEST_ARCH="arm64" ;;
+    Linux/x86_64) PLATFORM="linux_amd64"; GUEST_ARCH="amd64" ;;
     *)
       die "unsupported platform ${os}/${arch}; Torio supports Darwin/arm64 and Linux/x86_64"
       ;;
@@ -204,17 +206,27 @@ install_from_archive() {
   extract="${tmp}/extract"
   mkdir -p "$extract"
   tar -xzf "$archive" -C "$extract"
-  # die exits, which skips the RETURN trap; remove the temp dir first.
-  if [[ ! -f "${extract}/torio" ]]; then
+  local broker="torio-mcp-broker-linux-${GUEST_ARCH}"
+  local relay="torio-mcp-connect-linux-${GUEST_ARCH}"
+  # Validate the complete set before changing the prefix. die exits, which
+  # skips the RETURN trap; remove the temp dir first.
+  if [[ ! -f "${extract}/torio" || ! -f "${extract}/${broker}" || ! -f "${extract}/${relay}" ]]; then
     rm -rf "$tmp"
-    die "archive missing torio binary"
+    die "archive missing torio binary or its Linux guest MCP payloads"
   fi
   mkdir -p "$prefix"
-  local staged="${prefix}/.torio.new.$$"
-  cp "${extract}/torio" "$staged"
-  chmod 755 "$staged"
-  mv -f "$staged" "${prefix}/torio"
+  local name staged
+  # Publish torio last. A completed install therefore never exposes a new host
+  # binary before both payloads it expects are present beside it.
+  for name in "$broker" "$relay" torio; do
+    staged="${prefix}/.${name}.new.$$"
+    cp "${extract}/${name}" "$staged"
+    chmod 755 "$staged"
+    mv -f "$staged" "${prefix}/${name}"
+  done
   log "installed ${prefix}/torio"
+  log "installed ${prefix}/${broker}"
+  log "installed ${prefix}/${relay}"
 }
 
 main() {

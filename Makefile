@@ -88,6 +88,13 @@ package-release:
 		GOOS="$$goos" GOARCH="$$goarch" CGO_ENABLED=0 go build -trimpath \
 			-ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$$commit -X main.date=$$date" \
 			-o "dist/torio-$$goos-$$goarch" ./cmd/torio; \
+		GOOS=linux GOARCH="$$goarch" CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" \
+			-o "dist/torio-mcp-broker-linux-$$goarch" ./cmd/torio-mcp-broker; \
+		GOOS=linux GOARCH="$$goarch" CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" \
+			-o "dist/torio-mcp-connect-linux-$$goarch" ./cmd/torio-mcp-connect; \
 		python3 scripts/package_release.py --version "$(VERSION)" --platform "$$platform" \
-			--binary "dist/torio-$$goos-$$goarch" --license LICENSE --out dist; \
+			--binary "dist/torio-$$goos-$$goarch" \
+			--broker-binary "dist/torio-mcp-broker-linux-$$goarch" \
+			--relay-binary "dist/torio-mcp-connect-linux-$$goarch" \
+			--license LICENSE --out dist; \
 	done

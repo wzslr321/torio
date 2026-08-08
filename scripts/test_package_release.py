@@ -39,6 +39,13 @@ class PackageArchiveTests(unittest.TestCase):
         path.write_bytes(b"\x7fELF-fake-torio-binary")
         path.chmod(0o755)
 
+    def _guest_payloads(self, root: Path) -> tuple[Path, Path]:
+        broker = root / "broker-bin"
+        relay = root / "relay-bin"
+        self._touch_binary(broker)
+        self._touch_binary(relay)
+        return broker, relay
+
     def test_archive_contents_and_sums(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -47,6 +54,7 @@ class PackageArchiveTests(unittest.TestCase):
             readme = root / "README.md"
             out = root / "dist"
             self._touch_binary(binary)
+            broker, relay = self._guest_payloads(root)
             license_path.write_text("MIT test license\n", encoding="utf-8")
             readme.write_text("# Torio test\n", encoding="utf-8")
 
@@ -54,6 +62,8 @@ class PackageArchiveTests(unittest.TestCase):
                 version="0.0.0",
                 platform="darwin/arm64",
                 binary=binary,
+                broker_binary=broker,
+                relay_binary=relay,
                 license_path=license_path,
                 readme_path=readme,
                 out_dir=out,
@@ -63,7 +73,7 @@ class PackageArchiveTests(unittest.TestCase):
 
             with tarfile.open(archive, "r:gz") as tf:
                 names = {m.name for m in tf.getmembers()}
-                self.assertEqual(names, set(pr.REQUIRED_MEMBERS))
+                self.assertEqual(names, set(pr.required_members("darwin/arm64")))
                 # No nested paths / escape
                 for m in tf.getmembers():
                     self.assertFalse(m.name.startswith("/"))
@@ -72,11 +82,40 @@ class PackageArchiveTests(unittest.TestCase):
             digest = hashlib.sha256(archive.read_bytes()).hexdigest()
             self.assertEqual(sums.read_text(encoding="utf-8"), f"{digest}  {archive.name}\n")
 
+    def test_archive_carries_both_linux_guest_payloads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            host = root / "torio"
+            broker = root / "broker"
+            relay = root / "relay"
+            for binary in (host, broker, relay):
+                self._touch_binary(binary)
+            license_path = root / "LICENSE"
+            readme = root / "README.md"
+            license_path.write_text("MIT\n", encoding="utf-8")
+            readme.write_text("# release\n", encoding="utf-8")
+
+            archive, _ = pr.build_archive(
+                version="0.0.0",
+                platform="darwin/arm64",
+                binary=host,
+                broker_binary=broker,
+                relay_binary=relay,
+                license_path=license_path,
+                readme_path=readme,
+                out_dir=root / "dist",
+            )
+            with tarfile.open(archive, "r:gz") as tf:
+                names = {member.name for member in tf.getmembers()}
+            self.assertIn("torio-mcp-broker-linux-arm64", names)
+            self.assertIn("torio-mcp-connect-linux-arm64", names)
+
     def test_refuses_overwrite(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             binary = root / "torio"
             self._touch_binary(binary)
+            broker, relay = self._guest_payloads(root)
             license_path = root / "LICENSE"
             readme = root / "README.md"
             license_path.write_text("L\n", encoding="utf-8")
@@ -86,6 +125,8 @@ class PackageArchiveTests(unittest.TestCase):
                 version="0.0.1",
                 platform="darwin/arm64",
                 binary=binary,
+                broker_binary=broker,
+                relay_binary=relay,
                 license_path=license_path,
                 readme_path=readme,
                 out_dir=out,
@@ -95,6 +136,8 @@ class PackageArchiveTests(unittest.TestCase):
                     version="0.0.1",
                     platform="darwin/arm64",
                     binary=binary,
+                    broker_binary=broker,
+                    relay_binary=relay,
                     license_path=license_path,
                     readme_path=readme,
                     out_dir=out,
@@ -105,6 +148,7 @@ class PackageArchiveTests(unittest.TestCase):
             root = Path(tmp)
             binary = root / "torio"
             self._touch_binary(binary)
+            broker, relay = self._guest_payloads(root)
             license_path = root / "LICENSE"
             readme = root / "README.md"
             license_path.write_text("L\n", encoding="utf-8")
@@ -116,6 +160,8 @@ class PackageArchiveTests(unittest.TestCase):
                 version="0.0.3",
                 platform="darwin/arm64",
                 binary=binary,
+                broker_binary=broker,
+                relay_binary=relay,
                 license_path=license_path,
                 readme_path=readme,
                 out_dir=root / "dist",
@@ -125,7 +171,13 @@ class PackageArchiveTests(unittest.TestCase):
                 modes = {member.name: member.mode & 0o777 for member in tf.getmembers()}
             self.assertEqual(
                 modes,
-                {"torio": 0o755, "LICENSE": 0o644, "README.md": 0o644},
+                {
+                    "torio": 0o755,
+                    "torio-mcp-broker-linux-arm64": 0o755,
+                    "torio-mcp-connect-linux-arm64": 0o755,
+                    "LICENSE": 0o644,
+                    "README.md": 0o644,
+                },
             )
 
     def test_rejects_secret_shaped_filename(self):
@@ -133,6 +185,7 @@ class PackageArchiveTests(unittest.TestCase):
             root = Path(tmp)
             binary = root / "torio"
             self._touch_binary(binary)
+            broker, relay = self._guest_payloads(root)
             bad = root / "credentials.json"
             bad.write_text("{}", encoding="utf-8")
             readme = root / "README.md"
@@ -142,6 +195,8 @@ class PackageArchiveTests(unittest.TestCase):
                     version="0.0.2",
                     platform="darwin/arm64",
                     binary=binary,
+                    broker_binary=broker,
+                    relay_binary=relay,
                     license_path=bad,
                     readme_path=readme,
                     out_dir=root / "dist",
@@ -170,6 +225,7 @@ class PackageArchiveTests(unittest.TestCase):
             root = Path(tmp)
             binary = root / "torio"
             self._touch_binary(binary)
+            broker, relay = self._guest_payloads(root)
             license_path = root / "LICENSE"
             readme = root / "README.md"
             license_path.write_text("L\n", encoding="utf-8")
@@ -182,6 +238,8 @@ class PackageArchiveTests(unittest.TestCase):
                     version="0.0.4",
                     platform=platform,
                     binary=binary,
+                    broker_binary=broker,
+                    relay_binary=relay,
                     license_path=license_path,
                     readme_path=readme,
                     out_dir=out,
@@ -229,6 +287,10 @@ class TempReadmeCleanupTests(unittest.TestCase):
                         "darwin/arm64",
                         "--binary",
                         str(root / "missing-binary"),
+                        "--broker-binary",
+                        str(root / "missing-broker"),
+                        "--relay-binary",
+                        str(root / "missing-relay"),
                         "--out",
                         str(root / "dist"),
                     ]
@@ -255,6 +317,17 @@ class SupportedPlatformsMatchTheProductTests(unittest.TestCase):
 
     def test_every_supported_platform_has_a_release_label(self):
         self.assertEqual(set(pr.PLATFORM_LABELS), set(pr.SUPPORTED_PLATFORMS))
+
+
+class ReleaseBuildWiringTests(unittest.TestCase):
+    def test_local_and_ci_packaging_build_both_guest_commands(self):
+        for path in (ROOT / "Makefile", ROOT / ".github" / "workflows" / "release.yml"):
+            with self.subTest(path=path.name):
+                text = path.read_text(encoding="utf-8")
+                self.assertIn("./cmd/torio-mcp-broker", text)
+                self.assertIn("./cmd/torio-mcp-connect", text)
+                self.assertIn("--broker-binary", text)
+                self.assertIn("--relay-binary", text)
 
 
 if __name__ == "__main__":

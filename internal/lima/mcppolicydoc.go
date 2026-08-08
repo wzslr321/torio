@@ -54,6 +54,14 @@ const (
 	maxDocumentBytes = 256 << 10
 )
 
+// MaxPolicyServices and MaxPolicyDocumentBytes export the parser's allocation
+// bounds to the delivered broker's bounded directory reader. The parser remains
+// the sole owner of their values.
+const (
+	MaxPolicyServices      = maxServices
+	MaxPolicyDocumentBytes = maxDocumentBytes
+)
+
 // MaxServiceNameLen bounds a service name. It is short because the name is a
 // slug an operator types and reads, not a description. Exported so that
 // arithmetic can be asserted rather than assumed.

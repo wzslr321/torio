@@ -41,6 +41,12 @@ class InstallerTests(unittest.TestCase):
         binary = self.root / "torio-bin"
         binary.write_bytes(b"#!/bin/sh\necho torio-fake\n")
         binary.chmod(0o755)
+        broker = self.root / "broker-bin"
+        relay = self.root / "relay-bin"
+        broker.write_bytes(b"#!/bin/sh\necho broker-fake\n")
+        relay.write_bytes(b"#!/bin/sh\necho relay-fake\n")
+        broker.chmod(0o755)
+        relay.chmod(0o755)
         license_path = self.root / "LICENSE"
         license_path.write_text("MIT test\n", encoding="utf-8")
         readme = self.root / "README.md"
@@ -60,6 +66,10 @@ class InstallerTests(unittest.TestCase):
                     platform,
                     "--binary",
                     str(binary),
+                    "--broker-binary",
+                    str(broker),
+                    "--relay-binary",
+                    str(relay),
                     "--license",
                     str(license_path),
                     "--readme",
@@ -117,6 +127,12 @@ class InstallerTests(unittest.TestCase):
         dest = self.prefix / "torio"
         self.assertTrue(dest.is_file())
         self.assertTrue(dest.stat().st_mode & stat.S_IXUSR)
+        for guest_payload in (
+            self.prefix / "torio-mcp-broker-linux-arm64",
+            self.prefix / "torio-mcp-connect-linux-arm64",
+        ):
+            self.assertTrue(guest_payload.is_file(), guest_payload)
+            self.assertTrue(guest_payload.stat().st_mode & stat.S_IXUSR)
         self.assertIn(str(dest), proc.stdout)
         self.assertIn("export PATH=", proc.stderr)
         self.assertNotIn("SSH_AUTH_SOCK", proc.stderr)

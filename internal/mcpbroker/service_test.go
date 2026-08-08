@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -195,5 +196,49 @@ func TestServiceServerRefusesCallWhenAuditCannotBeWritten(t *testing.T) {
 	}
 	if calls := upstream.called(); len(calls) != 0 {
 		t.Fatalf("unaudited call reached upstream: %v", calls)
+	}
+}
+
+type deadlineUpstream struct{ sawDeadline bool }
+
+func (u *deadlineUpstream) ListTools(context.Context, *mcp.ListToolsParams) (*mcp.ListToolsResult, error) {
+	return &mcp.ListToolsResult{Tools: []*mcp.Tool{{Name: "slow", InputSchema: map[string]any{"type": "object"}}}}, nil
+}
+
+func (u *deadlineUpstream) CallTool(ctx context.Context, _ *mcp.CallToolParams) (*mcp.CallToolResult, error) {
+	_, u.sawDeadline = ctx.Deadline()
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestServiceServerBoundsEveryUpstreamToolCall(t *testing.T) {
+	ctx := context.Background()
+	upstream := &deadlineUpstream{}
+	server, err := NewServiceServer(ctx, ServiceConfig{
+		Service:     "tickets",
+		Policy:      policySet(t, `[{"name":"slow","writes":false}]`),
+		Upstream:    upstream,
+		Audit:       &memoryRecorder{},
+		PeerUID:     1001,
+		CallTimeout: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewServiceServer: %v", err)
+	}
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+	go server.Run(ctx, serverTransport)
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer session.Close()
+
+	started := time.Now()
+	if _, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "slow"}); err == nil {
+		t.Fatal("timed-out upstream call succeeded")
+	}
+	if !upstream.sawDeadline || time.Since(started) > time.Second {
+		t.Fatalf("deadline observed = %t, elapsed = %s", upstream.sawDeadline, time.Since(started))
 	}
 }

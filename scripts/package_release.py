@@ -3,13 +3,15 @@
 
 Usage:
     python3 scripts/package_release.py --version 1.0.0 --platform darwin/arm64 \
-        --binary ./torio --out dist/
+        --binary ./torio --broker-binary ./torio-mcp-broker \
+        --relay-binary ./torio-mcp-connect --out dist/
 
 Produces:
     torio_<version>_<goos>_<goarch>.tar.gz
     SHA256SUMS   (rewritten from every archive present in --out)
 
-The archive contains only: torio (binary), LICENSE, README.md (release notes).
+The archive contains the host `torio`, the two Linux guest payloads selected by
+the host profile, LICENSE and README.md.
 
 Run once per supported host into the same --out. SHA256SUMS is regenerated from
 the directory rather than appended to, so a rerun cannot leave a stale line for
@@ -31,7 +33,7 @@ from pathlib import Path
 
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$")
 ASSET_NAME_FMT = "torio_{version}_{goos}_{goarch}.tar.gz"
-REQUIRED_MEMBERS = ("torio", "LICENSE", "README.md")
+BASE_MEMBERS = ("torio", "LICENSE", "README.md")
 
 # The hosts Torio ships for. This list must equal the keys of
 # internal/lima.profiles: an archive for a platform the CLI has no instance pins
@@ -44,6 +46,15 @@ SUPPORTED_PLATFORMS = ("darwin/arm64", "linux/amd64")
 PLATFORM_LABELS = {
     "darwin/arm64": "macOS on Apple Silicon",
     "linux/amd64": "Linux on x86_64",
+}
+
+# Lima guests run the same CPU architecture as their host profile, but always
+# Linux. Keep the mapping explicit: host and guest platform are different facts
+# on macOS, and naming a Darwin broker payload would make `mcp install` copy an
+# unexecutable file into the VM.
+GUEST_ARCH_BY_PLATFORM = {
+    "darwin/arm64": "arm64",
+    "linux/amd64": "amd64",
 }
 
 
@@ -66,6 +77,16 @@ def asset_name(version: str, platform: str) -> str:
     return ASSET_NAME_FMT.format(version=version, goos=goos, goarch=goarch)
 
 
+def guest_artifact_names(platform: str) -> tuple[str, str]:
+    split_platform(platform)
+    arch = GUEST_ARCH_BY_PLATFORM[platform]
+    return (f"torio-mcp-broker-linux-{arch}", f"torio-mcp-connect-linux-{arch}")
+
+
+def required_members(platform: str) -> tuple[str, ...]:
+    return (*BASE_MEMBERS, *guest_artifact_names(platform))
+
+
 def _require_file(path: Path, label: str) -> None:
     if not path.is_file():
         raise PackageError(f"missing {label}: {path}")
@@ -84,6 +105,8 @@ def build_archive(
     version: str,
     platform: str,
     binary: Path,
+    broker_binary: Path,
+    relay_binary: Path,
     license_path: Path,
     readme_path: Path,
     out_dir: Path,
@@ -91,9 +114,11 @@ def build_archive(
     """Create the tarball and SHA256SUMS. Returns (archive_path, sums_path)."""
     name = asset_name(version, platform)
     _require_file(binary, "binary")
+    _require_file(broker_binary, "broker guest binary")
+    _require_file(relay_binary, "relay guest binary")
     _require_file(license_path, "LICENSE")
     _require_file(readme_path, "release README")
-    for p in (binary, license_path, readme_path):
+    for p in (binary, broker_binary, relay_binary, license_path, readme_path):
         _assert_no_secrets(p)
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -106,6 +131,13 @@ def build_archive(
         staged_bin = stage / "torio"
         shutil.copy2(binary, staged_bin)
         os.chmod(staged_bin, 0o755)
+        broker_name, relay_name = guest_artifact_names(platform)
+        staged_broker = stage / broker_name
+        staged_relay = stage / relay_name
+        shutil.copy2(broker_binary, staged_broker)
+        shutil.copy2(relay_binary, staged_relay)
+        os.chmod(staged_broker, 0o755)
+        os.chmod(staged_relay, 0o755)
         staged_license = stage / "LICENSE"
         staged_readme = stage / "README.md"
         shutil.copy2(license_path, staged_license)
@@ -114,7 +146,7 @@ def build_archive(
         os.chmod(staged_readme, 0o644)
 
         with tarfile.open(archive_path, "w:gz") as tf:
-            for member in REQUIRED_MEMBERS:
+            for member in required_members(platform):
                 tf.add(stage / member, arcname=member)
 
     return archive_path, write_sums(out_dir)
@@ -154,8 +186,10 @@ def default_release_readme(version: str, platform: str) -> str:
         f"# Torio {version}\n\n"
         f"{label} ({platform}) release.\n\n"
         "## Install\n\n"
-        "Verify `SHA256SUMS`, extract `torio` onto your `PATH` "
-        "(for example `~/.local/bin`), then run `torio version --json`.\n\n"
+        "Verify `SHA256SUMS`, extract the archive into one directory on your "
+        "`PATH` (for example `~/.local/bin`), then run `torio version --json`. "
+        "The two `torio-mcp-*-linux-*` files are guest payloads used by "
+        "`torio mcp install`; keep them beside `torio`.\n\n"
         f"This archive runs on {label}. Supported hosts: {supported}.\n"
     )
 
@@ -170,6 +204,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Host this binary was built for, as GOOS/GOARCH",
     )
     p.add_argument("--binary", required=True, type=Path, help="Path to built torio binary")
+    p.add_argument(
+        "--broker-binary", required=True, type=Path, help="Path to Linux guest broker binary"
+    )
+    p.add_argument(
+        "--relay-binary", required=True, type=Path, help="Path to Linux guest relay binary"
+    )
     p.add_argument("--license", type=Path, default=Path("LICENSE"), help="LICENSE file")
     # --readme exists as a deterministic test input; releases take the default.
     p.add_argument(
@@ -197,6 +237,8 @@ def main(argv: list[str] | None = None) -> int:
                 version=args.version,
                 platform=args.platform,
                 binary=args.binary,
+                broker_binary=args.broker_binary,
+                relay_binary=args.relay_binary,
                 license_path=args.license,
                 readme_path=readme,
                 out_dir=args.out,

@@ -3,6 +3,9 @@ package mcpbroker
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -222,6 +225,109 @@ func TestOAuthHandlerInteractiveModeConfiguresDynamicRegistration(t *testing.T) 
 	}
 	if handler == nil || authorizationURL != "" {
 		t.Fatalf("handler = %v, authorization started during construction: %q", handler, authorizationURL)
+	}
+}
+
+func TestOAuthHandlerCompletesDiscoveryDCRPKCEAndPersistsSession(t *testing.T) {
+	var server *httptest.Server
+	var sawDCR, sawPKCE, sawVerifier bool
+	mux := http.NewServeMux()
+	server = httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	resourceURL := server.URL + "/mcp"
+	redirectURL := "http://localhost:43119/callback"
+
+	mux.HandleFunc("/.well-known/oauth-protected-resource", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"resource":%q,"authorization_servers":[%q]}`, resourceURL, server.URL)
+	})
+	mux.HandleFunc("/.well-known/oauth-authorization-server", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":%q,"token_endpoint":%q,"registration_endpoint":%q,"response_types_supported":["code"],"grant_types_supported":["authorization_code","refresh_token"],"token_endpoint_auth_methods_supported":["none"],"code_challenge_methods_supported":["S256"],"authorization_response_iss_parameter_supported":true}`,
+			server.URL, server.URL+"/authorize", server.URL+"/token", server.URL+"/register")
+	})
+	mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+			return
+		}
+		sawDCR = true
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = fmt.Fprintf(w, `{"client_id":"dynamic-client","redirect_uris":[%q],"token_endpoint_auth_method":"none","grant_types":["authorization_code","refresh_token"],"response_types":["code"]}`, redirectURL)
+	})
+	mux.HandleFunc("/authorize", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		sawPKCE = query.Get("code_challenge") != "" && query.Get("code_challenge_method") == "S256"
+		location := query.Get("redirect_uri") + "?code=authorization-code&state=" + url.QueryEscape(query.Get("state")) + "&iss=" + url.QueryEscape(server.URL)
+		http.Redirect(w, r, location, http.StatusFound)
+	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "form", http.StatusBadRequest)
+			return
+		}
+		sawVerifier = r.Form.Get("code_verifier") != "" && r.Form.Get("code") == "authorization-code"
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"access_token":"access-token","refresh_token":"refresh-token","token_type":"Bearer","expires_in":3600}`)
+	})
+
+	store := NewSessionStore(filepath.Join(t.TempDir(), "oauth"))
+	handler, err := NewOAuthHandler(context.Background(), OAuthHandlerConfig{
+		Service:     "tickets",
+		RedirectURL: redirectURL,
+		Store:       store,
+		HTTPClient:  server.Client(),
+		Fetcher: func(ctx context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
+			client := *server.Client()
+			client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+			response, err := client.Get(args.URL)
+			if err != nil {
+				return nil, err
+			}
+			defer response.Body.Close()
+			location, err := response.Location()
+			if err != nil {
+				return nil, err
+			}
+			return &auth.AuthorizationResult{
+				Code:  location.Query().Get("code"),
+				State: location.Query().Get("state"),
+				Iss:   location.Query().Get("iss"),
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewOAuthHandler: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, resourceURL, nil)
+	response := &http.Response{
+		StatusCode: http.StatusUnauthorized,
+		Header:     make(http.Header),
+		Body:       http.NoBody,
+		Request:    request,
+	}
+	response.Header.Set("WWW-Authenticate", `Bearer resource_metadata="`+server.URL+`/.well-known/oauth-protected-resource"`)
+	if err := handler.Authorize(context.Background(), request, response); err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	source, err := handler.TokenSource(context.Background())
+	if err != nil {
+		t.Fatalf("TokenSource: %v", err)
+	}
+	token, err := source.Token()
+	if err != nil {
+		t.Fatalf("Token: %v", err)
+	}
+	if token.AccessToken != "access-token" || !sawDCR || !sawPKCE || !sawVerifier {
+		t.Fatalf("OAuth result token=%q DCR=%t PKCE=%t verifier=%t", token.AccessToken, sawDCR, sawPKCE, sawVerifier)
+	}
+	config, persisted, err := store.Load("tickets")
+	if err != nil {
+		t.Fatalf("Load persisted OAuth: %v", err)
+	}
+	if config.ClientID != "dynamic-client" || persisted.RefreshToken != "refresh-token" {
+		t.Fatalf("persisted config/token = %#v / %#v", config, persisted)
 	}
 }
 
