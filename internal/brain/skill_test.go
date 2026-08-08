@@ -1,6 +1,7 @@
 package brain
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -49,6 +50,59 @@ type skilllessBackend struct{ backend.Backend }
 
 func (skilllessBackend) Identity() backend.Identity     { return claudecode.New().Identity() }
 func (skilllessBackend) BrainSkill() backend.BrainSkill { return backend.BrainSkill{} }
+
+func TestActivateRetrievalPreservesNotApplicableSkillState(t *testing.T) {
+	m := New(nil, lima.BootstrapOptions{Backend: skilllessBackend{}})
+	report := InitReport{Status: StatusReport{State: StateInitialized, SkillState: SkillNotApplicable}}
+
+	if err := m.activateRetrieval(t.Context(), "init", &report); err != nil {
+		t.Fatalf("activateRetrieval: %v", err)
+	}
+	if report.SkillUpdated {
+		t.Error("a backend with no skill reported an update")
+	}
+	if report.Status.SkillState != SkillNotApplicable {
+		t.Errorf("skill state = %q, want %q", report.Status.SkillState, SkillNotApplicable)
+	}
+}
+
+type testProjectRegistry struct{ created bool }
+
+func (r *testProjectRegistry) Status(_ context.Context, _ backend.Transport, _ string, _ string) (backend.RegistryStatus, error) {
+	return backend.RegistryStatus{Present: r.created, PrimaryMatches: r.created}, nil
+}
+
+func (r *testProjectRegistry) Create(_ context.Context, _ backend.Transport, _ string, _ string, _ string) error {
+	r.created = true
+	return nil
+}
+
+func (*testProjectRegistry) Restore(context.Context, backend.Transport, string) error  { return nil }
+func (*testProjectRegistry) Archive(context.Context, backend.Transport, string) error  { return nil }
+func (*testProjectRegistry) Activate(context.Context, backend.Transport, string) error { return nil }
+
+type registryBackend struct {
+	backend.Backend
+	registry backend.ProjectRegistry
+}
+
+func (b registryBackend) Registry() backend.ProjectRegistry { return b.registry }
+
+func TestInitUsesTheDeclaredProjectRegistry(t *testing.T) {
+	g := readyFake()
+	registry := &testProjectRegistry{}
+	b := registryBackend{Backend: lima.Hermes(), registry: registry}
+
+	if _, err := New(g, lima.BootstrapOptions{Backend: b}).Init(t.Context()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if !registry.created {
+		t.Fatal("Brain did not create its project through the backend registry")
+	}
+	if g.saw("hermes project") {
+		t.Fatalf("Brain bypassed the backend registry: %v", g.calls)
+	}
+}
 
 // TestABackendWithNoSkillInstallsNothing pins the honest answer: "not
 // applicable" is a state, and it is deliberately distinct from "not installed".

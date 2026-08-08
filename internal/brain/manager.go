@@ -255,7 +255,9 @@ func (m *Manager) activateRetrieval(ctx context.Context, op string, report *Init
 		return err
 	}
 	report.SkillUpdated = updated
-	report.Status.SkillState = SkillInstalled
+	if m.backend().BrainSkill().Installable() {
+		report.Status.SkillState = SkillInstalled
+	}
 	// The status this report carries was taken before the repair. Leaving the
 	// drift issue on it prints `skill: installed` and `issues:
 	// retrieval_skill_drift` in the same block, which reads as a failure to an
@@ -557,12 +559,12 @@ func (m *Manager) newStatusReport() StatusReport {
 
 func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, error) {
 	report := m.newStatusReport()
-	registered, projectConflict, err := m.projectStatus(ctx, op)
+	project, err := m.projectStatus(ctx, op)
 	if err != nil {
 		return report, err
 	}
-	report.ProjectRegistered = registered
-	report.ProjectConflict = projectConflict
+	report.ProjectRegistered = project.Registered()
+	report.ProjectConflict = project.Conflicts()
 
 	// The skill lives under the backend's own profile, not under the Brain, so
 	// probe it before the vault: an uninitialized or drifted Brain returns early
@@ -607,7 +609,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 		return report, err
 	}
 	if !exists {
-		if registered || projectConflict {
+		if project.Present || project.Conflicts() {
 			report.Issues = append(report.Issues, "project_registered_without_scaffold")
 			report.State = StateDrift
 		} else {
@@ -660,7 +662,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 	empty := len(emptyRes.Stdout) == 0
 
 	if empty {
-		if registered || projectConflict {
+		if project.Present || project.Conflicts() {
 			report.Issues = append(report.Issues, "project_registered_without_scaffold")
 		}
 		// An empty directory has nothing to overwrite, so a leftover
@@ -676,7 +678,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 		// A registration pointing at a *different* path stays drift. That slug
 		// belongs to something else, and scaffolding under it would trample a
 		// project Torio does not own.
-		if report.PathSecure && report.NativeFilesystem && !projectConflict {
+		if report.PathSecure && report.NativeFilesystem && !project.Conflicts() {
 			report.State = StateUninitialized
 		} else {
 			report.State = StateDrift
@@ -792,10 +794,10 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 	switch {
 	case !report.PathSecure || !report.NativeFilesystem || !report.ManagedScaffold:
 		report.State = StateDrift
-	case projectConflict:
+	case project.Conflicts():
 		report.Issues = append(report.Issues, "project_slug_conflict")
 		report.State = StateDrift
-	case registrationDeclared && !registered:
+	case registrationDeclared && !project.Registered():
 		report.Issues = append(report.Issues, "project_not_registered")
 		report.State = StateDrift
 	default:
@@ -824,72 +826,53 @@ func (m *Manager) requireRootAccess(ctx context.Context, op string) error {
 // declares no project registry has nothing to register the vault with, and the
 // vault is no less usable for it: the skill reaches a path, not a registration.
 func (m *Manager) ensureProject(ctx context.Context, op string) error {
-	if m.backend().Registry() == nil {
+	reg := m.backend().Registry()
+	if reg == nil {
 		return nil
 	}
-	registered, conflict, err := m.projectStatus(ctx, op)
+	status, err := m.projectStatus(ctx, op)
 	if err != nil {
 		return err
 	}
-	if conflict {
-		return &Error{Op: op, Kind: KindRegistration, Err: fmt.Errorf("Hermes Project slug %q points to a different primary path", ProjectSlug)}
+	if status.Conflicts() {
+		return &Error{Op: op, Kind: KindRegistration, Err: fmt.Errorf("backend project slug %q points to a different primary path", ProjectSlug)}
 	}
-	if registered {
+	if status.Registered() {
 		return nil
 	}
-	if err := m.mustRun(ctx, op, KindRegistration, "register Hermes Project",
-		guestexec.UserExecAs(m.agentUser(), "hermes", "project", "create", ProjectName, m.vault(), "--slug", ProjectSlug)); err != nil {
-		return err
+	if err := reg.Create(ctx, m.guest, ProjectSlug, ProjectName, m.vault()); err != nil {
+		return m.mapRegistryErr(op, err)
 	}
-	registered, conflict, err = m.projectStatus(ctx, op)
+	status, err = m.projectStatus(ctx, op)
 	if err != nil {
 		return err
 	}
-	if !registered || conflict {
-		return &Error{Op: op, Kind: KindRegistration, Err: fmt.Errorf("Hermes Project registration postcondition failed")}
+	if !status.Registered() {
+		return &Error{Op: op, Kind: KindRegistration, Err: fmt.Errorf("backend project registration postcondition failed")}
 	}
 	return nil
 }
 
-func (m *Manager) projectStatus(ctx context.Context, op string) (registered, conflict bool, err error) {
-	if m.backend().Registry() == nil {
+func (m *Manager) projectStatus(ctx context.Context, op string) (backend.RegistryStatus, error) {
+	reg := m.backend().Registry()
+	if reg == nil {
 		// No registry to be registered with. The vault is reached by path, and
 		// a backend that keeps no project list has nothing to add it to.
-		return false, false, nil
+		return backend.RegistryStatus{}, nil
 	}
-	show, err := m.run(ctx, op, guestexec.UserExecAs(m.agentUser(), "hermes", "project", "show", ProjectSlug))
+	status, err := reg.Status(ctx, m.guest, ProjectSlug, m.vault())
 	if err != nil {
-		return false, false, err
+		return backend.RegistryStatus{}, m.mapRegistryErr(op, err)
 	}
-	// Hand-verified against a real Hermes v0.19.0 guest: `hermes project show`
-	// exits 0 for an unknown slug too, writing only a diagnostic to stderr,
-	// because upstream `hermes_cli/main.py` calls `args.func(args)` and discards
-	// the return value, making every `return 1` in `projects_cmd.py` dead code.
-	// Existence must therefore be read from stdout, never from the exit code.
-	if show.ExitCode == 0 {
-		switch {
-		case strings.TrimSpace(string(show.Stdout)) == "":
-			// No project block was printed: the slug is free, not conflicting.
-			return false, false, nil
-		case singlePrimaryPathIs(string(show.Stdout), m.vault()):
-			return true, false, nil
-		default:
-			// A project block exists but its primary path is not ours.
-			return false, true, nil
-		}
+	return status, nil
+}
+
+func (m *Manager) mapRegistryErr(op string, err error) error {
+	var registryErr *backend.RegistryError
+	if errors.As(err, &registryErr) && registryErr.Malformed {
+		return &Error{Op: op, Kind: KindVerification, Err: registryErr.Err}
 	}
-	// A non-zero exit no longer means "no such project"; it means the Hermes CLI
-	// itself is broken or missing (e.g. 127, or argparse's 2). A successful list
-	// proves the Hermes Project CLI is available, but list output is never used
-	// for path matching: it carries slugs and names, not primary paths.
-	list, err := m.run(ctx, op, guestexec.UserExecAs(m.agentUser(), "hermes", "project", "list"))
-	if err != nil {
-		return false, false, err
-	}
-	if list.ExitCode != 0 {
-		return false, false, commandError(op, KindRegistration, "list Hermes Projects", list.ExitCode)
-	}
-	return false, false, nil
+	return &Error{Op: op, Kind: KindRegistration, Err: err}
 }
 
 func (m *Manager) testPath(ctx context.Context, op, flag, path string) (bool, error) {
