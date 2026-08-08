@@ -8,10 +8,15 @@ import (
 	"testing"
 )
 
-// operatorShellHost prepares the two host preconditions of an operator
-// session — a canonical Lima ssh config for the target instance and a running
-// SSH agent — and returns the fake HOME they live under.
-func operatorShellHost(t *testing.T) string {
+// limaSSHConfigHost prepares the one host precondition every session spec has —
+// a canonical Lima ssh config for the target instance — under a fake HOME, and
+// returns that HOME.
+//
+// It is a fixture rather than the real host because these are unit tests: a spec
+// builder that reads $HOME/.lima passes on any machine that happens to have the
+// instance running and fails everywhere else, which is exactly how the agent
+// session specs came to be green locally and red on CI.
+func limaSSHConfigHost(t *testing.T) string {
 	t.Helper()
 
 	home := t.TempDir()
@@ -23,6 +28,17 @@ func operatorShellHost(t *testing.T) string {
 		t.Fatalf("writing lima ssh config: %v", err)
 	}
 	t.Setenv("HOME", home)
+	return home
+}
+
+// operatorShellHost adds the second precondition an operator session has and an
+// agent session deliberately has not: a running SSH agent. They are separate so
+// that a spec which started requiring an agent socket it should never have
+// would fail rather than be handed one by a shared fixture.
+func operatorShellHost(t *testing.T) string {
+	t.Helper()
+
+	home := limaSSHConfigHost(t)
 	t.Setenv("SSH_AUTH_SOCK", filepath.Join(home, "agent.sock"))
 	return home
 }

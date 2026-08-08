@@ -19,6 +19,7 @@ const testAgentHelper = "/usr/local/bin/torio-agent-session"
 // multiplexed connection whose master was opened *with* forwarding would carry
 // push capability nobody asked for.
 func TestProjectAgentSpecCarriesNoPushCapability(t *testing.T) {
+	limaSSHConfigHost(t)
 	cmd, err := ProjectAgentSpec(testAgentHelper, HermesWorkspacePath, HermesWorkspacePath+"/demo")
 	if err != nil {
 		t.Fatalf("ProjectAgentSpec: %v", err)
@@ -85,6 +86,7 @@ func TestProjectAgentSpecRefusesABackendWithNoHelper(t *testing.T) {
 // the other's helper.
 func TestSessionSpecsValidateAgainstTheBackendsOwnWorkspace(t *testing.T) {
 	const other = "/home/claude/projects"
+	limaSSHConfigHost(t)
 
 	if _, err := ProjectAgentSpec(testAgentHelper, other, other+"/demo"); err != nil {
 		t.Fatalf("a path under the backend's own workspace was rejected: %v", err)
