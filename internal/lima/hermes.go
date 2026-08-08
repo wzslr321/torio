@@ -185,21 +185,21 @@ func (b hermesBackend) reconcileInstall(ctx context.Context, r backend.StepRunne
 }
 
 func (hermesBackend) installDeps(ctx context.Context, r backend.StepRunner, name string) error {
-	upd, err := r.Probe(ctx, name, "sudo", "-n", "apt-get", "update", "-y")
+	upd, err := r.Probe(ctx, name, "sudo", "-n", "apt-get", "-o", "DPkg::Lock::Timeout=300", "update", "-y")
 	if err != nil {
 		return err
 	}
 	if upd.ExitCode != 0 {
-		return r.Fail(name, "apt-get update failed", "fix guest apt sources and re-run bootstrap")
+		return r.Fail(name, "apt-get update failed", "inspect the guest package manager and re-run bootstrap")
 	}
 	inst, err := r.Probe(ctx, name,
-		append([]string{"sudo", "-n", "apt-get", "install", "-y", "--no-install-recommends"}, hermesBuildDeps...)...,
+		append([]string{"sudo", "-n", "apt-get", "-o", "DPkg::Lock::Timeout=300", "install", "-y", "--no-install-recommends"}, hermesBuildDeps...)...,
 	)
 	if err != nil {
 		return err
 	}
 	if inst.ExitCode != 0 {
-		return r.Fail(name, "apt-get install of hermes build deps failed", "fix guest apt and re-run bootstrap")
+		return r.Fail(name, "apt-get install of hermes build deps failed", "inspect the guest package manager and re-run bootstrap")
 	}
 	return nil
 }
@@ -348,7 +348,7 @@ func (hermesBackend) ProbeAuth(context.Context, backend.StepRunner) error { retu
 // should not carry a compiler toolchain and ffmpeg for a Python install it will
 // never perform.
 func (hermesBackend) ProvisionScript() string {
-	return `apt-get install -y --no-install-recommends ` + strings.Join(hermesBuildDeps, " ") + `
+	return `apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends ` + strings.Join(hermesBuildDeps, " ") + `
 
 if ! id -u ` + HermesUser + ` >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash --user-group ` + HermesUser + `

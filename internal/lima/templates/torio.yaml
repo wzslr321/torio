@@ -48,8 +48,8 @@ provision:
       #!/bin/bash
       set -euxo pipefail
       export DEBIAN_FRONTEND=noninteractive
-      apt-get update -y
-      apt-get install -y --no-install-recommends git curl ca-certificates xz-utils sudo uidmap dbus-user-session
+      apt-get -o DPkg::Lock::Timeout=300 update -y
+      apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends git curl ca-certificates xz-utils sudo uidmap dbus-user-session
 
       if ! getent group torio-projects >/dev/null; then
         groupadd --system torio-projects
