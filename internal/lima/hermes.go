@@ -96,7 +96,10 @@ func (hermesBackend) VerifyMembership(ctx context.Context, r backend.StepRunner)
 	return nil
 }
 
-// VerifyIsolation proves hermes holds no authority beyond its own work.
+// VerifyIsolation proves the Hermes-specific isolation condition Torio checks:
+// the agent identity is not root-equivalent through the Docker group. It does
+// not claim to enumerate every authority the identity may hold; unlike the
+// interactive Claude Code backend, Hermes has no exact-group-set contract.
 func (hermesBackend) VerifyIsolation(ctx context.Context, r backend.StepRunner) error {
 	const name = "hermes_not_in_docker"
 	res, err := r.Probe(ctx, name, "id", "-nG", HermesUser)
