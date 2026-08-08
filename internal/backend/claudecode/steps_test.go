@@ -48,6 +48,10 @@ func (f *fakeRunner) Fail(name, detail, _ string) error {
 
 func (f *fakeRunner) PinnedVersion() string { return "" }
 
+// The fake reconciles, so every step under test takes its repairing path and
+// the assertions below are about what that path does.
+func (f *fakeRunner) Reconcile() bool { return true }
+
 // Compile-time proof the fake really is the interface a backend is handed.
 var _ backend.StepRunner = (*fakeRunner)(nil)
 

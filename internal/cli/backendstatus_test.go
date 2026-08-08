@@ -59,7 +59,7 @@ func TestStatusReadsTheCheckNamesTheBackendDeclares(t *testing.T) {
 	}
 	rep := statusReport(
 		lima.CheckResult{Name: "claude_version", OK: true, Detail: "2.1.220"},
-		lima.CheckResult{Name: "claude_auth", OK: true, Detail: "credential present"},
+		lima.CheckResult{Name: "claude_auth", OK: true, Detail: backend.CredentialPresent},
 		lima.CheckResult{Name: "claude_mcp_servers", OK: true, Detail: "none configured"},
 	)
 	got := renderStatus(t, b, rep)
@@ -79,7 +79,7 @@ func TestStatusReadsTheCheckNamesTheBackendDeclares(t *testing.T) {
 // still be read correctly. Deriving the key would fail this and only this.
 func TestADeclaredNameIsNotTheRegisteredName(t *testing.T) {
 	b := statusBackend{name: "some-agent", checks: backend.StatusChecks{Auth: "unrelated_auth_check"}}
-	rep := statusReport(lima.CheckResult{Name: "unrelated_auth_check", OK: true, Detail: "credential present"})
+	rep := statusReport(lima.CheckResult{Name: "unrelated_auth_check", OK: true, Detail: backend.CredentialPresent})
 	if got := renderStatus(t, b, rep); !strings.Contains(got, `"credentials":"present"`) {
 		t.Errorf("status did not read the declared check name\ngot: %s", got)
 	}
@@ -114,10 +114,69 @@ func TestADeclaredCheckWithNoResultIsUnknown(t *testing.T) {
 // the two "I did not find out" answers.
 func TestALoggedOutBoxIsAbsent(t *testing.T) {
 	b := statusBackend{name: "claude-code", checks: backend.StatusChecks{Auth: "claude_auth"}}
-	rep := statusReport(lima.CheckResult{Name: "claude_auth", OK: true, Detail: "no credential"})
+	rep := statusReport(lima.CheckResult{Name: "claude_auth", OK: true, Detail: backend.CredentialAbsent})
 	if got := renderStatus(t, b, rep); !strings.Contains(got, `"credentials":"absent"`) {
 		t.Errorf("a probed logged-out box must be absent\ngot: %s", got)
 	}
+}
+
+// TestAnUnrecognizedCredentialDetailIsUnknown pins the failure the shared
+// constants exist to prevent. The state used to be recovered from the prose —
+// a detail starting "credent" and containing "present" — so "credential not
+// present", the most natural rewording of the absent answer, reported a
+// credential the box does not hold.
+//
+// Equality against the constants makes that impossible, and anything else is
+// "unknown": a detail this renderer cannot read is an answer it did not get,
+// which is exactly what unknown means.
+func TestAnUnrecognizedCredentialDetailIsUnknown(t *testing.T) {
+	b := statusBackend{name: "claude-code", checks: backend.StatusChecks{Auth: "claude_auth"}}
+	for _, detail := range []string{
+		"credential not present",
+		"credential absent; run `torio backend login`",
+		"",
+	} {
+		rep := statusReport(lima.CheckResult{Name: "claude_auth", OK: true, Detail: detail})
+		if got := renderStatus(t, b, rep); !strings.Contains(got, `"credentials":"unknown"`) {
+			t.Errorf("detail %q was read as a credential state\ngot: %s", detail, got)
+		}
+	}
+}
+
+// TestTheAuthCheckRecordsWhatTheRendererReads closes the loop across the
+// package boundary: the backend that records a credential answer and the
+// renderer that reads one must be using the same two strings, and only a real
+// backend can prove that.
+func TestTheAuthCheckRecordsWhatTheRendererReads(t *testing.T) {
+	b := claudecode.New()
+	for exit, want := range map[int]string{0: `"credentials":"present"`, 1: `"credentials":"absent"`} {
+		r := &recordingDetailRunner{exit: exit}
+		if err := b.ProbeAuth(context.Background(), r); err != nil {
+			t.Fatalf("ProbeAuth: %v", err)
+		}
+		rep := statusReport(lima.CheckResult{Name: b.StatusChecks().Auth, OK: true, Detail: r.detail})
+		if got := renderStatus(t, b, rep); !strings.Contains(got, want) {
+			t.Errorf("the renderer did not read the detail the backend recorded (%q) as %s\ngot: %s", r.detail, want, got)
+		}
+	}
+}
+
+// recordingDetailRunner answers the credential probe with a chosen exit code
+// and keeps the detail recorded, which is the value the renderer is handed.
+type recordingDetailRunner struct {
+	recordingRunner
+	exit   int
+	detail string
+}
+
+func (r *recordingDetailRunner) Probe(ctx context.Context, name string, argv ...string) (execx.Result, error) {
+	_, _ = r.recordingRunner.Probe(ctx, name, argv...)
+	return execx.Result{ExitCode: r.exit}, nil
+}
+
+func (r *recordingDetailRunner) Record(name string, ok bool, detail string) {
+	r.recordingRunner.Record(name, ok, detail)
+	r.detail = detail
 }
 
 // TestBootstrapTellsAnUnauthenticatedBoxToLogIn pins the second reader of the
@@ -128,7 +187,7 @@ func TestBootstrapTellsAnUnauthenticatedBoxToLogIn(t *testing.T) {
 	b := statusBackend{name: "claude-code", checks: backend.StatusChecks{Auth: "claude_auth"}}
 	var out bytes.Buffer
 	a := &app{stdout: &out, stderr: &bytes.Buffer{}, build: testBuild(), backend: b}
-	rep := statusReport(lima.CheckResult{Name: "claude_auth", OK: true, Detail: "no credential"})
+	rep := statusReport(lima.CheckResult{Name: "claude_auth", OK: true, Detail: backend.CredentialAbsent})
 	if err := a.writeBootstrapNextStep(rep); err != nil {
 		t.Fatalf("writeBootstrapNextStep: %v", err)
 	}
@@ -144,7 +203,7 @@ func TestBootstrapTellsAnUnauthenticatedBoxToLogIn(t *testing.T) {
 func TestAnUndeclaredCheckMatchesNothing(t *testing.T) {
 	b := statusBackend{name: "claude-code", checks: backend.StatusChecks{Auth: "claude_auth"}}
 	rep := statusReport(
-		lima.CheckResult{Name: "claude_auth", OK: true, Detail: "credential present"},
+		lima.CheckResult{Name: "claude_auth", OK: true, Detail: backend.CredentialPresent},
 		lima.CheckResult{Name: "", OK: true, Detail: "atlassian"},
 	)
 	got := renderStatus(t, b, rep)
@@ -156,17 +215,42 @@ func TestAnUndeclaredCheckMatchesNothing(t *testing.T) {
 	}
 }
 
+// TestBackendStatusChangesNothing pins the command's own promise against the
+// walk it runs. `backend status` and `vm bootstrap` share that walk, and status
+// asked for the repairing one: on a guest whose command path had drifted it
+// would repoint a root-owned symlink — and on a fresh one download and install
+// a binary — while its help text said it read the guest and changed nothing.
+func TestBackendStatusChangesNothing(t *testing.T) {
+	script := bootstrapHappyResp()
+	script[10] = scriptedResp{res: execx.Result{ExitCode: 1}} // shim points nowhere
+	fake := &fakeLimaRunner{script: script}
+
+	code, _, stderr := runVMWithFake(t, []string{"backend", "status"}, fake)
+	if code == int(ExitOK) {
+		t.Fatal("backend status reported a drifted guest as fine")
+	}
+	if !strings.Contains(stderr, "torio vm bootstrap") {
+		t.Errorf("the failure does not name the command that repairs it\ngot: %s", stderr)
+	}
+	for i, call := range fake.calls {
+		for _, arg := range call {
+			if arg == "ln" {
+				t.Fatalf("backend status repaired the guest: call %d = %v", i, call)
+			}
+		}
+	}
+}
+
 // TestTheRealBackendsDeclareTheChecksTheyRecord closes the loop the unit tests
 // above cannot: a fake can declare any name and be internally consistent, so it
 // proves the renderer and nothing about the two backends that ship.
 //
-// It covers the version and auth checks, which a backend records through its
-// own contract methods. The MCP servers check is deliberately left out: on the
-// Hermes backend it is recorded by this repository's bootstrap orchestrator
-// rather than through the Backend interface, so there is no interface call that
-// would reach it and a test pretending otherwise would assert nothing. Within a
-// package the two names are now the same constant, which is the guard that
-// belongs there.
+// Every declared check is covered, because every one of them is recorded
+// through a contract method the bootstrap walk calls. That was not true while
+// the Hermes MCP check was recorded only by the broker verifier: it was
+// declared to a renderer that reads the bootstrap report, so `backend status`
+// showed nothing on a box with MCP servers configured — the same silence a
+// backend that declares no check at all produces.
 func TestTheRealBackendsDeclareTheChecksTheyRecord(t *testing.T) {
 	for _, b := range []backend.Backend{lima.Hermes(), claudecode.New()} {
 		name := b.Identity().Name
@@ -177,9 +261,11 @@ func TestTheRealBackendsDeclareTheChecksTheyRecord(t *testing.T) {
 		// what this test is about, not the verdict.
 		_ = b.VerifyVersion(context.Background(), r)
 		_ = b.ProbeAuth(context.Background(), r)
+		_ = b.VerifyGuardrails(context.Background(), r)
 		for _, declared := range []struct{ role, want string }{
 			{"version", checks.Version},
 			{"auth", checks.Auth},
+			{"MCP servers", checks.MCPServers},
 		} {
 			if declared.want == "" {
 				continue
@@ -215,6 +301,8 @@ func (r *recordingRunner) Fail(name, _, _ string) error {
 }
 
 func (r *recordingRunner) PinnedVersion() string { return "" }
+
+func (r *recordingRunner) Reconcile() bool { return true }
 
 func (r *recordingRunner) saw(name string) bool {
 	for _, n := range r.names {

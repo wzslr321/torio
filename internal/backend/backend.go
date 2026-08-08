@@ -93,6 +93,16 @@ type StepRunner interface {
 	// empty when unpinned. A backend that carries its own pin enforces that one
 	// regardless.
 	PinnedVersion() string
+	// Reconcile reports whether this run may repair what it finds. It is false
+	// for a caller that is only asking what is true — `torio backend status` —
+	// and a step that would install, link or write anything must instead fail
+	// with a remediation naming `torio vm bootstrap`.
+	//
+	// It exists because the alternative was a status command that downloaded a
+	// pinned binary and rewrote a root-owned settings file while its own help
+	// text said it changed nothing. Verification does not need repair; only
+	// bootstrap does.
+	Reconcile() bool
 }
 
 // Backend is the contract. The bootstrap hooks run in the order they are
@@ -176,6 +186,24 @@ type StatusChecks struct {
 	// Empty when the backend is not an MCP client.
 	MCPServers string
 }
+
+// The two details an auth check may record. They are constants shared by the
+// backend that writes one and the renderer that reads it, and the renderer
+// compares by equality.
+//
+// The first version recovered the state from the prose by searching for
+// "present" in a detail beginning "credent" — so "credential not present", the
+// most natural rewording of the second constant, would have reported a
+// credential the box does not hold. A check name is already shared as a
+// constant; the answer it records is worth no less.
+//
+// Neither carries a remediation. What an operator should do about a logged-out
+// box is the CLI's to say, and it says it from the state rather than by
+// appending a sentence a comparison then has to tolerate.
+const (
+	CredentialPresent = "credential present"
+	CredentialAbsent  = "credential absent"
+)
 
 // Transport is the one-shot guest command channel a capability surface uses.
 // It is declared here rather than imported so this package stays free of guest

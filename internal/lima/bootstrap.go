@@ -75,7 +75,7 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 	// The backend's steps run against the same fail-closed machinery as ours:
 	// truncated output is not evidence, a failed check is recorded in the report
 	// the operator reads, and a failure carries a remediation.
-	r := &stepRunner{adapter: a, report: &rep, pinnedVersion: opts.PinnedVersion}
+	r := &stepRunner{adapter: a, report: &rep, pinnedVersion: opts.PinnedVersion, reconcile: !opts.VerifyOnly}
 
 	// Identity first, then the shared group it must be in, then the group's
 	// other member, then what the identity must NOT hold. Each agnostic step
@@ -118,10 +118,10 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 	if err := a.verifyOperatorShellHelper(ctx, &rep); err != nil {
 		return rep, err
 	}
-	if err := a.verifyProjectEnterHelper(ctx, &rep); err != nil {
+	if err := a.verifyProjectEnterHelper(ctx, &rep, r.reconcile); err != nil {
 		return rep, err
 	}
-	if err := a.verifyAgentSessionHelper(ctx, &rep, b.Session()); err != nil {
+	if err := a.verifyAgentSessionHelper(ctx, &rep, b.Session(), r.reconcile); err != nil {
 		return rep, err
 	}
 
@@ -145,6 +145,7 @@ type stepRunner struct {
 	adapter       *Adapter
 	report        *BootstrapReport
 	pinnedVersion string
+	reconcile     bool
 }
 
 var _ backend.StepRunner = (*stepRunner)(nil)
@@ -171,6 +172,8 @@ func (r *stepRunner) Fail(name, detail, remediation string) error {
 }
 
 func (r *stepRunner) PinnedVersion() string { return r.pinnedVersion }
+
+func (r *stepRunner) Reconcile() bool { return r.reconcile }
 
 const bootstrapOp = "bootstrap"
 
@@ -299,6 +302,15 @@ type BootstrapOptions struct {
 	// runs Hermes, and reading an older config must not re-point a box at a
 	// different agent.
 	Backend backend.Backend
+	// VerifyOnly runs every check and repairs nothing. A step that would have
+	// installed or linked something fails instead, carrying the remediation
+	// that names `torio vm bootstrap`.
+	//
+	// It is what makes a status command able to say it changes nothing and be
+	// telling the truth. The zero value reconciles, because that is what
+	// bootstrap is for and a caller that forgets the field must not silently
+	// stop repairing the guest.
+	VerifyOnly bool
 }
 
 // CheckResult is one bootstrap postcondition or reconcile outcome. Detail is a
@@ -587,7 +599,7 @@ func (a *Adapter) verifyRootHelperFile(ctx context.Context, rep *BootstrapReport
 // root-owned regular file provisioned by the Lima template. A helper absent
 // from a VM created by an older Torio is installed from the current embedded
 // bytes. Any existing but drifted path is reported and never overwritten.
-func (a *Adapter) verifyProjectEnterHelper(ctx context.Context, rep *BootstrapReport) error {
+func (a *Adapter) verifyProjectEnterHelper(ctx context.Context, rep *BootstrapReport, reconcile bool) error {
 	const name = "project_enter_helper"
 	spec := projectEnterHelperSpec
 
@@ -603,6 +615,9 @@ func (a *Adapter) verifyProjectEnterHelper(ctx context.Context, rep *BootstrapRe
 		}
 		if absent.ExitCode != 0 {
 			return a.verifyFailed(rep, name, "could not prove the helper path is absent", projectEnterHelperRemediation)
+		}
+		if !reconcile {
+			return a.verifyFailed(rep, name, "no project enter helper at "+spec.Path, projectEnterHelperRemediation)
 		}
 		installed, err := a.SSHInput(ctx, embeddedProjectEnter,
 			[]string{"sudo", "-n", "/bin/bash", "-ceu", projectEnterInstallScript})
@@ -633,7 +648,7 @@ func (a *Adapter) verifyProjectEnterHelper(ctx context.Context, rep *BootstrapRe
 // part of the boundary in the same way the shell helper is: root-owned, a
 // regular file, writable by nobody else. It is installed from the embedded
 // bytes when absent and reported, never overwritten, when it has drifted.
-func (a *Adapter) verifyAgentSessionHelper(ctx context.Context, rep *BootstrapReport, session *backend.SessionSpec) error {
+func (a *Adapter) verifyAgentSessionHelper(ctx context.Context, rep *BootstrapReport, session *backend.SessionSpec, reconcile bool) error {
 	if session == nil {
 		return nil
 	}
@@ -658,6 +673,9 @@ func (a *Adapter) verifyAgentSessionHelper(ctx context.Context, rep *BootstrapRe
 		}
 		if absent.ExitCode != 0 {
 			return a.verifyFailed(rep, name, "could not prove the helper path is absent", remediation)
+		}
+		if !reconcile {
+			return a.verifyFailed(rep, name, "no agent session helper at "+spec.Path, remediation)
 		}
 		installed, err := a.SSHInput(ctx, session.Helper,
 			[]string{"sudo", "-n", "/bin/bash", "-ceu", rootHelperInstallScript(spec.Path)})

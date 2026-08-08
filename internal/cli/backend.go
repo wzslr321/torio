@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/lima"
 )
 
@@ -43,7 +44,9 @@ func newBackendStatusCmd(a *app) *cobra.Command {
 			"session — the backend has.\n\n" +
 			"It reads the guest and changes nothing, and it never reaches the network: " +
 			"whether a credential is still valid is between the operator and whoever " +
-			"issued it.",
+			"issued it.\n\n" +
+			"It runs the same checks as `vm bootstrap` with every repair turned off, so " +
+			"a guest that needs one is reported rather than rebuilt.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := a.opContext(cmd)
@@ -52,7 +55,11 @@ func newBackendStatusCmd(a *app) *cobra.Command {
 			if err != nil {
 				return &CLIError{Exit: ExitExternal, Code: "OPERATOR_LOOKUP_FAILED", Command: "backend.status", Message: err.Error()}
 			}
-			rep, err := a.newLima().Bootstrap(ctx, lima.BootstrapOptions{OperatorUser: opUser, Backend: a.backend})
+			// VerifyOnly is what makes the sentence above true. The same walk
+			// records the checks this report is read from, but nothing in it
+			// may install, link or write: a guest that needs repair is
+			// reported, with `torio vm bootstrap` as the remedy.
+			rep, err := a.newLima().Bootstrap(ctx, lima.BootstrapOptions{OperatorUser: opUser, Backend: a.backend, VerifyOnly: true})
 			if err != nil {
 				ce := mapLimaError("backend.status", err)
 				ce.Details = bootstrapReportDetails(rep)
@@ -145,11 +152,15 @@ func checkDetail(rep lima.BootstrapReport, name string) (string, bool) {
 // says something different about what Torio actually did.
 //
 // "not-applicable" means the backend declares no auth check — there was no way
-// to ask. "unknown" means it declares one and the report has no result for it —
-// there was a way to ask and no answer came back. Collapsing the second into
-// the first is how a box that holds a credential comes to report that its state
-// is unknowable, and collapsing either into "absent" claims a logged-out box on
-// no evidence.
+// to ask. "unknown" means it declares one and the report carries no answer this
+// renderer recognizes: either no result at all, or a detail that is neither of
+// the two the contract defines. Collapsing the second into the first is how a
+// box that holds a credential comes to report that its state is unknowable, and
+// collapsing either into "absent" claims a logged-out box on no evidence.
+//
+// The two recognized details are compared by equality against the constants the
+// recording backend uses. Reading the state out of free prose is what let
+// "credential not present" answer "present".
 func credentialState(rep lima.BootstrapReport, name string) string {
 	if name == "" {
 		return "not-applicable"
@@ -158,20 +169,13 @@ func credentialState(rep lima.BootstrapReport, name string) string {
 	switch {
 	case !found:
 		return "unknown"
-	case len(detail) >= 7 && detail[:7] == "credent" && contains(detail, "present"):
+	case detail == backend.CredentialPresent:
 		return "present"
-	default:
+	case detail == backend.CredentialAbsent:
 		return "absent"
+	default:
+		return "unknown"
 	}
-}
-
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }
 
 func orNone(s string) string {

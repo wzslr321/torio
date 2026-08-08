@@ -30,6 +30,12 @@ yours. Torio sees none of the flow — it builds the transport and hands over th
 terminal. No SSH agent is forwarded, so a login session cannot reach a Git
 remote.
 
+`status` verifies and never repairs. It runs the same guest checks as `vm
+bootstrap`, with every repair turned off: a box missing something bootstrap
+would install — the pinned binary, the command-path link, the managed settings —
+fails the check and names `torio vm bootstrap` as the remedy, rather than being
+quietly rebuilt by a command you asked a question.
+
 `status` answers four states for the credential, and only two of them are
 findings. **present** and **absent** are what a probe returned.
 **not-applicable** is for a backend that declares no credential check at all,

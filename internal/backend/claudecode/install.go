@@ -61,6 +61,10 @@ func (claudeBackend) Install(ctx context.Context, r backend.StepRunner) error {
 		return err
 	}
 	if present.ExitCode != 0 {
+		if !r.Reconcile() {
+			return r.Fail(name, "no pinned claude binary at "+target,
+				"run `torio vm bootstrap`, which downloads and verifies the pinned version")
+		}
 		if err := download(ctx, r, name, target); err != nil {
 			return err
 		}
@@ -183,6 +187,10 @@ func reconcileCommandPath(ctx context.Context, r backend.StepRunner, name, targe
 	if trimmed(cur.Stdout) == target {
 		r.Record(link, true, "already correct")
 		return nil
+	}
+	if !r.Reconcile() {
+		return r.Fail(link, "the claude command path does not point at "+target,
+			"run `torio vm bootstrap`, which repoints "+commandPath)
 	}
 	ln, err := r.Probe(ctx, link, "sudo", "-n", "ln", "-sfn", target, commandPath)
 	if err != nil {

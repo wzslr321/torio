@@ -73,6 +73,10 @@ func reconcileManagedSettings(ctx context.Context, r backend.StepRunner) error {
 			return r.Fail(name, "could not prove the managed settings path is absent",
 				"inspect "+managedSettingsPath+" on the guest")
 		}
+		if !r.Reconcile() {
+			return r.Fail(name, "no managed settings at "+managedSettingsPath,
+				"run `torio vm bootstrap`, which installs them root-owned")
+		}
 		if err := installManagedSettings(ctx, r, name); err != nil {
 			return err
 		}

@@ -37,9 +37,9 @@ func (claudeBackend) ProbeAuth(ctx context.Context, r backend.StepRunner) error 
 		return err
 	}
 	if res.ExitCode == 0 {
-		r.Record(name, true, "credential present")
+		r.Record(name, true, backend.CredentialPresent)
 		return nil
 	}
-	r.Record(name, true, "credential absent; run `torio backend login`")
+	r.Record(name, true, backend.CredentialAbsent)
 	return nil
 }
