@@ -144,8 +144,14 @@ it refused, an unrecognized `kind` refused.
 {"schema_version": "1", "kind": "permission", "pid": 1234}
 ```
 
-`pid` is optional. There is deliberately no free-text field, so there is nothing
-in a marker that a rendered line could carry.
+`pid` is optional and is the session that is waiting. A backend's hook finds it
+by walking up the process tree to the nearest ancestor that is the agent — a
+hook runs as a child of the session that fired it — and writes the marker
+without one if no ancestor matches, which is a weaker answer rather than a
+missing one.
+
+There is deliberately no free-text field, so there is nothing in a marker that a
+rendered line could carry.
 
 **Gate** — the file must be owned by the backend identity and must not be
 group- or world-writable. A marker that fails the gate is `unknown`, never
@@ -163,15 +169,20 @@ reports not-waiting; a marker naming no pid survives only while some session on
 that box does. Where liveness itself is `unknown`, so is waiting: a marker that
 cannot be ranked is not reported.
 
-**Scope** — one marker per box, not per session. With two sessions open on the
-same box the field answers "does anything here want you", and cannot say which:
-either session's hook writes the same file, and answering in one clears it for
-both. So a box with one session waiting and one being answered reports
-not-waiting until the waiting one next speaks. That is the same lost-ping
-failure this design already accepts, arriving through a second session rather
-than through a missed event, and it is the reason to reach for per-session
-markers when one box routinely runs several agents. Neither backend records a
-session id anywhere a marker could name today.
+**Scope** — one marker per box, and it names one session. `pid` is what makes
+the answer actionable where several agents share a box: it appears in `sessions`
+above, so the waiting one can be told from the others by its age. A marker
+without a pid is a statement about the box instead, ranked against every session
+on it.
+
+One file per box still bounds what it can say. Two sessions waiting at once are
+one marker — the second to speak overwrites the first — and a prompt submitted
+in either clears it for both, so a box with one session waiting and one being
+answered reports not-waiting until the waiting one next speaks. That is the same
+lost-ping failure this design accepts elsewhere, arriving through a second
+session rather than through a missed event. A marker per session is the fix if
+one box routinely runs several agents; it needs the reader to enumerate a
+directory rather than stat a fixed path.
 
 **Cost of a lost marker** — a missed notification, and nothing else. That is the
 failure this design chose to accept, which is why absence with a live session is

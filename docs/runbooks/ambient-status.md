@@ -208,11 +208,34 @@ A stopped box reports `0` sessions and `no` waiting — proven, without entering
 it, because nothing runs in a VM that is not running — and `?` for progress,
 because that evidence is inside it.
 
+## Which session is it
+
 `SESSION` counts every agent process on the box, so two open sessions read as
-`2`. `WAITING` does not divide the same way: there is one marker per box, so it
-answers "does anything here want you" and not which one. Answering in one
-session clears the flag the other set. If you routinely keep several sessions on
-one box, read the count and the flag together rather than the flag alone.
+`2`, and `WAITING` names the one that spoke:
+
+```console
+$ torio status
+INSTANCE           BOX      BACKEND      SESSION  WAITING                    PROGRESS
+torio-claude-code  running  claude-code  2        notification 7m pid 11673  —
+```
+
+Match that pid against the sessions to find it by how long it has been open,
+which is usually how you remember which window it is:
+
+```console
+$ torio status --json | jq -r '.data.instances[]
+    | select(.waiting.state=="known" and .waiting.waiting)
+    | .waiting.pid as $p
+    | .session.sessions[] | select(.pid == $p)
+    | "waiting session: pid \(.pid), open for \(.age_seconds)s"'
+waiting session: pid 11673, open for 683s
+```
+
+One caveat, and it is the reason to read the count and the flag together. There
+is one marker per box: two sessions waiting at once are one marker, the second
+to speak overwrites the first, and answering in either clears it for both. So a
+box with one session waiting and one being answered reports not-waiting until
+the waiting one next speaks.
 
 `torio status` says nothing about whether one box is healthy. For that, ask the
 box: `torio backend status` walks its bootstrap checks, and `torio serve status`

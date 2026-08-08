@@ -168,8 +168,10 @@ func sessionCell(f status.SessionField) string {
 }
 
 // waitingCell names the kind rather than saying yes, because the kind is what
-// tells the operator whether the agent is blocked or merely calling out. It is
-// an enumerated value; nothing an agent wrote reaches this line.
+// tells the operator whether the agent is blocked or merely calling out, and
+// names the session when the marker recorded one — on a box running two agents
+// "something here wants you" is only half an answer. Both are enumerated or
+// numeric; nothing an agent wrote reaches this line.
 func waitingCell(f status.WaitingField) string {
 	switch {
 	case f.State == status.NotApplicable:
@@ -178,6 +180,8 @@ func waitingCell(f status.WaitingField) string {
 		return glyphUnknown
 	case !f.Waiting:
 		return "no"
+	case f.PID != 0:
+		return f.Kind + " " + compactAge(f.AgeSeconds) + " pid " + strconv.Itoa(f.PID)
 	default:
 		return f.Kind + " " + compactAge(f.AgeSeconds)
 	}

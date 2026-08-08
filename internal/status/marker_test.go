@@ -141,3 +141,34 @@ func TestWaitingIsUnknownWhenTheBackendDeclaresNoMarker(t *testing.T) {
 		t.Error("the marker path was stat'd for a backend that declares no marker")
 	}
 }
+
+// A marker that names its session makes the answer actionable: on a box running
+// two agents, "something here wants you" is only half an answer.
+func TestWaitingCarriesTheSessionTheMarkerNamed(t *testing.T) {
+	env := markerEnv(testUser, "600", testGuestNow-30, markerDocJSON(KindNotification, 1234))
+
+	got := pollWithMarker(t, env)
+
+	if got.State != Known || !got.Waiting {
+		t.Fatalf("waiting = %+v, want a proven wait", got)
+	}
+	if got.PID != 1234 {
+		t.Errorf("pid = %d, want the session the marker named", got.PID)
+	}
+}
+
+// A marker with no session is still an answer about the box, ranked against
+// every session on it. The field says so by carrying no pid rather than a zero
+// that reads like one.
+func TestWaitingWithoutASessionCarriesNoPID(t *testing.T) {
+	env := markerEnv(testUser, "600", testGuestNow-30, markerDocJSON(KindNotification, 0))
+
+	got := pollWithMarker(t, env)
+
+	if got.State != Known || !got.Waiting {
+		t.Fatalf("waiting = %+v, want a proven wait", got)
+	}
+	if got.PID != 0 {
+		t.Errorf("pid = %d, want none", got.PID)
+	}
+}

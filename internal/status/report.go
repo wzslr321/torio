@@ -115,6 +115,14 @@ type WaitingField struct {
 	// Kind is why, and is one of a fixed set. An unrecognized value makes the
 	// whole field unknown rather than reaching a renderer.
 	Kind string `json:"kind,omitempty"`
+	// PID is which session is waiting, when the marker recorded one, and it
+	// always appears in Sessions above. It is what makes the answer actionable
+	// on a box running several agents: without it the field says something here
+	// wants you and cannot say which.
+	//
+	// Zero means the marker named no session, which is not an error: the field
+	// is then a statement about the box, ranked against every session on it.
+	PID int `json:"pid,omitempty"`
 	// AgeSeconds is how long the wait has been outstanding, from the marker's
 	// modification time against the guest's clock.
 	AgeSeconds int64 `json:"age_seconds,omitempty"`

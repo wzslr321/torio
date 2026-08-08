@@ -101,3 +101,22 @@ func keysOf[V any](m map[string]V) []string {
 	}
 	return out
 }
+
+// The helper finds the waiting session by walking up to the nearest ancestor
+// that is the agent, so the name it walks for must be the one the probe
+// declares. Two spellings here would write a marker that names nothing, on
+// every box, silently.
+func TestWaitingMarkerHelperWalksForTheDeclaredSessionProcess(t *testing.T) {
+	script := string(WaitingMarkerScript())
+	spec := (claudeBackend{}).Status()
+	if !strings.Contains(script, "session_process='"+spec.SessionProcess+"'") {
+		t.Errorf("helper does not walk for %q, the process name the probe declares", spec.SessionProcess)
+	}
+	// Best effort by design: an agent that ever runs a hook detached leaves no
+	// matching ancestor, and the marker must still be written — without a pid,
+	// which is what it carried before and what the reader already ranks against
+	// the box as a whole.
+	if !strings.Contains(script, `"schema_version":"1","kind":"%s"}`) {
+		t.Error("helper has no pid-less fallback; a hook with no agent ancestor would write nothing")
+	}
+}

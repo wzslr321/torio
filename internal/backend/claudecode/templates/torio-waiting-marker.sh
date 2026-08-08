@@ -16,6 +16,7 @@
 set -euo pipefail
 
 marker="$HOME/.torio-waiting.json"
+session_process='claude'
 
 die() {
   printf 'torio-waiting-marker: %s\n' "$1" >&2
@@ -37,6 +38,25 @@ case "$1" in
     ;;
 esac
 
+# Which session is waiting, found by walking up the process tree to the nearest
+# ancestor that is the agent itself. A hook runs as a child of the session that
+# fired it, so the ancestor is the answer; the alternative, the hook payload on
+# standard input, is the one thing this file must not read.
+#
+# It is best effort by design. If the agent ever runs a hook detached, or renames
+# what a session runs as, no ancestor matches and the marker is written without a
+# pid — which is exactly what it carried before, and which the reader already
+# ranks against the box as a whole.
+waiting_pid=''
+p=$$
+while [ -n "$p" ] && [ "$p" -gt 1 ]; do
+  if [ "$(cat "/proc/$p/comm" 2>/dev/null)" = "$session_process" ]; then
+    waiting_pid=$p
+    break
+  fi
+  p="$(awk '/^PPid:/{print $2}' "/proc/$p/status" 2>/dev/null)"
+done
+
 # Written through a staging file in the same directory so a poll never reads a
 # half-written document, and created 0600 from the start rather than tightened
 # afterwards: the reader refuses a marker anyone but its owner could write, and
@@ -44,6 +64,10 @@ esac
 tmp="$(mktemp "$HOME/.torio-waiting.XXXXXX")"
 trap 'rm -f -- "$tmp"' EXIT
 chmod 0600 "$tmp"
-printf '{"schema_version":"1","kind":"%s"}\n' "$kind" >"$tmp"
+if [ -n "$waiting_pid" ]; then
+  printf '{"schema_version":"1","kind":"%s","pid":%d}\n' "$kind" "$waiting_pid" >"$tmp"
+else
+  printf '{"schema_version":"1","kind":"%s"}\n' "$kind" >"$tmp"
+fi
 mv -T -- "$tmp" "$marker"
 trap - EXIT

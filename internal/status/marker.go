@@ -133,6 +133,7 @@ func waitingFromMarker(doc markerDoc, e statEntry, sessions []Session, guestNow 
 		State:      Known,
 		Waiting:    true,
 		Kind:       doc.Kind,
+		PID:        doc.PID,
 		AgeSeconds: int64(guestNow.Sub(e.mtime) / time.Second),
 	}
 }
