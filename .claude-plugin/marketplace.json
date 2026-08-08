@@ -1,0 +1,27 @@
+{
+  "name": "torio",
+  "owner": {
+    "name": "Wiktor Zajac",
+    "url": "https://github.com/wzslr321"
+  },
+  "metadata": {
+    "description": "Plugins from the Torio project.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "brain-kit",
+      "source": "./brainkit",
+      "description": "A second brain for your agent: a Markdown vault with a written standard, plus capture, triage, daily notes, meetings, people and retrieval.",
+      "category": "productivity",
+      "keywords": [
+        "second-brain",
+        "notes",
+        "markdown",
+        "okf",
+        "pkm",
+        "vault"
+      ]
+    }
+  ]
+}

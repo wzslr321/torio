@@ -4,6 +4,18 @@
 
 ### Added
 
+- **The vault has a written standard, and it ships as a kit you can install
+  without the VM.** `brainkit/STANDARD.md` describes a Torio vault normatively —
+  eight note types and their frontmatter, naming, which links each type owes,
+  and what an agent may do to it — as a profile of the Open Knowledge Format.
+  `brainkit/` is a Claude Code plugin, published from a marketplace at the
+  repository root, carrying six skills (search, capture, triage, daily, meeting,
+  people), five commands and a librarian subagent. Two clauses make it adoptable
+  against notes that already exist: a note without frontmatter stays valid to
+  read, and wikilinks are refused in favour of relative Markdown links a checker
+  can verify. Nothing under `internal/`, `cmd/` or `e2e/` changed — the kit is
+  content, Torio is mechanics
+  ([ADR-0010](docs/adr/0010-okf-vault-standard-and-brain-kit.md)).
 - **A backend contract, and a second backend behind it.** Torio ran one agent
   and the name was hardwired into every layer. `internal/backend` now states
   what Torio requires — an identity and its paths, an install and pin, a version
