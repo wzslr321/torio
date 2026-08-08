@@ -2,6 +2,10 @@
 
 - Status: Accepted
 - Date: 2026-08-08
+- Superseded in part by:
+  [ADR-0012](0012-mcp-broker-transport-and-oauth.md), which replaces the
+  "MCP is a chosen, named hole" decision with the delivered custody path for
+  every backend.
 - Applies to: `internal/backend`, `internal/lima`, `internal/serve`,
   `internal/projects`, `internal/brain`, `internal/config`, `internal/cli`
 
