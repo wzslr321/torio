@@ -110,6 +110,22 @@ story behind every command above, are in
 unit, the loopback endpoint and the Hermes version, so a backend that stopped
 answering names itself instead of leaving you to guess.
 
+Once you run more than one box, `torio status` is the other one. It polls every
+box Torio owns and gives you a row each: whether it is running, what its agent
+has going, whether anything there is waiting on you, and when it last did work.
+Fields it cannot prove say so — `?` for a question it could not answer, `—` for
+one that backend does not answer at all — because a status line that guesses is
+one you stop reading. It exits 0 whatever it finds, so a status bar can call it
+on a timer; the recipes are in
+[`docs/runbooks/ambient-status.md`](docs/runbooks/ambient-status.md).
+
+```console
+$ torio status
+INSTANCE            BOX      BACKEND      SESSION  WAITING          PROGRESS
+torio               running  hermes       —        ?                24s
+torio-claude-code   running  claude-code  1        notification 3m  —
+```
+
 Work happens in the checkouts: from Desktop, from your own editor, or from
 `torio project enter <id>`. Edit, run checks that read rather than write,
 review `git diff`. When you decide something should leave the VM:

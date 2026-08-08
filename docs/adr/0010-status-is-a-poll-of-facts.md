@@ -2,8 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-08-08
-- Applies to: `internal/backend`, `internal/lima`, `internal/claudecode`,
-  `internal/cli`
+- Applies to: `internal/backend`, `internal/status`, `internal/lima`,
+  `internal/backend/claudecode`, `internal/config`, `internal/cli`
 
 ## Context
 
@@ -47,12 +47,12 @@ equivalent of `StdoutTruncated` — there is no moment at which a reader can
 know it saw everything — so the streaming shape would reopen a solved
 problem, not just cost more.
 
-**The facts already exist; only the relays are missing.** Both backends
-continuously write level-triggered truth as a side effect of running: pid
-files and rosters with process start times, state files rewritten at turn
-boundaries, databases whose mtime moves with work. A probe that reads those
-at poll time answers "does this agent exist and when did it last provably
-progress" without either backend changing at all.
+**The facts already exist; only the relays are missing.** A running agent is a
+process in the guest's own table, and a working one leaves modification times
+behind it: state files rewritten at turn boundaries, databases whose mtime moves
+with a write. A probe that reads those at poll time answers "does this agent
+exist and when did it last provably progress" without either backend changing at
+all.
 
 ## Decision
 
@@ -76,14 +76,19 @@ The v1 vocabulary, chosen because each entry is provable today:
 
 - **box** — running or stopped, a host-side fact from `limactl list --json`,
   which never enters a VM and costs nothing.
-- **session** — exists or not, from a pid the backend already records, paired
-  with its start time so a recycled pid does not impersonate a dead agent.
+- **session** — exists or not, from the guest's own process table, filtered to
+  the process name the backend declares its sessions run under. Written first as
+  "a pid the backend already records": checked against both running boxes,
+  neither backend records one — Claude Code keeps no roster and no pid file,
+  Hermes holds its sessions as rows inside one long-lived service. The live
+  table is the stronger reading anyway, because it cannot outlive the process it
+  describes, which is exactly what a record left behind by a killed agent does.
 - **waiting on a human** — the one field that justifies the whole surface,
   and the one exception below.
-- **last progress** — the newest timestamp among evidence the backend cannot
-  help producing (state-file mtimes, roster updates). Explicitly not "last
-  message": Hermes demonstrates that message recency reads a busy agent as
-  dead.
+- **last progress** — the newest modification time among files the backend
+  cannot help writing while it works. Explicitly not "last message": a backend
+  that records a row per turn reads as dead throughout a long tool call, which
+  is exactly when an operator is watching to see whether they are needed.
 
 There is no `failed` state. Neither backend can prove one — Hermes has no
 error value in its end reasons, Claude Code's failure hook covers API errors
@@ -145,14 +150,21 @@ for the same reason guest filenames never reach Torio's output today.
   Torio code: the tmux line, the prompt segment, and the notification hook
   are configuration for tools the operator already runs, and ship as a
   documented recipe, not as a feature.
-- Claude Code is the first backend with a probe: its roster and hook
-  surfaces exist today. Both are undocumented internals of a binary Torio
-  already pins, so the dependency is declared next to the pin and a probe
-  that cannot parse what it finds reports unknown — it never guesses.
-- Hermes reports existence and last progress from what it already writes.
-  Its truthful "waiting on approval" predicate lives only in process memory
-  today, so its waiting field is unknown until a change in Hermes exports
-  it; this ADR does not pretend otherwise.
+- Claude Code is the first backend with a probe: it declares the process name
+  its sessions run under, and the marker its hooks write. It declares no
+  progress reading, because the evidence it cannot help producing is a
+  per-session transcript at a path named after the project and the session,
+  which no fixed declaration can point at — and the one file that does sit
+  still moves when a prompt is submitted rather than while one is worked on,
+  which is the "last message" reading this record refuses. A session's own age
+  answers that question better.
+- Hermes reports last progress from what it already writes, and nothing else.
+  It declares no session process, because a Hermes session is not one: the
+  service holds its sessions as rows, and whether that service is up is what
+  `serve status` already proves from systemd and the endpoint. Its truthful
+  "waiting on approval" predicate lives only in process memory today, so its
+  waiting field is unknown until a change in Hermes exports it; this ADR does
+  not pretend otherwise.
 - The waiting marker's path, format, and TTL become a documented convention
   a backend's hooks write to — owned by Torio like the schema, so the third
   backend's integration is a shim plus a declaration.

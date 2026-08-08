@@ -152,7 +152,38 @@ fail-closed, like the root command.
 
 ```text
 torio version [--json]
+torio status [--json]
 ```
+
+`status` is the only command that answers across boxes. Every other command
+addresses the one instance this invocation selected; this one polls every box
+Torio owns and reports, per box, whether it is running, which backend it was
+provisioned for, what that backend has running, whether anything there is
+waiting on a human, and when it last provably did work.
+
+- Human output is a header line and one tab-separated row per box:
+  `INSTANCE  BOX  BACKEND  SESSION  WAITING  PROGRESS`. A host with no boxes
+  prints `no instances` and a next step.
+- Every field is one of three things, and never a fourth: a proven value, `?`
+  for a question that was asked and could not be answered, or `—` for one the
+  box's backend does not answer at all. Absence is never rendered as a zero.
+- It exits **0 whenever the poll completes**. A box that could not be reached, a
+  config document that could not be read, a fact that could not be proven — each
+  costs one field and nothing else. Only failing to list the boxes at all is an
+  error (exit 8), because then there is nothing to report on.
+- The poll covers the default instance, every instance whose name Torio derived
+  from a backend (`torio-<backend>`), and the instance `TORIO_INSTANCE` names
+  for this invocation. A box named directly by any other means is outside it.
+- `--config` does **not** redirect what is read here. Each box's backend comes
+  from the document that box owns, because a poll that read one document for
+  every box would report them all as running the same agent.
+- It is not a replacement for the per-box commands: `torio backend status`
+  answers one box's bootstrap checks in full, and `torio serve status` answers
+  whether one box's guest service is ready.
+
+The document `--json` carries, the probe a backend declares to be included in
+it, and the waiting-marker convention are specified in
+[`status.md`](status.md).
 
 ### VM
 
