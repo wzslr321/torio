@@ -12,7 +12,7 @@
   that backend does not answer at all — never a zero standing in for a silence.
   It exits 0 whenever the poll completes, so a status bar can call it on a
   timer; only failing to list the boxes at all is an error
-  ([ADR-0010](docs/adr/0010-status-is-a-poll-of-facts.md),
+  ([ADR-0012](docs/adr/0012-status-is-a-poll-of-facts.md),
   [contract](docs/contracts/status.md),
   [recipes](docs/runbooks/ambient-status.md)).
 - **The status line, and the one command that installs it.**
@@ -69,7 +69,7 @@
   read, and wikilinks are refused in favour of relative Markdown links a checker
   can verify. Nothing under `internal/`, `cmd/` or `e2e/` changed — the kit is
   content, Torio is mechanics
-  ([ADR-0010](docs/adr/0010-okf-vault-standard-and-brain-kit.md)).
+  ([ADR-0012](docs/adr/0010-okf-vault-standard-and-brain-kit.md)).
 - **A backend contract, and a second backend behind it.** Torio ran one agent
   and the name was hardwired into every layer. `internal/backend` now states
   what Torio requires — an identity and its paths, an install and pin, a version

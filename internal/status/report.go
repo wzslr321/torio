@@ -1,6 +1,6 @@
 // Package status answers one question across every box Torio owns: which
 // agents exist, which are working, which are waiting on a human, and which are
-// gone (ADR-0010).
+// gone (ADR-0012).
 //
 // It is a poll of facts, not a cache of events. What it reads are things a
 // backend cannot help producing while it runs — a process that exists, a file

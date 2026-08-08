@@ -1,4 +1,4 @@
-# ADR-0010: Status is a poll of facts; events only ring the bell
+# ADR-0012: Status is a poll of facts; events only ring the bell
 
 - Status: Accepted
 - Date: 2026-08-08

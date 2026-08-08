@@ -34,7 +34,7 @@ var sessionProcess = path.Base(commandPath)
 // session id, so a fixed declaration cannot point at it. The file that does sit
 // at a fixed path, `history.jsonl`, moves when a prompt is submitted and not
 // while one is being worked on — which is exactly the "last message" reading
-// ADR-0010 refuses, because it reports a busy agent as dead throughout a long
+// ADR-0012 refuses, because it reports a busy agent as dead throughout a long
 // tool call. A session's own age already answers the question that reading
 // would have answered badly.
 func (claudeBackend) Status() *backend.StatusSpec {
