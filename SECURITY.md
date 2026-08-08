@@ -68,8 +68,14 @@ trade-off left unstated would misdescribe the boundary.
 - **The MCP audit log is a narrow write channel** toward a privileged file: on a
   denial the tool name comes from the agent. It is capped and escaped, which
   bounds the bandwidth without removing the channel.
-- **The MCP broker daemon is not delivered.** The released CLI provisions custody
-  only; it installs no unit and carries no traffic.
+- **The MCP client configuration is not an OS sandbox.** Claude Code honors a
+  root-owned managed-only declaration and Hermes' agent-owned declaration is
+  checked for drift, but arbitrary code under the agent uid can open any socket
+  its groups permit. The broker's peer-uid check, root-owned exact policy and
+  private OAuth home are the enforcement boundary.
+- **A granted MCP write can be used by prompt injection.** The broker prevents
+  undeclared tools and unaudited calls; it cannot tell whether an allowed call
+  reflects the operator's intent. Grant writes narrowly and review the audit.
 
 ## Out of scope
 

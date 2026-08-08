@@ -82,15 +82,16 @@ the VM and registers it with Hermes; nothing is discovered, scanned, or picked
 up automatically because it happened to be on disk.
 
 Read access to a private repository is your job, set up by you on the guest.
-Torio never stores a token, never prompts for one, and never passes one to the
-model — a workspace it prepared has no push credentials in it at all.
+Torio never stores a Git token, never prompts for one, and never passes one to
+the model — a workspace it prepared has no push credentials in it at all.
 
 ## What Torio will not do {#limits}
 
-The narrowness is the point. Torio never
-holds or prompts for a credential — the one it forwards is your SSH agent, into
-a session you opened, for as long as you keep it open. It never opens a tunnel
-or exposes a port beyond the guest's loopback. It never commits, pushes, merges,
+The narrowness is the point. Torio never holds your Git or model-provider
+credential — the one it forwards is your SSH agent, into a session you opened,
+for as long as you keep it open. MCP OAuth is stored only under the separate
+broker uid after an explicit login. Torio never exposes a port beyond the
+guest's loopback; MCP login opens only its fixed loopback callback forward. It never commits, pushes, merges,
 or tags — those are yours, always. It never deletes or re-images a VM, and it
 takes no data back out of one. And it is not an agent platform: no task queue,
 no dispatcher, no fleet of autonomous workers running while you sleep.

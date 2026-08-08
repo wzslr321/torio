@@ -1,8 +1,28 @@
 # Changelog
 
-## Unreleased
+## 0.3.2 - 2026-08-09
 
 ### Added
+
+- **The MCP broker now carries traffic through the custody boundary.** Release
+  archives ship Linux guest broker and relay payloads for each supported host.
+  `torio mcp install` atomically installs them and the systemd unit, verifies
+  root-owned exact policy, and wires either backend to a credential-free stdio
+  relay. The broker uses the official MCP Go SDK v1.7.0 for Streamable HTTP,
+  validates every granted tool against upstream discovery, exposes only the
+  intersection, obtains caller uid from the Unix socket, and audits decisions
+  without arguments or results
+  ([ADR-0012](docs/adr/0012-mcp-broker-transport-and-oauth.md)).
+- **`torio mcp login <service>`.** OAuth is an explicit interactive operator
+  action using discovery, dynamic client registration and PKCE S256 through a
+  loopback-only SSH callback forward with no SSH agent. Tokens and refresh state
+  are crash-safely stored as `torio-mcp`, never under the agent uid or on the
+  host. The unit starts only after every policy service has logged in.
+- Claude Code now uses root-owned managed MCP configuration with
+  `allowManagedMcpServersOnly`; native entries are removed from its agent-owned
+  file and rejected by status. Hermes' agent-owned declaration is reconciled
+  and checked as drift, while authorization remains the root-owned broker policy
+  ([ADR-0013](docs/adr/0013-mcp-managed-client-config-and-activation.md)).
 
 - **What the brain does on its own is measured, not asserted.** The kit's claim
   was always behavioural — that an agent reaches for the vault when a task turns
@@ -117,6 +137,11 @@
 
 ### Fixed
 
+- The Hermes `VerifyIsolation` comment claimed the backend held no authority
+  beyond its own work while the implementation proved only absence from the
+  Docker group. The contract now states exactly the fact it proves, without
+  broadening a security claim beyond its evidence ([#13](https://github.com/wzslr321/torio/issues/13)).
+
 - `backend status` reported a Claude Code box's credential as **not-applicable**
   — the answer that means Torio has no way to ask — on a box whose auth probe
   had run and found one. The renderer built its lookup key by appending `_auth`
@@ -192,15 +217,6 @@
   `limactl copy torio:/home/hermes/brain/` — the wrong box and the wrong
   directory, in a line that looks exactly right. The command now prints filled in
   by `brain status`, which knows what it just read.
-
-### Known
-
-- MCP inside a Claude Code box is a named hole, not a solved problem. The
-  backend is a native MCP client, an operator's tokens then live under the agent
-  identity, and invariant 9's "explicit, enumerable and verified" is not met for
-  it. What is provided is legibility: the configured servers are enumerated by
-  name, described everywhere as what is configured and never as what is
-  permitted. The fix is the broker, which needs an accepted ADR first.
 
 ## 0.3.1 - 2026-08-07
 

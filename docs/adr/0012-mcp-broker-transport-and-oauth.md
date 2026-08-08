@@ -2,6 +2,9 @@
 
 - Status: Accepted
 - Date: 2026-08-09
+- Superseded in part by:
+  [ADR-0013](0013-mcp-managed-client-config-and-activation.md), for Claude's
+  root-managed client configuration and login-gated unit activation.
 - Supersedes: [ADR-0008](0008-mcp-broker-daemon-deleted.md) in full; the
   "Not delivered — upstream transport and OAuth lifecycle" part of
   [ADR-0004](0004-mcp-credential-custody-and-egress.md); and "MCP is a chosen,

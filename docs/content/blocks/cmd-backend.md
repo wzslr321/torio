@@ -48,11 +48,10 @@ been found to be unaskable. Each of the last two is one command's worth of
 difference for an operator, and collapsing them is how a box that holds a
 credential comes to report that its state is unknowable.
 
-For a backend that is a native MCP client, `status` also lists the MCP servers
-the guest is configured with, by name. Read that as what is configured, never as
-what is permitted: the list comes from a file the agent owns and can rewrite,
-and the servers carry credentials of yours that live under the agent's own
-identity. Revocation is at the provider. This is a hole the project names rather
-than hides — see
-[ADR-0009](https://github.com/wzslr321/torio/blob/main/docs/adr/0009-backend-contract-and-claude-code.md)
-and the MCP broker work it points at.
+For a backend that is an MCP client, `status` also reports its configured server
+names. On Hermes this comes from an agent-owned file and is therefore a drift
+detector. Claude Code's released route is the root-owned managed MCP document;
+unmanaged native entries are excluded by the pinned managed setting. In both
+cases tool permission comes from the separate root-owned broker policy, not from
+the backend report. See
+[ADR-0013](https://github.com/wzslr321/torio/blob/main/docs/adr/0013-mcp-managed-client-config-and-activation.md).

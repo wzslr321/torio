@@ -5,7 +5,9 @@
 - Superseded in part by:
   [ADR-0012](0012-mcp-broker-transport-and-oauth.md), which replaces the
   "MCP is a chosen, named hole" decision with the delivered custody path for
-  every backend.
+  every backend, and
+  [ADR-0013](0013-mcp-managed-client-config-and-activation.md), which makes the
+  Claude client route root-managed and removes native MCP declarations.
 - Applies to: `internal/backend`, `internal/lima`, `internal/serve`,
   `internal/projects`, `internal/brain`, `internal/config`, `internal/cli`
 

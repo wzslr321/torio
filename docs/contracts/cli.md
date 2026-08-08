@@ -432,29 +432,29 @@ torio project shell <id>
 
 ```text
 torio mcp install
+torio mcp login <service>
 torio mcp status
 ```
 
-MCP servers are to be reached through a broker running under its own guest
+MCP servers are reached through a broker running under its own guest
 identity `torio-mcp`, so that an upstream credential does not exist under the
 identity the agent has a shell as
-([ADR-0004](../adr/0004-mcp-credential-custody-and-egress.md)). Torio currently
-provisions and verifies the custody boundary that broker needs; it does not yet
-deliver the daemon or the upstream transport.
+([ADR-0004](../adr/0004-mcp-credential-custody-and-egress.md),
+[ADR-0012](../adr/0012-mcp-broker-transport-and-oauth.md),
+[ADR-0013](../adr/0013-mcp-managed-client-config-and-activation.md)).
 
 - `install` creates the unprivileged `torio-mcp` identity, its `0700` credential
   store, the `torio-mcp-clients` group and the root-owned policy directory — then
   **proves** the result instead of trusting the exit codes of the commands that
   produced it. Idempotent (`changed:false` on an unchanged run), accepts no
-  secrets, and **grants nothing** beyond the client-group membership `hermes`
-  needs to open a socket and `torio-mcp` needs to hand its own socket to the
-  group. `torio-mcp` never lands in `torio-projects`, and `hermes` never lands in
-  the `torio-mcp` group; those are the two mistakes that would void the decision
-  while leaving every other check green.
-- `install` **installs and activates no daemon.** Upstream transport and OAuth
-  lifecycle need their own accepted contract; until that exists, the release
-  publishes neither the broker nor the relay binary. The public command
-  provisions only the custody boundary a future daemon will need.
+  secrets, and grants the selected backend identity (`hermes` or `claude`) only
+  client-group access to broker sockets. `torio-mcp` never lands in
+  `torio-projects`, and the agent never lands in the `torio-mcp` group.
+- The release carries guest-Linux broker and relay payloads beside the host
+  binary. `install` verifies them, writes them and the systemd unit atomically as
+  root-owned files, reloads systemd and configures the selected backend with one
+  credential-free relay entry per policy service. The unit remains stopped until
+  every policy service has completed login.
 - Policy is an explicit operator grant, so `install` neither generates nor guesses
   it. On a fresh guest the first run may create the root-owned policy directory
   and end as a precondition with `changed:true`; the operator then writes at least
@@ -464,29 +464,41 @@ deliver the daemon or the upstream transport.
 - `install` **does not block** on credentials left under the Hermes profile. They
   are exactly what the broker exists to eliminate, but refusing to install while
   they are present is a deadlock: the operator cannot build the thing they are
-  meant to migrate to. That continuous invariant belongs to `status`.
-- When `hermes` has just joined the client group, `install` reports
+  meant to migrate to. That continuous invariant belongs to `status`; revoke a
+  migrated native provider grant upstream.
+- For Hermes, `config.yaml` is reconciled to exact policy service names and
+  relay arguments. It is agent-writable, so this is explicitly a drift detector,
+  not an enforcement boundary. For Claude Code, Torio installs root-owned
+  `/etc/claude-code/managed-mcp.json`, pins `allowManagedMcpServersOnly: true`,
+  and removes native MCP declarations from agent-owned `.claude.json`.
+- When the selected identity has just joined the client group, `install` reports
   `restart_required`. A long-lived process does not acquire a
   group because the group database changed underneath it — the backend keeps what
-  it started with until `torio serve restart`.
+  it started with until the Hermes service is restarted or the Claude agent
+  session is reopened.
+- `login <service>` is interactive and does not support `--json`. It opens one
+  explicitly loopback-bound SSH local forward for the OAuth callback, disables
+  agent forwarding and multiplexing, and runs the fixed broker login command as
+  `torio-mcp`. Torio accepts no token, client secret or bearer-token file. OAuth
+  discovery, dynamic client registration, PKCE S256, exchange and refresh use
+  the pinned official MCP Go SDK. After the last required login Torio enables
+  and starts the broker unit.
 - `status` **proves and reports; it repairs nothing.** It verifies that the broker
   identity exists, that its credential store is readable by nobody else, that
-  `hermes` can open the broker socket but is **not** in the broker's own group, has
-  no sudo and no groups outside the managed set (`hermes`, `torio-projects`,
-  `torio-mcp-clients`), and that no MCP credential has appeared under the Hermes
-  profile. It runs no mutating command.
+  the selected agent can open the broker socket but is **not** in the broker's
+  own group, has no sudo and no group outside the managed set. For Hermes it also
+  rejects native token files; for Claude it rejects any native MCP declaration
+  and proves the root-owned managed-only configuration. It runs no mutating
+  command.
 - It also verifies **the two documents that decide what this custody is for**.
   Policy files must be `root:root 0644` regular files (never symlinks) in a
   directory nobody but root writes to — a policy document the agent can write
   voids the decision while leaving every other check green. Their contents pass
-  the same strict parser the broker uses. An absent runtime is a valid state
-  regardless of a dormant unit: it is the presence of `/run/torio-mcp`, not of a
-  unit file, that triggers daemon verification. When a runtime exists, the exact
-  trusted unit must be active, the service set must equal the set of ordinary
-  listening sockets exactly, and the running process's policy digest must match
-  the verified documents. And `mcp_servers` in `config.yaml` must point only at
-  the relay: that file is writable by the agent, so an entry pointing elsewhere is
-  an MCP server the broker will never see — no policy, no audit.
+  the same strict parser the broker uses. While any policy service still requires
+  login, an absent runtime is the valid dormant state. Once OAuth state is
+  complete, the runtime is required: the exact trusted unit must be active, the
+  service set must equal the set of ordinary listening sockets exactly, and the
+  running process's policy digest must match the verified documents.
 - The `mcp_servers` check reads **one shape of YAML and refuses the rest**. A block
   in inline syntax, with an anchor, alias, merge key or tab, or in a second
   document, is reported as drift rather than guessed at. This is not a boundary
@@ -506,6 +518,10 @@ deliver the daemon or the upstream transport.
   `/etc/torio-mcp/policy.d/<service>.json` as `root:root 0644` — readable by the
   agent, unwritable by it. Deny by default; only tools named explicitly pass, with
   no inference from names and no patterns.
+- Streamable HTTP is the only delivered upstream transport. Before publishing a
+  socket the broker enumerates upstream tools and intersects them with the exact
+  root-owned grant. Calls are audited without arguments or results; missing peer
+  uid or an unwritable audit fails closed.
 - The broker **does not fully prevent a confused deputy**: an injected instruction
   can use any tool the policy grants, including a writing one, against any
   permitted target. Granting a write stays an explicit operator decision recorded
