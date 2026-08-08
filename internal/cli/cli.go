@@ -277,6 +277,7 @@ func newRootCmd(a *app) *cobra.Command {
 		"agent backend this invocation is about; selects the instance that runs it (default hermes)")
 
 	root.AddCommand(newVersionCmd(a))
+	root.AddCommand(newStatusCmd(a))
 	root.AddCommand(newVMCmd(a))
 	root.AddCommand(newServeCmd(a))
 	root.AddCommand(newBrainCmd(a))

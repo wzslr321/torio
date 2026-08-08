@@ -1,0 +1,200 @@
+package cli
+
+import (
+	"encoding/json"
+	"io"
+	"strings"
+	"testing"
+
+	"github.com/wzslr321/torio/internal/execx"
+)
+
+// statusListJSON is one `limactl list --json` record, in the NDJSON shape real
+// output takes.
+func statusListJSON(name, state string) string {
+	return `{"name":"` + name + `","status":"` + state + `","config":{}}`
+}
+
+// A poll over a stopped box is answered entirely from the host: the box state
+// proves nothing is running there, so the only guest-facing call is the
+// enumeration itself.
+func TestStatusReportsAStoppedBoxWithoutEnteringIt(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: execx.Result{ExitCode: 0, Stdout: []byte(statusListJSON("torio", "Stopped") + "\n")}},
+	}}
+
+	code, stdout, stderr := runVMWithFake(t, []string{"status"}, fake)
+
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("stdout = %q, want a header and one row", stdout)
+	}
+	if lines[0] != "INSTANCE\tBOX\tBACKEND\tSESSION\tWAITING\tPROGRESS" {
+		t.Errorf("header = %q", lines[0])
+	}
+	want := "torio\tstopped\thermes\t0\tno\t" + glyphUnknown
+	if lines[1] != want {
+		t.Errorf("row = %q, want %q", lines[1], want)
+	}
+	if len(fake.calls) != 1 {
+		t.Errorf("host calls = %d, want only the enumeration", len(fake.calls))
+	}
+}
+
+// The surface covers only what Torio owns. A neighbouring VM the operator runs
+// for something else is not reported, because reporting it would claim an agent
+// is not running on a box that never had one.
+func TestStatusReportsOnlyTorioOwnedBoxes(t *testing.T) {
+	body := statusListJSON("torio", "Stopped") + "\n" +
+		statusListJSON("someone-elses-vm", "Running") + "\n"
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: execx.Result{ExitCode: 0, Stdout: []byte(body)}},
+	}}
+
+	_, stdout, _ := runVMWithFake(t, []string{"status"}, fake)
+
+	if strings.Contains(stdout, "someone-elses-vm") {
+		t.Fatalf("stdout = %q, want the unrelated VM left out", stdout)
+	}
+}
+
+// No boxes is a complete answer, not an error: nothing has been created yet.
+func TestStatusOnAHostWithNoBoxes(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: execx.Result{ExitCode: 0, Stdout: nil}},
+	}}
+
+	code, stdout, stderr := runVMWithFake(t, []string{"status"}, fake)
+
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "no instances") || !strings.Contains(stdout, "next: torio vm init") {
+		t.Errorf("stdout = %q, want an empty answer with a next step", stdout)
+	}
+}
+
+func TestStatusJSONEnvelope(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: execx.Result{ExitCode: 0, Stdout: []byte(statusListJSON("torio", "Stopped") + "\n")}},
+	}}
+
+	code, stdout, stderr := runVMWithFake(t, []string{"status", "--json"}, fake)
+
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	var env struct {
+		SchemaVersion string `json:"schema_version"`
+		OK            bool   `json:"ok"`
+		Command       string `json:"command"`
+		Data          struct {
+			Instances []struct {
+				Name    string `json:"instance"`
+				Box     string `json:"box"`
+				Backend struct {
+					State string `json:"state"`
+					Name  string `json:"name"`
+				} `json:"backend"`
+				Session struct {
+					State    string `json:"state"`
+					Sessions []any  `json:"sessions"`
+				} `json:"session"`
+				Waiting struct {
+					State string `json:"state"`
+				} `json:"waiting"`
+				Progress struct {
+					State string `json:"state"`
+				} `json:"last_progress"`
+			} `json:"instances"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("stdout is not the envelope: %v; got %q", err, stdout)
+	}
+	if !env.OK || env.Command != "status" || env.SchemaVersion != schemaVersion {
+		t.Fatalf("envelope = %+v", env)
+	}
+	if len(env.Data.Instances) != 1 {
+		t.Fatalf("instances = %d, want 1", len(env.Data.Instances))
+	}
+	in := env.Data.Instances[0]
+	if in.Name != "torio" || in.Box != "stopped" || in.Backend.Name != "hermes" {
+		t.Errorf("instance = %+v", in)
+	}
+	// Every field states which of the three kinds of answer it is, and the
+	// session list is an array even when there is nothing in it, so a recipe can
+	// count it without first testing the state.
+	if in.Session.State == "" || in.Waiting.State == "" || in.Progress.State == "" {
+		t.Errorf("instance = %+v, want every field to carry a state", in)
+	}
+	if in.Session.Sessions == nil {
+		t.Error("sessions = null, want an array")
+	}
+}
+
+// The one failure a poll does not survive: without the list there is nothing to
+// report on, and an empty report would read as "no boxes".
+func TestStatusFailsWhenTheHostCannotListBoxes(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: execx.Result{ExitCode: 1, Stderr: []byte("lima: internal error")}},
+	}}
+
+	code, _, stderr := runVMWithFake(t, []string{"status"}, fake)
+
+	if code != int(ExitExternal) {
+		t.Fatalf("exit = %d, want %d; stderr=%q", code, ExitExternal, stderr)
+	}
+}
+
+// A box whose own document cannot be read is one unknown row. The command still
+// exits 0: unknown is an answer.
+func TestStatusReportsAnUnknownBackendAsARow(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: execx.Result{ExitCode: 0, Stdout: []byte(statusListJSON("torio-nosuchbackend", "Stopped") + "\n")}},
+	}}
+
+	code, stdout, stderr := runVMWithFake(t, []string{"status"}, fake)
+
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	row := strings.Split(strings.TrimSpace(stdout), "\n")[1]
+	if !strings.HasPrefix(row, "torio-nosuchbackend\tstopped\t"+glyphUnknown) {
+		t.Errorf("row = %q, want the backend reported as unknown", row)
+	}
+}
+
+func TestCompactAge(t *testing.T) {
+	for _, tc := range []struct {
+		seconds int64
+		want    string
+	}{
+		{0, "0s"},
+		{45, "45s"},
+		{60, "1m"},
+		{3599, "59m"},
+		{3600, "1h"},
+		{86_399, "23h"},
+		{86_400, "1d"},
+	} {
+		if got := compactAge(tc.seconds); got != tc.want {
+			t.Errorf("compactAge(%d) = %q, want %q", tc.seconds, got, tc.want)
+		}
+	}
+}
+
+// The status command is registered on the root, so it is reachable as
+// `torio status` and carries its own envelope command name.
+func TestStatusIsARootCommand(t *testing.T) {
+	root := newRootCmd(&app{stdout: io.Discard, stderr: io.Discard, build: testBuild()})
+	for _, c := range root.Commands() {
+		if c.Name() == "status" {
+			return
+		}
+	}
+	t.Fatal("torio status is not registered on the root command")
+}
