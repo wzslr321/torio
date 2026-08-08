@@ -1,9 +1,11 @@
 ## Command surface — `torio brain` {#brain}
 
-Manages the private Second Brain: a Markdown vault at `/home/hermes/brain`,
-versioned by a local Git repository, owned by `hermes`, and registered with
-Hermes as its own project so any session can search it. The parent takes no
-action itself; an absent or unknown subcommand is a usage error.
+Manages the private Second Brain: a Markdown vault in the agent identity's own
+home, versioned by a local Git repository, owned by that identity, and — on a
+backend that keeps a project registry — registered as its own project so any
+session can search it. `brain status` prints the path on the box you are
+talking to. The parent takes no action itself; an absent or unknown subcommand
+is a usage error.
 
 | Command | What it does |
 | --- | --- |
@@ -29,8 +31,13 @@ Torio brings data in and does not take it out. There is no `torio brain export`.
 Copying the Brain to your host is an explicit thing you do:
 
 ```bash
-limactl copy torio:/home/hermes/brain/ <host-destination>/
+limactl copy <instance>:<vault-path>/ <host-destination>/
 ```
+
+`brain status` prints that line filled in for the box it just read, because the
+instance and the vault path are both the backend's — a copied-out example
+naming another backend's box is a command that either fails or copies the wrong
+vault.
 
 That is your command, not a Torio feature: nothing verifies the result, and
 Torio does not call it a backup.

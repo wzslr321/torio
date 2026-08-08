@@ -22,13 +22,18 @@ func newBrainCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "brain",
 		Short: "Initialize and inspect the private Markdown Second Brain",
-		Long: "Manage the mandatory Torio Second Brain at " + brain.Path + ". " +
-			"The Brain stays on the guest's native filesystem, is private to hermes, " +
-			"and is registered as a separate Hermes Project. Commands report only " +
+		// No instance name and no vault path here. Both are resolved per
+		// invocation from the backend the instance runs, and `--help` never
+		// reaches that resolution — so a line built at construction time told a
+		// Claude Code operator to copy from the other backend's box and the
+		// other backend's directory, plausibly enough to try it.
+		Long: "Manage the mandatory Torio Second Brain. It stays on the guest's native " +
+			"filesystem, is private to the agent identity that owns it, and is registered " +
+			"with the backend's project registry when it declares one. Commands report only " +
 			"bounded aggregate metadata, never note names or content.\n\n" +
-			"Torio brings data in and does not take it out. To copy the Brain back to " +
-			"the Mac, run limactl yourself:\n\n" +
-			"  limactl copy " + lima.InstanceName + ":" + brain.Path + "/ <host-destination>/\n\n" +
+			"Torio brings data in and does not take it out. To copy the Brain back to the " +
+			"host, run limactl yourself; `torio brain status` prints the instance and vault " +
+			"path to copy from, and the exact command.\n\n" +
 			"That is an operator command, not a Torio feature: nothing verifies the " +
 			"result and Torio does not call it a backup.",
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -133,7 +138,12 @@ func newBrainStatusCmd(a *app) *cobra.Command {
 				cliErr.Details = brainStatusDetails(report)
 				return cliErr
 			}
-			return a.emitBrainStatus("brain.status", report, brainSkillNotes(report.SkillState, report.SkillPath, false))
+			// The copy-out command is written here rather than in help text
+			// because only a run knows which box and which vault it is about.
+			notes := append(brainSkillNotes(report.SkillState, report.SkillPath, false),
+				fmt.Sprintf("copy out (operator command, not a backup): limactl copy %s:%s/ <host-destination>/",
+					lima.InstanceName, report.Path))
+			return a.emitBrainStatus("brain.status", report, notes)
 		},
 	}
 }

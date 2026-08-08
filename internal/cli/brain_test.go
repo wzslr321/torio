@@ -7,9 +7,53 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/wzslr321/torio/internal/brain"
 	"github.com/wzslr321/torio/internal/lima"
 )
+
+// TestBrainHelpNamesNoBoxAndNoGuestPath guards the one thing help text cannot
+// know. It is built when the command tree is built, and `--help` short-circuits
+// before the instance and the backend are resolved — so a baked-in instance
+// name and vault path told a Claude Code operator to run
+// `limactl copy torio:/home/hermes/brain/`, naming the wrong box and the wrong
+// directory in a single line that looks exactly right.
+//
+// The concrete command belongs in `brain status`, which knows what it just read.
+func TestBrainHelpNamesNoBoxAndNoGuestPath(t *testing.T) {
+	cmd := newBrainCmd(&app{})
+	for _, c := range append([]*cobra.Command{cmd}, cmd.Commands()...) {
+		for _, text := range []string{c.Short, c.Long} {
+			for _, forbidden := range []string{"/home/", lima.InstanceName + ":"} {
+				if strings.Contains(text, forbidden) {
+					t.Errorf("%q help names %q, which is resolved per invocation:\n%s", c.Name(), forbidden, text)
+				}
+			}
+		}
+	}
+}
+
+// TestBrainStatusPrintsTheCopyOutCommandForThisBox is the other half: the
+// instruction did not disappear, it moved to where both values are known.
+func TestBrainStatusPrintsTheCopyOutCommandForThisBox(t *testing.T) {
+	svc := &fakeBrainService{statusReport: brain.StatusReport{State: brain.StateInitialized, Path: "/home/claude/brain"}}
+	var out bytes.Buffer
+	a := &app{stdout: &out, stderr: &bytes.Buffer{}, build: testBuild()}
+	a.newBrain = func(*lima.Adapter, lima.BootstrapOptions) brainService { return svc }
+	a.newLima = func() *lima.Adapter { return nil }
+	a.lookupOperatorUser = func() (string, error) { return "testop", nil }
+
+	cmd := newBrainStatusCmd(a)
+	cmd.SetContext(context.Background())
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("brain status: %v", err)
+	}
+	want := "limactl copy " + lima.InstanceName + ":/home/claude/brain/"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("status did not print %q\ngot: %s", want, out.String())
+	}
+}
 
 type fakeBrainService struct {
 	initReport   brain.InitReport
