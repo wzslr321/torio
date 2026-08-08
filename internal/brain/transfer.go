@@ -278,7 +278,7 @@ func (m *Manager) prepareGuestImport(ctx context.Context, op, hostPayload string
 		guestexec.UserExecAs(m.agentUser(), "dd", "of="+m.importManifestPath(), "status=none", "conv=fsync")); err != nil {
 		return err
 	}
-	if err := m.guest.CopyToGuest(ctx, hostPayload, m.importPayloadPath()); err != nil {
+	if err := m.guest.CopyToGuest(ctx, hostPayload, m.importPayloadPath(), m.identity().Home); err != nil {
 		return fromGuestErr(op, err)
 	}
 	if err := m.adoptGuestPayload(ctx, op); err != nil {

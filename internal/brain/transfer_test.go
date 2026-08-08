@@ -270,6 +270,31 @@ func TestImportIntoRequiresOneNewContainedSubtree(t *testing.T) {
 	}
 }
 
+// TestImportDeclaresTheOwningIdentitysBoundary pins the value the transport
+// refuses a destination against. The two travel together — a payload path
+// derived from one identity and a boundary fixed at another is a transfer that
+// fails on the guest with everything already staged.
+func TestImportDeclaresTheOwningIdentitysBoundary(t *testing.T) {
+	source := t.TempDir()
+	writeHostTransferFile(t, source, "note.md", "note", 0o600)
+
+	g := readyFake()
+	g.importFiles = 1
+	m := New(g, lima.BootstrapOptions{})
+	if _, err := m.Import(context.Background(), ImportOptions{Source: source}); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if len(g.copies) != 1 {
+		t.Fatalf("copies = %#v, want exactly one", g.copies)
+	}
+	if got, want := g.copies[0].home, m.identity().Home; got != want {
+		t.Errorf("declared boundary = %q, want the owning identity's home %q", got, want)
+	}
+	if !strings.HasPrefix(g.copies[0].guest, g.copies[0].home+"/") {
+		t.Errorf("payload %q is not below the boundary %q it declared", g.copies[0].guest, g.copies[0].home)
+	}
+}
+
 func TestImportChecksumMismatchNeverPromotes(t *testing.T) {
 	source := t.TempDir()
 	writeHostTransferFile(t, source, "note.md", "note", 0o600)

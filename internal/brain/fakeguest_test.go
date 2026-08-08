@@ -27,6 +27,10 @@ type fakeCopy struct {
 	direction string
 	host      string
 	guest     string
+	// home is the boundary the transfer declared. The real transport refuses a
+	// destination outside it, so a test that never looked at it would pass
+	// while the product failed on the guest.
+	home string
 }
 
 type fakeGuest struct {
@@ -176,8 +180,8 @@ func (f *fakeGuest) SSHInput(ctx context.Context, stdin []byte, command []string
 	return f.route(ctx, stdin, command)
 }
 
-func (f *fakeGuest) CopyToGuest(_ context.Context, hostSourceDir, guestDestinationDir string) error {
-	f.copies = append(f.copies, fakeCopy{direction: "to_guest", host: hostSourceDir, guest: guestDestinationDir})
+func (f *fakeGuest) CopyToGuest(_ context.Context, hostSourceDir, guestDestinationDir, guestHome string) error {
+	f.copies = append(f.copies, fakeCopy{direction: "to_guest", host: hostSourceDir, guest: guestDestinationDir, home: guestHome})
 	return f.copyToErr
 }
 
@@ -651,8 +655,8 @@ func (g *blockingGuest) SSHInput(ctx context.Context, stdin []byte, command []st
 	return g.base.SSHInput(ctx, stdin, command)
 }
 
-func (g *blockingGuest) CopyToGuest(ctx context.Context, hostSourceDir, guestDestinationDir string) error {
-	return g.base.CopyToGuest(ctx, hostSourceDir, guestDestinationDir)
+func (g *blockingGuest) CopyToGuest(ctx context.Context, hostSourceDir, guestDestinationDir, guestHome string) error {
+	return g.base.CopyToGuest(ctx, hostSourceDir, guestDestinationDir, guestHome)
 }
 
 func (g *blockingGuest) block(command []string) {
