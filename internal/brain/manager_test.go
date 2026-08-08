@@ -289,7 +289,7 @@ func TestInitRejectsWrongExistingProjectWithoutCreatingDuplicate(t *testing.T) {
 
 func TestStatusRejectsBrainPresentOnlyAsNonPrimaryProjectFolder(t *testing.T) {
 	g := initializedFake()
-	g.projectShow = "name: Second Brain\nprimary: /home/hermes/other\nfolders:\n  - " + Path + "\n"
+	g.projectShow = projectShowOutput("/home/hermes/other")
 
 	report, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
 	if err != nil {
