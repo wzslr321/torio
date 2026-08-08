@@ -57,7 +57,10 @@ class PlatformE2EContractTests(unittest.TestCase):
             "        timeout-minutes: 2\n",
             text,
         )
-        self.assertIn("TORIO_INSTANCE: torio-ci-${{ github.run_id }}-${{ github.run_attempt }}", text)
+        self.assertIn(
+            "TORIO_INSTANCE: torio-ci-${{ matrix.backend }}-${{ github.run_id }}-${{ github.run_attempt }}",
+            text,
+        )
         self.assertIn("make package-release VERSION=0.0.0", text)
         self.assertIn("scripts/install.sh", text)
         self.assertIn("PLATFORM_E2E_TORIO_BIN", text)
@@ -68,9 +71,30 @@ class PlatformE2EContractTests(unittest.TestCase):
         self.assertIn("if: always()", text)
         self.assertIn("bash e2e/platform/cleanup.sh", text)
         self.assertIn("ginkgo-junit.xml", text)
-        self.assertIn("platform-e2e-junit-${{ github.run_id }}-${{ github.run_attempt }}", text)
+        self.assertIn(
+            "platform-e2e-junit-${{ matrix.backend }}-${{ github.run_id }}-${{ github.run_attempt }}",
+            text,
+        )
         self.assertNotIn("continue-on-error", text)
         self.assertNotIn("limactl fake", text.lower())
+
+    def test_workflow_runs_the_journey_against_every_backend(self) -> None:
+        # PLATFORM_E2E_BACKEND selected the backend and was set by no workflow,
+        # so the second backend's journey ran only by hand and a regression in
+        # it would have merged and released green.
+        text = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("PLATFORM_E2E_BACKEND: ${{ matrix.backend }}", text)
+        self.assertIn(
+            "backend: ${{ fromJSON(inputs.backend != '' "
+            "&& format('[\"{0}\"]', inputs.backend) "
+            "|| '[\"hermes\",\"claude-code\"]') }}",
+            text,
+        )
+        # Independent legs: which one broke is the first thing worth knowing.
+        self.assertIn("fail-fast: false", text)
+        # The artifacts and the instance are per-leg, or one leg overwrites the
+        # other's evidence.
+        self.assertIn("${{ matrix.backend }}", text)
 
     def test_workflow_selects_the_stage_and_rejects_an_unknown_one(self) -> None:
         text = WORKFLOW.read_text(encoding="utf-8")
