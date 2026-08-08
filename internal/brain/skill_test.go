@@ -22,9 +22,13 @@ func TestTheVaultFollowsTheBackendIdentity(t *testing.T) {
 			t.Errorf("%s: vault = %q, want %q", id.Name, m.vault(), id.BrainPath)
 		}
 		for name, got := range map[string]string{
-			"staging":       m.stagingPath(),
-			"skill staging": m.skillStagingPath(),
-			"lock":          m.lockPath(),
+			"staging":          m.stagingPath(),
+			"skill staging":    m.skillStagingPath(),
+			"lock":             m.lockPath(),
+			"import staging":   m.importStagingPath(),
+			"import payload":   m.importPayloadPath(),
+			"import manifest":  m.importManifestPath(),
+			"import candidate": m.importCandidatePath(),
 		} {
 			if got == "" || got[:len(id.Home)] != id.Home {
 				t.Errorf("%s: %s path %q is not under the identity's home %q", id.Name, name, got, id.Home)

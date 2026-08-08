@@ -16,12 +16,18 @@ import (
 	"github.com/wzslr321/torio/internal/transfer"
 )
 
-const (
-	importStagingPath   = lima.HermesHome + "/.torio-brain-import-staging"
-	importPayloadPath   = importStagingPath + "/payload"
-	importManifestPath  = importStagingPath + "/manifest.sha256"
-	importCandidatePath = lima.HermesHome + "/.torio-brain-candidate"
-)
+// The import working paths, derived from the home of the identity that owns the
+// vault for the same reason every other Brain path is (see Manager.vault). A
+// fixed home here would be worse than an unwritable staging directory: root
+// creates the parents, so an import on a backend whose identity lives elsewhere
+// silently fabricates the other backend's home and stages private vault bytes —
+// and parks the previous Brain — outside the boundary the owning identity keeps.
+func (m *Manager) importStagingPath() string {
+	return m.identity().Home + "/.torio-brain-import-staging"
+}
+func (m *Manager) importPayloadPath() string   { return m.importStagingPath() + "/payload" }
+func (m *Manager) importManifestPath() string  { return m.importStagingPath() + "/manifest.sha256" }
+func (m *Manager) importCandidatePath() string { return m.identity().Home + "/.torio-brain-candidate" }
 
 const renameExchangeProgram = `import ctypes, os, sys
 if len(sys.argv) != 3:
@@ -151,9 +157,9 @@ func (m *Manager) Import(ctx context.Context, opts ImportOptions) (report Transf
 				rollbackFailed = true
 			}
 		}
-		cleanupTargets := []string{"rm", "-rf", "--", importStagingPath, importCandidatePath}
+		cleanupTargets := []string{"rm", "-rf", "--", m.importStagingPath(), m.importCandidatePath()}
 		if rollbackFailed {
-			cleanupTargets = []string{"rm", "-rf", "--", importStagingPath}
+			cleanupTargets = []string{"rm", "-rf", "--", m.importStagingPath()}
 		}
 		_, _ = m.run(cleanupCtx, op, guestexec.RootExec(cleanupTargets...))
 		if err := m.releaseInitLock(cleanupCtx, op, lockToken); retErr == nil && err != nil {
@@ -235,7 +241,7 @@ func (m *Manager) Import(ctx context.Context, opts ImportOptions) (report Transf
 
 func (m *Manager) prepareGuestImport(ctx context.Context, op, hostPayload string, manifest *transfer.Manifest) error {
 	if err := m.mustRun(ctx, op, KindGuestCommand, "clean private import staging",
-		guestexec.RootExec("rm", "-rf", "--", importStagingPath, importCandidatePath)); err != nil {
+		guestexec.RootExec("rm", "-rf", "--", m.importStagingPath(), m.importCandidatePath())); err != nil {
 		return err
 	}
 	// The payload arrives over `limactl copy`, which is rsync running as the Lima
@@ -256,23 +262,23 @@ func (m *Manager) prepareGuestImport(ctx context.Context, op, hostPayload string
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "create private import staging",
 		guestexec.RootExec("install", "-d", "-o", m.agentUser(), "-g", lima.TorioProjectsGroup, "-m", "0750",
-			importStagingPath)); err != nil {
+			m.importStagingPath())); err != nil {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "create private import payload staging",
 		guestexec.RootExec("install", "-d", "-o", transportUser, "-g", lima.TorioProjectsGroup, "-m", "2770",
-			importPayloadPath)); err != nil {
+			m.importPayloadPath())); err != nil {
 		return err
 	}
-	checksums, err := manifest.ChecksumFile(importPayloadPath)
+	checksums, err := manifest.ChecksumFile(m.importPayloadPath())
 	if err != nil {
 		return &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("private transfer manifest could not be rendered")}
 	}
 	if err := m.mustRunInput(ctx, op, KindGuestCommand, "write private transfer manifest", checksums,
-		guestexec.UserExecAs(m.agentUser(), "dd", "of="+importManifestPath, "status=none", "conv=fsync")); err != nil {
+		guestexec.UserExecAs(m.agentUser(), "dd", "of="+m.importManifestPath(), "status=none", "conv=fsync")); err != nil {
 		return err
 	}
-	if err := m.guest.CopyToGuest(ctx, hostPayload, importPayloadPath); err != nil {
+	if err := m.guest.CopyToGuest(ctx, hostPayload, m.importPayloadPath()); err != nil {
 		return fromGuestErr(op, err)
 	}
 	if err := m.adoptGuestPayload(ctx, op); err != nil {
@@ -314,17 +320,17 @@ func (m *Manager) guestSessionUser(ctx context.Context, op string) (string, erro
 // that will be moved into place, with nothing rewritten afterwards.
 func (m *Manager) adoptGuestPayload(ctx context.Context, op string) error {
 	if err := m.mustRun(ctx, op, KindGuestCommand, "adopt the copied payload",
-		guestexec.RootExec("chown", "-R", "--", m.agentUser()+":"+m.agentUser(), importPayloadPath)); err != nil {
+		guestexec.RootExec("chown", "-R", "--", m.agentUser()+":"+m.agentUser(), m.importPayloadPath())); err != nil {
 		return err
 	}
 	return m.mustRun(ctx, op, KindGuestCommand, "normalize copied payload permissions",
-		guestexec.RootExec("chmod", "-R", "u=rwX,g=rX,o=", "--", importPayloadPath))
+		guestexec.RootExec("chmod", "-R", "u=rwX,g=rX,o=", "--", m.importPayloadPath()))
 }
 
 func (m *Manager) verifyGuestPayload(ctx context.Context, op string, manifest *transfer.Manifest) error {
 	for _, argv := range [][]string{
-		guestexec.UserExecAs(m.agentUser(), "find", importPayloadPath, "-type", "l", "-printf", ".", "-quit"),
-		guestexec.UserExecAs(m.agentUser(), "find", importPayloadPath, "!", "-type", "d", "!", "-type", "f", "-printf", ".", "-quit"),
+		guestexec.UserExecAs(m.agentUser(), "find", m.importPayloadPath(), "-type", "l", "-printf", ".", "-quit"),
+		guestexec.UserExecAs(m.agentUser(), "find", m.importPayloadPath(), "!", "-type", "d", "!", "-type", "f", "-printf", ".", "-quit"),
 	} {
 		res, err := m.run(ctx, op, argv)
 		if err != nil {
@@ -334,14 +340,14 @@ func (m *Manager) verifyGuestPayload(ctx context.Context, op string, manifest *t
 			return &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("guest staging contains a link or special file")}
 		}
 	}
-	count, err := m.run(ctx, op, guestexec.UserExecAs(m.agentUser(), "find", importPayloadPath, "-type", "f", "-printf", "."))
+	count, err := m.run(ctx, op, guestexec.UserExecAs(m.agentUser(), "find", m.importPayloadPath(), "-type", "f", "-printf", "."))
 	if err != nil {
 		return err
 	}
 	if count.ExitCode != 0 || !onlyDots(count.Stdout) || len(count.Stdout) != manifest.Files() {
 		return &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("guest staging file count does not match the private manifest")}
 	}
-	sum, err := m.run(ctx, op, guestexec.UserExecAs(m.agentUser(), "sha256sum", "--quiet", "--strict", "-c", importManifestPath))
+	sum, err := m.run(ctx, op, guestexec.UserExecAs(m.agentUser(), "sha256sum", "--quiet", "--strict", "-c", m.importManifestPath()))
 	if err != nil {
 		return err
 	}
@@ -355,15 +361,15 @@ func (m *Manager) verifyGuestPayload(ctx context.Context, op string, manifest *t
 // candidate/<into>, creating a hermes-owned 0750 parent first when the target
 // is nested deeper than the candidate root.
 func (m *Manager) movePayloadIntoContainedCandidate(ctx context.Context, op, into string) error {
-	target := importCandidatePath + "/" + into
-	if parent := path.Dir(target); parent != importCandidatePath {
+	target := m.importCandidatePath() + "/" + into
+	if parent := path.Dir(target); parent != m.importCandidatePath() {
 		if err := m.mustRun(ctx, op, KindGuestCommand, "create contained import parent",
 			guestexec.RootExec("install", "-d", "-o", m.agentUser(), "-g", m.agentUser(), "-m", "0750", parent)); err != nil {
 			return err
 		}
 	}
 	return m.mustRun(ctx, op, KindGuestCommand, "move verified payload into contained candidate",
-		guestexec.RootExec("mv", "-T", importPayloadPath, target))
+		guestexec.RootExec("mv", "-T", m.importPayloadPath(), target))
 }
 
 // verifySnapshotRepository proves dir holds exactly a local committed snapshot:
@@ -390,12 +396,12 @@ func (m *Manager) verifySnapshotRepository(ctx context.Context, op, dir, what st
 func (m *Manager) buildFirstImportCandidate(ctx context.Context, op, into string) error {
 	if into == "" {
 		if err := m.mustRun(ctx, op, KindGuestCommand, "move verified payload into candidate",
-			guestexec.RootExec("mv", "-T", importPayloadPath, importCandidatePath)); err != nil {
+			guestexec.RootExec("mv", "-T", m.importPayloadPath(), m.importCandidatePath())); err != nil {
 			return err
 		}
 	} else {
 		if err := m.mustRun(ctx, op, KindGuestCommand, "create import candidate",
-			guestexec.RootExec("install", "-d", "-o", m.agentUser(), "-g", m.agentUser(), "-m", "0750", importCandidatePath)); err != nil {
+			guestexec.RootExec("install", "-d", "-o", m.agentUser(), "-g", m.agentUser(), "-m", "0750", m.importCandidatePath())); err != nil {
 			return err
 		}
 		if err := m.movePayloadIntoContainedCandidate(ctx, op, into); err != nil {
@@ -403,16 +409,16 @@ func (m *Manager) buildFirstImportCandidate(ctx context.Context, op, into string
 		}
 	}
 
-	dirs := []string{importCandidatePath}
+	dirs := []string{m.importCandidatePath()}
 	for _, name := range canonicalDirectories {
-		dirs = append(dirs, importCandidatePath+"/"+name)
+		dirs = append(dirs, m.importCandidatePath()+"/"+name)
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "complete canonical candidate directories",
 		guestexec.RootExec(append([]string{"install", "-d", "-o", m.agentUser(), "-g", m.agentUser(), "-m", "0750"}, dirs...)...)); err != nil {
 		return err
 	}
 	for _, name := range canonicalFiles {
-		target := importCandidatePath + "/" + name
+		target := m.importCandidatePath() + "/" + name
 		exists, err := m.testPrivatePath(ctx, op, "-f", target)
 		if err != nil {
 			return err
@@ -434,38 +440,38 @@ func (m *Manager) buildFirstImportCandidate(ctx context.Context, op, into string
 		}
 	}
 	if err := m.mustRun(ctx, op, KindGit, "initialize imported Brain repository",
-		guestexec.UserExecAs(m.agentUser(), "git", "-C", importCandidatePath, "init", "--initial-branch=main")); err != nil {
+		guestexec.UserExecAs(m.agentUser(), "git", "-C", m.importCandidatePath(), "init", "--initial-branch=main")); err != nil {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGit, "stage imported Brain snapshot",
-		guestexec.UserExecAs(m.agentUser(), "git", "-C", importCandidatePath, "add", "-A")); err != nil {
+		guestexec.UserExecAs(m.agentUser(), "git", "-C", m.importCandidatePath(), "add", "-A")); err != nil {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGit, "commit imported Brain snapshot",
-		guestexec.UserExecAs(m.agentUser(), "git", "-C", importCandidatePath,
+		guestexec.UserExecAs(m.agentUser(), "git", "-C", m.importCandidatePath(),
 			"-c", "user.name=torio",
 			"-c", "user.email=torio@localhost",
 			"commit", "-m", "Import Torio Second Brain")); err != nil {
 		return err
 	}
-	return m.verifySnapshotRepository(ctx, op, importCandidatePath, "import candidate")
+	return m.verifySnapshotRepository(ctx, op, m.importCandidatePath(), "import candidate")
 }
 
 func (m *Manager) buildExistingImportCandidate(ctx context.Context, op, into string, replacePristine bool) error {
 	if err := m.mustRun(ctx, op, KindGuestCommand, "create existing-Brain candidate",
-		guestexec.RootExec("install", "-d", "-o", m.agentUser(), "-g", m.agentUser(), "-m", "0750", importCandidatePath)); err != nil {
+		guestexec.RootExec("install", "-d", "-o", m.agentUser(), "-g", m.agentUser(), "-m", "0750", m.importCandidatePath())); err != nil {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "copy existing Brain into private candidate",
-		guestexec.RootExec("cp", "-a", "--", m.vault()+"/.", importCandidatePath+"/")); err != nil {
+		guestexec.RootExec("cp", "-a", "--", m.vault()+"/.", m.importCandidatePath()+"/")); err != nil {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGit, "stage pre-import checkpoint",
-		guestexec.UserExecAs(m.agentUser(), "git", "-C", importCandidatePath, "add", "-A")); err != nil {
+		guestexec.UserExecAs(m.agentUser(), "git", "-C", m.importCandidatePath(), "add", "-A")); err != nil {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGit, "commit pre-import checkpoint",
-		guestexec.UserExecAs(m.agentUser(), "git", "-C", importCandidatePath,
+		guestexec.UserExecAs(m.agentUser(), "git", "-C", m.importCandidatePath(),
 			"-c", "user.name=torio",
 			"-c", "user.email=torio@localhost",
 			"commit", "--allow-empty", "-m", "Checkpoint before Torio Brain import")); err != nil {
@@ -477,30 +483,30 @@ func (m *Manager) buildExistingImportCandidate(ctx context.Context, op, into str
 			return err
 		}
 	} else {
-		copyArgs := guestexec.RootExec("cp", "-a", "--update=none-fail", "--", importPayloadPath+"/.", importCandidatePath+"/")
+		copyArgs := guestexec.RootExec("cp", "-a", "--update=none-fail", "--", m.importPayloadPath()+"/.", m.importCandidatePath()+"/")
 		if replacePristine {
-			copyArgs = guestexec.RootExec("cp", "-a", "--", importPayloadPath+"/.", importCandidatePath+"/")
+			copyArgs = guestexec.RootExec("cp", "-a", "--", m.importPayloadPath()+"/.", m.importCandidatePath()+"/")
 		}
 		if err := m.mustRun(ctx, op, KindConflict, "copy verified payload into candidate", copyArgs); err != nil {
 			return err
 		}
 		if err := m.mustRun(ctx, op, KindGuestCommand, "remove copied import payload",
-			guestexec.RootExec("rm", "-rf", "--", importPayloadPath)); err != nil {
+			guestexec.RootExec("rm", "-rf", "--", m.importPayloadPath())); err != nil {
 			return err
 		}
 	}
 	if err := m.mustRun(ctx, op, KindGit, "stage imported Brain snapshot",
-		guestexec.UserExecAs(m.agentUser(), "git", "-C", importCandidatePath, "add", "-A")); err != nil {
+		guestexec.UserExecAs(m.agentUser(), "git", "-C", m.importCandidatePath(), "add", "-A")); err != nil {
 		return err
 	}
 	if err := m.mustRun(ctx, op, KindGit, "commit imported Brain snapshot",
-		guestexec.UserExecAs(m.agentUser(), "git", "-C", importCandidatePath,
+		guestexec.UserExecAs(m.agentUser(), "git", "-C", m.importCandidatePath(),
 			"-c", "user.name=torio",
 			"-c", "user.email=torio@localhost",
 			"commit", "-m", "Import Torio Second Brain")); err != nil {
 		return err
 	}
-	return m.verifySnapshotRepository(ctx, op, importCandidatePath, "import candidate")
+	return m.verifySnapshotRepository(ctx, op, m.importCandidatePath(), "import candidate")
 }
 
 func (m *Manager) isPristineScaffold(ctx context.Context, op string, status StatusReport) (bool, error) {
@@ -551,7 +557,7 @@ func (m *Manager) isPristineScaffold(ctx context.Context, op string, status Stat
 
 func (m *Manager) exchangeImportCandidate(ctx context.Context, op string) error {
 	res, err := m.guest.SSH(ctx, guestexec.RootExec(
-		"python3", "-c", renameExchangeProgram, m.vault(), importCandidatePath,
+		"python3", "-c", renameExchangeProgram, m.vault(), m.importCandidatePath(),
 	))
 	if err != nil {
 		return &Error{Op: op, Kind: KindTransport, Err: fmt.Errorf("atomic Brain directory exchange could not start")}

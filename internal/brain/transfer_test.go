@@ -10,6 +10,17 @@ import (
 	"github.com/wzslr321/torio/internal/lima"
 )
 
+// The default backend's import working paths. They are read back through a
+// Manager rather than respelled here, so these tests assert against the
+// derivation the product uses instead of a copy that can agree with nothing.
+var (
+	defaultBrain        = New(nil, lima.BootstrapOptions{})
+	importStagingPath   = defaultBrain.importStagingPath()
+	importPayloadPath   = defaultBrain.importPayloadPath()
+	importManifestPath  = defaultBrain.importManifestPath()
+	importCandidatePath = defaultBrain.importCandidatePath()
+)
+
 func writeHostTransferFile(t *testing.T, root, rel, content string, mode os.FileMode) {
 	t.Helper()
 	target := filepath.Join(root, filepath.FromSlash(rel))
