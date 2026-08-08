@@ -195,6 +195,28 @@ audit constrains them. Torio reports which servers are configured, by name, and
 that is legibility rather than a control. See
 [ADR-0009](docs/adr/0009-backend-contract-and-claude-code.md).
 
+## The brain, without the VM
+
+The vault has a written standard of its own, and it ships as a plugin you can
+install into Claude Code with no VM under it at all:
+
+```
+/plugin marketplace add wzslr321/torio
+/plugin install brain-kit@torio
+/brain-kit:init
+```
+
+That gives you the vault, its format, and the rituals that keep it worth having
+— capture, inbox triage, daily notes, meetings, people, retrieval. It works
+against a directory of notes you already have: a note without frontmatter stays
+valid to read, so nothing is rewritten on arrival.
+
+What it does not give you is a boundary. Those are instructions to a model
+running on your workstation with your permissions, which is the gap the VM
+closes and the reason the rest of this README exists. Same standard, same vault
+shape, either way — [`brainkit/README.md`](brainkit/README.md) and
+[`brainkit/STANDARD.md`](brainkit/STANDARD.md).
+
 ## Supported hosts
 
 | Host | VM type | Guest |
@@ -233,6 +255,8 @@ If one of these is yours, [`CONTRIBUTING.md`](CONTRIBUTING.md) has the how and
   [Diátaxis](https://diataxis.fr).
 - [`docs/runbooks/first-run.md`](docs/runbooks/first-run.md): the complete
   first run, every command in order.
+- [`brainkit/STANDARD.md`](brainkit/STANDARD.md): what a Torio vault is — the
+  note types, the naming, the links, and what an agent may do to it.
 - [`docs/adr/`](docs/adr/README.md): the accepted decisions. Why the VM is the
   trust boundary, why write capability is operator-carried, why the egress
   allowlist was rejected.

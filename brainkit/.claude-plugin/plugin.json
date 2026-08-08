@@ -1,0 +1,20 @@
+{
+  "name": "brain-kit",
+  "description": "A second brain for your agent: a Markdown vault with a written standard, plus capture, triage, daily notes, meetings, people and retrieval.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Wiktor Zajac",
+    "url": "https://github.com/wzslr321"
+  },
+  "homepage": "https://github.com/wzslr321/torio/tree/main/brainkit",
+  "repository": "https://github.com/wzslr321/torio",
+  "license": "MIT",
+  "keywords": [
+    "second-brain",
+    "notes",
+    "markdown",
+    "okf",
+    "pkm",
+    "vault"
+  ]
+}

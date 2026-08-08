@@ -1,0 +1,14 @@
+Whiteboard, 2026-08-06. Kept as a file so a note has something to link to.
+
+    capture ──triage──> project ─┐
+       │                         ├──> daily (log only)
+       └──────────> resource ────┘
+
+    meeting ──attendees──> person
+       │                      ^
+       └──actions──> todo.md  │
+                              │
+    person.Interactions ──────┘   (written by whatever writes the meeting)
+
+Rule that came out of drawing it: every arrow is a relative Markdown link in
+the file the arrow starts from. No arrow is inferred at read time.
