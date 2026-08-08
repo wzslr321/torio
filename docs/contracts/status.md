@@ -86,6 +86,11 @@ There is no field for a session title, a prompt, a path or a message, and none
 will be added: this output is rendered into terminals that interpret escape
 sequences, and the guests it is read from run agents that write their own prose.
 
+This is what makes the one-line formats safe rather than lucky. `torio status
+--format tmux` interpolates document values straight into tmux's own `#[...]`
+style sequences; it can do that because the schema has nowhere for an agent to
+put one, not because the renderer escapes anything.
+
 ## What a backend declares
 
 A backend declares a status probe or declares none. Declaring none is an answer:

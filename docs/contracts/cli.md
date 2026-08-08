@@ -152,7 +152,8 @@ fail-closed, like the root command.
 
 ```text
 torio version [--json]
-torio status [--json]
+torio status [--json] [--format table|tmux|prompt]
+torio status setup tmux|zsh [--json]
 ```
 
 `status` is the only command that answers across boxes. Every other command
@@ -180,6 +181,34 @@ waiting on a human, and when it last provably did work.
 - It is not a replacement for the per-box commands: `torio backend status`
   answers one box's bootstrap checks in full, and `torio serve status` answers
   whether one box's guest service is ready.
+
+`--format` collapses the same report onto one line for a surface that is glanced
+at rather than read: `tmux` carries tmux's own `#[...]` style sequences, `prompt`
+carries none at all, because a shell counts the characters in a prompt to place
+the cursor.
+
+- `--json` and a non-default `--format` are a usage error (exit 2). The envelope
+  is the machine contract and a line is a rendering of it; asking for both would
+  break the single-envelope rule, and choosing one silently would leave the
+  operator to discover which.
+- A poll that could not complete prints `torio: ?` on the line **and still exits
+  non-zero**. The exit code is unchanged; the line exists because a surface
+  refreshed on a timer shows whatever arrives, and an empty one there reads as a
+  quiet host.
+- Both line formats are rendered from the same document `--json` carries. They
+  are two opinions Torio maintains, not the interface — that is the document.
+
+`status setup` prints the configuration that puts one of those lines on a
+surface, and prints **only**: it writes no file, and no flag makes it. A dotfile
+belongs to the operator, and the rule is the one `vm bootstrap` holds about a
+managed file it did not install — report, never repair in place.
+
+- The snippet calls the binary by the path of the executable that printed it,
+  not by name, because an older `torio` earlier on `PATH` exits 2 into an empty
+  surface with no error on any stream.
+- An unknown surface, or no surface, is a usage error (exit 2).
+- Under `--json` it is one envelope carrying `surface` and `configuration`, so
+  machine mode stays machine mode.
 
 The document `--json` carries, the probe a backend declares to be included in
 it, and the waiting-marker convention are specified in

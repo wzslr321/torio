@@ -15,6 +15,15 @@
   ([ADR-0010](docs/adr/0010-status-is-a-poll-of-facts.md),
   [contract](docs/contracts/status.md),
   [recipes](docs/runbooks/ambient-status.md)).
+- **The status line, and the one command that installs it.**
+  `torio status --format tmux|prompt` collapses the report onto one line for a
+  status bar or a shell prompt, and `torio status setup tmux|zsh` prints the
+  configuration that puts it there. `setup` prints and nothing else: a dotfile
+  belongs to you, and the snippet names the file it goes in so the placing is
+  your step. The snippet calls the binary that printed it rather than `torio`,
+  because an older one earlier on `PATH` exits 2 and every such surface renders
+  that as an empty line. A poll that failed prints `torio: ?` rather than
+  nothing, for the same reason.
 - **A fourth declarable capability.** A backend declares the name its sessions
   run under, the files whose modification time proves work, and whether its
   hooks write the waiting marker. Each is separately declarable and each

@@ -115,9 +115,7 @@ box Torio owns and gives you a row each: whether it is running, what its agent
 has going, whether anything there is waiting on you, and when it last did work.
 Fields it cannot prove say so — `?` for a question it could not answer, `—` for
 one that backend does not answer at all — because a status line that guesses is
-one you stop reading. It exits 0 whatever it finds, so a status bar can call it
-on a timer; the recipes are in
-[`docs/runbooks/ambient-status.md`](docs/runbooks/ambient-status.md).
+one you stop reading.
 
 ```console
 $ torio status
@@ -125,6 +123,12 @@ INSTANCE            BOX      BACKEND      SESSION  WAITING          PROGRESS
 torio               running  hermes       —        ?                24s
 torio-claude-code   running  claude-code  1        notification 3m  —
 ```
+
+It exits 0 whatever it finds, so something can call it on a timer and put the
+answer where you already look. `torio status setup tmux` prints the block that
+does that; the same report collapses to one chip per box, and only the box that
+wants you is loud. Details and the other surfaces are in
+[`docs/runbooks/ambient-status.md`](docs/runbooks/ambient-status.md).
 
 Work happens in the checkouts: from Desktop, from your own editor, or from
 `torio project enter <id>`. Edit, run checks that read rather than write,
