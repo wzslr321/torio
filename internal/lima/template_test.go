@@ -239,6 +239,10 @@ func TestRenderedTemplateProvisionsOnlyTheDeclaredBackendsIdentity(t *testing.T)
 		t.Fatalf("renderTemplate: %v", err)
 	}
 	got := string(text)
+	if !strings.Contains(got, "apt-get -o DPkg::Lock::Timeout=300 update -y") ||
+		!strings.Contains(got, "apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends") {
+		t.Fatal("rendered template does not wait for the dpkg lock")
+	}
 
 	id := Hermes().Identity()
 	for _, want := range []string{
@@ -256,7 +260,7 @@ func TestRenderedTemplateProvisionsOnlyTheDeclaredBackendsIdentity(t *testing.T)
 
 	// The backend's build dependencies belong to the backend, not to every
 	// guest Torio creates.
-	base := got[strings.Index(got, "apt-get install -y --no-install-recommends"):]
+	base := got[strings.Index(got, "apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends"):]
 	base = base[:strings.Index(base, "\n")]
 	for _, dep := range hermesBuildDeps {
 		if dep == "git" || dep == "curl" || dep == "ca-certificates" {

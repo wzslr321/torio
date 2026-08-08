@@ -207,6 +207,32 @@ func TestBootstrapMissingLauncherInstallsHermes(t *testing.T) {
 	}
 }
 
+func TestBootstrapInstallDepsWaitsForDPkgLock(t *testing.T) {
+	s := bootstrapHappyScript()
+	s[7] = scriptedResponse{result: exitResult(1, "", "")} // launcher missing
+	install := []scriptedResponse{
+		{result: exitResult(0, "", "")},
+		{result: exitResult(0, "", "")},
+		{result: exitResult(0, "", "")},
+		{result: exitResult(0, "", "")},
+		{result: exitResult(0, "", "")},
+		{result: exitResult(0, "", "")},
+		{result: stdoutResult(PromotedHermesCommit + "\n")},
+	}
+	s = append(s[:8], append(install, s[8:]...)...)
+	fr := &fakeRunner{script: s}
+
+	if _, err := New(fr).Bootstrap(context.Background(), bootstrapOpts()); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	for i := 0; i < fr.callCount(); i++ {
+		args := fr.callArgs(i)
+		if containsArg(args, "apt-get") && !containsArg(args, "DPkg::Lock::Timeout=300") {
+			t.Fatalf("apt argv = %v, want a dpkg lock timeout", args)
+		}
+	}
+}
+
 func TestBootstrapExistingInstallSkipsCurl(t *testing.T) {
 	fr := &fakeRunner{script: bootstrapHappyScript()}
 	a := New(fr)
