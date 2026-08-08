@@ -74,6 +74,7 @@ func newStatusCmd(a *app) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&format, "format", formatTable,
 		"how to print the report: "+strings.Join(statusFormats, ", "))
+	cmd.AddCommand(newStatusSetupCmd(a))
 	return cmd
 }
 

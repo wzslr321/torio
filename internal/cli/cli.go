@@ -85,6 +85,11 @@ type app struct {
 	// lookupOperatorUser resolves the Lima login identity for `vm init`.
 	// Production uses the current OS user; tests inject a fixed name.
 	lookupOperatorUser func() (string, error)
+
+	// executablePath is this binary's own path, which `torio status setup`
+	// writes into the configuration it prints. Production reads it from the
+	// kernel; tests inject a fixed path so what they pin is the snippet.
+	executablePath func() (string, error)
 }
 
 // Run builds the command tree, executes it, and returns the process exit code.
