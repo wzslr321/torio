@@ -8,16 +8,16 @@
 // assumed. Anything that runs as a guest identity and reads a filesystem fits
 // inside it. What differs between agents is narrower than it looks: how the
 // binary is installed and pinned, how it reports a version, whether it keeps a
-// project registry, whether it runs as a service, and how an operator opens a
-// session with it.
+// project registry, whether it runs as a service, how an operator opens a
+// session with it, and what it leaves behind that proves an agent is alive.
 //
-// So the contract is those five things plus the identity that owns them, and
-// three of them are declarable: a backend that keeps no project registry, runs
-// no service, or offers no interactive session says so, and Torio reports that
-// as a state rather than inventing a failure. Verification stays honest in both
-// directions — whatever a backend declares, `vm bootstrap` and `serve status`
-// must be able to prove; whatever it declares it has not got, they must not
-// pretend to check.
+// So the contract is those six things plus the identity that owns them, and
+// four of them are declarable: a backend that keeps no project registry, runs
+// no service, offers no interactive session, or leaves no fact a status poll
+// can read says so, and Torio reports that as a state rather than inventing a
+// failure. Verification stays honest in both directions — whatever a backend
+// declares, `vm bootstrap` and `serve status` must be able to prove; whatever
+// it declares it has not got, they must not pretend to check.
 //
 // This package holds no guest mechanics of its own. It imports the transport
 // result type and nothing else, so an implementation can live wherever its
@@ -27,6 +27,7 @@ package backend
 import (
 	"context"
 	"strconv"
+	"time"
 
 	"github.com/wzslr321/torio/internal/execx"
 )
@@ -145,6 +146,8 @@ type Backend interface {
 	Service() *ServiceSpec
 	// Session is the backend's interactive session, nil when it declares none.
 	Session() *SessionSpec
+	// Status is the backend's status probe, nil when it declares none.
+	Status() *StatusSpec
 
 	// StatusChecks names the bootstrap checks `torio backend status` reads
 	// back out of the report.
@@ -362,4 +365,63 @@ type SessionSpec struct {
 	// reaches it, which is why it needs no root-owned helper to launder it.
 	// Empty when the backend takes no credential of its own.
 	LoginArgv []string
+}
+
+// StatusSpec is how a backend answers whether an agent is alive on its box and
+// what it is doing (ADR-0010). A nil spec is a declaration: `torio status`
+// reports that the backend answers no such question and runs no guest command
+// to discover what it was already told.
+//
+// The split between what a backend declares here and what Torio does with it
+// follows who owns the format being read. A backend's record of its own
+// sessions is the backend's format, so the backend brings both the command
+// that emits it and the parser that reads it — Torio learning each product's
+// internal file would be one parser per product and the schema ownership
+// inverted. Everything else a poll reads is POSIX or Torio's own convention:
+// modification times, process liveness, the waiting marker. Torio builds those
+// argv and parses that output itself, so what a poll runs on a guest stays
+// fixed no matter which backend it is asking.
+type StatusSpec struct {
+	// SessionArgv is the fixed guest argv, run as the backend's identity,
+	// whose standard output is the backend's own record of its live sessions.
+	// It is a constant: no caller value reaches it, and nothing derived from a
+	// previous answer does either.
+	SessionArgv []string
+	// ParseSessions maps SessionArgv's standard output to the sessions that
+	// output claims exist.
+	//
+	// It reads untrusted guest input (ADR-0002) and so decodes strictly:
+	// unknown fields refused, a second decode required to find EOF, and an
+	// error rather than a partial reading. A poll renders that error as
+	// unknown. An agent that cannot be read about is not an agent that is
+	// quiet, and a status surface that guesses the difference is worse than one
+	// that admits it could not tell.
+	ParseSessions func(out []byte) ([]SessionFact, error)
+	// ProgressPaths are guest files whose modification time is evidence the
+	// backend cannot help producing while it works. The newest of them is the
+	// last moment the agent provably progressed.
+	//
+	// They are deliberately not "when the last message was written". A backend
+	// that records a row per turn reads as dead for the whole of a long tool
+	// call, which is the wrong answer at exactly the moment an operator is
+	// watching to see whether anyone needs them.
+	ProgressPaths []string
+	// WaitingMarker declares that this backend's hooks write Torio's waiting
+	// marker. False is not "this agent is not waiting": it is the backend
+	// having no way to say so, which a poll reports as unknown.
+	WaitingMarker bool
+}
+
+// SessionFact is one session a backend's own record claims exists.
+//
+// It carries no title, no prompt and no path. A status document renders
+// identifiers and enumerated values only, because its output reaches a terminal
+// that interprets escape sequences and an agent writes its own session titles.
+type SessionFact struct {
+	// PID is the process the backend recorded for the session.
+	PID int
+	// StartedAt is when the backend recorded that process starting, zero when
+	// it records no start time. A poll pairs it with the process's actual start
+	// time, so a recycled pid cannot impersonate an agent that has died.
+	StartedAt time.Time
 }

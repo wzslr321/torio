@@ -28,6 +28,7 @@ func (processBackend) ProbeAuth(context.Context, backend.StepRunner) error      
 func (processBackend) Registry() backend.ProjectRegistry                          { return nil }
 func (processBackend) Service() *backend.ServiceSpec                              { return nil }
 func (processBackend) Session() *backend.SessionSpec                              { return nil }
+func (processBackend) Status() *backend.StatusSpec                                { return nil }
 func (processBackend) ProvisionScript() string                                    { return "" }
 func (processBackend) BrainSkill() backend.BrainSkill                             { return backend.BrainSkill{} }
 func (processBackend) StatusChecks() backend.StatusChecks                         { return backend.StatusChecks{} }
