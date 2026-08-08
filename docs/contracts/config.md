@@ -79,7 +79,8 @@ Rules, enforced on **darwin/linux**; elsewhere an explicit, documented no-op:
   boundary; there is no full ancestor walk.
 - **Explicit `--config`:** the *file* gets full enforcement (no-follow, type,
   mode-private, owned-by-EUID); the mode of its parent directory is **not**
-  required, so an operator may point at a shared location.
+  required, so an operator may point at a shared location. The sibling
+  `projects.json` gets the same parent-directory waiver.
 - **Writes:** `WriteFile` validates the trusted directory **before** creating any
   file — an atomic rename must not "legalize" a symlinked, permissive or
   foreign-owned directory as authority.

@@ -58,6 +58,39 @@ func TestLoadRegistryTellsAbsentFromEmpty(t *testing.T) {
 	}
 }
 
+func TestResolveRegistryHonorsExplicitConfigParentWaiver(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, configFileName)
+	if err := os.WriteFile(configPath, []byte(`{"schema_version":"3","projects":[{"id":"demo","display_name":"Demo","remote":"git@github.com:owner/demo.git"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := ResolvePaths(Options{ConfigPath: configPath})
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+
+	projects, err := ResolveRegistry(paths)
+	if err != nil {
+		t.Fatalf("ResolveRegistry: %v", err)
+	}
+	if len(projects) != 1 || projects[0].ID != "demo" {
+		t.Fatalf("projects = %#v, want the legacy project", projects)
+	}
+	if err := WriteRegistryForPaths(paths, []Project{{ID: "next", DisplayName: "Next", Remote: "git@github.com:owner/next.git"}}); err != nil {
+		t.Fatalf("WriteRegistryForPaths: %v", err)
+	}
+	projects, err = ResolveRegistry(paths)
+	if err != nil {
+		t.Fatalf("ResolveRegistry after write: %v", err)
+	}
+	if len(projects) != 1 || projects[0].ID != "next" {
+		t.Fatalf("projects after write = %#v, want the shared registry", projects)
+	}
+}
+
 // TestWriteRegistryRoundTripsSorted pins that the same set of projects always
 // produces the same bytes, so attaching in a different order does not show up
 // as a diff in a file the operator may keep under version control.

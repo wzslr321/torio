@@ -358,7 +358,7 @@ func (r FileRegistry) Save(f config.File) error {
 	if err != nil {
 		return err
 	}
-	return config.WriteRegistry(paths.RegistryFile, f.Projects)
+	return config.WriteRegistryForPaths(paths, f.Projects)
 }
 
 var _ Registry = FileRegistry{}
