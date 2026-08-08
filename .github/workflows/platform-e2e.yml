@@ -24,6 +24,11 @@ on:
         required: false
         type: string
         default: ubuntu-24.04
+      backend:
+        description: "Agent backend to run the journey against; empty runs every one"
+        required: false
+        type: string
+        default: ""
   pull_request:
     paths-ignore:
       - "**.md"
@@ -43,6 +48,11 @@ on:
         required: false
         type: string
         default: ubuntu-24.04
+      backend:
+        description: "Agent backend to run the journey against; empty runs every one"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -63,12 +73,23 @@ concurrency:
 
 jobs:
   platform:
-    name: real ${{ inputs.runner || 'ubuntu-24.04' }} / Lima ${{ inputs.stage || 'full' }} stage
+    name: real ${{ inputs.runner || 'ubuntu-24.04' }} / Lima ${{ inputs.stage || 'full' }} stage / ${{ matrix.backend }}
     runs-on: ${{ inputs.runner || 'ubuntu-24.04' }}
     timeout-minutes: ${{ (inputs.stage || 'full') == 'full' && 45 || 25 }}
+    # Every backend Torio ships gets its own guest, because a backend nothing
+    # boots is a product claim nothing tests. The legs are independent, so
+    # fail-fast is off: which of them broke is the first thing worth knowing.
+    #
+    # A caller may name one — the darwin host stage does, since it boots no
+    # guest and bills at ten times the Linux rate.
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: ${{ fromJSON(inputs.backend != '' && format('["{0}"]', inputs.backend) || '["hermes","claude-code"]') }}
     env:
-      TORIO_INSTANCE: torio-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      TORIO_INSTANCE: torio-ci-${{ matrix.backend }}-${{ github.run_id }}-${{ github.run_attempt }}
       PLATFORM_E2E_STAGE: ${{ inputs.stage || 'full' }}
+      PLATFORM_E2E_BACKEND: ${{ matrix.backend }}
     steps:
       - name: Checkout
         timeout-minutes: 3
@@ -193,7 +214,7 @@ jobs:
         timeout-minutes: 2
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: platform-e2e-junit-${{ github.run_id }}-${{ github.run_attempt }}
+          name: platform-e2e-junit-${{ matrix.backend }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/torio-platform-e2e-artifacts/ginkgo-junit.xml
           if-no-files-found: warn
           retention-days: 7
@@ -203,7 +224,7 @@ jobs:
         timeout-minutes: 2
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: platform-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          name: platform-e2e-diagnostics-${{ matrix.backend }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/torio-platform-e2e-artifacts
           if-no-files-found: warn
           retention-days: 7

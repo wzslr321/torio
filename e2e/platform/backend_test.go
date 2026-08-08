@@ -3,6 +3,7 @@
 package platform
 
 import (
+	"fmt"
 	"os"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -89,7 +90,7 @@ func profileFor(name string) backendProfile {
 				"agent_session_helper",
 			},
 		}
-	default:
+	case backendHermes:
 		return backendProfile{
 			name:             backendHermes,
 			user:             "hermes",
@@ -110,6 +111,13 @@ func profileFor(name string) backendProfile {
 			},
 		}
 	}
+	// An unknown name is a broken invocation, not a reason to fall back. A
+	// default case here made a typo in a CI matrix run the first backend's
+	// journey twice and report both legs green — the one outcome a two-backend
+	// gate exists to make impossible.
+	Fail(fmt.Sprintf("unknown PLATFORM_E2E_BACKEND %q; known backends are %q and %q",
+		name, backendHermes, backendClaudeCode))
+	return backendProfile{}
 }
 
 // expectChecksOK asserts that every named bootstrap check is present in the

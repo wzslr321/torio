@@ -261,8 +261,12 @@ because it shares none of that history.
   output, which knows which backend answered. The JSON envelope gains `backend`
   and capability-declaration keys; the existing Hermes-named keys keep being
   emitted, unchanged, on a Hermes instance.
-- `e2e/platform` gains a second, labelled journey. The Hermes journey is
-  untouched and stays the default gate.
+- `e2e/platform` becomes one journey parameterized by backend, run once per
+  backend, rather than a second copy of the harness. A second copy would drift
+  from the first, and the drift would land in the shared steps — the ones a
+  contract exists to make identical. Every backend is a gate: a leg nothing runs
+  is a product claim nothing tests, and an unknown backend name fails the run
+  instead of falling back to the default.
 - The host writes a second document, `projects.json`. It is the first persistent
   host state besides `config.json` since ADR-0001, and it is held to the same
   rules: contained join, mode-private, owned-by-EUID, opened no-follow, strict
