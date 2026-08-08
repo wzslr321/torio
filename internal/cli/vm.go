@@ -281,25 +281,19 @@ func newVMStopCmd(a *app) *cobra.Command {
 func newVMBootstrapCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "bootstrap",
-		Short: "Reconcile and verify the existing Torio target for Hermes",
-		Long: "Reconcile and verify the already-created Torio VM so an operator has a " +
-			"usable Hermes path: a stable non-interactive `hermes` command " +
-			"and the guest filesystem layout on native ext4.\n\n" +
+		Short: "Reconcile and verify the existing Torio target for its backend",
+		Long: "Reconcile and verify the already-created Torio VM for its declared agent backend " +
+			"and its guest filesystem layout on a native filesystem.\n\n" +
 			"It operates only on the existing target after a verified Running precondition, " +
 			"through the typed Lima boundary. It is idempotent and narrow: when the pinned " +
-			"Hermes Agent launcher is missing it installs the Gate-0 commit via the upstream " +
-			"install script (verifiable postcondition: git HEAD pin + launcher path), may ensure " +
-			"the `hermes` PATH shim, but never recreates or re-images the VM, installs a " +
-			"model/provider, accepts secrets, or creates services. It verifies (not merely trusts) " +
-			"the hermes user, torio-projects membership for hermes and the operator, absence of " +
-			"docker-group membership for hermes, architecture, the hermes command, git, the " +
-			"persistent profile/brain/workspace paths with correct ownership and modes on native " +
-			"Linux, and the absence of a broad host mount — failing closed with remediation on " +
-			"any drift.\n\n" +
-			"Bootstrap issues several bounded guest probes and can install Hermes from source, " +
+			"backend install is missing it may reconcile the backend's declared installation, but " +
+			"never recreates or re-images the VM, installs a model or provider, accepts secrets, " +
+			"or creates a service. It verifies the backend identity, shared-project membership, " +
+			"isolation, architecture, git, backend-required paths and the absence of broad host " +
+			"mounts — failing closed with remediation on any drift.\n\n" +
+			"Bootstrap issues several bounded guest probes and may install a backend from source, " +
 			"so give it the largest timeout the policy allows: --timeout 10m.\n\n" +
-			"After a successful run, reach the remote Hermes instance yourself (operator-controlled), " +
-			"e.g.:  torio vm ssh -- sudo -u " + lima.HermesUser + " -- hermes --version",
+			"Backend-specific checks and paths are reported in the result.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := a.opContext(cmd)

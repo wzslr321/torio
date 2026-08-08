@@ -140,7 +140,7 @@ ROOT_COMMAND_CONSTRUCTOR = "newRootCmd"
 # would report the same gap twice and let a fix be applied to the wrong file.
 # docs/contracts/cli.md is normative but is not the operator surface — a command
 # documented only there still reaches no reader who is running the binary.
-COMMAND_DOC_GLOB = "docs/content/**/*.md"
+COMMAND_DOC_GLOBS = ("docs/content/**/*.md", "docs/contracts/*.md")
 
 
 def _go_sources() -> list[Path]:
@@ -414,10 +414,11 @@ def validate_command_coverage() -> list[str]:
         ]
     documents = {
         str(path.relative_to(ROOT)): path.read_text(encoding="utf-8")
-        for path in sorted(ROOT.glob(COMMAND_DOC_GLOB))
+        for glob in COMMAND_DOC_GLOBS
+        for path in sorted(ROOT.glob(glob))
     }
     return [
-        f"docs/content/: nothing documents {command!r}; the binary exposes a "
+        f"operator documentation: nothing documents {command!r}; the binary exposes a "
         f"command the operator surface does not describe"
         for command in undocumented_commands(surface, documents)
     ]
