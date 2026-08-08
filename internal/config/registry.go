@@ -95,6 +95,26 @@ func ResolveRegistry(paths Paths) ([]Project, error) {
 	return legacyProjects(paths.RootConfigFile)
 }
 
+// UpdateRegistry applies update while holding the advisory lock for the shared
+// registry directory. The lock spans reading, changing, writing and verifying
+// the document, so concurrent project mutations cannot overwrite one another.
+func UpdateRegistry(paths Paths, update func([]Project) ([]Project, error)) error {
+	return withRegistryLock(paths.RegistryFile, func() error {
+		projects, err := ResolveRegistry(paths)
+		if err != nil {
+			return err
+		}
+		next, err := update(slices.Clone(projects))
+		if err != nil {
+			return err
+		}
+		if slices.Equal(next, projects) {
+			return nil
+		}
+		return WriteRegistry(paths.RegistryFile, next)
+	})
+}
+
 // legacyProjects reads the projects out of a config document at an explicit
 // path, treating an absent document as no projects. It is the pre-shared-
 // registry read path and has no other caller.

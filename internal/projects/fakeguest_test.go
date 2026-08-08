@@ -3,6 +3,7 @@ package projects
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/wzslr321/torio/internal/config"
@@ -439,6 +440,21 @@ func (r *fakeRegistry) Save(f config.File) error {
 	r.file = f
 	r.saved = append(r.saved, f)
 	return nil
+}
+
+func (r *fakeRegistry) Update(update func(config.File) (config.File, error)) error {
+	f, err := r.Load()
+	if err != nil {
+		return err
+	}
+	next, err := update(f)
+	if err != nil {
+		return err
+	}
+	if slices.Equal(f.Projects, next.Projects) {
+		return nil
+	}
+	return r.Save(next)
 }
 
 var _ Registry = (*fakeRegistry)(nil)

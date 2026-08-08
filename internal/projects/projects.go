@@ -313,8 +313,8 @@ type ServiceEnvCheck struct {
 type Registry interface {
 	// Load returns the current config document.
 	Load() (config.File, error)
-	// Save persists the document atomically and verifies the result.
-	Save(config.File) error
+	// Update applies one project-registry mutation atomically.
+	Update(func(config.File) (config.File, error)) error
 }
 
 // FileRegistry is the production Registry: it resolves the same canonical
@@ -359,6 +359,21 @@ func (r FileRegistry) Save(f config.File) error {
 		return err
 	}
 	return config.WriteRegistryForPaths(paths, f.Projects)
+}
+
+// Update applies a project mutation while the shared registry is locked.
+func (r FileRegistry) Update(update func(config.File) (config.File, error)) error {
+	paths, err := config.ResolvePaths(r.Options)
+	if err != nil {
+		return err
+	}
+	return config.UpdateRegistry(paths, func(projects []config.Project) ([]config.Project, error) {
+		next, err := update(config.File{SchemaVersion: config.ConfigSchemaVersion, Projects: projects})
+		if err != nil {
+			return nil, err
+		}
+		return next.Projects, nil
+	})
 }
 
 var _ Registry = FileRegistry{}
