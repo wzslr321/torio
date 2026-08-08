@@ -26,14 +26,14 @@ func (claudeBackend) VerifyIsolation(ctx context.Context, r backend.StepRunner) 
 	return verifyNoSudo(ctx, r)
 }
 
-// allowedGroups is the complete supplementary group set for the identity: its
-// own primary group, and the shared workspace group. Nothing else has a reason
-// to be there, so anything else is drift.
-//
-// When the MCP broker returns (issue #2), its client group joins this list —
-// deliberately as an edit here rather than as a rule that admits unknown
-// groups, because a check that tolerates additions is not this check.
-func allowedGroups() []string { return []string{User, lima.TorioProjectsGroup} }
+// allowedGroups is the closed group set. The broker client group is optional
+// because bootstrap must pass both before and after the operator installs MCP;
+// it conveys only permission to connect to policy-enforcing sockets.
+func allowedGroups() []string {
+	return []string{User, lima.TorioProjectsGroup, lima.TorioMCPClientsGroup}
+}
+
+func requiredGroups() []string { return []string{User, lima.TorioProjectsGroup} }
 
 func verifyGroupsExact(ctx context.Context, r backend.StepRunner) error {
 	const name = "claude_groups_exact"
@@ -56,14 +56,15 @@ func verifyGroupsExact(ctx context.Context, r backend.StepRunner) error {
 		slices.Sort(unexpected)
 		return r.Fail(name,
 			fmt.Sprintf("claude holds %d group(s) outside the declared set: %s", len(unexpected), strings.Join(unexpected, " ")),
-			"remove the extra group membership; the agent identity holds exactly its own group and "+lima.TorioProjectsGroup)
+			"remove the extra group membership; the only optional group is "+lima.TorioMCPClientsGroup)
 	}
-	for _, want := range allowed {
+	for _, want := range requiredGroups() {
 		if !slices.Contains(got, want) {
 			return r.Fail(name, "claude is not in "+want, "add claude to "+want+" on the guest")
 		}
 	}
-	r.Record(name, true, strings.Join(allowed, " "))
+	slices.Sort(got)
+	r.Record(name, true, strings.Join(got, " "))
 	return nil
 }
 

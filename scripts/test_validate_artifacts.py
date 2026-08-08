@@ -160,7 +160,7 @@ func newGroupRunCmd(a *app) *cobra.Command {
 # A deliberate ratchet, updated on purpose when a command is added or removed:
 # the derivation reads internal/cli/, and this pin is what makes an accidental
 # change to the surface fail a test instead of passing silently.
-PINNED_COMMAND_COUNT = 28
+PINNED_COMMAND_COUNT = 29
 
 
 class CommandSurface(unittest.TestCase):
@@ -190,6 +190,7 @@ class CommandSurface(unittest.TestCase):
         surface = v.command_surface()
         self.assertEqual(PINNED_COMMAND_COUNT, len(surface))
         self.assertIn("torio vm bootstrap", surface)
+        self.assertIn("torio mcp login", surface)
         self.assertIn("torio version", surface)
 
     def test_an_undocumented_command_is_named(self) -> None:

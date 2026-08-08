@@ -108,6 +108,41 @@ func TestProjectEnterSpecBuildsAnInteractiveSessionWithoutAgentForwarding(t *tes
 	}
 }
 
+func TestMCPLoginSpecForwardsOnlyTheLoopbackCallbackAndRunsFixedBrokerLogin(t *testing.T) {
+	home := limaSSHConfigHost(t)
+	t.Setenv("SSH_AUTH_SOCK", "/must/not/be/used")
+
+	spec, err := MCPLoginSpec("atlassian")
+	if err != nil {
+		t.Fatalf("MCPLoginSpec: %v", err)
+	}
+	want := []string{
+		"-F", filepath.Join(home, ".lima", InstanceName, "ssh.config"),
+		"-o", "ControlMaster=no",
+		"-o", "ControlPath=none",
+		"-o", "ForwardAgent=no",
+		"-o", "ExitOnForwardFailure=yes",
+		"-a",
+		"-L", "127.0.0.1:43119:127.0.0.1:43119",
+		"lima-" + InstanceName,
+		"sudo", "-n", "-u", TorioMCPUser, "--",
+		TorioMCPBrokerPath, "login", "atlassian",
+	}
+	if spec.Name != "ssh" || !equalArgs(spec.Args, want) {
+		t.Fatalf("command = %s %v, want ssh %v", spec.Name, spec.Args, want)
+	}
+	if strings.Contains(strings.Join(spec.Args, " "), "ForwardAgent=yes") {
+		t.Fatal("MCP login forwards the operator's SSH agent")
+	}
+}
+
+func TestMCPLoginSpecRejectsAnInvalidServiceBeforeReadingHostState(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if _, err := MCPLoginSpec("../../escape"); err == nil {
+		t.Fatal("invalid service was accepted")
+	}
+}
+
 // TestOperatorShellSpecPutsOverridesAfterTheConfigFlag pins the ordering rule:
 // -F first, every -o after it. Lima's generated ssh.config enables
 // ControlMaster/ControlPersist, so an override placed before -F loses, a stale

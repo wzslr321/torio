@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
 )
@@ -72,10 +73,16 @@ func runVMWithFakeBoundJSON(t *testing.T, args []string, fake execx.Runner) (int
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	var stdout, stderr bytes.Buffer
 	a := &app{
-		stdout:             &stdout,
-		stderr:             &stderr,
-		build:              testBuild(),
-		newLima:            func() *lima.Adapter { return lima.New(fake) },
+		stdout:  &stdout,
+		stderr:  &stderr,
+		build:   testBuild(),
+		newLima: func() *lima.Adapter { return lima.New(fake) },
+		installMCP: func(ctx context.Context, adapter *lima.Adapter, _ backend.Identity) (lima.MCPBrokerInstallReport, error) {
+			return adapter.ProvisionMCPBroker(ctx)
+		},
+		verifyMCP: func(ctx context.Context, adapter *lima.Adapter, _ backend.Identity) (lima.MCPBrokerReport, error) {
+			return adapter.VerifyMCPBroker(ctx)
+		},
 		lookupOperatorUser: func() (string, error) { return "testop", nil },
 	}
 	code := runWithApp(context.Background(), a, args)

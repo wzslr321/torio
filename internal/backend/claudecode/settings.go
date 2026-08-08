@@ -163,18 +163,13 @@ const mcpConfigPath = Home + "/.claude.json"
 // reportMCPServers enumerates the MCP servers the guest is configured with, by
 // name.
 //
-// This is the compensating legibility for a hole this backend accepts and names
-// (ADR-0009): Claude Code is a native MCP client, an operator will connect it to
-// services with their own tokens, and those tokens then live under the agent's
-// uid — outside any policy and outside any audit, which is precisely the shape
-// the MCP custody boundary exists to end. The broker that would fix it does not
-// exist yet (issue #2).
-//
-// So this check makes no claim to constrain anything. It reads a file the agent
-// can rewrite, and it reports names only — never a value, never a token, never
-// an endpoint — so that an operator can at least see what the box is wired to,
-// and revoke at the provider. It never fails a bootstrap: what it finds is a
-// fact about the box, not a defect in it.
+// This reads Claude's agent-owned file as a drift detector only. The released
+// MCP route lives in root-owned managed-mcp.json and managed settings exclude
+// unmanaged servers (ADR-0013); a native entry here is nevertheless worth
+// reporting because it can retain an old credential the agent uid can read.
+// Names alone are emitted — never a value, token or endpoint. Bootstrap does
+// not fail on this fact; `torio mcp status` is the command that verifies the
+// custody boundary and rejects native entries.
 func reportMCPServers(ctx context.Context, r backend.StepRunner) error {
 	const name = mcpServersCheck
 	res, err := r.Probe(ctx, name, "sudo", "-n", "-u", User, "--",

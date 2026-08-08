@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/wzslr321/torio/internal/backend"
 )
 
 const mcpInstallOp = "mcp_install"
@@ -25,9 +27,10 @@ const brokerLoginShell = "/usr/sbin/nologin"
 // boundary. Changed reports whether the guest was actually modified, so a re-run
 // is visibly a no-op rather than an indistinguishable success.
 type MCPBrokerInstallReport struct {
-	Instance string
-	Changed  bool
-	// RestartRequired is set when hermes newly joined the client group. A
+	Instance  string
+	AgentUser string
+	Changed   bool
+	// RestartRequired is set when the selected backend newly joined the client group. A
 	// long-running process does not gain a group because the group database
 	// changed under it, so the always-on backend keeps its old credentials until
 	// it is restarted.
@@ -44,11 +47,46 @@ func (r *MCPBrokerInstallReport) record(name string, ok bool, detail string) {
 	r.Checks = append(r.Checks, CheckResult{Name: name, OK: ok, Detail: boundDetail(detail)})
 }
 
-// ProvisionMCPBroker installs and verifies only the credential-custody
-// boundary. The daemon is deliberately not installed or activated until its
-// upstream transport and OAuth lifecycle have their own accepted contract.
+// ProvisionMCPBroker is the Hermes-compatible boundary provisioner retained for
+// adapter callers. The CLI uses ProvisionMCPBrokerFor so installation also
+// deploys the released transport for the selected backend.
 func (a *Adapter) ProvisionMCPBroker(ctx context.Context) (MCPBrokerInstallReport, error) {
-	rep := MCPBrokerInstallReport{Instance: InstanceName}
+	return a.provisionMCPBrokerBoundary(ctx, Hermes().Identity())
+}
+
+// ProvisionMCPBrokerFor provisions custody, installs the broker/relay/unit from
+// the same release as the host binary, and reconciles the selected backend's
+// MCP declaration. It leaves the unit stopped while any service needs login;
+// when private state is already complete, a changed transport is restarted and
+// an unchanged healthy runtime is left alone.
+func (a *Adapter) ProvisionMCPBrokerFor(ctx context.Context, identity backend.Identity, payloadDir string) (MCPBrokerInstallReport, error) {
+	if err := validateMCPBackendIdentity(identity); err != nil {
+		return MCPBrokerInstallReport{Instance: InstanceName}, err
+	}
+	rep, err := a.provisionMCPBrokerBoundary(ctx, identity)
+	if err != nil {
+		return rep, err
+	}
+	payloadChanged, err := a.installMCPPayloadFiles(ctx, payloadDir, &rep)
+	rep.Changed = rep.Changed || payloadChanged
+	if err != nil {
+		return rep, err
+	}
+	configChanged, err := a.reconcileMCPClientConfig(ctx, identity, rep.Policy, &rep)
+	rep.Changed = rep.Changed || configChanged
+	if err != nil {
+		return rep, err
+	}
+	runtimeChanged, err := a.reconcileMCPRuntimeAfterInstall(ctx, rep.Policy, payloadChanged || configChanged, &rep)
+	rep.Changed = rep.Changed || runtimeChanged
+	if err != nil {
+		return rep, err
+	}
+	return rep, nil
+}
+
+func (a *Adapter) provisionMCPBrokerBoundary(ctx context.Context, identity backend.Identity) (MCPBrokerInstallReport, error) {
+	rep := MCPBrokerInstallReport{Instance: InstanceName, AgentUser: identity.GuestUser}
 
 	groupChanged, err := a.ensureBrokerClientsGroup(ctx, &rep)
 	rep.Changed = rep.Changed || groupChanged
@@ -70,7 +108,7 @@ func (a *Adapter) ProvisionMCPBroker(ctx context.Context) (MCPBrokerInstallRepor
 	if err != nil {
 		return rep, err
 	}
-	clientChanged, err := a.ensureHermesIsClient(ctx, &rep)
+	clientChanged, err := a.ensureAgentIsClient(ctx, &rep, identity.GuestUser)
 	rep.Changed = rep.Changed || clientChanged
 	rep.RestartRequired = rep.RestartRequired || clientChanged
 	if err != nil {
@@ -82,8 +120,8 @@ func (a *Adapter) ProvisionMCPBroker(ctx context.Context) (MCPBrokerInstallRepor
 		return rep, err
 	}
 
-	verify := MCPBrokerReport{Instance: InstanceName}
-	for _, step := range brokerIdentitySteps(a) {
+	verify := MCPBrokerReport{Instance: InstanceName, AgentUser: identity.GuestUser}
+	for _, step := range brokerIdentityStepsFor(a, identity) {
 		if err := step(ctx, &verify); err != nil {
 			rep.Checks = append(rep.Checks, verify.Checks...)
 			return rep, err
@@ -255,22 +293,26 @@ func (a *Adapter) ensureBrokerHome(ctx context.Context, rep *MCPBrokerInstallRep
 // disturbed; passing -G here would silently strip hermes out of
 // TorioProjectsGroup and break the workspace.
 func (a *Adapter) ensureHermesIsClient(ctx context.Context, rep *MCPBrokerInstallReport) (bool, error) {
-	const name = "install:hermes_client"
-	res, err := a.installProbe(ctx, "id", "-nG", HermesUser)
+	return a.ensureAgentIsClient(ctx, rep, HermesUser)
+}
+
+func (a *Adapter) ensureAgentIsClient(ctx context.Context, rep *MCPBrokerInstallReport, agentUser string) (bool, error) {
+	name := "install:" + agentUser + "_client"
+	res, err := a.installProbe(ctx, "id", "-nG", agentUser)
 	if err != nil {
 		return false, err
 	}
 	if res.exit != 0 {
-		rep.record(name, false, "cannot read hermes group membership")
+		rep.record(name, false, "cannot read agent group membership")
 		return false, &Error{Op: mcpInstallOp, Kind: KindVerificationFailed,
-			Err: fmt.Errorf("%s: cannot read hermes group membership", name)}
+			Err: fmt.Errorf("%s: cannot read agent group membership", name)}
 	}
 	if hasGroup(res.out, TorioMCPClientsGroup) {
 		rep.record(name, true, "member")
 		return false, nil
 	}
 	if err := a.installMutate(ctx, rep, name, "usermod",
-		"sudo", "-n", "usermod", "-aG", TorioMCPClientsGroup, HermesUser); err != nil {
+		"sudo", "-n", "usermod", "-aG", TorioMCPClientsGroup, agentUser); err != nil {
 		return false, err
 	}
 	rep.record(name, true, "added")

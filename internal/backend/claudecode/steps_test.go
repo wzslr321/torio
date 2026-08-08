@@ -135,6 +135,13 @@ func TestGroupsExactRefusesAnythingUnaccountedFor(t *testing.T) {
 		}
 	})
 
+	t.Run("the broker client group is the one optional declared addition", func(t *testing.T) {
+		r := newFakeRunner(map[string]execx.Result{probe: out(User + " torio-projects torio-mcp-clients\n")})
+		if err := verifyGroupsExact(context.Background(), r); err != nil {
+			t.Fatalf("verifyGroupsExact after mcp install: %v", err)
+		}
+	})
+
 	t.Run("an extra group fails and is named", func(t *testing.T) {
 		r := newFakeRunner(map[string]execx.Result{probe: out(User + " torio-projects docker\n")})
 		if err := verifyGroupsExact(context.Background(), r); err == nil {
