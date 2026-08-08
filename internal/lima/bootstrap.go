@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -270,6 +271,24 @@ mv -T -- "$tmp" ` + dest + `
 sync -f ` + path.Dir(dest) + `
 trap - EXIT
 `
+}
+
+// rootHelperPathSegmentPattern is deliberately narrower than a filesystem
+// permits. A backend supplies its session helper path, and bootstrap later
+// splices that path into a script executed by root, so every component must be
+// one plain shell-inert segment rather than text that needs quoting.
+var rootHelperPathSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$`)
+
+func validateRootHelperPath(dest string) error {
+	if !path.IsAbs(dest) || dest == "/" || path.Clean(dest) != dest {
+		return fmt.Errorf("helper path must be absolute and canonical")
+	}
+	for _, component := range strings.Split(strings.TrimPrefix(dest, "/"), "/") {
+		if !rootHelperPathSegmentPattern.MatchString(component) {
+			return fmt.Errorf("helper path components must contain only plain filename characters")
+		}
+	}
+	return nil
 }
 
 // projectEnterInstallScript is the install for the ordinary workspace-session
@@ -653,6 +672,11 @@ func (a *Adapter) verifyAgentSessionHelper(ctx context.Context, rep *BootstrapRe
 		return nil
 	}
 	const name = "agent_session_helper"
+	if err := validateRootHelperPath(session.HelperPath); err != nil {
+		return a.verifyFailed(rep, name,
+			"backend declares an unsafe agent session helper path",
+			"fix the backend to declare an absolute canonical path made of plain filename components")
+	}
 	spec := backend.PathSpec{
 		Path:  session.HelperPath,
 		Owner: "root",
