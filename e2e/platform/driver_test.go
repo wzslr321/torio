@@ -17,14 +17,22 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-const commandTimeout = 10 * time.Minute
-const commandFailureOutputLimit = 4096
+const (
+	// cliOperationTimeout is the product policy ceiling passed to Torio. The
+	// harness timeout below may be raised independently, but this value must not
+	// exceed what the binary accepts.
+	cliOperationTimeout = 10 * time.Minute
+	commandTimeoutEnv   = "PLATFORM_E2E_COMMAND_TIMEOUT"
+
+	commandFailureOutputLimit = 4096
+)
 
 type driver struct {
 	binary      string
 	artifactDir string
 	env         []string
 	context     context.Context
+	commandWait time.Duration
 }
 
 func newDriver(binary, artifactDir, xdgConfigHome string) *driver {
@@ -34,12 +42,32 @@ func newDriver(binary, artifactDir, xdgConfigHome string) *driver {
 	Expect(err).NotTo(HaveOccurred(), "stat installed Torio binary")
 	Expect(info.Mode()&0o111).NotTo(BeZero(), "installed Torio binary is not executable")
 	Expect(os.MkdirAll(artifactDir, 0o700)).To(Succeed())
+	commandWait, err := harnessCommandTimeout(os.Getenv(commandTimeoutEnv))
+	Expect(err).NotTo(HaveOccurred(), commandTimeoutEnv)
 	return &driver{
 		binary:      binary,
 		artifactDir: artifactDir,
 		env:         replaceEnvironment(os.Environ(), "XDG_CONFIG_HOME", xdgConfigHome),
 		context:     context.Background(),
+		commandWait: commandWait,
 	}
+}
+
+// harnessCommandTimeout is the test's patience, not Torio's operation policy.
+// Empty keeps the historical ceiling-sized default; an override may exceed it
+// without changing the --timeout value sent to the binary.
+func harnessCommandTimeout(raw string) (time.Duration, error) {
+	if raw == "" {
+		return cliOperationTimeout, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s: %w", commandTimeoutEnv, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("%s must be greater than zero", commandTimeoutEnv)
+	}
+	return d, nil
 }
 
 func (d *driver) setContext(ctx context.Context) {
@@ -54,10 +82,10 @@ func (d *driver) mustRun(label, command string, args ...string) envelope {
 }
 
 func (d *driver) run(label, command string, args ...string) (envelope, error) {
-	ctx, cancel := context.WithTimeout(d.context, commandTimeout)
+	ctx, cancel := context.WithTimeout(d.context, d.commandWait)
 	defer cancel()
 
-	argv := append([]string{"--json", "--timeout", "10m"}, args...)
+	argv := append([]string{"--json", "--timeout", cliOperationTimeout.String()}, args...)
 	cmd := exec.CommandContext(ctx, d.binary, argv...)
 	configureProcessCancellation(cmd)
 	cmd.Env = d.env

@@ -124,6 +124,8 @@ export TORIO_INSTANCE=torio-ci-local
 export PLATFORM_E2E_TORIO_BIN=/path/to/installed/torio
 export PLATFORM_E2E_EXPECTED_VERSION=0.0.0
 export PLATFORM_E2E_ARTIFACT_DIR=/tmp/torio-platform-e2e-artifacts
+# Optional: let the harness wait longer without changing Torio's 10m policy.
+export PLATFORM_E2E_COMMAND_TIMEOUT=20m
 make platform-e2e                                     # the whole journey
 PLATFORM_E2E_LABEL_FILTER='!guest' make platform-e2e  # the host stage alone
 ```
