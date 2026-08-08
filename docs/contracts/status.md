@@ -163,6 +163,16 @@ reports not-waiting; a marker naming no pid survives only while some session on
 that box does. Where liveness itself is `unknown`, so is waiting: a marker that
 cannot be ranked is not reported.
 
+**Scope** — one marker per box, not per session. With two sessions open on the
+same box the field answers "does anything here want you", and cannot say which:
+either session's hook writes the same file, and answering in one clears it for
+both. So a box with one session waiting and one being answered reports
+not-waiting until the waiting one next speaks. That is the same lost-ping
+failure this design already accepts, arriving through a second session rather
+than through a missed event, and it is the reason to reach for per-session
+markers when one box routinely runs several agents. Neither backend records a
+session id anywhere a marker could name today.
+
 **Cost of a lost marker** — a missed notification, and nothing else. That is the
 failure this design chose to accept, which is why absence with a live session is
 reported as `known: not waiting` rather than as unknown.

@@ -150,6 +150,12 @@ A stopped box reports `0` sessions and `no` waiting — proven, without entering
 it, because nothing runs in a VM that is not running — and `?` for progress,
 because that evidence is inside it.
 
+`SESSION` counts every agent process on the box, so two open sessions read as
+`2`. `WAITING` does not divide the same way: there is one marker per box, so it
+answers "does anything here want you" and not which one. Answering in one
+session clears the flag the other set. If you routinely keep several sessions on
+one box, read the count and the flag together rather than the flag alone.
+
 `torio status` says nothing about whether one box is healthy. For that, ask the
 box: `torio backend status` walks its bootstrap checks, and `torio serve status`
 proves whether its guest service is actually answering.
