@@ -3,6 +3,7 @@ package lima
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -109,6 +110,41 @@ func TestBootstrapReportSurfacesObservedVersions(t *testing.T) {
 	}
 	if got := checkDetail(rep, "git"); got != "2.43.0" {
 		t.Errorf("git detail = %q, want 2.43.0", got)
+	}
+}
+
+// TestAgentSessionHelperRejectsUnsafeBackendPathBeforeGuestAccess pins the
+// backend declaration seam. HelperPath is spliced into a root shell script when
+// the helper is absent, so no malformed path may reach even the first guest
+// probe, regardless of whether reconciliation is enabled.
+func TestAgentSessionHelperRejectsUnsafeBackendPathBeforeGuestAccess(t *testing.T) {
+	for _, helperPath := range []string{
+		"",
+		"usr/local/bin/torio-agent-session",
+		"/",
+		"/usr/local/bin/../torio-agent-session",
+		"/usr/local//bin/torio-agent-session",
+		"/usr/local/bin/torio agent session",
+		"/usr/local/bin/torio-agent-session;id",
+	} {
+		for _, reconcile := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/reconcile=%t", helperPath, reconcile), func(t *testing.T) {
+				fr := &fakeRunner{}
+				a := New(fr)
+				rep := BootstrapReport{}
+				session := &backend.SessionSpec{
+					HelperPath: helperPath,
+					Helper:     []byte("#!/bin/sh\n"),
+				}
+
+				if err := a.verifyAgentSessionHelper(context.Background(), &rep, session, reconcile); err == nil {
+					t.Fatal("unsafe backend helper path was accepted")
+				}
+				if got := fr.callCount(); got != 0 {
+					t.Fatalf("guest calls = %d, want 0: validate the backend path before crossing the guest boundary", got)
+				}
+			})
+		}
 	}
 }
 
