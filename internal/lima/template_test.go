@@ -246,6 +246,7 @@ func TestRenderedTemplateProvisionsOnlyTheDeclaredBackendsIdentity(t *testing.T)
 
 	id := Hermes().Identity()
 	for _, want := range []string{
+		"apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends " + strings.Join(hermesBuildDeps, " "),
 		"useradd --create-home --shell /bin/bash --user-group " + id.GuestUser,
 		"usermod -aG " + TorioProjectsGroup + " " + id.GuestUser,
 		"install -d -o " + id.GuestUser + " -g " + TorioProjectsGroup + " -m 2770 " + id.WorkspacePath,

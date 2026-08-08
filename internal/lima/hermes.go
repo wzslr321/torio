@@ -348,7 +348,7 @@ func (hermesBackend) ProbeAuth(context.Context, backend.StepRunner) error { retu
 // should not carry a compiler toolchain and ffmpeg for a Python install it will
 // never perform.
 func (hermesBackend) ProvisionScript() string {
-	return `apt-get install -y --no-install-recommends ` + strings.Join(hermesBuildDeps, " ") + `
+	return `apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends ` + strings.Join(hermesBuildDeps, " ") + `
 
 if ! id -u ` + HermesUser + ` >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash --user-group ` + HermesUser + `
