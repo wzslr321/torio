@@ -160,7 +160,7 @@ func newGroupRunCmd(a *app) *cobra.Command {
 # A deliberate ratchet, updated on purpose when a command is added or removed:
 # the derivation reads internal/cli/, and this pin is what makes an accidental
 # change to the surface fail a test instead of passing silently.
-PINNED_COMMAND_COUNT = 28
+PINNED_COMMAND_COUNT = 29
 
 
 class CommandSurface(unittest.TestCase):
@@ -191,6 +191,19 @@ class CommandSurface(unittest.TestCase):
         self.assertEqual(PINNED_COMMAND_COUNT, len(surface))
         self.assertIn("torio vm bootstrap", surface)
         self.assertIn("torio version", surface)
+
+    def test_a_parent_that_acts_is_documented_even_though_it_is_not_a_leaf(self) -> None:
+        # `torio status` is the one parent that does something itself, so the
+        # derivation above — which documents leaves — stopped demanding it the
+        # moment it gained a subcommand. Telling "a parent that acts" from "a
+        # parent that dispatches" by reading source text would be a guess, and a
+        # guess that failed quietly is the failure this whole check exists to
+        # prevent. So the one command with the hole is pinned by name instead.
+        self.assertNotIn("torio status", v.command_surface())
+        documented = "\n".join(
+            path.read_text(encoding="utf-8") for path in sorted(v.ROOT.glob(v.COMMAND_DOC_GLOB))
+        )
+        self.assertIn("torio status", documented)
 
     def test_an_undocumented_command_is_named(self) -> None:
         self.assertEqual(
