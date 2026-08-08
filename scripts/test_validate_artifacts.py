@@ -201,7 +201,9 @@ class CommandSurface(unittest.TestCase):
         # prevent. So the one command with the hole is pinned by name instead.
         self.assertNotIn("torio status", v.command_surface())
         documented = "\n".join(
-            path.read_text(encoding="utf-8") for path in sorted(v.ROOT.glob(v.COMMAND_DOC_GLOB))
+            path.read_text(encoding="utf-8")
+            for glob in v.COMMAND_DOC_GLOBS
+            for path in sorted(v.ROOT.glob(glob))
         )
         self.assertIn("torio status", documented)
 
