@@ -203,6 +203,9 @@ class CommandSurface(unittest.TestCase):
     def test_the_repository_documents_every_command(self) -> None:
         self.assertEqual([], v.validate_command_coverage())
 
+    def test_command_coverage_includes_the_normative_contract(self) -> None:
+        self.assertIn("docs/contracts/*.md", v.COMMAND_DOC_GLOBS)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -99,8 +99,8 @@ One instance runs one agent identity, and that has not changed. What `--backend`
 changes is who has to remember which box that is: the operator names the agent,
 and the instance follows.
 
-The mapping is derived, not recorded. The default backend is `torio`, so a box
-created before this flag existed is still the one an unflagged command talks to;
+The mapping is derived, not recorded. The default backend is `hermes`; `torio`
+is its default instance, so a box created before this flag existed is still the one an unflagged command talks to;
 every other backend is `torio-<backend>`. There is no table of instance names to
 maintain and so no second place that can disagree about which box runs which
 agent.
@@ -193,35 +193,32 @@ torio vm ssh -- COMMAND...
   and does not trust a clean exit code: after `limactl stop` it re-queries and
   requires state `Stopped`, otherwise fail-closed (exit 3). It never uses
   `--force`.
-- `bootstrap` reconciles and verifies the guest: a stable, non-interactive
-  `hermes` command and the layout of persistent guest directories on a native
-  Linux filesystem. It runs only against an existing target in a verified
-  `Running` state, through the typed Lima/execx boundary (fixed argv, no
-  `sh -c`, no concatenated strings, bounded and redacted output). It is
-  idempotent and narrow: it may install the pinned Hermes Agent launcher and the
-  `/usr/local/bin/hermes` PATH symlink, but it does **not** recreate or re-image
-  the VM, install a model or provider, accept secrets, or create the backend
-  service (that is `serve install`).
-- **Docker: `hermes` MUST NOT be in the `docker` group.** Membership is
-  root-equivalent on the guest, so rootful Docker for the `hermes` service
-  identity is forbidden by
+- `bootstrap` reconciles and verifies the declared backend and its persistent
+  guest layout on a native Linux filesystem. It runs only against an existing
+  target in a verified `Running` state, through the typed Lima/execx boundary
+  (fixed argv, no `sh -c`, no concatenated strings, bounded and redacted output).
+  It is idempotent and narrow: it may install the backend's pinned runtime, but
+  does **not** recreate or re-image the VM, install a model or provider, accept
+  secrets, or create a service (that is `serve install`). Backend-specific
+  checks are declared by the backend and reported in the result.
+- **Docker: a backend identity MUST NOT be in the `docker` group.** Membership
+  is root-equivalent on the guest, so rootful Docker for an agent identity is forbidden by
   [ADR-0003](../adr/0003-ownership-split-and-operator-carried-write.md).
   `bootstrap` **verifies the absence** of that membership and fails closed if it
   finds it; the provisioning template removes `hermes` from `docker` if the group
   exists. No Docker Engine is installed at all, and `bootstrap` does **not** check
   Docker reachability. A future container runtime requires a rootless,
   hermes-owned design behind its own ADR.
-- `bootstrap` **verifies** rather than trusting an exit code: the `hermes` user
-  exists; the `torio-projects` group exists with both `hermes` and the operator
-  (the Lima login identity) in it; `hermes` is **not** in `docker`;
-  `uname -m` is the host profile's guest architecture; `hermes --version` works through the documented stable
-  path; `git --version` works; every required path is a directory with the
-  expected owner, group and mode on a native Linux filesystem rather than a host
-  share; and no broad host mount is present. Any unknown, unverifiable or
+- `bootstrap` **verifies** rather than trusting an exit code: the backend
+  identity exists, reaches `torio-projects` with the operator, is outside
+  `docker`, and satisfies its declared runtime checks; `uname -m` is the host
+  profile's guest architecture; `git --version` works; every backend-required
+  path has the expected owner, group and mode on a native Linux filesystem rather
+  than a host share; and no broad host mount is present. Any unknown, unverifiable or
   drifted state (architecture, version, ownership, mount) is reported and
   fail-closed (exit 6), never papered over. A rerun is a success only when every
   postcondition is proven.
-- The required paths have disjoint roles (constants in
+- Backend-required paths have disjoint roles. For Hermes, the paths are (constants in
   `internal/lima/bootstrap.go`) — `/home/hermes/.hermes` is **not** a knowledge
   base:
 
@@ -232,12 +229,23 @@ torio vm ssh -- COMMAND...
   | `HermesBrainPath` | `/home/hermes/brain` | Second Brain vault |
   | `HermesWorkspacePath` | `/home/hermes/projects` | shared project workspace |
 
-  `bootstrap` verifies the profile and the Brain **independently**; neither path
-  is an alias of the other.
-- `bootstrap` runs several bounded guest probes and may install Hermes from
+  Hermes bootstrap verifies the profile and the Brain **independently**; neither
+  path is an alias of the other.
+- `bootstrap` runs several bounded guest probes and may install a backend from
   source; run it with the largest timeout policy allows: `--timeout 10m`
-  (`config.MaxTimeout`). Reaching Hermes afterwards stays operator-controlled
-  (for example `torio vm ssh -- sudo -u hermes -- hermes --version`).
+  (`config.MaxTimeout`).
+
+### Backend
+
+```text
+torio backend status
+torio backend login
+```
+
+- `status` reports the backend identity, its installed version, credential state
+  and declared capabilities. It verifies state and never repairs it.
+- `login` opens the backend's own interactive login flow as its guest identity.
+  It is interactive and rejects `--json`; no SSH agent is forwarded.
 
 ### Backend
 
@@ -297,24 +305,23 @@ torio brain status
 torio brain import <host-directory> [--into SUBDIR] [--dry-run]
 ```
 
-The Second Brain is a private Markdown vault under `/home/hermes/brain`,
-versioned by its own local Git repository and registered as a separate Hermes
-Project ([ADR-0003](../adr/0003-ownership-split-and-operator-carried-write.md)).
+The Second Brain is a private Markdown vault under the declared backend's Brain
+path, versioned by its own local Git repository and registered with the backend
+when it declares a project registry
+([ADR-0003](../adr/0003-ownership-split-and-operator-carried-write.md)).
 
 - **Output never contains note names or note content.** All three commands report
   bounded aggregate metadata only: file counts, total bytes, a manifest digest,
   stable drift markers. This applies to `error.details` as well. It is the Brain's
   privacy boundary, not a matter of brevity.
 - `init` creates the canonical scaffold atomically through private guest staging,
-  makes the first local commit and registers the Hermes Project. After
-  verification it installs or refreshes the global `torio-brain` skill so the
-  Brain is searchable from other projects; Hermes caches a skill prompt per
-  backend process, so open sessions must be restarted. Idempotent for matching
-  managed state; refuses non-empty unmanaged data. It configures no remote and
-  pushes nothing.
+  makes the first local commit and registers it where the backend declares a
+  registry. After verification it installs or refreshes that backend's declared
+  `torio-brain` skill surface. Idempotent for matching managed state; refuses
+  non-empty unmanaged data. It configures no remote and pushes nothing.
 - `status` reports state (`initialized`/`uninitialized`/drift), the native
-  filesystem, ownership and mode, the Git worktree state, aggregates, Hermes
-  Project registration and skill state. It modifies nothing.
+  filesystem, ownership and mode, the Git worktree state, aggregates, declared
+  project-registration state and skill state. It modifies nothing.
 - `import` moves allowlisted files (Markdown, Canvas, local attachments) through
   private host and guest staging, verified by a guest-side checksum.
   Credential-shaped files, repository metadata, symlinks, hardlinks, special
