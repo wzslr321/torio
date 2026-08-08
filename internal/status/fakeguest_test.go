@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/execx"
@@ -28,13 +27,11 @@ type fakeGuest struct {
 type guestEnv struct {
 	now       string
 	ps        string
-	record    string
-	recordRC  int
 	statLines string
 	marker    string
 	markerRC  int
 	// truncate names the fact whose output arrives truncated ("clock",
-	// "processes", "record", "stat", "marker").
+	// "processes", "stat", "marker").
 	truncate string
 }
 
@@ -57,8 +54,6 @@ func (f *fakeGuest) SSH(_ context.Context, argv []string) (execx.Result, error) 
 		return f.answer("stat", 0, f.env.statLines), nil
 	case strings.Contains(j, "cat -- "+testHome+"/"+MarkerFileName):
 		return f.answer("marker", f.env.markerRC, f.env.marker), nil
-	case strings.Contains(j, testRecordPath):
-		return f.answer("record", f.env.recordRC, f.env.record), nil
 	}
 	return execx.Result{}, fmt.Errorf("fakeGuest: unrouted command: %s", j)
 }
@@ -90,14 +85,14 @@ func (f *fakeGuest) saw(sub string) bool {
 
 // The guest layout the tests are written against.
 const (
-	testUser       = "agent"
-	testHome       = "/home/agent"
-	testRecordPath = "/home/agent/.state/record.json"
-	testGuestNow   = 1_754_600_000 // a fixed unix second; nothing here reads a real clock
+	testUser         = "agent"
+	testHome         = "/home/agent"
+	testProcess      = "agent-cli"
+	testProgressPath = "/home/agent/.state/transcript.jsonl"
+	testGuestNow     = 1_754_600_000 // a fixed unix second; nothing here reads a real clock
 )
 
-// testBackend declares a probe whose parser is supplied per test, so a test can
-// say "this record is unparseable" without inventing a wire format.
+// testBackend declares a probe a test shapes per case.
 type testBackend struct {
 	backend.Backend
 	spec *backend.StatusSpec
@@ -116,26 +111,14 @@ func (nullBackend) Identity() backend.Identity {
 }
 func (nullBackend) Status() *backend.StatusSpec { return nil }
 
-// specWith returns a probe declaring one record path, one progress path and the
-// marker convention.
-func specWith(parse func([]byte) ([]backend.SessionFact, error), marker bool) *backend.StatusSpec {
+// specWith returns a probe declaring the agent process name, one progress path
+// and whether the marker convention is written.
+func specWith(process string, marker bool) *backend.StatusSpec {
 	return &backend.StatusSpec{
-		SessionArgv:   []string{"cat", "--", testRecordPath},
-		ParseSessions: parse,
-		ProgressPaths: []string{testRecordPath},
-		WaitingMarker: marker,
+		SessionProcess: process,
+		ProgressPaths:  []string{testProgressPath},
+		WaitingMarker:  marker,
 	}
-}
-
-// claiming is a parser that reports a fixed set of sessions.
-func claiming(facts ...backend.SessionFact) func([]byte) ([]backend.SessionFact, error) {
-	return func([]byte) ([]backend.SessionFact, error) { return facts, nil }
-}
-
-// unparseable is a parser that refuses, the way a strict decoder refuses a
-// document it cannot vouch for.
-func unparseable(_ []byte) ([]backend.SessionFact, error) {
-	return nil, fmt.Errorf("unknown field in record")
 }
 
 // statLine renders one `stat -c` line the way the guest would.
@@ -166,14 +149,7 @@ func pollBox(g *fakeGuest, b backend.Backend, box Box) Instance {
 func defaultEnv() guestEnv {
 	return guestEnv{
 		now:       fmt.Sprintf("%d\n", testGuestNow),
-		ps:        " 1234 600\n 1400 12\n",
-		record:    "{}",
-		statLines: statLine(testRecordPath, testUser, "600", testGuestNow-30) + "\n",
+		ps:        " 1234 600 " + testProcess + "\n 1400 12 bash\n",
+		statLines: statLine(testProgressPath, testUser, "600", testGuestNow-30) + "\n",
 	}
-}
-
-// startedSecondsAgo is the wall-clock start a backend would have recorded for a
-// process the guest reports as having run for that long.
-func startedSecondsAgo(n int64) time.Time {
-	return time.Unix(testGuestNow-n, 0).UTC()
 }

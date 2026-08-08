@@ -150,34 +150,19 @@ func (p *Poller) probe(ctx context.Context, instance string, id backend.Identity
 	return session, waiting, progress
 }
 
-// sessions reads the backend's own record and keeps only what a live process
-// confirms.
+// sessions reads the guest's process table and keeps the agent's own processes.
 func (p *Poller) sessions(ctx context.Context, instance string, t backend.Transport, user string, spec *backend.StatusSpec, guestNow time.Time) SessionField {
-	psOut, err := p.run(ctx, instance, "processes", t, user, append([]string{"ps", "-o", "pid=,etimes=", "-u"}, user)...)
+	if spec.SessionProcess == "" {
+		// The backend runs no process a session corresponds to. That is a
+		// declaration, and reporting it as an agent that is not running would be
+		// answering a question this backend was never asked.
+		return SessionField{State: NotApplicable, Sessions: []Session{}}
+	}
+	out, err := p.run(ctx, instance, "processes", t, user, processArgv(user)...)
 	if err != nil {
 		return unknownSession()
 	}
-	live := parseProcesses(psOut)
-
-	res, err := guestexec.Run(ctx, t, guestexec.UserExecAs(user, spec.SessionArgv...))
-	if err != nil {
-		p.diagnose(instance, "sessions", err)
-		return unknownSession()
-	}
-	if res.ExitCode != 0 {
-		// The record could not be read. That is not evidence that nothing is
-		// running: a backend writes its roster only under conditions of its own,
-		// and reading absence as quiet is how a status surface reports a working
-		// agent as gone.
-		p.diagnose(instance, "sessions", errUnreadableRecord)
-		return unknownSession()
-	}
-	claims, err := spec.ParseSessions(res.Stdout)
-	if err != nil {
-		p.diagnose(instance, "sessions", err)
-		return unknownSession()
-	}
-	return verifySessions(claims, live, guestNow)
+	return sessionsNamed(spec.SessionProcess, parseProcesses(out), guestNow)
 }
 
 // paths reads every path fact in one call: the progress evidence a backend
@@ -190,7 +175,7 @@ func (p *Poller) paths(ctx context.Context, instance string, t backend.Transport
 		paths = append(paths, markerPath)
 	}
 	if len(paths) == 0 {
-		return unknownProgress(), nil
+		return ProgressField{State: NotApplicable}, nil
 	}
 
 	// A missing path makes `stat` exit non-zero while still printing a line for
@@ -208,6 +193,11 @@ func (p *Poller) paths(ctx context.Context, instance string, t backend.Transport
 		if e, ok := entries[markerPath]; ok {
 			marker = &e
 		}
+	}
+	if len(spec.ProgressPaths) == 0 {
+		// The stat call happened for the marker alone: this backend writes no
+		// evidence of work, which is a declaration and not an unreadable box.
+		return ProgressField{State: NotApplicable}, marker
 	}
 	return newestProgress(spec.ProgressPaths, entries, guestNow), marker
 }

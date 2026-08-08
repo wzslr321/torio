@@ -8,17 +8,16 @@ import (
 	"github.com/wzslr321/torio/internal/backend"
 )
 
-func TestPollReportsALiveSessionTheGuestConfirms(t *testing.T) {
+func TestPollReportsTheAgentProcessesTheGuestIsRunning(t *testing.T) {
 	g := &fakeGuest{env: defaultEnv()}
-	b := testBackend{spec: specWith(claiming(backend.SessionFact{PID: 1234, StartedAt: startedSecondsAgo(600)}), true)}
 
-	got := pollOne(g, b)
+	got := pollOne(g, testBackend{spec: specWith(testProcess, true)})
 
 	if got.Session.State != Known {
 		t.Fatalf("session state = %q, want %q", got.Session.State, Known)
 	}
 	if len(got.Session.Sessions) != 1 || got.Session.Sessions[0].PID != 1234 {
-		t.Fatalf("sessions = %+v, want the confirmed pid", got.Session.Sessions)
+		t.Fatalf("sessions = %+v, want only the agent's own process", got.Session.Sessions)
 	}
 	if got.Session.Sessions[0].AgeSeconds != 600 {
 		t.Errorf("age = %d, want the guest's own elapsed seconds", got.Session.Sessions[0].AgeSeconds)
@@ -31,87 +30,70 @@ func TestPollReportsALiveSessionTheGuestConfirms(t *testing.T) {
 	}
 }
 
-// A record that claims a pid nothing is running is the exact lie this design
-// exists to refuse: no backend reports its own death, so a killed agent leaves
-// its record behind saying it is working.
-func TestPollDropsASessionNoLiveProcessConfirms(t *testing.T) {
+// The match is on the whole process name. A prefix or substring match is how a
+// status surface starts counting an editor, a pager or a grep the agent spawned
+// as a second agent.
+func TestPollCountsOnlyProcessesNamedExactly(t *testing.T) {
 	env := defaultEnv()
-	env.ps = " 1400 12\n"
+	env.ps = " 1234 600 " + testProcess + "\n 1300 20 " + testProcess + "-helper\n 1400 12 bash\n"
 	g := &fakeGuest{env: env}
-	b := testBackend{spec: specWith(claiming(backend.SessionFact{PID: 1234}), false)}
 
-	got := pollOne(g, b)
+	got := pollOne(g, testBackend{spec: specWith(testProcess, false)})
+
+	if len(got.Session.Sessions) != 1 || got.Session.Sessions[0].PID != 1234 {
+		t.Fatalf("sessions = %+v, want only the exact name matched", got.Session.Sessions)
+	}
+}
+
+// Nothing running is a proven answer, not an absent one: the process table was
+// read and the agent was not in it.
+func TestPollReportsAnEmptyProcessTableAsProvenQuiet(t *testing.T) {
+	env := defaultEnv()
+	env.ps = " 1400 12 bash\n"
+	g := &fakeGuest{env: env}
+
+	got := pollOne(g, testBackend{spec: specWith(testProcess, false)})
 
 	if got.Session.State != Known {
 		t.Fatalf("session state = %q, want %q", got.Session.State, Known)
 	}
 	if len(got.Session.Sessions) != 0 {
-		t.Fatalf("sessions = %+v, want the unconfirmed claim dropped", got.Session.Sessions)
+		t.Fatalf("sessions = %+v, want none", got.Session.Sessions)
 	}
 }
 
-// A pid the guest handed to a different process must not stand in for the agent
-// that died holding it.
-func TestPollDropsASessionWhoseStartTimeDisagrees(t *testing.T) {
+// A backend that runs no process a session corresponds to has declared that,
+// and the field says so rather than reporting an agent that is not running.
+func TestPollReportsNotApplicableForABackendWithNoSessionProcess(t *testing.T) {
 	g := &fakeGuest{env: defaultEnv()}
-	b := testBackend{spec: specWith(claiming(backend.SessionFact{PID: 1234, StartedAt: startedSecondsAgo(90_000)}), false)}
 
-	got := pollOne(g, b)
+	got := pollOne(g, testBackend{spec: &backend.StatusSpec{ProgressPaths: []string{testProgressPath}}})
 
-	if len(got.Session.Sessions) != 0 {
-		t.Fatalf("sessions = %+v, want the recycled pid rejected", got.Session.Sessions)
+	if got.Session.State != NotApplicable {
+		t.Fatalf("session state = %q, want %q", got.Session.State, NotApplicable)
 	}
-}
-
-// A record that cannot be read is not a quiet box. Reading absence as quiet is
-// how a status surface reports a working agent as gone.
-func TestPollReportsUnknownWhenTheRecordCannotBeRead(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		env  func(guestEnv) guestEnv
-		spec *backend.StatusSpec
-	}{
-		{
-			name: "command failed",
-			env:  func(e guestEnv) guestEnv { e.recordRC = 1; return e },
-			spec: specWith(claiming(), false),
-		},
-		{
-			name: "output truncated",
-			env:  func(e guestEnv) guestEnv { e.truncate = "record"; return e },
-			spec: specWith(claiming(), false),
-		},
-		{
-			name: "output unparseable",
-			env:  func(e guestEnv) guestEnv { return e },
-			spec: specWith(unparseable, false),
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			g := &fakeGuest{env: tc.env(defaultEnv())}
-			got := pollOne(g, testBackend{spec: tc.spec})
-			if got.Session.State != Unknown {
-				t.Fatalf("session state = %q, want %q", got.Session.State, Unknown)
-			}
-			if got.Session.Sessions == nil {
-				t.Error("sessions = null, want an empty array so a reader can count it unconditionally")
-			}
-		})
+	if g.saw("ps -o") {
+		t.Error("the process table was read for a backend that declares no session process")
+	}
+	if got.Progress.State != Known {
+		t.Errorf("progress state = %q, want the declared half still answered", got.Progress.State)
 	}
 }
 
 // One unprovable fact must not take the others down with it: a box whose
-// process list is unreadable can still report when it last progressed.
+// process table is unreadable can still report when it last progressed.
 func TestPollDegradesOneFactAtATime(t *testing.T) {
 	env := defaultEnv()
 	env.truncate = "processes"
 	g := &fakeGuest{env: env}
-	b := testBackend{spec: specWith(claiming(backend.SessionFact{PID: 1234}), true)}
 
-	got := pollOne(g, b)
+	got := pollOne(g, testBackend{spec: specWith(testProcess, true)})
 
 	if got.Session.State != Unknown {
 		t.Fatalf("session state = %q, want %q", got.Session.State, Unknown)
+	}
+	if got.Session.Sessions == nil {
+		t.Error("sessions = null, want an empty array so a reader can count it unconditionally")
 	}
 	if got.Progress.State != Known {
 		t.Errorf("progress state = %q, want it unaffected by the session read", got.Progress.State)
@@ -151,9 +133,9 @@ func TestPollAsksNothingOfABackendThatDeclaresNoProbe(t *testing.T) {
 // progressed is a different question, and stays unknown.
 func TestPollAnswersAStoppedBoxWithoutEnteringIt(t *testing.T) {
 	g := &fakeGuest{env: defaultEnv()}
-	b := testBackend{spec: specWith(claiming(backend.SessionFact{PID: 1234}), true)}
 
-	got := pollBox(g, b, Box{Name: "torio-test", State: "stopped", Running: false})
+	got := pollBox(g, testBackend{spec: specWith(testProcess, true)},
+		Box{Name: "torio-test", State: "stopped", Running: false})
 
 	if g.callCount() != 0 {
 		t.Fatalf("guest calls = %d, want none for a stopped box", g.callCount())
@@ -173,7 +155,7 @@ func TestPollAnswersAStoppedBoxWithoutEnteringIt(t *testing.T) {
 // to stop answering about the others.
 func TestPollReportsAnUnresolvedBackendAsUnknownAndKeepsGoing(t *testing.T) {
 	g := &fakeGuest{env: defaultEnv()}
-	b := testBackend{spec: specWith(claiming(), false)}
+	b := testBackend{spec: specWith(testProcess, false)}
 	p := &Poller{
 		Instances: func(context.Context) ([]Box, error) {
 			return []Box{
@@ -212,9 +194,8 @@ func TestPollReportsAnUnresolvedBackendAsUnknownAndKeepsGoing(t *testing.T) {
 // the box state it was enumerated with stays.
 func TestPollReportsAnUnreachableBoxAsUnknown(t *testing.T) {
 	g := &fakeGuest{env: defaultEnv(), failWith: errors.New("transport failed")}
-	b := testBackend{spec: specWith(claiming(), true)}
 
-	got := pollOne(g, b)
+	got := pollOne(g, testBackend{spec: specWith(testProcess, true)})
 
 	if got.Box != "running" {
 		t.Errorf("box = %q, want the enumerated state kept", got.Box)
@@ -244,26 +225,22 @@ func TestPollFailsWhenTheEnumerationFails(t *testing.T) {
 	}
 }
 
-// The probe runs as the backend's identity, never as the Lima login user, which
-// holds passwordless root.
+// Every probe runs as the backend's identity, never as the Lima login user,
+// which holds passwordless root.
 func TestPollRunsEveryProbeAsTheBackendIdentity(t *testing.T) {
 	g := &fakeGuest{env: defaultEnv()}
-	b := testBackend{spec: specWith(claiming(), true)}
 
-	pollOne(g, b)
+	pollOne(g, testBackend{spec: specWith(testProcess, true)})
 
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if len(g.calls) == 0 {
 		t.Fatal("no guest calls recorded")
 	}
+	prefix := "sudo -n -u " + testUser + " --"
 	for _, c := range g.calls {
-		if !hasPrefixFields(c, "sudo -n -u "+testUser+" --") {
+		if len(c) < len(prefix) || c[:len(prefix)] != prefix {
 			t.Errorf("guest call %q does not run as the backend identity", c)
 		}
 	}
-}
-
-func hasPrefixFields(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }

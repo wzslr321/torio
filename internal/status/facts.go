@@ -5,22 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/wzslr321/torio/internal/backend"
 )
-
-// startTolerance is how far a backend's recorded start time may sit from the
-// one derived from the live process before the two are treated as different
-// processes.
-//
-// It exists because the two clocks are read differently: a backend writes a
-// wall-clock timestamp when it starts a session, while the poll derives one by
-// subtracting the process's elapsed seconds from the guest's current time,
-// which is whole-second and rounds. A minute and a half absorbs that without
-// absorbing a pid recycled into a genuinely different process — pids are handed
-// out in sequence and a box would have to churn through the whole pid space
-// inside the window for a collision to land here.
-const startTolerance = 90 * time.Second
 
 // parseGuestNow reads `date +%s` from the guest.
 //
@@ -41,21 +26,31 @@ func parseGuestNow(out []byte) (time.Time, error) {
 type process struct {
 	pid     int
 	elapsed time.Duration
+	// name is what `ps -o comm=` printed, which the kernel truncates to fifteen
+	// characters.
+	name string
 }
 
-// parseProcesses reads `ps -o pid=,etimes= -u <user>` output: one line per
-// process, the pid and how many seconds it has been running.
+// processArgv is the fixed reading of the guest's process table, restricted to
+// the backend's own identity. The user is a compile-time backend declaration,
+// never a value read from a previous answer.
+func processArgv(user string) []string {
+	return []string{"ps", "-o", "pid=,etimes=,comm=", "-u", user}
+}
+
+// parseProcesses reads `ps -o pid=,etimes=,comm= -u <user>` output: one line
+// per process, the pid, how many seconds it has been running, and the name.
 //
 // A line it cannot read is skipped rather than failing the whole reading. The
-// output is a list of processes and the question asked of it is whether a
-// specific pid is among them; one unreadable line cannot make a pid that is
-// there absent, and failing closed on it would report every session on the box
-// as unknown because of a process that has nothing to do with any of them.
-func parseProcesses(out []byte) map[int]process {
-	live := make(map[int]process)
+// output is a list of processes and the question asked of it is which of them
+// are the agent; one unreadable line cannot make a process that is there
+// absent, and failing closed on it would report the box as unknown because of a
+// process that has nothing to do with the agent.
+func parseProcesses(out []byte) []process {
+	var live []process
 	for _, line := range strings.Split(string(out), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) != 2 {
+		if len(fields) < 3 {
 			continue
 		}
 		pid, err := strconv.Atoi(fields[0])
@@ -66,7 +61,10 @@ func parseProcesses(out []byte) map[int]process {
 		if err != nil || secs < 0 {
 			continue
 		}
-		live[pid] = process{pid: pid, elapsed: time.Duration(secs) * time.Second}
+		// comm is the last column and the kernel allows a space in it, so it is
+		// everything after the two numeric columns rather than a third field.
+		name := strings.TrimSpace(strings.Join(fields[2:], " "))
+		live = append(live, process{pid: pid, elapsed: time.Duration(secs) * time.Second, name: name})
 	}
 	return live
 }
@@ -129,34 +127,23 @@ func writableBeyondOwner(mode string) bool {
 	return bits&0o022 != 0
 }
 
-// verifySessions keeps the sessions a backend claims only where a live process
-// agrees with the claim.
+// sessionsNamed selects the agent's own processes out of the guest's table.
 //
-// The claim alone is not evidence: a backend that is killed leaves its record
-// behind, so a record read on its own reports a dead agent as working forever.
-// The start time is what stops the opposite error — a pid the guest has since
-// handed to something else would otherwise let an unrelated process stand in
-// for the agent that died.
-func verifySessions(claims []backend.SessionFact, live map[int]process, guestNow time.Time) SessionField {
-	out := make([]Session, 0, len(claims))
-	for _, claim := range claims {
-		proc, running := live[claim.PID]
-		if !running {
+// The match is on the whole name and not a prefix or a substring, because a
+// substring match is how a status surface starts counting an editor, a pager or
+// a grep the agent spawned as a second agent. What is being read is the live
+// table rather than a record the backend wrote, so there is nothing here that
+// can outlive the process it describes — which is the failure a status document
+// built on backend-written records has no answer to.
+func sessionsNamed(name string, live []process, guestNow time.Time) SessionField {
+	out := make([]Session, 0, len(live))
+	for _, proc := range live {
+		if proc.name != name {
 			continue
 		}
-		startedAt := guestNow.Add(-proc.elapsed)
-		if !claim.StartedAt.IsZero() {
-			drift := startedAt.Sub(claim.StartedAt.UTC())
-			if drift < 0 {
-				drift = -drift
-			}
-			if drift > startTolerance {
-				continue
-			}
-		}
 		out = append(out, Session{
-			PID:        claim.PID,
-			StartedAt:  startedAt.Format(time.RFC3339),
+			PID:        proc.pid,
+			StartedAt:  guestNow.Add(-proc.elapsed).Format(time.RFC3339),
 			AgeSeconds: int64(proc.elapsed / time.Second),
 		})
 	}

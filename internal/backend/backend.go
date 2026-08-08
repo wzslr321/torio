@@ -27,7 +27,6 @@ package backend
 import (
 	"context"
 	"strconv"
-	"time"
 
 	"github.com/wzslr321/torio/internal/execx"
 )
@@ -372,34 +371,29 @@ type SessionSpec struct {
 // reports that the backend answers no such question and runs no guest command
 // to discover what it was already told.
 //
-// The split between what a backend declares here and what Torio does with it
-// follows who owns the format being read. A backend's record of its own
-// sessions is the backend's format, so the backend brings both the command
-// that emits it and the parser that reads it — Torio learning each product's
-// internal file would be one parser per product and the schema ownership
-// inverted. Everything else a poll reads is POSIX or Torio's own convention:
-// modification times, process liveness, the waiting marker. Torio builds those
-// argv and parses that output itself, so what a poll runs on a guest stays
-// fixed no matter which backend it is asking.
+// Every field is separately declarable, because the two backends that exist can
+// prove different halves: one runs a process per session and writes no record
+// of it anywhere, the other runs a single long-lived service and keeps its
+// sessions in a database. An empty field is the same kind of declaration a nil
+// spec is, one question narrower.
 type StatusSpec struct {
-	// SessionArgv is the fixed guest argv, run as the backend's identity,
-	// whose standard output is the backend's own record of its live sessions.
-	// It is a constant: no caller value reaches it, and nothing derived from a
-	// previous answer does either.
-	SessionArgv []string
-	// ParseSessions maps SessionArgv's standard output to the sessions that
-	// output claims exist.
+	// SessionProcess is the name a session's process reports in the guest's
+	// process table, as `ps -o comm=` prints it. Empty when the backend runs no
+	// process a session corresponds to, which a poll reports as not-applicable
+	// rather than as an agent that is not running.
 	//
-	// It reads untrusted guest input (ADR-0002) and so decodes strictly:
-	// unknown fields refused, a second decode required to find EOF, and an
-	// error rather than a partial reading. A poll renders that error as
-	// unknown. An agent that cannot be read about is not an agent that is
-	// quiet, and a status surface that guesses the difference is worse than one
-	// that admits it could not tell.
-	ParseSessions func(out []byte) ([]SessionFact, error)
+	// It is a process name rather than a record on disk for two reasons. Neither
+	// backend writes such a record — that was checked against running boxes, not
+	// assumed — and the process table cannot lie about liveness the way a file
+	// left behind by a killed agent does. The name is the one a session is
+	// launched under, which is the backend's own to declare; the kernel truncates
+	// it to fifteen characters, so a longer declaration would silently match
+	// nothing.
+	SessionProcess string
 	// ProgressPaths are guest files whose modification time is evidence the
 	// backend cannot help producing while it works. The newest of them is the
-	// last moment the agent provably progressed.
+	// last moment the agent provably progressed. Empty when the backend writes no
+	// such file.
 	//
 	// They are deliberately not "when the last message was written". A backend
 	// that records a row per turn reads as dead for the whole of a long tool
@@ -407,21 +401,7 @@ type StatusSpec struct {
 	// watching to see whether anyone needs them.
 	ProgressPaths []string
 	// WaitingMarker declares that this backend's hooks write Torio's waiting
-	// marker. False is not "this agent is not waiting": it is the backend
-	// having no way to say so, which a poll reports as unknown.
+	// marker. False is not "this agent is not waiting": it is the backend having
+	// no way to say so, which a poll reports as unknown.
 	WaitingMarker bool
-}
-
-// SessionFact is one session a backend's own record claims exists.
-//
-// It carries no title, no prompt and no path. A status document renders
-// identifiers and enumerated values only, because its output reaches a terminal
-// that interprets escape sequences and an agent writes its own session titles.
-type SessionFact struct {
-	// PID is the process the backend recorded for the session.
-	PID int
-	// StartedAt is when the backend recorded that process starting, zero when
-	// it records no start time. A poll pairs it with the process's actual start
-	// time, so a recycled pid cannot impersonate an agent that has died.
-	StartedAt time.Time
 }

@@ -3,14 +3,12 @@ package status
 import (
 	"fmt"
 	"testing"
-
-	"github.com/wzslr321/torio/internal/backend"
 )
 
 // markerEnv is defaultEnv plus a marker file with the given stat facts and body.
 func markerEnv(owner, mode string, mtime int64, body string) guestEnv {
 	e := defaultEnv()
-	e.statLines = statLine(testRecordPath, testUser, "600", testGuestNow-30) + "\n" +
+	e.statLines = statLine(testProgressPath, testUser, "600", testGuestNow-30) + "\n" +
 		statLine(testHome+"/"+MarkerFileName, owner, mode, mtime) + "\n"
 	e.marker = body
 	return e
@@ -23,11 +21,10 @@ func markerDocJSON(kind string, pid int) string {
 	return fmt.Sprintf(`{"schema_version":%q,"kind":%q,"pid":%d}`, MarkerSchemaVersion, kind, pid)
 }
 
-func pollWithMarker(t *testing.T, env guestEnv, claim backend.SessionFact) WaitingField {
+func pollWithMarker(t *testing.T, env guestEnv) WaitingField {
 	t.Helper()
 	g := &fakeGuest{env: env}
-	b := testBackend{spec: specWith(claiming(claim), true)}
-	return pollOne(g, b).Waiting
+	return pollOne(g, testBackend{spec: specWith(testProcess, true)}).Waiting
 }
 
 // The marker's whole purpose: an agent asked for a decision, and the operator
@@ -35,7 +32,7 @@ func pollWithMarker(t *testing.T, env guestEnv, claim backend.SessionFact) Waiti
 func TestWaitingIsReportedForAFreshOwnedMarkerWithALiveProcess(t *testing.T) {
 	env := markerEnv(testUser, "600", testGuestNow-120, markerDocJSON(KindPermission, 1234))
 
-	got := pollWithMarker(t, env, backend.SessionFact{PID: 1234})
+	got := pollWithMarker(t, env)
 
 	if got.State != Known || !got.Waiting {
 		t.Fatalf("waiting = %+v, want a proven wait", got)
@@ -53,7 +50,7 @@ func TestWaitingIsReportedForAFreshOwnedMarkerWithALiveProcess(t *testing.T) {
 func TestWaitingIsFalseWhenTheProcessThatAskedIsGone(t *testing.T) {
 	env := markerEnv(testUser, "600", testGuestNow-120, markerDocJSON(KindPermission, 9999))
 
-	got := pollWithMarker(t, env, backend.SessionFact{PID: 1234})
+	got := pollWithMarker(t, env)
 
 	if got.State != Known || got.Waiting {
 		t.Fatalf("waiting = %+v, want a proven not-waiting", got)
@@ -66,7 +63,7 @@ func TestWaitingIsFalseWhenTheProcessThatAskedIsGone(t *testing.T) {
 func TestWaitingIsUnknownForAnExpiredMarker(t *testing.T) {
 	env := markerEnv(testUser, "600", testGuestNow-int64(MarkerTTL.Seconds())-1, markerDocJSON(KindPermission, 1234))
 
-	got := pollWithMarker(t, env, backend.SessionFact{PID: 1234})
+	got := pollWithMarker(t, env)
 
 	if got.State != Unknown {
 		t.Fatalf("waiting state = %q, want %q for an expired marker", got.State, Unknown)
@@ -89,9 +86,8 @@ func TestWaitingIsUnknownForAMarkerThatFailsItsGate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			env := markerEnv(tc.owner, tc.mode, testGuestNow-60, markerDocJSON(KindPermission, 1234))
 			g := &fakeGuest{env: env}
-			b := testBackend{spec: specWith(claiming(backend.SessionFact{PID: 1234}), true)}
 
-			got := pollOne(g, b)
+			got := pollOne(g, testBackend{spec: specWith(testProcess, true)})
 
 			if got.Waiting.State != Unknown {
 				t.Fatalf("waiting state = %q, want %q", got.Waiting.State, Unknown)
@@ -119,7 +115,7 @@ func TestWaitingIsUnknownForAMarkerThatCannotBeVouchedFor(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			env := markerEnv(testUser, "600", testGuestNow-60, tc.body)
 
-			got := pollWithMarker(t, env, backend.SessionFact{PID: 1234})
+			got := pollWithMarker(t, env)
 
 			if got.State != Unknown {
 				t.Fatalf("waiting state = %q, want %q", got.State, Unknown)
@@ -135,9 +131,8 @@ func TestWaitingIsUnknownForAMarkerThatCannotBeVouchedFor(t *testing.T) {
 // agent is not waiting stops looking at it.
 func TestWaitingIsUnknownWhenTheBackendDeclaresNoMarker(t *testing.T) {
 	g := &fakeGuest{env: defaultEnv()}
-	b := testBackend{spec: specWith(claiming(backend.SessionFact{PID: 1234}), false)}
 
-	got := pollOne(g, b)
+	got := pollOne(g, testBackend{spec: specWith(testProcess, false)})
 
 	if got.Waiting.State != Unknown {
 		t.Fatalf("waiting state = %q, want %q", got.Waiting.State, Unknown)

@@ -23,16 +23,49 @@ func TestParseGuestNow(t *testing.T) {
 // absent, and failing closed on it would report every session on the box as
 // unknown because of a process that has nothing to do with any of them.
 func TestParseProcessesSkipsWhatItCannotRead(t *testing.T) {
-	got := parseProcesses([]byte("  1234 600\nnonsense\n  -1 5\n  1400 notanumber\n  1500 12\n"))
+	got := parseProcesses([]byte("  1234 600 claude\nnonsense\n  -1 5 claude\n  1400 notanumber bash\n  1500 12 claude\n"))
 
 	if len(got) != 2 {
 		t.Fatalf("processes = %+v, want the two readable lines", got)
 	}
-	if got[1234].elapsed != 600*time.Second {
-		t.Errorf("elapsed = %v, want 600s", got[1234].elapsed)
+	if got[0].pid != 1234 || got[0].elapsed != 600*time.Second || got[0].name != "claude" {
+		t.Errorf("process = %+v, want pid 1234 running 600s as claude", got[0])
 	}
-	if _, ok := got[1500]; !ok {
+	if got[1].pid != 1500 {
 		t.Error("a readable line after an unreadable one was dropped")
+	}
+}
+
+// The kernel allows a space in a process name, and comm is the last column, so
+// everything after the two numeric columns belongs to the name.
+func TestParseProcessesKeepsANameWithASpace(t *testing.T) {
+	got := parseProcesses([]byte("  42 7 my agent\n"))
+
+	if len(got) != 1 || got[0].name != "my agent" {
+		t.Fatalf("processes = %+v, want the whole name kept", got)
+	}
+}
+
+// Selecting by name is what turns a process table into sessions, and it matches
+// the whole name so a helper the agent spawned is not counted as an agent.
+func TestSessionsNamed(t *testing.T) {
+	now := time.Unix(1754600000, 0).UTC()
+	live := []process{
+		{pid: 10, elapsed: 60 * time.Second, name: "claude"},
+		{pid: 11, elapsed: 5 * time.Second, name: "claude-helper"},
+		{pid: 12, elapsed: 5 * time.Second, name: "bash"},
+	}
+
+	got := sessionsNamed("claude", live, now)
+
+	if got.State != Known || len(got.Sessions) != 1 || got.Sessions[0].PID != 10 {
+		t.Fatalf("sessions = %+v, want only the exact match", got)
+	}
+	if got.Sessions[0].StartedAt != now.Add(-60*time.Second).Format(time.RFC3339) {
+		t.Errorf("started at = %q, want it derived from the guest clock", got.Sessions[0].StartedAt)
+	}
+	if empty := sessionsNamed("nothing", live, now); empty.State != Known || len(empty.Sessions) != 0 {
+		t.Errorf("sessions = %+v, want a proven empty set", empty)
 	}
 }
 
