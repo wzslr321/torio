@@ -5,7 +5,52 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestUpdateRegistrySerializesReadModifyWrite(t *testing.T) {
+	paths, err := ResolvePaths(Options{Getenv: envOnly("XDG_CONFIG_HOME", t.TempDir())})
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	firstEntered := make(chan struct{})
+	secondEntered := make(chan struct{})
+	release := make(chan struct{})
+	errs := make(chan error, 2)
+
+	go func() {
+		errs <- UpdateRegistry(paths, func(projects []Project) ([]Project, error) {
+			close(firstEntered)
+			<-release
+			return append(projects, Project{ID: "first", DisplayName: "First", Remote: "git@github.com:owner/first.git"}), nil
+		})
+	}()
+	<-firstEntered
+	go func() {
+		errs <- UpdateRegistry(paths, func(projects []Project) ([]Project, error) {
+			close(secondEntered)
+			return append(projects, Project{ID: "second", DisplayName: "Second", Remote: "git@github.com:owner/second.git"}), nil
+		})
+	}()
+	select {
+	case <-secondEntered:
+		t.Fatal("second update entered before the first read-modify-write finished")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("UpdateRegistry: %v", err)
+		}
+	}
+	projects, err := ResolveRegistry(paths)
+	if err != nil {
+		t.Fatalf("ResolveRegistry: %v", err)
+	}
+	if len(projects) != 2 {
+		t.Fatalf("projects = %#v, want both updates", projects)
+	}
+}
 
 // registryPath returns a path for a registry document inside a trusted config
 // directory. The directory is mode-private because that is a precondition the

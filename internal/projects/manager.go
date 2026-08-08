@@ -367,19 +367,14 @@ func (m *Manager) Remove(ctx context.Context, id string) (RemoveReport, error) {
 		report.HermesArchived = true
 	}
 
-	fresh, err := m.registry.Load()
-	if err != nil {
-		return report, &Error{Op: op, Kind: KindConfigWrite, Err: err}
-	}
-	next, err := fresh.WithoutProject(id)
+	err = m.registry.Update(func(fresh config.File) (config.File, error) {
+		return fresh.WithoutProject(id)
+	})
 	if err != nil {
 		if errors.Is(err, config.ErrProjectNotFound) {
 			// A concurrent rerun already removed the entry; the removal is done.
 			return report, nil
 		}
-		return report, &Error{Op: op, Kind: KindConfigWrite, Err: err}
-	}
-	if err := m.registry.Save(next); err != nil {
 		report.Notes = append(report.Notes, "config_entry_retained", "rerun_finishes")
 		return report, &Error{Op: op, Kind: KindConfigWrite, Err: err}
 	}
@@ -942,21 +937,19 @@ func (m *Manager) registryStatus(ctx context.Context, op, id, workspace string) 
 // guest work, and it is a no-op when the entry is already there — which is what
 // makes a rerun after an interrupted add finish cleanly.
 func (m *Manager) persist(op string, entry config.Project, allowDuplicateRemote bool) error {
-	current, err := m.registry.Load()
-	if err != nil {
-		return &Error{Op: op, Kind: KindConfigWrite, Err: err}
-	}
-	if existing, found := findProject(current, entry.ID); found {
-		if existing != entry {
-			return &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("project %q is already registered with different details", entry.ID)}
+	err := m.registry.Update(func(current config.File) (config.File, error) {
+		if existing, found := findProject(current, entry.ID); found {
+			if existing == entry {
+				return current, nil
+			}
+			return config.File{}, fmt.Errorf("%w: project %q is already registered with different details", config.ErrDuplicateProjectID, entry.ID)
 		}
-		return nil
-	}
-	next, err := current.WithProject(entry, config.AddOptions{AllowDuplicateRemote: allowDuplicateRemote})
+		return current.WithProject(entry, config.AddOptions{AllowDuplicateRemote: allowDuplicateRemote})
+	})
 	if err != nil {
-		return &Error{Op: op, Kind: KindConflict, Err: err}
-	}
-	if err := m.registry.Save(next); err != nil {
+		if errors.Is(err, config.ErrDuplicateProjectID) || errors.Is(err, config.ErrDuplicateRemote) {
+			return &Error{Op: op, Kind: KindConflict, Err: err}
+		}
 		return &Error{Op: op, Kind: KindConfigWrite, Err: err}
 	}
 	return nil
