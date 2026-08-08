@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/wzslr321/torio/internal/backend/claudecode"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
 	"github.com/wzslr321/torio/internal/projects"
@@ -160,6 +163,52 @@ func TestProjectCommandsWireLimaAdapterAndOperator(t *testing.T) {
 	}
 	if gotOpts.OperatorUser != "testop" {
 		t.Fatalf("bootstrap operator = %q, want testop", gotOpts.OperatorUser)
+	}
+}
+
+// TestProjectCommandsCarryTheInstanceBackend is the assertion whose absence let
+// every `project` command run as the wrong agent on a non-Hermes instance.
+//
+// The project manager derives the guest identity, the workspace, the registry
+// and the interactive session from the backend in its options, and falls back to
+// the backend Torio shipped first when given none. The CLI passed none. Nothing
+// failed loudly: `project add` verified the *hermes* user's bootstrap on a guest
+// that has no hermes user, and `project agent` would have asked for a session
+// the fallback backend does not declare.
+func TestProjectCommandsCarryTheInstanceBackend(t *testing.T) {
+	// Declared the way an instance really declares it — in the config document —
+	// so this exercises the resolution the CLI actually performs.
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	want := claudecode.New()
+	if err := os.MkdirAll(filepath.Join(home, "torio"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	document := `{"schema_version":"3","backend":"` + want.Identity().Name + `","projects":[]}`
+	if err := os.WriteFile(filepath.Join(home, "torio", "config.json"), []byte(document), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	var gotOpts lima.BootstrapOptions
+	a := &app{
+		stdout:             &stdout,
+		stderr:             &stderr,
+		build:              testBuild(),
+		lookupOperatorUser: func() (string, error) { return "testop", nil },
+		newProjects: func(_ *lima.Adapter, opts lima.BootstrapOptions) projectService {
+			gotOpts = opts
+			return &fakeProjectService{listOut: []projects.Project{sampleProject()}}
+		},
+	}
+	if code := runWithApp(context.Background(), a, []string{"project", "list", "--json"}); code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if gotOpts.Backend == nil {
+		t.Fatal("project manager was handed no backend; it silently falls back to the first one Torio shipped")
+	}
+	if got, wantName := gotOpts.Backend.Identity().Name, want.Identity().Name; got != wantName {
+		t.Fatalf("project manager backend = %q, want %q", got, wantName)
 	}
 }
 

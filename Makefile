@@ -42,6 +42,9 @@ vet:
 	@if command -v go >/dev/null 2>&1; then go vet -C e2e -tags=e2e ./...; fi
 	@if command -v go >/dev/null 2>&1; then go vet -C e2e -tags=platform_e2e ./...; fi
 
+# One journey, run once per backend. PLATFORM_E2E_BACKEND selects which
+# (default: hermes); the shared steps are asserted identically on both, which is
+# the point of having a backend contract at all.
 platform-e2e:
 	@test -n "$$PLATFORM_E2E_TORIO_BIN" || (echo "PLATFORM_E2E_TORIO_BIN is required" >&2; exit 2)
 	@test -n "$$PLATFORM_E2E_ARTIFACT_DIR" || (echo "PLATFORM_E2E_ARTIFACT_DIR is required" >&2; exit 2)

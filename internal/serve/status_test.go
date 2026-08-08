@@ -8,7 +8,7 @@ import (
 
 func TestStatusReadyBackend(t *testing.T) {
 	f := newFake(defaultEnv())
-	a := New(f)
+	a := newTestAdapter(f)
 
 	rep, err := a.Status(context.Background())
 	if err != nil {
@@ -30,7 +30,7 @@ func TestStatusNotInstalled(t *testing.T) {
 	env := defaultEnv()
 	env.installed = false
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 
 	rep, err := a.Status(context.Background())
 	assertKind(t, err, KindNotInstalled)
@@ -43,7 +43,7 @@ func TestStatusInstalledButInactive(t *testing.T) {
 	env := defaultEnv()
 	env.active = "inactive"
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 
 	rep, err := a.Status(context.Background())
 	assertKind(t, err, KindInactive)
@@ -59,7 +59,7 @@ func TestStatusActiveButEndpointDeadIsFailure(t *testing.T) {
 	env.active = "active"
 	env.endpointCode = "000"
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 
 	rep, err := a.Status(context.Background())
 	assertKind(t, err, KindEndpointUnready)
@@ -76,7 +76,7 @@ func TestStatusParsesVersionFromRealisticBody(t *testing.T) {
 	// carries the version well past the first bytes. The version must be parsed
 	// from the FULL body, never a truncated prefix.
 	f := newFake(defaultEnv())
-	a := New(f)
+	a := newTestAdapter(f)
 	rep, err := a.Status(context.Background())
 	if err != nil {
 		t.Fatalf("Status: %v", err)
@@ -105,7 +105,7 @@ func TestStatus200WithoutVersionIsNotReady(t *testing.T) {
 			env.endpointCode = "200"
 			env.endpointBody = tc.body
 			f := newFake(env)
-			a := New(f)
+			a := newTestAdapter(f)
 
 			rep, err := a.Status(context.Background())
 			assertKind(t, err, KindEndpointUnready)

@@ -77,11 +77,12 @@ reassigned: recycling a code would silently change the meaning of an existing 4.
 ```text
 --json                 machine output
 --config PATH          explicit non-secret config
+--backend NAME         the agent this invocation is about; selects its instance
 --timeout DURATION     bounded operation; cannot exceed the policy maximum
 --verbose              more redacted diagnostics on stderr
 ```
 
-That is the full list. All four are real persistent flags, accepted before and
+That is the full list. All five are real persistent flags, accepted before and
 after a subcommand; an unknown flag is rejected (usage, exit 2), never silently
 accepted. `--config` resolves to the typed configuration (see
 [`config.md`](config.md)) used by the command — it is not merely parsed. A
@@ -91,6 +92,48 @@ There is no global `--force`. A command may have a narrow, documented recovery
 flag, but none may bypass verification or the credential boundary: `vm init` does
 not recreate a non-matching instance, `brain import` does not overwrite existing
 data, and `project remove` does not delete a checkout.
+
+### `--backend` and the instance it selects
+
+One instance runs one agent identity, and that has not changed. What `--backend`
+changes is who has to remember which box that is: the operator names the agent,
+and the instance follows.
+
+The mapping is derived, not recorded. The default backend is `torio`, so a box
+created before this flag existed is still the one an unflagged command talks to;
+every other backend is `torio-<backend>`. There is no table of instance names to
+maintain and so no second place that can disagree about which box runs which
+agent.
+
+`TORIO_INSTANCE` still names a box directly and **wins over the flag**. It is the
+only way to reach an instance whose name Torio did not derive — a test VM, or a
+second box running the same backend — so a flag must not be able to redirect an
+invocation that already named its target. Given both, the instance's declared
+backend and the flag must agree; they cannot on a derived instance, and a
+disagreement on a named one is a usage error (`BACKEND_MISMATCH`, exit 2) rather
+than a guest built for one identity being driven as another. An instance with no
+config document yet declares nothing, which is the ordinary state before
+`vm init` — there the flag is the declaration.
+
+### The project registry is shared, the checkouts are not
+
+The registry lives at `projects.json` in the config root and is read by every
+instance under it. A project is something the operator attached, not something an
+instance owns, so switching which box a command talks to does not switch which
+projects exist. Everything an instance does own — the backend it was provisioned
+for, the settings a command against it runs under — stays in that instance's own
+`config.json`.
+
+Checkouts do not follow, and cannot: each is owned by one backend's guest
+identity, under that backend's workspace root. So a registered project exists in
+zero or more guests, and `project add <id> --backend NAME` materializes it in one
+more, using the remote already on record. That is a separate step rather than
+something `project agent` does on demand, because cloning reaches a Git remote.
+
+An installation that predates the shared registry keeps its projects in the
+instance document's `projects` array; that array is read until `projects.json`
+exists and is **not deleted** when it does. Reversing the migration is removing
+one file.
 
 ### `--help` and `--json`
 
@@ -114,7 +157,7 @@ torio version [--json]
 ### VM
 
 ```text
-torio vm init [--cpus N] [--memory SIZE] [--disk SIZE]
+torio vm init [--backend NAME] [--cpus N] [--memory SIZE] [--disk SIZE]
 torio vm start
 torio vm stop
 torio vm bootstrap
@@ -129,6 +172,16 @@ torio vm ssh -- COMMAND...
   `qemu`/`x86_64` on Linux; see ADR-0002). A
   non-matching instance is **fail-closed** (exit 6): there is no `--force`, and
   Torio never recreates, resets or deletes an existing VM.
+- The global `--backend NAME` both selects the instance and, on `init`, is
+  recorded in that instance's config before the VM is created. It defaults to
+  `hermes`, which is also what an instance that declares nothing runs. A rerun
+  without the flag keeps the declaration; a rerun naming a *different* backend
+  is a usage error (`BACKEND_MISMATCH`, exit 2), because the guest is
+  provisioned for one agent identity and re-declaring it would leave a guest
+  built for one being driven as another. `torio vm init --backend NAME` is
+  therefore how a second backend gets its box: it builds one rather than
+  converting the one you have
+  ([ADR-0009](../adr/0009-backend-contract-and-claude-code.md)).
 - `--cpus`/`--memory`/`--disk` size the VM at **creation**; defaults are 4 vCPU,
   `8GiB` and `60GiB`. These are the only operator values substituted into the
   template besides the login identity, and `--memory`/`--disk` must be single
@@ -194,9 +247,17 @@ torio serve start|stop|restart|status
 torio serve logs [--lines N]
 ```
 
+- Every `serve` subcommand acts on the guest service the configured backend
+  **declares**. A backend that declares none (a process backend, such as Claude
+  Code) has no unit to manage: `serve status` exits 0 and reports
+  `service_declared:false` without running a single guest command, while
+  `install`, `start`, `stop`, `restart` and `logs` fail closed with
+  `NO_SERVICE` (exit 3) naming the backend. Asking after a service is a
+  question with an answer; asking Torio to manage one that was never declared
+  is an operator mistake ([ADR-0009](../adr/0009-backend-contract-and-claude-code.md)).
 - `serve install` manages its own **user** service (a custom systemd unit for the
-  `hermes` user) only after feature detection (`hermes serve --help`). It
-  generates a deterministic `hermes-serve.service` with a pinned loopback bind
+  backend identity). It generates a deterministic `hermes-serve.service` with a
+  pinned loopback bind
   (`--host 127.0.0.1 --port 9119`), `HERMES_HOME=/home/hermes/.hermes` and
   `Restart=always`, validates it with `systemd-analyze --user verify` **before
   activation**, then runs `daemon-reload` and `enable`. It ensures `linger` for
@@ -214,7 +275,9 @@ torio serve logs [--lines N]
 - `serve status` proves **both**: the user-systemd state and actual endpoint
   readiness over loopback. Exit 0 only when `active` and `/api/status == 200`; not
   installed or inactive → exit 3; active with a dead endpoint → exit 6. It
-  modifies nothing.
+  modifies nothing. Its data carries `backend` and `service_declared` first,
+  because those decide whether the remaining fields mean anything: on a backend
+  with no service the rest is absent state, not a service that is down.
 - `serve logs [--lines N]` returns bounded, redacted journal entries for the unit
   **only** (`journalctl --user -u hermes-serve.service -n N --no-pager`) — scoped
   to the unit and redacted through execx, so it does not expose Torio's own
@@ -274,27 +337,47 @@ Torio does not claim that this is a backup and verifies nothing about it.
 ### Projects
 
 ```text
-torio project add <name> <remote> [--id SLUG] [--use]
+torio project add <name> [remote] [--id SLUG] [--use]
 torio project list
 torio project show <id>
 torio project use <id>
 torio project remove <id>
+torio project agent <id>
 torio project enter <id>
 torio project shell <id>
 ```
 
-- **A workspace path is not an input.** It is always derived as
-  `/home/hermes/projects/<id>`, never accepted from the operator and never stored
-  in the config (see [`config.md`](config.md)). Without `--id` the identifier is
-  `<name>` itself, which must be a lowercase slug.
+- **A workspace path is not an input.** It is always derived from the configured
+  backend's workspace and the identifier — `/home/hermes/projects/<id>` on
+  Hermes, `/home/claude/projects/<id>` on Claude Code — never accepted from the
+  operator and never stored in the config (see [`config.md`](config.md)).
+  Without `--id` the identifier is `<name>` itself, which must be a lowercase
+  slug.
+- **The project registry is a declared capability**, exactly as the guest service
+  is. A backend that keeps none — a project is a directory it is started in —
+  clones, verifies and records the checkout as usual, and reports that there was
+  nowhere to register it. `show` and `remove` carry `registry_declared` first,
+  as `serve status` carries `service_declared`, and when it is false they say
+  nothing about a registration: `show` omits the `hermes` object rather than
+  emitting one of all-falses, which reads as a registration that went missing,
+  and `remove` does not report an archival it did not perform. `use` fails
+  closed with `NO_REGISTRY` (exit 3) naming the backend, since there is no
+  active project to select
+  ([ADR-0009](../adr/0009-backend-contract-and-claude-code.md)).
 - **Torio stores no Git credentials.** A remote the guest cannot already read
   non-interactively is fail-closed (exit 7) — the remedy is a human granting
   access outside Torio, not a retry.
 - `add` clones exactly the given remote into the derived path **or** verifies and
-  adopts a checkout already there, gives the operator and `hermes` shared access,
-  and registers the project with Hermes before writing to the config. Nothing on
-  the guest is reset, cleaned or deleted, so a rerun after an error finishes the
-  work. `--use` makes the project active on success.
+  adopts a checkout already there, gives the operator and the backend identity
+  shared access, and registers the project where the backend keeps a registry
+  before writing to the config. Nothing on the guest is reset, cleaned or
+  deleted, so a rerun after an error finishes the work. `--use` makes the
+  project active on success.
+- `add <id>` with **no remote** materializes an already registered project in
+  the selected backend's guest, from the remote on record. The remote is read
+  rather than retyped: a typo would put a different repository behind an
+  identifier that already means something. An unregistered id has nothing to
+  complete from and is a usage error (exit 2).
 - Whether a Hermes project already holds the slug is decided from command
   **output**, never from an exit code: `hermes project show` has exited both 0
   and non-zero for a project that does not exist, depending on its version. When
@@ -309,6 +392,15 @@ torio project shell <id>
 - `remove` archives the Hermes Project and drops the config entry. The checkout
   directory is **never** deleted, and the output says where it still is.
   There is no `--delete`.
+- `agent` starts the configured backend in the checkout, running as the
+  **backend's** guest identity rather than the operator's. The transport is
+  `enter`'s — agent forwarding and multiplexing both disabled — so an agent
+  session can neither reach a Git remote nor inherit a connection that can. The
+  remote argv is the backend's root-owned helper plus one validated project
+  path; the command the helper runs is a constant inside it. A backend that
+  declares no interactive session answers `BACKEND_NO_SESSION` (exit 3): a
+  service backend's surface is its service, not a terminal
+  ([ADR-0009](../adr/0009-backend-contract-and-claude-code.md)).
 - `enter` opens an ordinary interactive session in the checkout with agent
   forwarding and SSH multiplexing disabled. That session can edit and commit
   locally but receives no write capability toward the remote. It is preflighted
@@ -325,9 +417,9 @@ torio project shell <id>
   forward), but Torio **never performs a test push** to prove anything. The
   session is not bounded by `--timeout`: the operator ends it. Afterwards Torio
   makes no claim about what was pushed — check the remote yourself.
-- `enter` and `shell` are interactive and **do not support `--json`**: there is no
-  document to emit, so `--json` is a usage error (exit 2) rather than a silently
-  ignored flag.
+- `agent`, `enter` and `shell` are interactive and **do not support `--json`**:
+  there is no document to emit, so `--json` is a usage error (exit 2) rather than
+  a silently ignored flag.
 
 ### MCP
 

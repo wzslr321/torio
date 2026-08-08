@@ -10,13 +10,19 @@ import (
 )
 
 // CopyToGuest transfers one already-filtered private host staging directory to
-// a staging directory below HermesHome using the exact `limactl copy` shape
+// a staging directory below guestHome, using the exact `limactl copy` shape
 // promoted by the Brain transfer Gate. The trailing slashes are intentional:
 // the verified contract copies directory contents while preserving their
 // relative tree.
-func (a *Adapter) CopyToGuest(ctx context.Context, hostSourceDir, guestDestinationDir string) error {
+//
+// guestHome is the home of the guest identity this transfer is for, and it is a
+// parameter rather than a constant because the boundary belongs to that
+// identity. It was HermesHome, which on a second backend meant private vault
+// bytes were only ever accepted into the *other* identity's home — the one
+// place they must not land.
+func (a *Adapter) CopyToGuest(ctx context.Context, hostSourceDir, guestDestinationDir, guestHome string) error {
 	const op = "copy_to_guest"
-	host, guest, err := transferPaths(hostSourceDir, guestDestinationDir)
+	host, guest, err := transferPaths(hostSourceDir, guestDestinationDir, guestHome)
 	if err != nil {
 		return &Error{Op: op, Kind: KindVerificationFailed, Err: err}
 	}
@@ -38,12 +44,16 @@ func (a *Adapter) copy(ctx context.Context, op, source, destination string) erro
 	return nil
 }
 
-// transferPaths validates both sides before either is rendered into Lima's
-// colon-based remote syntax. Callers may choose the host directory, but it must
-// be an absolute non-root path with no remote-syntax/control bytes. Guest
-// staging is deliberately narrower: exactly a contained descendant of the
-// fixed Hermes home, never /tmp or another guest authority boundary.
-func transferPaths(hostDir, guestDir string) (host, guest string, err error) {
+// transferPaths validates every side before any of them is rendered into
+// Lima's colon-based remote syntax. Callers may choose the host directory, but
+// it must be an absolute non-root path with no remote-syntax/control bytes.
+// Guest staging is deliberately narrower: exactly a contained descendant of the
+// owning identity's home, never /tmp or another guest authority boundary.
+//
+// The home is validated to the same standard as the destination rather than
+// trusted for coming from a backend. It reaches an argv the same way, and a
+// boundary that accepts anything as its own root is not one.
+func transferPaths(hostDir, guestDir, guestHome string) (host, guest string, err error) {
 	if !filepath.IsAbs(hostDir) ||
 		filepath.Clean(hostDir) == string(filepath.Separator) ||
 		strings.ContainsAny(hostDir, ":\x00\n\r") {
@@ -51,14 +61,21 @@ func transferPaths(hostDir, guestDir string) (host, guest string, err error) {
 	}
 	host = filepath.Clean(hostDir) + string(filepath.Separator)
 
+	if !strings.HasPrefix(guestHome, "/") ||
+		strings.ContainsAny(guestHome, ":\x00\n\r\\") ||
+		path.Clean(guestHome) != guestHome ||
+		guestHome == "/" {
+		return "", "", fmt.Errorf("guest transfer boundary is not a usable guest home")
+	}
+
 	if !strings.HasPrefix(guestDir, "/") ||
 		strings.ContainsAny(guestDir, ":\x00\n\r\\") {
 		return "", "", fmt.Errorf("guest transfer path is outside the typed staging boundary")
 	}
 	cleanGuest := path.Clean(guestDir)
 	if cleanGuest != guestDir ||
-		cleanGuest == HermesHome ||
-		!strings.HasPrefix(cleanGuest, HermesHome+"/") {
+		cleanGuest == guestHome ||
+		!strings.HasPrefix(cleanGuest, guestHome+"/") {
 		return "", "", fmt.Errorf("guest transfer path is outside the typed staging boundary")
 	}
 	guest = cleanGuest + "/"

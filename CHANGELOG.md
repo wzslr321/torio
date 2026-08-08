@@ -1,5 +1,174 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **A backend contract, and a second backend behind it.** Torio ran one agent
+  and the name was hardwired into every layer. `internal/backend` now states
+  what Torio requires — an identity and its paths, an install and pin, a version
+  probe, credential presence — and three capabilities a backend *declares*:
+  a project registry, a guest service, an interactive session. Nil is a
+  first-class answer, and the rule that follows is the point: whatever a backend
+  declares, `vm bootstrap` and `serve status` must prove; whatever it declares
+  it has not got, they must not pretend to check
+  ([ADR-0009](docs/adr/0009-backend-contract-and-claude-code.md)).
+- **Claude Code as the second backend.** A process backend, not a service one:
+  no daemon, no readiness endpoint, no project registry. It runs as a dedicated
+  guest identity with no sudo and a closed group set, both proven rather than
+  assumed, from a version-pinned binary verified against the vendor's published
+  checksum and installed root-owned — which closes, for this backend, the
+  agent-writable shim that `SECURITY.md` records as a known path to root.
+- `torio project agent <id>` starts the backend inside a checkout as the backend
+  identity, on a transport that forwards no SSH agent and reuses no connection.
+  The triad is now `enter` (you, no push), `shell` (you, push), `agent` (the
+  agent, never push).
+- `torio backend status` and `torio backend login`: what this instance runs and
+  what it declares, and the terminal where an operator grants the box a
+  credential of its own. Torio stores, forwards and reads none of it.
+- **`--backend NAME`, a global flag: name the agent, and Torio finds its box.**
+  One instance still runs one agent identity — that is what makes every custody
+  statement provable — but the operator no longer carries the bookkeeping. The
+  instance is *derived* from the backend (`torio` for the default one,
+  `torio-<backend>` for the rest), so there is no table of names to maintain and
+  no second place that can disagree about which box runs which agent.
+  `TORIO_INSTANCE` still names a box directly and wins over the flag; given
+  both, a disagreement between the flag and what the instance declares is a
+  usage error rather than a guest built for one identity being driven as
+  another. `torio vm init --backend NAME` is how a second backend gets its box.
+- **One project registry, shared by every instance.** It moved out of the
+  instance document into `projects.json` in the config root. A project is
+  something the operator attached, not something an instance owns, so switching
+  which box a command talks to no longer switches which projects exist —
+  `project list` says the same thing whichever backend is selected, and the
+  workspace path it reports moves with the backend that owns the checkout.
+  Migration is a read, not a command: the legacy `projects` array is used until
+  `projects.json` exists, and is **left in place** when it does, so reversing
+  this is removing one file.
+- `torio project add <id>` with no remote materializes an already registered
+  project in the selected backend's guest, from the remote on record. Checkouts
+  cannot be shared — each is owned by one backend's guest identity — so this is
+  the explicit step that gives a second backend its own working tree. It stays a
+  separate command rather than something `project agent` does on demand, because
+  cloning reaches a Git remote.
+
+### Changed
+
+- `project show` and `project remove` finish what the declared-absent registry
+  started. `show` printed `hermes: absent` and an object of all-falses on a
+  Claude Code box — naming a backend that is not running there and reporting its
+  registration as gone; `remove` claimed it had archived a Hermes project when
+  there was none to archive. Both now carry `registry_declared`, as `serve
+  status` carries `service_declared`, and say nothing about a registration when
+  it is false. A Hermes instance's envelope is unchanged.
+- Config schema `"3"` carries the backend. `"2"` is still read: it predates the
+  field, names no backend, and an instance that names none is running Hermes —
+  which is what every existing box already is. An older binary refuses a `"3"`
+  document, which is the intended failure rather than a gap: it cannot know its
+  Hermes-shaped commands are aimed at a box running a different agent.
+- `vm bootstrap` and `serve status` carry `backend`, and `serve status` carries
+  `service_declared` first — on a backend with no service the remaining fields
+  are absent state, not a service that is down. Every existing Hermes-named key
+  is still emitted, unchanged, on a Hermes instance.
+- The Second Brain's vault, staging and lock follow the backend identity that
+  owns them, instead of being fixed at one backend's home.
+- The Brain's retrieval skill is now the backend's own, declared alongside the
+  root it is discovered in. Claude Code gets a skill written for Claude Code —
+  `Grep`, `Glob` and `Read` over `/home/claude/brain`, installed at
+  `~/.claude/skills/torio-brain/` and uncategorized, because it routes by
+  reading descriptions rather than by position in a static index. The Hermes
+  skill and its category grouping are unchanged.
+- `brain status` and `brain init` name the skill path from the report instead of
+  a constant. The constant was the Hermes profile path, which every Claude Code
+  box would have been told to look at.
+
+### Fixed
+
+- `backend status` reported a Claude Code box's credential as **not-applicable**
+  — the answer that means Torio has no way to ask — on a box whose auth probe
+  had run and found one. The renderer built its lookup key by appending `_auth`
+  to the name the backend is registered under, which happened to be what the
+  first backend called its check and matched nothing on the second, so the
+  version and the MCP server list went missing the same way and `vm bootstrap`
+  never told an unauthenticated operator to log in. A backend now *declares*
+  the checks the report is read by. The credential answer gained a fourth
+  state, **unknown**, for a check that was declared and produced no result:
+  having no way to ask and getting no answer are different facts, and both are
+  different from being logged out.
+- `backend login` opened Claude Code in the operator's home directory. `sudo -H`
+  sets `HOME` and leaves the working directory inherited from the ssh session,
+  and the agent identity is deliberately unable to traverse that directory —
+  so the first thing an operator saw was the agent reporting two unreadable
+  settings files and offering to repair them, on a box where nothing was wrong.
+  The session now starts in the agent's own home, chosen after `sudo` so it does
+  not depend on the operator reaching that directory either.
+- `vm bootstrap` could never succeed on a Claude Code instance. Its no-sudo
+  proof required `sudo -n -l -U claude` to exit 1, and sudo 1.9.15 exits 0 for
+  that query whether the identity may run everything or nothing — the answer is
+  in the output. The check now matches sudo's two sentences in the C locale and
+  fails closed on anything else, including silence. Found by running the backend
+  on a real guest; every unit and transcript test passed throughout.
+- Every `torio project` command ran as the wrong agent on a non-Hermes
+  instance. The project manager derives the guest identity, workspace, registry
+  and interactive session from the backend in its options and falls back to the
+  first backend Torio shipped when handed none — and the CLI handed it none.
+  `project add` on a Claude Code box therefore demanded a `hermes` user the
+  guest does not have, and `project agent` would have asked the fallback backend
+  for a session it does not declare.
+- `project show` reported `hermes_project_absent` on every project on a backend
+  that keeps no registry — an issue naming a registration that could never have
+  existed, on a healthy checkout. `project use` there failed with a registration
+  error telling the operator to re-run `project add`, which cannot create what is
+  missing; it now fails with `no_registry` naming the backend, where serve's
+  `no_service` already pointed.
+- `brain init` could never reach `initialized` on a backend with no project
+  registry. An unregistered vault counted as drift regardless of whether there
+  was anywhere to register it, so `init` reported drift it could not repair and
+  then failed its own postcondition — on a vault that was healthy on disk.
+  Registration is now a condition only where a registry is declared.
+- `brain status` told an operator on a backend that declares no retrieval skill
+  to run `torio brain init` to install one, while the JSON envelope beside it
+  correctly reported `not_applicable`. It now says the same thing in both.
+- Installing a retrieval skill for a backend with no skill category probed
+  `/SKILL.md` and `test -f ""`. No shipped backend reached that path before; the
+  Claude Code skill does.
+- `brain import` staged and swapped through the first backend's home on every
+  backend. The vault, the staging directory and the lock had already moved to
+  the identity that owns them; the import's own four paths had not. On a Claude
+  Code box the import therefore had root fabricate `/home/hermes`, staged
+  private vault bytes there, and parked the previous Brain beside them —
+  outside the boundary the owning identity keeps. All four are now derived.
+- `backend status` showed no MCP servers on a Hermes box that had them. The
+  check was declared and did run, but only inside `torio mcp status`, whose
+  report the status renderer never sees — so "none configured" and "three, one
+  of which bypasses the broker" were the same silence. Bootstrap now records it,
+  and records what it found without failing: the command that treats a bypass as
+  a failure is the one that verifies the boundary.
+- `backend status` said it read the guest and changed nothing while running the
+  same reconciling walk as `vm bootstrap`. On a drifted or fresh guest, asking
+  for status would download the pinned binary, repoint a root-owned symlink and
+  write managed settings. It now runs that walk with every repair turned off: a
+  guest that needs one is reported, naming `torio vm bootstrap` as the remedy.
+- `backend status` recovered the credential state by searching the check's prose
+  for "present". The two answers are now constants shared by the backend that
+  records one and the renderer that reads it, compared by equality, and anything
+  else reads as **unknown** rather than as a credential the box does not hold.
+- `torio brain --help` named the first backend's box and vault path. Help text is
+  built before the instance is resolved and `--help` never reaches that
+  resolution, so a Claude Code operator was told to run
+  `limactl copy torio:/home/hermes/brain/` — the wrong box and the wrong
+  directory, in a line that looks exactly right. The command now prints filled in
+  by `brain status`, which knows what it just read.
+
+### Known
+
+- MCP inside a Claude Code box is a named hole, not a solved problem. The
+  backend is a native MCP client, an operator's tokens then live under the agent
+  identity, and invariant 9's "explicit, enumerable and verified" is not met for
+  it. What is provided is legibility: the configured servers are enumerated by
+  name, described everywhere as what is configured and never as what is
+  permitted. The fix is the broker, which needs an accepted ADR first.
+
 ## 0.3.1 - 2026-08-07
 
 The first release built from the public repository. 0.3.0's tag predates the

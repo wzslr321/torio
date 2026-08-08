@@ -16,14 +16,11 @@ import (
 	"path"
 	"strings"
 
+	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/config"
-	"github.com/wzslr321/torio/internal/lima"
 )
 
 const (
-	// workspaceRoot is the fixed parent of every attached checkout. Bootstrap
-	// already proves it exists as hermes:torio-projects 2770 on native ext4.
-	workspaceRoot = lima.HermesWorkspacePath
 	// sharedGroup is the group the operator and `hermes` both belong to, and the
 	// only way found to let both identities work one checkout without sudo:
 	// workspaceRoot is 2770 hermes:torio-projects, so setgid puts every file
@@ -86,7 +83,12 @@ type AddReport struct {
 	Cloned bool
 	// Adopted reports that this run verified and kept an existing checkout.
 	Adopted bool
-	// HermesCreated / HermesRestored report what this run did to the Hermes
+	// RegistryDeclared reports that the backend keeps a project registry at
+	// all. When it is false the two fields below are meaningless rather than
+	// false-and-alarming: nothing was registered because there was nowhere to
+	// register it.
+	RegistryDeclared bool
+	// HermesCreated / HermesRestored report what this run did to the backend's
 	// project registration.
 	HermesCreated  bool
 	HermesRestored bool
@@ -188,28 +190,11 @@ func (c CheckoutStatus) issues() []string {
 	return out
 }
 
-// HermesStatus is the derived state of the Hermes project registration. It is
-// read from `hermes project show` stdout, never from its exit code.
-type HermesStatus struct {
-	// Present reports that a project with our slug exists at all.
-	Present bool
-	// Archived reports the ` (archived)` flag on the header line.
-	Archived bool
-	// PrimaryMatches reports that the project's primary path is our derived path.
-	PrimaryMatches bool
-}
-
-// registered reports the state `Add` must reach: present, not archived, and
-// pointing at our derived path.
-func (h HermesStatus) registered() bool {
-	return h.Present && !h.Archived && h.PrimaryMatches
-}
-
-// conflicts reports a project holding our slug but pointing somewhere else.
-// Torio never adopts, repoints or archives it.
-func (h HermesStatus) conflicts() bool {
-	return h.Present && !h.PrimaryMatches
-}
+// HermesStatus is the derived state of the backend's project registration. It
+// is the contract's registry status under the name the JSON envelope has always
+// used for it; a backend that declares no registry leaves it zero, which
+// `RegistryDeclared` is what distinguishes from "declared and absent".
+type HermesStatus = backend.RegistryStatus
 
 // ShowReport is the inspected state of one attached project.
 type ShowReport struct {
@@ -341,23 +326,39 @@ type FileRegistry struct {
 	Options config.Options
 }
 
-// Load reads the config document. A first run with no document on disk is not
-// an error: it yields an empty registry the first mutation will persist.
+// Load reads the instance document and overlays the resolved project registry
+// on it. A first run with neither on disk is not an error: it yields an empty
+// registry the first mutation will persist.
+//
+// The overlay is where the migration lives, and config.ResolveRegistry owns
+// which document currently holds the projects. What matters here is that the
+// registry never comes from the instance document this call just loaded: that
+// document is the instance's own — its backend, its settings — and reading a
+// registry out of it is what made switching instances switch projects.
 func (r FileRegistry) Load() (config.File, error) {
 	rt, err := config.Load(r.Options)
 	if err != nil {
 		return config.File{}, err
 	}
+	projects, err := config.ResolveRegistry(rt.Paths)
+	if err != nil {
+		return config.File{}, err
+	}
+	rt.File.Projects = projects
 	return rt.File, nil
 }
 
-// Save persists f to the resolved config path.
+// Save persists the registry to the shared document.
+//
+// Only the projects are written. The rest of f is the instance's own document,
+// which this path has no business rewriting: a project addition must not be
+// what re-persists a backend declaration or a timeout.
 func (r FileRegistry) Save(f config.File) error {
 	paths, err := config.ResolvePaths(r.Options)
 	if err != nil {
 		return err
 	}
-	return config.WriteFile(paths.ConfigFile, f)
+	return config.WriteRegistry(paths.RegistryFile, f.Projects)
 }
 
 var _ Registry = FileRegistry{}
@@ -367,9 +368,10 @@ var _ Registry = FileRegistry{}
 //
 // The config layer's slug validation already makes traversal impossible, so
 // this is a containment assertion rather than a second validator: if the
-// derived path ever stops being workspaceRoot/<id>, no caller should act on it.
-func derivePath(id string) (string, error) {
-	if id == "" {
+// derived path ever stops being the backend workspace root + /<id>, no caller
+// should act on it.
+func derivePath(workspaceRoot, id string) (string, error) {
+	if id == "" || workspaceRoot == "" {
 		return "", errInvalidID
 	}
 	p := workspaceRoot + "/" + id

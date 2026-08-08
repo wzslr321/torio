@@ -27,6 +27,10 @@ type fakeCopy struct {
 	direction string
 	host      string
 	guest     string
+	// home is the boundary the transfer declared. The real transport refuses a
+	// destination outside it, so a test that never looked at it would pass
+	// while the product failed on the guest.
+	home string
 }
 
 type fakeGuest struct {
@@ -111,17 +115,29 @@ func initializedFake() *fakeGuest {
 	return f
 }
 
+// The payloads this package's tests are written against. They are the Hermes
+// backend's own declaration, reached the way production reaches it, because the
+// retrieval skill now travels with the backend rather than living here — and a
+// test that kept its own copy would pass while the shipped one drifted.
+func hermesSkillPayload() ([]byte, string, error) {
+	return declaredPayload(lima.Hermes().BrainSkill().Payload)
+}
+
+func hermesCategoryPayload() ([]byte, string, error) {
+	return declaredPayload(lima.Hermes().BrainSkill().CategoryPayload)
+}
+
 // withInstalledSkill puts the current embedded payload on the fake guest with
 // the ownership and mode a real install produces.
 func (f *fakeGuest) withInstalledSkill(t *testing.T) *fakeGuest {
 	t.Helper()
-	_, digest, err := retrievalSkill()
+	_, digest, err := hermesSkillPayload()
 	if err != nil {
-		t.Fatalf("retrievalSkill() error = %v", err)
+		t.Fatalf("hermesSkillPayload() error = %v", err)
 	}
-	_, categoryDigest, err := retrievalCategory()
+	_, categoryDigest, err := hermesCategoryPayload()
 	if err != nil {
-		t.Fatalf("retrievalCategory() error = %v", err)
+		t.Fatalf("hermesCategoryPayload() error = %v", err)
 	}
 	f.skillDirMode = "750"
 	f.skillPresent = true
@@ -164,8 +180,8 @@ func (f *fakeGuest) SSHInput(ctx context.Context, stdin []byte, command []string
 	return f.route(ctx, stdin, command)
 }
 
-func (f *fakeGuest) CopyToGuest(_ context.Context, hostSourceDir, guestDestinationDir string) error {
-	f.copies = append(f.copies, fakeCopy{direction: "to_guest", host: hostSourceDir, guest: guestDestinationDir})
+func (f *fakeGuest) CopyToGuest(_ context.Context, hostSourceDir, guestDestinationDir, guestHome string) error {
+	f.copies = append(f.copies, fakeCopy{direction: "to_guest", host: hostSourceDir, guest: guestDestinationDir, home: guestHome})
 	return f.copyToErr
 }
 
@@ -639,8 +655,8 @@ func (g *blockingGuest) SSHInput(ctx context.Context, stdin []byte, command []st
 	return g.base.SSHInput(ctx, stdin, command)
 }
 
-func (g *blockingGuest) CopyToGuest(ctx context.Context, hostSourceDir, guestDestinationDir string) error {
-	return g.base.CopyToGuest(ctx, hostSourceDir, guestDestinationDir)
+func (g *blockingGuest) CopyToGuest(ctx context.Context, hostSourceDir, guestDestinationDir, guestHome string) error {
+	return g.base.CopyToGuest(ctx, hostSourceDir, guestDestinationDir, guestHome)
 }
 
 func (g *blockingGuest) block(command []string) {

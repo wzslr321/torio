@@ -2,8 +2,9 @@
 
 This document describes the typed host configuration. Implementation:
 `internal/config/`. The configuration is **non-secret** (`AGENTS.md` §6):
-secret-shaped material is rejected. `config.json` is the only persistent host
-state Torio writes ([ADR-0001](../adr/0001-control-plane-and-trusted-host-inputs.md)).
+secret-shaped material is rejected. `config.json` and `projects.json` are the
+only persistent host state Torio writes
+([ADR-0001](../adr/0001-control-plane-and-trusted-host-inputs.md)).
 
 ## Locations (XDG)
 
@@ -31,9 +32,24 @@ Rules:
   strictly validated then.
 - With an explicit `--config`, the trusted config directory is the parent of the
   named file.
-- A file located **inside** the trusted directory (`config.json`) uses a contained
-  join: the name must be a plain file name and the result must not leave the base
-  directory. Traversal is rejected structurally, not by string cleaning.
+- A file located **inside** the trusted directory (`config.json`,
+  `projects.json`) uses a contained join: the name must be a plain file name and
+  the result must not leave the base directory. Traversal is rejected
+  structurally, not by string cleaning.
+
+### Instances
+
+A named instance (`TORIO_INSTANCE`, or one derived from `--backend`) moves its
+config document to `<config-dir>/instances/<name>/config.json`, resolved one
+contained segment at a time so the name cannot introduce a separator. The
+default instance keeps `<config-dir>/config.json`.
+
+`projects.json` does **not** move. It is resolved from the config root before the
+instance can move anything underneath it, so every instance reads and writes one
+registry. What an instance owns is what is specific to that box — the backend it
+was provisioned for, the settings a command against it runs under — and a project
+is not: it is something the operator attached, so switching which box a command
+talks to must not switch which projects exist.
 
 ## Path trust boundary ([ADR-0001](../adr/0001-control-plane-and-trusted-host-inputs.md))
 
@@ -85,15 +101,34 @@ Fields:
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `schema_version` | string | yes | `"2"`. Any other value is rejected, with no migration. |
+| `schema_version` | string | yes | `"3"` is written. `"2"` is still read and normalized to `"3"` on the next write. Any other value is rejected, with no migration. |
+| `backend` | string | no | The agent backend this instance runs, fixed at `vm init`. Omitted means `hermes`. A name this binary has no implementation for is rejected, and the error names the ones it has. |
 | `default_timeout` | string (Go duration) | no | Default operation timeout; validated > 0 and ≤ the policy maximum. Feeds the timeout policy when `--timeout` is not given explicitly (the flag wins). |
-| `projects` | array | no | The project registry — see below. Omitted normalizes to an empty registry. |
+| `projects` | array | no | **Legacy.** Where the registry lived before it was shared (see below). The *default* instance's array is still read when `projects.json` is absent; any instance's is preserved verbatim when its document is rewritten for another reason, and none of them ever gains an entry. Omitted normalizes to an empty registry. |
+
+### Versions and what an older binary does
+
+A `"2"` document predates instances declaring a backend. It names none, and an
+instance that names none is running Hermes — which is what every instance
+created before the field already is. Reading the absence as anything else would
+re-point a working box at a different agent on upgrade.
+
+A `"2"` document carrying a `backend` field is rejected. A document means what
+its declared version says it means, and one that mixes the two was written by
+something that understood neither.
+
+An older binary reading a `"3"` document fails closed, by its own version gate
+and by the strict decoder on `backend`. That is the intended failure: an old
+binary cannot know its Hermes-shaped commands are pointed at a box running a
+different agent, so it must stop rather than guess
+([ADR-0009](../adr/0009-backend-contract-and-claude-code.md)).
 
 A valid document:
 
 ```json
 {
-  "schema_version": "2",
+  "schema_version": "3",
+  "backend": "hermes",
   "default_timeout": "45s",
   "projects": [
     {
@@ -105,14 +140,57 @@ A valid document:
 }
 ```
 
-## Project registry
+## Project registry — `projects.json`
 
 The registry is the **non-secret** source of truth about attached projects
-([ADR-0003](../adr/0003-ownership-split-and-operator-carried-write.md)).
+([ADR-0003](../adr/0003-ownership-split-and-operator-carried-write.md)). It is
+its own document, at `<config-root>/projects.json`, shared by every instance
+under that root and written through the same crash-safe path as the config
+document: private temp, fsync, atomic rename, read back and verify. Entries are
+sorted by `id` before marshalling, so the same set of projects always produces
+the same bytes.
+
+```json
+{
+  "schema_version": "1",
+  "projects": [
+    {
+      "id": "my-project",
+      "display_name": "My Project",
+      "remote": "git@github.com:owner/my-project.git"
+    }
+  ]
+}
+```
+
+`schema_version` is `"1"`; any other value is rejected, with no migration. The
+version, the strict decoder, the secret-shape refusal and the trust rules are
+the config document's, not looser ones because this is "just a list".
+
+**Migration is a read, not a command.** An installation that predates this
+document has its projects in the **default** instance's `projects` array, and
+that array is read for as long as `projects.json` does not exist — whichever
+instance a command selects. Reading the selected instance's array instead would
+empty the registry the moment an operator first passed `--backend`. The first
+write creates `projects.json`, which is authoritative from then on, and **leaves
+the legacy array where it is**. Downgrading Torio has to find its projects
+exactly where it left them, and reversing the migration has to be removing one
+file rather than recovering from a backup nobody made.
+
+A *non-default* instance's own legacy array is not carried over. Those were
+separate per-instance registries, which is the thing being abolished, and
+merging two registries is not a decision this layer can make safely. Nothing is
+deleted: the entries are still in that document, to copy across or leave.
+
+**An absent document is not an empty registry.** The two are distinguished
+everywhere: absent means "not migrated" and falls back to the legacy array,
+while a written document with no entries means the operator has attached
+nothing. Collapsing them would make an upgrade look like a mass detach.
 
 **A workspace path is not a field.** It is derived from `id` as
-`/home/hermes/projects/<id>` by the projects layer, so the config cannot point a
-project at an arbitrary guest path. A project object carrying a `path` field is
+`<backend workspace root>/<id>` — `/home/hermes/projects/<id>` on a Hermes
+instance — by the projects layer, so the config cannot point a project at an
+arbitrary guest path. A project object carrying a `path` field is
 rejected like any unknown field.
 
 | Field | Type | Required | Rule |

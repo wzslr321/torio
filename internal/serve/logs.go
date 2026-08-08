@@ -28,6 +28,9 @@ type LogsReport struct {
 // output is bounded (by -n and by execx's per-stream cap) and redacted. lines <=
 // 0 uses DefaultLogLines; values above maxLogLines are clamped.
 func (a *Adapter) Logs(ctx context.Context, lines int) (LogsReport, error) {
+	if a.spec == nil {
+		return LogsReport{}, a.noServiceErr("logs")
+	}
 	const op = "logs"
 	if lines <= 0 {
 		lines = DefaultLogLines
@@ -35,7 +38,7 @@ func (a *Adapter) Logs(ctx context.Context, lines int) (LogsReport, error) {
 	if lines > maxLogLines {
 		lines = maxLogLines
 	}
-	rep := LogsReport{Unit: UnitName, Lines: lines}
+	rep := LogsReport{Unit: a.spec.UnitName, Lines: lines}
 
 	rt, e := a.runtimeDir(ctx, op)
 	if e != nil {
@@ -47,10 +50,10 @@ func (a *Adapter) Logs(ctx context.Context, lines int) (LogsReport, error) {
 		return rep, e
 	}
 	if !inst {
-		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: fmt.Errorf("unit %q is not installed", UnitName)}
+		return rep, &Error{Op: op, Kind: KindNotInstalled, Err: fmt.Errorf("unit %q is not installed", a.spec.UnitName)}
 	}
 
-	res, e := a.sh(ctx, op, userEnv(rt, "journalctl", "--user", "-u", UnitName, "-n", strconv.Itoa(lines), "--no-pager"))
+	res, e := a.sh(ctx, op, a.userEnv(rt, "journalctl", "--user", "-u", a.spec.UnitName, "-n", strconv.Itoa(lines), "--no-pager"))
 	if e != nil {
 		return rep, e
 	}

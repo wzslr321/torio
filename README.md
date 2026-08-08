@@ -146,6 +146,55 @@ stdout; flags, exit codes and each command's contract are in the
   not an adversarial one. Data exfiltration is unsolved and DNS is an accepted
   covert channel. [`SECURITY.md`](SECURITY.md) says exactly what is claimed.
 
+## Which agent runs inside
+
+One VM runs one agent identity, and a second backend means a second VM — never
+a second agent inside one, because two identities sharing a workspace would
+contend over the same checkouts and make every custody statement ambiguous.
+
+You do not track which VM that is. `--backend` names the agent and Torio finds
+its box: the default one is `torio`, the rest are `torio-<backend>`.
+
+| | `hermes` (default) | `claude-code` |
+| --- | --- | --- |
+| Shape | a guest service on loopback | a per-session process |
+| Reached by | a client through a tunnel you open | `torio project agent <id>` |
+| Project registry | yes, driven by Torio | none — a project is a directory |
+| Pinned by | an upstream commit | a version, checksum-verified |
+
+```bash
+torio vm init --backend claude-code
+torio vm start --backend claude-code
+torio vm bootstrap --backend claude-code --timeout 10m
+torio backend login --backend claude-code       # the box gets its own grant
+torio project add demo --backend claude-code    # already attached elsewhere? clone it here
+torio project agent demo --backend claude-code  # the agent works here
+torio project shell demo --backend claude-code  # you review, and push
+```
+
+The project registry is shared, so `demo` is attached once and `project list`
+says the same thing whichever backend you select. The checkouts are not shared
+and cannot be — each is owned by one guest identity — so `project add <id>`
+with no remote is the step that gives a backend its own working tree, from the
+remote already on record. What passes between the two trees is what you push.
+
+`TORIO_INSTANCE` still names a box directly, for a test VM or a second box
+running the same backend.
+
+Inside the box the agent runs without permission prompts, and that is the
+inversion worth understanding. A prompt is a control inside the agent's own
+process — it can be ignored, and in practice it is clicked through. The box
+replaces it with controls the agent cannot reach: an unprivileged identity with
+no `sudo`, a closed group set, a binary it cannot rewrite, no credential that
+reaches a Git remote, and the edge of a VM. The agent commits; you push, after
+reading what it did.
+
+What the box does **not** solve for a Claude Code backend is MCP. It is a native
+MCP client, your tokens end up under the agent's own identity, and no policy or
+audit constrains them. Torio reports which servers are configured, by name, and
+that is legibility rather than a control. See
+[ADR-0009](docs/adr/0009-backend-contract-and-claude-code.md).
+
 ## Supported hosts
 
 | Host | VM type | Guest |
@@ -168,9 +217,6 @@ Torio does less than it will. Where it is going, roughly in order:
   [ADR-0004](docs/adr/0004-mcp-credential-custody-and-egress.md).
 - **More hosts.** arm64 Linux is one table row plus an image digest away; it
   waits on someone booting and verifying it, not on design.
-- **Backends beyond Hermes.** Nothing in the boundary (a loopback service,
-  read-only checkouts, operator-carried write) is Hermes-specific. The backend
-  contract should say so in code.
 - **Editor integration.** A Neovim panel already ships in
   [`integrations/neovim`](integrations/neovim/README.md): `:Torio` lists
   projects, opens routine or push-capable terminals, reports health, and shows

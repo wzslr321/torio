@@ -296,13 +296,13 @@ func TestAddRejectsProjectIDsThatEscapeTheWorkspaceRoot(t *testing.T) {
 
 func TestDerivePathContainsEveryIDUnderTheWorkspaceRoot(t *testing.T) {
 	for _, id := range []string{"../etc", "a/b", "..", ".", "", "a/../../b"} {
-		if _, err := derivePath(id); err == nil {
-			t.Errorf("derivePath(%q) error = nil, want a containment failure", id)
+		if _, err := derivePath(lima.HermesWorkspacePath, id); err == nil {
+			t.Errorf("derivePath(lima.HermesWorkspacePath, %q) error = nil, want a containment failure", id)
 		}
 	}
-	got, err := derivePath(testID)
+	got, err := derivePath(lima.HermesWorkspacePath, testID)
 	if err != nil || got != testPath {
-		t.Fatalf("derivePath(%q) = %q, %v; want %q, nil", testID, got, err, testPath)
+		t.Fatalf("derivePath(lima.HermesWorkspacePath, %q) = %q, %v; want %q, nil", testID, got, err, testPath)
 	}
 }
 
@@ -513,26 +513,6 @@ func TestAddRegistersWhenShowExitsZeroForAnUnknownProject(t *testing.T) {
 	}
 	if len(r.saved) != 1 {
 		t.Fatalf("config entries = %d, want 1", len(r.saved))
-	}
-}
-
-func TestHermesProjectListedMatchesTheSlugColumnOnly(t *testing.T) {
-	const listing = "  demo                     Demo  [1 folder(s)]\n" +
-		"  other                    demo  [2 folder(s)]\n"
-
-	if !hermesProjectListed(listing, "demo") {
-		t.Error("the listed slug was not found")
-	}
-	if hermesProjectListed(listing, "absent") {
-		t.Error("an absent slug was reported as listed")
-	}
-	// "demo" is the *name* of the second project. A substring search would let
-	// one project answer an existence question about another.
-	if hermesProjectListed("  other                    demo  [2 folder(s)]\n", "demo") {
-		t.Error("a project name answered for a different project's slug")
-	}
-	if hermesProjectListed("No projects yet. Create one with `hermes project create <name>`.\n", "demo") {
-		t.Error("the empty-listing sentence was read as a project")
 	}
 }
 

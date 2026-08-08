@@ -188,7 +188,7 @@ func TestLoadRejectsMalformedJSON(t *testing.T) {
 
 func TestLoadRejectsWrongSchemaVersion(t *testing.T) {
 	for _, body := range []string{
-		`{"schema_version":"3"}`,
+		`{"schema_version":"4"}`,
 		`{"schema_version":"0"}`,
 		`{"schema_version":"v2"}`,
 	} {
@@ -429,10 +429,12 @@ func TestWriteFileRejectsInvalidDocumentBeforeCreatingFile(t *testing.T) {
 
 // TestWriteFileRequiresCurrentSchemaVersion pins the write gate: only the
 // current version reaches disk, so no path can emit a document the next
-// invocation would refuse to read.
+// invocation would refuse to read. "2" is in the list on purpose — it is
+// readable, and writing it back would silently drop the backend a newer
+// document declares.
 func TestWriteFileRequiresCurrentSchemaVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), appDir, configFileName)
-	for _, version := range []string{"", "1", "3"} {
+	for _, version := range []string{"", "1", "2", "4"} {
 		if err := WriteFile(path, File{SchemaVersion: version}); err == nil {
 			t.Errorf("WriteFile with schema_version %q must be rejected", version)
 		}

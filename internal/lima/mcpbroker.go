@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/wzslr321/torio/internal/backend"
 )
 
 const mcpBrokerOp = "mcp_broker"
@@ -41,13 +43,13 @@ const (
 
 // torioMCPHomeSpec is the required state of the broker's home. Unlike the
 // Hermes paths in bootstrapRequiredPaths, nothing here may be group-readable:
-// allowStricter is deliberately absent so a *looser* mode fails and the check
+// AllowStricter is deliberately absent so a *looser* mode fails and the check
 // cannot be satisfied by widening.
-var torioMCPHomeSpec = bootstrapPathSpec{
-	path:  TorioMCPHome,
-	owner: TorioMCPUser,
-	group: TorioMCPUser,
-	modes: []string{"700", "0700"},
+var torioMCPHomeSpec = backend.PathSpec{
+	Path:  TorioMCPHome,
+	Owner: TorioMCPUser,
+	Group: TorioMCPUser,
+	Modes: []string{"700", "0700"},
 }
 
 // MCPBrokerReport is the structured outcome of verifying the broker boundary.
@@ -425,9 +427,9 @@ func (a *Adapter) verifyHermesNotBrokerOwner(ctx context.Context, rep *MCPBroker
 }
 
 func (a *Adapter) verifyBrokerHome(ctx context.Context, rep *MCPBrokerReport) error {
-	name := "path:" + torioMCPHomeSpec.path
+	name := "path:" + torioMCPHomeSpec.Path
 
-	st, kind, err := a.statPath(ctx, rep, name, torioMCPHomeSpec.path)
+	st, kind, err := a.statPath(ctx, rep, name, torioMCPHomeSpec.Path)
 	if err != nil {
 		return err
 	}
@@ -438,7 +440,7 @@ func (a *Adapter) verifyBrokerHome(ctx context.Context, rep *MCPBrokerReport) er
 		return a.brokerMissing(rep, name, "not a directory", "run `torio mcp install` to provision the broker credential store")
 	}
 
-	og, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%U:%G %a", torioMCPHomeSpec.path)
+	og, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%U:%G %a", torioMCPHomeSpec.Path)
 	if err != nil {
 		return err
 	}
@@ -449,14 +451,14 @@ func (a *Adapter) verifyBrokerHome(ctx context.Context, rep *MCPBrokerReport) er
 	if !ok {
 		return a.brokerFailed(rep, name, "unparseable ownership/mode", "verify the path exists on the guest")
 	}
-	if owner != torioMCPHomeSpec.owner || group != torioMCPHomeSpec.group {
+	if owner != torioMCPHomeSpec.Owner || group != torioMCPHomeSpec.Group {
 		return a.brokerFailed(rep, name,
-			fmt.Sprintf("owner:group %s:%s, want %s:%s", owner, group, torioMCPHomeSpec.owner, torioMCPHomeSpec.group),
+			fmt.Sprintf("owner:group %s:%s, want %s:%s", owner, group, torioMCPHomeSpec.Owner, torioMCPHomeSpec.Group),
 			"fix broker home ownership on the guest")
 	}
 	if !modeMatches(torioMCPHomeSpec, mode) {
 		return a.brokerFailed(rep, name,
-			fmt.Sprintf("mode %s, want one of %v", mode, torioMCPHomeSpec.modes),
+			fmt.Sprintf("mode %s, want one of %v", mode, torioMCPHomeSpec.Modes),
 			"the broker credential store must not be readable outside torio-mcp (ADR-0004)")
 	}
 	rep.record(name, true, fmt.Sprintf("%s:%s %s", owner, group, mode))

@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-Seven records cover the decisions that govern the delivered binary and how it is
+Eight records cover the decisions that govern the delivered binary and how it is
 published.
 
 | ADR | Decision |
@@ -12,6 +12,7 @@ published.
 | [0005](0005-repository-and-documentation-governance.md) | English, five ADRs, and what leaves the tree instead of rotting in it |
 | [0006](0006-destination-egress-allowlist-rejected.md) | The destination allowlist is rejected; exfiltration stays unsolved and the documentation keeps saying so |
 | [0008](0008-mcp-broker-daemon-deleted.md) | The dormant MCP broker daemon and relay are deleted; the policy-document parser they held moves into `internal/lima` |
+| [0009](0009-backend-contract-and-claude-code.md) | An instance runs one backend, declared by a contract; a backend declares what it has, and verification checks exactly that; Claude Code is the second one |
 
 ## Rules
 

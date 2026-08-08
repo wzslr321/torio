@@ -7,9 +7,53 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/wzslr321/torio/internal/brain"
 	"github.com/wzslr321/torio/internal/lima"
 )
+
+// TestBrainHelpNamesNoBoxAndNoGuestPath guards the one thing help text cannot
+// know. It is built when the command tree is built, and `--help` short-circuits
+// before the instance and the backend are resolved — so a baked-in instance
+// name and vault path told a Claude Code operator to run
+// `limactl copy torio:/home/hermes/brain/`, naming the wrong box and the wrong
+// directory in a single line that looks exactly right.
+//
+// The concrete command belongs in `brain status`, which knows what it just read.
+func TestBrainHelpNamesNoBoxAndNoGuestPath(t *testing.T) {
+	cmd := newBrainCmd(&app{})
+	for _, c := range append([]*cobra.Command{cmd}, cmd.Commands()...) {
+		for _, text := range []string{c.Short, c.Long} {
+			for _, forbidden := range []string{"/home/", lima.InstanceName + ":"} {
+				if strings.Contains(text, forbidden) {
+					t.Errorf("%q help names %q, which is resolved per invocation:\n%s", c.Name(), forbidden, text)
+				}
+			}
+		}
+	}
+}
+
+// TestBrainStatusPrintsTheCopyOutCommandForThisBox is the other half: the
+// instruction did not disappear, it moved to where both values are known.
+func TestBrainStatusPrintsTheCopyOutCommandForThisBox(t *testing.T) {
+	svc := &fakeBrainService{statusReport: brain.StatusReport{State: brain.StateInitialized, Path: "/home/claude/brain"}}
+	var out bytes.Buffer
+	a := &app{stdout: &out, stderr: &bytes.Buffer{}, build: testBuild()}
+	a.newBrain = func(*lima.Adapter, lima.BootstrapOptions) brainService { return svc }
+	a.newLima = func() *lima.Adapter { return nil }
+	a.lookupOperatorUser = func() (string, error) { return "testop", nil }
+
+	cmd := newBrainStatusCmd(a)
+	cmd.SetContext(context.Background())
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("brain status: %v", err)
+	}
+	want := "limactl copy " + lima.InstanceName + ":/home/claude/brain/"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("status did not print %q\ngot: %s", want, out.String())
+	}
+}
 
 type fakeBrainService struct {
 	initReport   brain.InitReport
@@ -312,6 +356,7 @@ func TestMapBrainErrorExitCodes(t *testing.T) {
 func TestBrainInitReportsRetrievalSkillActivation(t *testing.T) {
 	status := initializedBrainReport()
 	status.SkillState = brain.SkillInstalled
+	status.SkillPath = brain.SkillFilePath
 	service := &fakeBrainService{initReport: brain.InitReport{
 		Created:      true,
 		SkillUpdated: true,
@@ -343,6 +388,29 @@ func TestBrainInitReportsRetrievalSkillActivation(t *testing.T) {
 	}
 }
 
+// TestBrainSkillPathFollowsTheReport pins that the path an operator is told to
+// look at is the one the guest actually has. It used to be a constant naming
+// the Hermes profile, which every Claude Code box would have been handed with
+// full confidence by the command whose only job is to report what is there.
+func TestBrainSkillPathFollowsTheReport(t *testing.T) {
+	const claudePath = "/home/claude/.claude/skills/torio-brain/SKILL.md"
+	status := initializedBrainReport()
+	status.SkillState = brain.SkillInstalled
+	status.SkillPath = claudePath
+	service := &fakeBrainService{statusReport: status}
+
+	code, stdout, stderr := runBrainCLI(t, []string{"brain", "status"}, service)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, claudePath) {
+		t.Errorf("status does not name the backend's own skill path: %q", stdout)
+	}
+	if strings.Contains(stdout, brain.SkillFilePath) {
+		t.Errorf("status names another backend's skill path: %q", stdout)
+	}
+}
+
 // An unchanged payload must not tell the operator to restart anything, and a
 // drifted one must point at the command that repairs it.
 func TestBrainStatusReportsRetrievalSkillHonestly(t *testing.T) {
@@ -350,10 +418,21 @@ func TestBrainStatusReportsRetrievalSkillHonestly(t *testing.T) {
 		name      string
 		state     brain.SkillState
 		wantHuman string
+		// avoidHuman is text that must not appear. It exists for the state whose
+		// text and JSON used to disagree: a backend that declares no skill was
+		// told in prose to run `torio brain init` to install one, while the
+		// envelope beside it correctly said not_applicable.
+		avoidHuman string
 	}{
-		{"installed", brain.SkillInstalled, "cannot tell"},
-		{"not installed", brain.SkillNotInstalled, "torio brain init"},
-		{"drift", brain.SkillDrift, "torio brain init"},
+		{name: "installed", state: brain.SkillInstalled, wantHuman: "cannot tell"},
+		{name: "not installed", state: brain.SkillNotInstalled, wantHuman: "torio brain init"},
+		{name: "drift", state: brain.SkillDrift, wantHuman: "torio brain init"},
+		{
+			name:       "not applicable",
+			state:      brain.SkillNotApplicable,
+			wantHuman:  "no retrieval skill to install",
+			avoidHuman: "torio brain init",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -370,6 +449,9 @@ func TestBrainStatusReportsRetrievalSkillHonestly(t *testing.T) {
 			}
 			if !strings.Contains(stdout, tc.wantHuman) {
 				t.Errorf("human status omits %q: %q", tc.wantHuman, stdout)
+			}
+			if tc.avoidHuman != "" && strings.Contains(stdout, tc.avoidHuman) {
+				t.Errorf("human status contradicts the %q envelope by saying %q: %q", tc.state, tc.avoidHuman, stdout)
 			}
 
 			code, stdout, stderr = runBrainCLI(t, []string{"brain", "status", "--json"}, service)

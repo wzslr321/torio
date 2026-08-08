@@ -449,9 +449,9 @@ func assertKind(t *testing.T, err error, want ErrorKind) {
 // `desc[:57] + "..."`, and the truncated string is the only text about this
 // skill that reaches the system prompt of every session.
 func TestRetrievalSkillPayloadContract(t *testing.T) {
-	payload, digest, err := retrievalSkill()
+	payload, digest, err := hermesSkillPayload()
 	if err != nil {
-		t.Fatalf("retrievalSkill() error = %v", err)
+		t.Fatalf("hermesSkillPayload() error = %v", err)
 	}
 	if len(digest) != 64 {
 		t.Fatalf("digest = %q, want a hex sha256", digest)
@@ -699,9 +699,9 @@ func TestInitRepairsADriftedRetrievalSkill(t *testing.T) {
 			if !report.SkillUpdated || report.Status.SkillState != SkillInstalled {
 				t.Fatalf("report = %#v, want a repaired retrieval skill", report)
 			}
-			_, digest, err := retrievalSkill()
+			_, digest, err := hermesSkillPayload()
 			if err != nil {
-				t.Fatalf("retrievalSkill() error = %v", err)
+				t.Fatalf("hermesSkillPayload() error = %v", err)
 			}
 			if g.skillDigest != digest || g.skillMode != "640" || g.skillDirMode != "750" {
 				t.Fatalf("guest skill = %q %s dir %s, want the embedded payload at 640/750",
@@ -801,9 +801,9 @@ func TestStatusReportsDriftWhileThePreCategorySkillSurvives(t *testing.T) {
 // at 60 characters, and Hermes reads it from the frontmatter `description`
 // key — a body-only file renders nothing at all.
 func TestCategoryDescriptionCarriesTheRuleInItsFrontmatter(t *testing.T) {
-	payload, _, err := retrievalCategory()
+	payload, _, err := hermesCategoryPayload()
 	if err != nil {
-		t.Fatalf("retrievalCategory() error = %v", err)
+		t.Fatalf("hermesCategoryPayload() error = %v", err)
 	}
 	text := string(payload)
 	if !strings.HasPrefix(text, "---\n") {

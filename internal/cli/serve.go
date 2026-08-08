@@ -179,15 +179,21 @@ type serveInstallData struct {
 }
 
 type serveStatusData struct {
-	Installed     bool   `json:"installed"`
-	Enabled       bool   `json:"enabled"`
-	Active        bool   `json:"active"`
-	ActiveState   string `json:"active_state"`
-	EndpointReady bool   `json:"endpoint_ready"`
-	EndpointCode  int    `json:"endpoint_code"`
-	Version       string `json:"version"`
-	Ready         bool   `json:"ready"`
-	URL           string `json:"url"`
+	// Backend and ServiceDeclared come first because they decide whether any of
+	// the rest means anything: a backend that runs no guest service has no unit
+	// to be installed and no endpoint to be ready, and the zero values below
+	// would otherwise read as a service that is down.
+	Backend         string `json:"backend"`
+	ServiceDeclared bool   `json:"service_declared"`
+	Installed       bool   `json:"installed"`
+	Enabled         bool   `json:"enabled"`
+	Active          bool   `json:"active"`
+	ActiveState     string `json:"active_state"`
+	EndpointReady   bool   `json:"endpoint_ready"`
+	EndpointCode    int    `json:"endpoint_code"`
+	Version         string `json:"version"`
+	Ready           bool   `json:"ready"`
+	URL             string `json:"url"`
 }
 
 type serveStopData struct {
@@ -201,17 +207,19 @@ type serveLogsData struct {
 	Text  string `json:"text"`
 }
 
-func statusData(r serve.StatusReport) serveStatusData {
+func statusData(backendName string, r serve.StatusReport) serveStatusData {
 	return serveStatusData{
-		Installed:     r.Installed,
-		Enabled:       r.Enabled,
-		Active:        r.Active,
-		ActiveState:   r.ActiveState,
-		EndpointReady: r.EndpointReady,
-		EndpointCode:  r.EndpointCode,
-		Version:       r.Version,
-		Ready:         r.Ready,
-		URL:           r.URL,
+		Backend:         backendName,
+		ServiceDeclared: r.ServiceDeclared,
+		Installed:       r.Installed,
+		Enabled:         r.Enabled,
+		Active:          r.Active,
+		ActiveState:     r.ActiveState,
+		EndpointReady:   r.EndpointReady,
+		EndpointCode:    r.EndpointCode,
+		Version:         r.Version,
+		Ready:           r.Ready,
+		URL:             r.URL,
 	}
 }
 
@@ -253,13 +261,23 @@ func (a *app) emitServeInstall(rep serve.InstallReport) error {
 			"  validated:      %t\n"+
 			"  enabled (boot): %t\n"+
 			"Next: torio serve start\n",
-		serve.UnitName, state, rep.UnitPath, rep.LingerEnabled, rep.Validated, rep.Enabled)
+		a.backend.Service().UnitName, state, rep.UnitPath, rep.LingerEnabled, rep.Validated, rep.Enabled)
 	return err
 }
 
 func (a *app) emitServeStatus(command string, rep serve.StatusReport) error {
 	if a.jsonOut {
-		return writeJSON(a.stdout, successEnvelope(command, statusData(rep)))
+		return writeJSON(a.stdout, successEnvelope(command, statusData(a.backend.Identity().Name, rep)))
+	}
+	if !rep.ServiceDeclared {
+		// Not a failure and not a silence: the operator asked after a service
+		// and gets told, in one line, that this backend has none and where its
+		// surface actually is.
+		_, err := fmt.Fprintf(a.stdout,
+			"Backend %q declares no guest service.\n"+
+				"  Its surface is an interactive session in a checkout: torio project agent <id>\n",
+			a.backend.Identity().Name)
+		return err
 	}
 	_, err := fmt.Fprintf(a.stdout,
 		"Backend ready on %s\n"+
@@ -274,7 +292,7 @@ func (a *app) emitServeStop(rep serve.StopReport) error {
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("serve.stop", serveStopData{Active: rep.Active, ActiveState: rep.ActiveState}))
 	}
-	_, err := fmt.Fprintf(a.stdout, "Backend %s stopped (state=%s).\n", serve.UnitName, rep.ActiveState)
+	_, err := fmt.Fprintf(a.stdout, "Backend %s stopped (state=%s).\n", a.backend.Service().UnitName, rep.ActiveState)
 	return err
 }
 
@@ -298,7 +316,7 @@ func mapServeError(command string, err error) *CLIError {
 	}
 	code := strings.ToUpper(string(serr.Kind))
 	switch serr.Kind {
-	case serve.KindNotInstalled, serve.KindInactive, serve.KindPostconditionFailed:
+	case serve.KindNotInstalled, serve.KindInactive, serve.KindPostconditionFailed, serve.KindNoService:
 		return &CLIError{Exit: ExitPrecondition, Code: code, Command: command, Message: serr.Error()}
 	case serve.KindEndpointUnready, serve.KindValidationFailed:
 		return &CLIError{Exit: ExitVerification, Code: code, Command: command, Message: serr.Error()}

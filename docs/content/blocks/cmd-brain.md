@@ -1,9 +1,11 @@
 ## Command surface — `torio brain` {#brain}
 
-Manages the private Second Brain: a Markdown vault at `/home/hermes/brain`,
-versioned by a local Git repository, owned by `hermes`, and registered with
-Hermes as its own project so any session can search it. The parent takes no
-action itself; an absent or unknown subcommand is a usage error.
+Manages the private Second Brain: a Markdown vault in the agent identity's own
+home, versioned by a local Git repository, owned by that identity, and — on a
+backend that keeps a project registry — registered as its own project so any
+session can search it. `brain status` prints the path on the box you are
+talking to. The parent takes no action itself; an absent or unknown subcommand
+is a usage error.
 
 | Command | What it does |
 | --- | --- |
@@ -29,8 +31,33 @@ Torio brings data in and does not take it out. There is no `torio brain export`.
 Copying the Brain to your host is an explicit thing you do:
 
 ```bash
-limactl copy torio:/home/hermes/brain/ <host-destination>/
+limactl copy <instance>:<vault-path>/ <host-destination>/
 ```
+
+`brain status` prints that line filled in for the box it just read, because the
+instance and the vault path are both the backend's — a copied-out example
+naming another backend's box is a command that either fails or copies the wrong
+vault.
 
 That is your command, not a Torio feature: nothing verifies the result, and
 Torio does not call it a backup.
+
+### On a backend that keeps no registry or no skills {#brain-backends}
+
+The vault, its git history and the import pipeline are the same on every
+backend: the vault lives in the backend identity's own home, owned by it, and
+`brain import` verifies and promotes exactly as it does elsewhere.
+
+Two things are per-backend, and `brain status` reports each as a state rather
+than as a fault:
+
+- **Registration.** A backend that keeps no project registry has nothing to
+  register the vault with. The vault is reached by path, so nothing is lost.
+- **The retrieval skill.** Each backend ships its own, because a retrieval skill
+  names the tools one agent has and the vault path one identity owns: the Hermes
+  skill calls `search_files` under `/home/hermes/brain`, the Claude Code skill
+  calls `Grep` under `/home/claude/brain`. Torio installs the one the backend
+  declares, at the path that backend discovers skills in, and `brain status`
+  names that path. A backend that declares none reports `not_applicable`, which
+  is deliberately not `not_installed` — reporting a missing thing where nothing
+  is missing teaches operators to ignore the report that matters.

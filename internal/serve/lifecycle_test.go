@@ -8,7 +8,7 @@ import (
 
 func TestStartHappyPathProvesReadiness(t *testing.T) {
 	f := newFake(defaultEnv())
-	a := New(f)
+	a := newTestAdapter(f)
 
 	rep, err := a.Start(context.Background())
 	if err != nil {
@@ -39,7 +39,7 @@ func TestStartNotInstalledIsPrecondition(t *testing.T) {
 	env := defaultEnv()
 	env.installed = false
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 
 	_, err := a.Start(context.Background())
 	assertKind(t, err, KindNotInstalled)
@@ -53,7 +53,7 @@ func TestStartPostconditionInactiveFailsClosed(t *testing.T) {
 	env := defaultEnv()
 	env.active = "failed"
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 
 	_, err := a.Start(context.Background())
 	assertKind(t, err, KindPostconditionFailed)
@@ -71,7 +71,7 @@ func TestStartActiveButEndpointDeadFailsClosed(t *testing.T) {
 	env.active = "active"
 	env.endpointCode = "000" // curl could not connect
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
@@ -95,7 +95,7 @@ func TestStartEndpointComesUpAfterRetries(t *testing.T) {
 	env := defaultEnv()
 	env.endpointCodeSeq = []string{"000", "000", "200"}
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 
 	rep, err := a.Start(context.Background())
 	if err != nil {
@@ -116,7 +116,7 @@ func TestStartEndpointActiveButNon200FailsClosed(t *testing.T) {
 	env := defaultEnv()
 	env.endpointCode = "503"
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
@@ -137,7 +137,7 @@ func TestStart200WithoutHermesVersionFailsClosed(t *testing.T) {
 	env.endpointCode = "200"
 	env.endpointBody = `{"served_by":"some-other-app"}` // 200 but no version
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
@@ -153,7 +153,7 @@ func TestStart200WithoutHermesVersionFailsClosed(t *testing.T) {
 
 func TestRestartProvesReadiness(t *testing.T) {
 	f := newFake(defaultEnv())
-	a := New(f)
+	a := newTestAdapter(f)
 
 	rep, err := a.Restart(context.Background())
 	if err != nil {
@@ -171,7 +171,7 @@ func TestStopIdempotentWhenAlreadyInactive(t *testing.T) {
 	env := defaultEnv()
 	env.active = "inactive"
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 
 	rep, err := a.Stop(context.Background())
 	if err != nil {
@@ -190,7 +190,7 @@ func TestStopStopsActiveServiceWithPostcondition(t *testing.T) {
 	env := defaultEnv()
 	env.activeSeq = []string{"active", "inactive"}
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 
 	rep, err := a.Stop(context.Background())
 	if err != nil {
@@ -209,7 +209,7 @@ func TestStopPostconditionStillActiveFailsClosed(t *testing.T) {
 	env := defaultEnv()
 	env.activeSeq = []string{"active", "active"}
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 
 	_, err := a.Stop(context.Background())
 	assertKind(t, err, KindPostconditionFailed)
@@ -219,7 +219,7 @@ func TestStopNotInstalledIsPrecondition(t *testing.T) {
 	env := defaultEnv()
 	env.installed = false
 	f := newFake(env)
-	a := New(f)
+	a := newTestAdapter(f)
 
 	_, err := a.Stop(context.Background())
 	assertKind(t, err, KindNotInstalled)

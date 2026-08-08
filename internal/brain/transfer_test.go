@@ -10,6 +10,17 @@ import (
 	"github.com/wzslr321/torio/internal/lima"
 )
 
+// The default backend's import working paths. They are read back through a
+// Manager rather than respelled here, so these tests assert against the
+// derivation the product uses instead of a copy that can agree with nothing.
+var (
+	defaultBrain        = New(nil, lima.BootstrapOptions{})
+	importStagingPath   = defaultBrain.importStagingPath()
+	importPayloadPath   = defaultBrain.importPayloadPath()
+	importManifestPath  = defaultBrain.importManifestPath()
+	importCandidatePath = defaultBrain.importCandidatePath()
+)
+
 func writeHostTransferFile(t *testing.T, root, rel, content string, mode os.FileMode) {
 	t.Helper()
 	target := filepath.Join(root, filepath.FromSlash(rel))
@@ -256,6 +267,31 @@ func TestImportIntoRequiresOneNewContainedSubtree(t *testing.T) {
 	}
 	if !g.saw("mv -T " + importPayloadPath + " " + importCandidatePath + "/archive/new-vault") {
 		t.Fatalf("--into did not preserve the source root as one subtree: %#v", g.calls)
+	}
+}
+
+// TestImportDeclaresTheOwningIdentitysBoundary pins the value the transport
+// refuses a destination against. The two travel together — a payload path
+// derived from one identity and a boundary fixed at another is a transfer that
+// fails on the guest with everything already staged.
+func TestImportDeclaresTheOwningIdentitysBoundary(t *testing.T) {
+	source := t.TempDir()
+	writeHostTransferFile(t, source, "note.md", "note", 0o600)
+
+	g := readyFake()
+	g.importFiles = 1
+	m := New(g, lima.BootstrapOptions{})
+	if _, err := m.Import(context.Background(), ImportOptions{Source: source}); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if len(g.copies) != 1 {
+		t.Fatalf("copies = %#v, want exactly one", g.copies)
+	}
+	if got, want := g.copies[0].home, m.identity().Home; got != want {
+		t.Errorf("declared boundary = %q, want the owning identity's home %q", got, want)
+	}
+	if !strings.HasPrefix(g.copies[0].guest, g.copies[0].home+"/") {
+		t.Errorf("payload %q is not below the boundary %q it declared", g.copies[0].guest, g.copies[0].home)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/execx"
 )
 
@@ -47,6 +48,8 @@ func bootstrapHappyScript() []scriptedResponse {
 		{result: stdoutResult("root:root 755\n")},                            // 28 stat helper owner/mode
 		{result: stdoutResult("regular file\n")},                             // 29 stat enter helper type
 		{result: stdoutResult("root:root 755\n")},                            // 30 stat enter helper owner/mode
+		{result: stdoutResult("regular file\n")},                             // 31 stat hermes config type
+		{result: stdoutResult("model:\n  provider: custom\n")},               // 32 cat hermes config (no mcp_servers)
 	}
 }
 
@@ -70,8 +73,8 @@ func TestBootstrapHappyPathAllChecksPass(t *testing.T) {
 			t.Errorf("check %q not OK: %s", c.Name, c.Detail)
 		}
 	}
-	if fr.callCount() != 31 {
-		t.Fatalf("callCount = %d, want 31 (no install/shim mutating steps when reconciled)", fr.callCount())
+	if fr.callCount() != 33 {
+		t.Fatalf("callCount = %d, want 33 (no install/shim mutating steps when reconciled)", fr.callCount())
 	}
 
 	got := fr.callArgs(12)
@@ -155,8 +158,8 @@ func TestBootstrapReconcilesHermesShim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Bootstrap: unexpected error: %v", err)
 	}
-	if fr.callCount() != 32 {
-		t.Fatalf("callCount = %d, want 32 (ln reconcile step present)", fr.callCount())
+	if fr.callCount() != 34 {
+		t.Fatalf("callCount = %d, want 34 (ln reconcile step present)", fr.callCount())
 	}
 	if got, want := fr.callArgs(11), []string{"shell", "--tty=false", "--workdir", "/", InstanceName, "--", "sudo", "-n", "ln", "-sfn", hermesTarget, hermesShimPath}; !equalArgs(got, want) {
 		t.Fatalf("ln argv = %v, want %v", got, want)
@@ -291,7 +294,7 @@ func TestBootstrapHermesPinnedVersionMismatchIsDrift(t *testing.T) {
 	fr := &fakeRunner{script: s}
 	a := New(fr)
 
-	_, err := a.Bootstrap(context.Background(), BootstrapOptions{HermesVersion: "0.20.0"})
+	_, err := a.Bootstrap(context.Background(), BootstrapOptions{PinnedVersion: "0.20.0"})
 	assertKind(t, err, KindVerificationFailed)
 }
 
@@ -426,6 +429,8 @@ func TestBootstrapInstallsAMissingProjectEnterHelperForExistingVMs(t *testing.T)
 		scriptedResponse{result: exitResult(0, "", "")},
 		scriptedResponse{result: exitResult(0, "regular file\n", "")},
 		scriptedResponse{result: exitResult(0, "root:root 755\n", "")},
+		scriptedResponse{result: exitResult(0, "regular file\n", "")},
+		scriptedResponse{result: exitResult(0, "model:\n  provider: custom\n", "")},
 	)
 	fr := &fakeRunner{script: script}
 	a := New(fr)
@@ -579,6 +584,75 @@ func assertKind(t *testing.T, err error, want ErrorKind) {
 	}
 }
 
+// TestBootstrapRecordsTheMCPServersItDeclares closes the gap between what this
+// backend declares in StatusChecks and what the report an operator reads
+// actually carries. The check existed and ran, but only inside VerifyMCPBroker,
+// whose report `torio backend status` never sees — so a Hermes box wired to MCP
+// showed nothing, exactly as a backend that is not an MCP client would.
+//
+// Both directions are pinned, because a check that can only say "fine" would be
+// no better than the silence it replaced.
+func TestBootstrapRecordsTheMCPServersItDeclares(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config string
+		wantOK bool
+		want   string
+	}{
+		{"through the relay", "mcp_servers:\n  atlassian:\n    command: " + TorioMCPRelayPath + "\n", true, "1 entr(ies), all through the relay"},
+		{"bypassing it", "mcp_servers:\n  sneaky:\n    command: /usr/bin/npx\n", false, "1 of 1 MCP server entries do not go through the broker relay"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			script := bootstrapHappyScript()
+			script[32] = scriptedResponse{result: stdoutResult(tc.config)}
+			rep, err := New(&fakeRunner{script: script}).Bootstrap(context.Background(), bootstrapOpts())
+			// A configured MCP server is a fact about the box, not a defect in
+			// it: the command that fails closed on a bypass is `torio mcp
+			// status`, where the boundary itself is what is being verified.
+			if err != nil {
+				t.Fatalf("recording the MCP servers failed the bootstrap: %v", err)
+			}
+			if got := Hermes().StatusChecks().MCPServers; checkDetail(rep, got) != tc.want {
+				t.Errorf("%s detail = %q, want %q", got, checkDetail(rep, got), tc.want)
+			}
+			if got := checkOK(rep, Hermes().StatusChecks().MCPServers); got != tc.wantOK {
+				t.Errorf("check OK = %v, want %v", got, tc.wantOK)
+			}
+		})
+	}
+}
+
+// TestVerifyOnlyRepairsNothing pins the mode that makes a status command able
+// to say it changes nothing.
+//
+// `torio backend status` runs this same walk, and before VerifyOnly existed it
+// ran the repairing one: asking a drifted guest what it was would download a
+// pinned binary, repoint a root-owned symlink and write managed settings, while
+// the command's own help text said it read the guest and changed nothing.
+func TestVerifyOnlyRepairsNothing(t *testing.T) {
+	s := bootstrapHappyScript()
+	s[10] = scriptedResponse{result: exitResult(1, "", "")} // shim points nowhere
+	fr := &fakeRunner{script: s}
+
+	_, err := New(fr).Bootstrap(context.Background(), BootstrapOptions{
+		OperatorUser: bootstrapTestOperator,
+		VerifyOnly:   true,
+	})
+	if err == nil {
+		t.Fatal("a verify-only run reported a drifted shim as fine")
+	}
+	if !strings.Contains(err.Error(), "torio vm bootstrap") {
+		t.Errorf("failure does not name the command that repairs it: %v", err)
+	}
+	for i := 0; i < fr.callCount(); i++ {
+		for _, arg := range fr.callArgs(i) {
+			if arg == "ln" {
+				t.Fatalf("a verify-only run repaired the shim: call %d = %v", i, fr.callArgs(i))
+			}
+		}
+	}
+}
+
 func checkOK(rep BootstrapReport, name string) bool {
 	for _, c := range rep.Checks {
 		if c.Name == name {
@@ -606,13 +680,13 @@ func checkDetail(rep BootstrapReport, name string) string {
 // error. Loosening must still fail, and so must tightening a path whose group
 // or world permission the operator depends on.
 func TestModeMatchesAcceptsAStricterModeOnlyWhereNobodyElseNeedsThePermission(t *testing.T) {
-	private := bootstrapPathSpec{modes: []string{"750", "0750"}, allowStricter: true}
-	shared := bootstrapPathSpec{modes: []string{"710", "0710"}}
+	private := backend.PathSpec{Modes: []string{"750", "0750"}, AllowStricter: true}
+	shared := backend.PathSpec{Modes: []string{"710", "0710"}}
 	helper := operatorShellHelperSpec
 
 	cases := []struct {
 		name string
-		spec bootstrapPathSpec
+		spec backend.PathSpec
 		mode string
 		want bool
 	}{
@@ -632,7 +706,7 @@ func TestModeMatchesAcceptsAStricterModeOnlyWhereNobodyElseNeedsThePermission(t 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := modeMatches(tc.spec, tc.mode); got != tc.want {
-				t.Errorf("modeMatches(%v, %q) = %v, want %v", tc.spec.modes, tc.mode, got, tc.want)
+				t.Errorf("modeMatches(%v, %q) = %v, want %v", tc.spec.Modes, tc.mode, got, tc.want)
 			}
 		})
 	}
@@ -650,13 +724,13 @@ func TestBootstrapRequiredPathsOptInToStrictnessDeliberately(t *testing.T) {
 		HermesWorkspacePath: false,
 	}
 	for _, spec := range bootstrapRequiredPaths {
-		expected, known := want[spec.path]
+		expected, known := want[spec.Path]
 		if !known {
-			t.Errorf("unexpected required path %q: decide whether a stricter mode is drift or hardening", spec.path)
+			t.Errorf("unexpected required path %q: decide whether a stricter mode is drift or hardening", spec.Path)
 			continue
 		}
-		if spec.allowStricter != expected {
-			t.Errorf("%s allowStricter = %v, want %v", spec.path, spec.allowStricter, expected)
+		if spec.AllowStricter != expected {
+			t.Errorf("%s allowStricter = %v, want %v", spec.Path, spec.AllowStricter, expected)
 		}
 	}
 }

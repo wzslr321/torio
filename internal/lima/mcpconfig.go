@@ -36,7 +36,7 @@ const mcpServersKey = "mcp_servers"
 // realistic cause, which is a config that drifted or an `hermes mcp add` run by
 // hand, not an adversary composing a parser differential.
 func (a *Adapter) verifyHermesMCPServers(ctx context.Context, rep *MCPBrokerReport) error {
-	const name = "hermes_mcp_servers"
+	const name = hermesMCPServersCheck
 
 	st, kind, err := a.statPath(ctx, rep, name, HermesConfigPath)
 	if err != nil {
@@ -64,22 +64,51 @@ func (a *Adapter) verifyHermesMCPServers(ctx context.Context, rep *MCPBrokerRepo
 			"verify "+HermesConfigPath+" on the guest")
 	}
 
-	scan, err := scanMCPServers(doc.out)
-	if err != nil {
-		// The reason is a fixed sentence chosen from a closed set, never a
-		// fragment of the file: this document is agent-written, and a report is
-		// somewhere the agent must not be able to put text.
-		return a.brokerFailed(rep, name, "the mcp_servers block could not be read with confidence: "+err.Error(),
-			"the check reads one shape of YAML and refuses the rest; rewrite the block as plain nested keys or inspect it by hand")
+	finding := hermesMCPServersFinding(scanMCPServers(doc.out))
+	if !finding.OK {
+		return a.brokerFailed(rep, name, finding.Detail, finding.Remediation)
 	}
-	if scan.Foreign > 0 {
-		return a.brokerFailed(rep, name,
-			fmt.Sprintf("%d of %d MCP server entries do not go through the broker relay", scan.Foreign, scan.Services),
-			"every entry must run "+TorioMCPRelayPath+"; an entry naming anything else reaches its upstream with no policy or audit")
-	}
-
-	rep.record(name, true, fmt.Sprintf("%d entr(ies), all through the relay", scan.Services))
+	rep.record(name, true, finding.Detail)
 	return nil
+}
+
+// hermesMCPFinding is the closed set of answers reading the mcp_servers block
+// can produce, separated from the reading of it because the same block is read
+// for two different purposes.
+//
+// `torio mcp status` reads it as the custody boundary ADR-0004 §3 defines, and
+// fails closed on a bypass. Bootstrap reads it so that `torio backend status`
+// can show what the box is wired to, and records the verdict without failing:
+// what is configured is a fact about the box, and the place that treats it as a
+// defect is the command that verifies the boundary. Two readers of one
+// agent-written file that could disagree about it would be worse than either
+// answer on its own, so both take their words from here.
+//
+// Every detail is a fixed sentence over derived counts, never a fragment of the
+// file: the document is agent-written, and a report is somewhere the agent must
+// not be able to put text.
+type hermesMCPFinding struct {
+	OK     bool
+	Detail string
+	// Remediation is for the caller that fails closed. The other one records
+	// the detail alone.
+	Remediation string
+}
+
+func hermesMCPServersFinding(scan mcpServersScan, err error) hermesMCPFinding {
+	switch {
+	case err != nil:
+		return hermesMCPFinding{
+			Detail:      "the mcp_servers block could not be read with confidence: " + err.Error(),
+			Remediation: "the check reads one shape of YAML and refuses the rest; rewrite the block as plain nested keys or inspect it by hand",
+		}
+	case scan.Foreign > 0:
+		return hermesMCPFinding{
+			Detail:      fmt.Sprintf("%d of %d MCP server entries do not go through the broker relay", scan.Foreign, scan.Services),
+			Remediation: "every entry must run " + TorioMCPRelayPath + "; an entry naming anything else reaches its upstream with no policy or audit",
+		}
+	}
+	return hermesMCPFinding{OK: true, Detail: fmt.Sprintf("%d entr(ies), all through the relay", scan.Services)}
 }
 
 // mcpServersScan is what the reader established about the block.

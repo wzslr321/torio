@@ -43,6 +43,9 @@ jobs:
       checkout_ref: ${{ inputs.tag || github.ref }}
       runner: macos-15
       stage: host
+      # One backend is enough here: this gate proves the darwin archive
+      # installs and runs, and it boots no guest for a backend to differ on.
+      backend: hermes
 
   package:
     name: package every supported host

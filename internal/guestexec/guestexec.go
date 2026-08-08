@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/wzslr321/torio/internal/execx"
-	"github.com/wzslr321/torio/internal/lima"
 )
 
 // Transport is the one-shot guest command channel (satisfied by *lima.Adapter).
@@ -60,13 +59,10 @@ func RootExec(args ...string) []string {
 	return append([]string{"sudo", "-n", "--"}, args...)
 }
 
-// UserExec builds `sudo -n -u hermes -- <args...>`: a guest command run as the
-// hermes service identity.
-func UserExec(args ...string) []string {
-	return UserExecAs(lima.HermesUser, args...)
-}
-
-// UserExecAs builds `sudo -n -u <user> -- <args...>`.
+// UserExecAs builds `sudo -n -u <user> -- <args...>`: a guest command run as a
+// named identity. The identity is always passed in, never defaulted here: which
+// identity owns a guest action is the caller's decision and differs per
+// backend, and a package this low has no way to be right about it.
 func UserExecAs(user string, args ...string) []string {
 	return append([]string{"sudo", "-n", "-u", user, "--"}, args...)
 }

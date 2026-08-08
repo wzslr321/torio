@@ -1,0 +1,235 @@
+package cli
+
+import (
+	"fmt"
+
+	"github.com/spf13/cobra"
+
+	"github.com/wzslr321/torio/internal/backend"
+	"github.com/wzslr321/torio/internal/lima"
+)
+
+func newBackendCmd(a *app) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "backend",
+		Short: "Inspect and authenticate the agent backend this instance runs",
+		Long: "An instance runs one agent backend, chosen at `vm init`. These commands " +
+			"report what it is and, for a backend that holds a credential of its own, " +
+			"open the session where an operator grants it one.\n\n" +
+			"Torio never stores, forwards or reads a backend credential. `login` only " +
+			"opens a terminal on the guest, as the backend identity; everything after " +
+			"that is between the operator and whoever issues the grant.",
+		Args:          cobra.ArbitraryArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(_ *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return usageError("no subcommand given; run 'torio backend --help'")
+			}
+			return usageError(fmt.Sprintf("unknown backend subcommand %q", args[0]))
+		},
+	}
+	cmd.AddCommand(newBackendStatusCmd(a))
+	cmd.AddCommand(newBackendLoginCmd(a))
+	return cmd
+}
+
+func newBackendStatusCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Report the backend, its version, and whether it holds a credential",
+		Long: "Report what this instance runs and what it declares: the backend name, " +
+			"the version installed on the guest, whether a credential is present, and " +
+			"which capabilities — a project registry, a guest service, an interactive " +
+			"session — the backend has.\n\n" +
+			"It reads the guest and changes nothing, and it never reaches the network: " +
+			"whether a credential is still valid is between the operator and whoever " +
+			"issued it.\n\n" +
+			"It runs the same checks as `vm bootstrap` with every repair turned off, so " +
+			"a guest that needs one is reported rather than rebuilt.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx, cancel := a.opContext(cmd)
+			defer cancel()
+			opUser, err := a.lookupOperatorUser()
+			if err != nil {
+				return &CLIError{Exit: ExitExternal, Code: "OPERATOR_LOOKUP_FAILED", Command: "backend.status", Message: err.Error()}
+			}
+			// VerifyOnly is what makes the sentence above true. The same walk
+			// records the checks this report is read from, but nothing in it
+			// may install, link or write: a guest that needs repair is
+			// reported, with `torio vm bootstrap` as the remedy.
+			rep, err := a.newLima().Bootstrap(ctx, lima.BootstrapOptions{OperatorUser: opUser, Backend: a.backend, VerifyOnly: true})
+			if err != nil {
+				ce := mapLimaError("backend.status", err)
+				ce.Details = bootstrapReportDetails(rep)
+				return ce
+			}
+			return a.emitBackendStatus(rep)
+		},
+	}
+}
+
+// backendStatusData is the `data` object for `backend status`.
+type backendStatusData struct {
+	Backend string `json:"backend"`
+	User    string `json:"user"`
+	Version string `json:"version"`
+	// Credentials is "present", "absent", "not-applicable" or "unknown".
+	//
+	// "not-applicable" is for a backend that declares no auth check, which is a
+	// different answer from "absent" and must not be rendered as one.
+	// "unknown" is for a backend that declares one whose result is missing from
+	// the report: Torio had a way to ask and has no answer, which is not the
+	// same as having no way to ask.
+	Credentials string `json:"credentials"`
+	// The capabilities the backend declares. They are reported even when false,
+	// because "this backend has no service" is the answer to a question
+	// operators keep asking, and an omitted key answers nothing.
+	RegistryDeclared bool `json:"registry_declared"`
+	ServiceDeclared  bool `json:"service_declared"`
+	SessionDeclared  bool `json:"session_declared"`
+	// MCPServers names the MCP servers the guest is configured with, if the
+	// backend can report them. They are names only, read from a file the agent
+	// owns: this is what is configured, never what is permitted.
+	MCPServers string `json:"mcp_servers,omitempty"`
+}
+
+func (a *app) emitBackendStatus(rep lima.BootstrapReport) error {
+	id := a.backend.Identity()
+	// The check names come from the backend. They were once built by appending
+	// to the registered name, which read one backend's report correctly and
+	// silently missed the other's entirely.
+	checks := a.backend.StatusChecks()
+	version, _ := checkDetail(rep, checks.Version)
+	mcpServers, _ := checkDetail(rep, checks.MCPServers)
+	data := backendStatusData{
+		Backend:          id.Name,
+		User:             id.GuestUser,
+		Version:          version,
+		Credentials:      credentialState(rep, checks.Auth),
+		RegistryDeclared: a.backend.Registry() != nil,
+		ServiceDeclared:  a.backend.Service() != nil,
+		SessionDeclared:  a.backend.Session() != nil,
+		MCPServers:       mcpServers,
+	}
+	if a.jsonOut {
+		return writeJSON(a.stdout, successEnvelope("backend.status", data))
+	}
+	if _, err := fmt.Fprintf(a.stdout,
+		"Backend %s (guest user %s)\n"+
+			"  version:     %s\n"+
+			"  credential:  %s\n"+
+			"  declares:    registry=%t service=%t session=%t\n",
+		data.Backend, data.User, orNone(data.Version), data.Credentials,
+		data.RegistryDeclared, data.ServiceDeclared, data.SessionDeclared); err != nil {
+		return err
+	}
+	if data.MCPServers != "" {
+		_, err := fmt.Fprintf(a.stdout, "  mcp servers: %s\n", data.MCPServers)
+		return err
+	}
+	return nil
+}
+
+// checkDetail returns the recorded detail of one bootstrap check and whether
+// the check is in the report at all. The two are separate answers: a check that
+// recorded an empty detail and a check that never ran are the same string and
+// must not become the same claim. An unnamed check is never found.
+func checkDetail(rep lima.BootstrapReport, name string) (string, bool) {
+	if name == "" {
+		return "", false
+	}
+	for _, c := range rep.Checks {
+		if c.Name == name {
+			return c.Detail, true
+		}
+	}
+	return "", false
+}
+
+// credentialState renders the auth check as one of four answers, each of which
+// says something different about what Torio actually did.
+//
+// "not-applicable" means the backend declares no auth check — there was no way
+// to ask. "unknown" means it declares one and the report carries no answer this
+// renderer recognizes: either no result at all, or a detail that is neither of
+// the two the contract defines. Collapsing the second into the first is how a
+// box that holds a credential comes to report that its state is unknowable, and
+// collapsing either into "absent" claims a logged-out box on no evidence.
+//
+// The two recognized details are compared by equality against the constants the
+// recording backend uses. Reading the state out of free prose is what let
+// "credential not present" answer "present".
+func credentialState(rep lima.BootstrapReport, name string) string {
+	if name == "" {
+		return "not-applicable"
+	}
+	detail, found := checkDetail(rep, name)
+	switch {
+	case !found:
+		return "unknown"
+	case detail == backend.CredentialPresent:
+		return "present"
+	case detail == backend.CredentialAbsent:
+		return "absent"
+	default:
+		return "unknown"
+	}
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "(not reported)"
+	}
+	return s
+}
+
+func newBackendLoginCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "login",
+		Short: "Open a guest terminal as the backend identity so it can be granted a credential",
+		Long: "Open an interactive terminal on the guest, as the backend's own identity, " +
+			"and start the backend there so its login flow runs. No SSH agent is " +
+			"forwarded and the session carries no Git remote write capability.\n\n" +
+			"The grant belongs to the box: it is issued to this guest identity and can " +
+			"be revoked without touching the operator's own. Torio never copies a " +
+			"credential in from the host — a shared identity would couple revocation to " +
+			"a machine the operator also works on, and make the box's activity " +
+			"indistinguishable from their own.\n\n" +
+			"Torio sees none of it. It builds the transport and hands over the terminal.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if a.jsonOut {
+				return usageError("backend login is interactive; --json is not supported")
+			}
+			session := a.backend.Session()
+			if session == nil {
+				return &CLIError{
+					Exit:    ExitPrecondition,
+					Code:    "BACKEND_NO_SESSION",
+					Command: "backend.login",
+					Message: fmt.Sprintf("backend %q declares no interactive session, so there is no terminal to log in from", a.backend.Identity().Name),
+				}
+			}
+			spec, err := lima.BackendLoginSpec(session.LoginArgv)
+			if err != nil {
+				return mapLimaError("backend.login", err)
+			}
+			// The session is bound by the command's own context, not by the
+			// operation timeout: a login flow waits on a human pasting a code
+			// from a browser, and killing it on a 30-second budget would be
+			// Torio deciding how fast someone can read.
+			runErr := a.newInteractive().RunInteractive(cmd.Context(), spec)
+			if _, err := fmt.Fprintf(a.stdout,
+				"%s: login session ended. Run `torio backend status` to see whether a credential is now present.\n",
+				a.backend.Identity().Name); err != nil {
+				return err
+			}
+			if runErr != nil {
+				return mapInteractiveSessionError("backend.login", "login session", runErr)
+			}
+			return nil
+		},
+	}
+}

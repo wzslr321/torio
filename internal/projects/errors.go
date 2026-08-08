@@ -34,6 +34,11 @@ const (
 	// KindRegistration is the Hermes project CLI failing or reporting a state we
 	// cannot verify.
 	KindRegistration ErrorKind = "registration_failed"
+	// KindNoRegistry is asking Torio to drive a project registry the backend
+	// declares it has not got. It mirrors serve's no_service: managing an
+	// undeclared capability is an operator error naming the backend, not a guest
+	// that failed, and it must not be reported as one.
+	KindNoRegistry ErrorKind = "no_registry"
 	// KindVerification is a postcondition that did not hold, or state we could
 	// not determine. It is the fail-closed default.
 	KindVerification ErrorKind = "verification"

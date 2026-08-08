@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/wzslr321/torio/internal/execx"
+	"github.com/wzslr321/torio/internal/lima"
 	"github.com/wzslr321/torio/internal/serve"
 )
 
@@ -98,7 +99,7 @@ func runServeWithGuest(t *testing.T, args []string, g serve.Guest) (int, string,
 		stdout:   &stdout,
 		stderr:   &stderr,
 		build:    testBuild(),
-		newServe: func() *serve.Adapter { return serve.New(g) },
+		newServe: func() *serve.Adapter { return serve.New(g, lima.Hermes()) },
 	}
 	code := runWithApp(context.Background(), a, args)
 	return code, stdout.String(), stderr.String()
@@ -116,7 +117,7 @@ func TestServeInstallHumanAndJSON(t *testing.T) {
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
 	}
-	if !strings.Contains(stdout, serve.UnitName) || !strings.Contains(stdout, "enabled (boot): true") {
+	if !strings.Contains(stdout, lima.HermesUnitName) || !strings.Contains(stdout, "enabled (boot): true") {
 		t.Errorf("human install output unexpected: %q", stdout)
 	}
 

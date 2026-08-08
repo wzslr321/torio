@@ -22,13 +22,18 @@ func newBrainCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "brain",
 		Short: "Initialize and inspect the private Markdown Second Brain",
-		Long: "Manage the mandatory Torio Second Brain at " + brain.Path + ". " +
-			"The Brain stays on the guest's native filesystem, is private to hermes, " +
-			"and is registered as a separate Hermes Project. Commands report only " +
+		// No instance name and no vault path here. Both are resolved per
+		// invocation from the backend the instance runs, and `--help` never
+		// reaches that resolution — so a line built at construction time told a
+		// Claude Code operator to copy from the other backend's box and the
+		// other backend's directory, plausibly enough to try it.
+		Long: "Manage the mandatory Torio Second Brain. It stays on the guest's native " +
+			"filesystem, is private to the agent identity that owns it, and is registered " +
+			"with the backend's project registry when it declares one. Commands report only " +
 			"bounded aggregate metadata, never note names or content.\n\n" +
-			"Torio brings data in and does not take it out. To copy the Brain back to " +
-			"the Mac, run limactl yourself:\n\n" +
-			"  limactl copy " + lima.InstanceName + ":" + brain.Path + "/ <host-destination>/\n\n" +
+			"Torio brings data in and does not take it out. To copy the Brain back to the " +
+			"host, run limactl yourself; `torio brain status` prints the instance and vault " +
+			"path to copy from, and the exact command.\n\n" +
 			"That is an operator command, not a Torio feature: nothing verifies the " +
 			"result and Torio does not call it a backup.",
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -133,7 +138,12 @@ func newBrainStatusCmd(a *app) *cobra.Command {
 				cliErr.Details = brainStatusDetails(report)
 				return cliErr
 			}
-			return a.emitBrainStatus("brain.status", report, brainSkillNotes(report.SkillState, false))
+			// The copy-out command is written here rather than in help text
+			// because only a run knows which box and which vault it is about.
+			notes := append(brainSkillNotes(report.SkillState, report.SkillPath, false),
+				fmt.Sprintf("copy out (operator command, not a backup): limactl copy %s:%s/ <host-destination>/",
+					lima.InstanceName, report.Path))
+			return a.emitBrainStatus("brain.status", report, notes)
 		},
 	}
 }
@@ -149,7 +159,7 @@ func (a *app) brainService(command string) (brainService, error) {
 		}
 	}
 	adapter := a.newLima()
-	return a.newBrain(adapter, lima.BootstrapOptions{OperatorUser: operatorUser}), nil
+	return a.newBrain(adapter, lima.BootstrapOptions{OperatorUser: operatorUser, Backend: a.backend}), nil
 }
 
 type brainStatusData struct {
@@ -234,7 +244,7 @@ func (a *app) emitBrainInit(report brain.InitReport) error {
 	if _, err := fmt.Fprintf(a.stdout, "Second Brain %s at %s.\n", action, report.Status.Path); err != nil {
 		return err
 	}
-	return a.emitBrainStatus("brain.init", report.Status, brainSkillNotes(report.Status.SkillState, report.SkillUpdated))
+	return a.emitBrainStatus("brain.init", report.Status, brainSkillNotes(report.Status.SkillState, report.Status.SkillPath, report.SkillUpdated))
 }
 
 func transferData(report brain.TransferReport) brainTransferData {
@@ -293,23 +303,33 @@ func (a *app) emitBrainTransfer(command string, report brain.TransferReport) err
 }
 
 // brainSkillNotes states what Torio actually verified. It checked a file on the
-// guest; it has no way to inspect a running Hermes backend, which caches the
-// skill prompt per process and does not rebuild it when a file appears.
-func brainSkillNotes(state brain.SkillState, updated bool) []string {
+// guest; it cannot inspect a running agent process, which reads its skills at
+// startup and does not rebuild that when a file appears.
+//
+// The path comes from the report because it is the backend's path. Naming a
+// fixed one here would have every Claude Code box told to look under the Hermes
+// profile — a wrong answer printed with full confidence by the command whose
+// only job is to report what is on the guest.
+func brainSkillNotes(state brain.SkillState, path string, updated bool) []string {
 	switch {
+	case state == brain.SkillNotApplicable:
+		return []string{
+			"This backend discovers no skills, so there is no retrieval skill to install.",
+			"The vault is still readable: it is a directory the agent can search by path.",
+		}
 	case state == brain.SkillInstalled && updated:
 		return []string{
-			"Retrieval skill written to " + brain.SkillFilePath + ".",
-			"Hermes caches the skill prompt per backend process: start a new session to use it.",
+			"Retrieval skill written to " + path + ".",
+			"Agents read their skills at startup: start a new session to use it.",
 		}
 	case state == brain.SkillInstalled:
 		return []string{
-			"Retrieval skill already current at " + brain.SkillFilePath + ".",
+			"Retrieval skill already current at " + path + ".",
 			"Torio verified the file only; it cannot tell whether a running session has loaded it.",
 		}
 	case state == brain.SkillDrift:
 		return []string{
-			"Retrieval skill at " + brain.SkillFilePath + " does not match the payload Torio ships.",
+			"Retrieval skill at " + path + " does not match the payload Torio ships.",
 			"Run 'torio brain init' to reinstall it, then start a new session.",
 		}
 	default:

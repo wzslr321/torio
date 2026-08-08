@@ -34,9 +34,11 @@ func newProjectCmd(a *app) *cobra.Command {
 		Use:   "project",
 		Short: "Attach and manage Git projects on the Torio VM",
 		Long: "Attach repositories to the managed guest, inspect them, and forget them. " +
-			"The workspace path is always derived as " + lima.HermesWorkspacePath + "/<id>, " +
-			"never taken from an operator. Torio stores no Git credentials: a remote the " +
-			"guest cannot already read noninteractively fails closed.",
+			"The workspace path is always derived as <backend workspace>/<id>, never taken " +
+			"from an operator, so it moves with --backend and a project can exist in more " +
+			"than one guest without either checkout being addressable from the other. " +
+			"Torio stores no Git credentials: a remote the guest cannot already read " +
+			"noninteractively fails closed.",
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return usageError("no subcommand given; run 'torio project --help'")
@@ -51,6 +53,7 @@ func newProjectCmd(a *app) *cobra.Command {
 	cmd.AddCommand(newProjectRemoveCmd(a))
 	cmd.AddCommand(newProjectEnterCmd(a))
 	cmd.AddCommand(newProjectShellCmd(a))
+	cmd.AddCommand(newProjectAgentCmd(a))
 	return cmd
 }
 
@@ -58,15 +61,22 @@ func newProjectAddCmd(a *app) *cobra.Command {
 	var id string
 	var use bool
 	cmd := &cobra.Command{
-		Use:   "add <name> <remote>",
-		Short: "Clone or adopt a repository and register it with Hermes",
+		Use:   "add <name> [remote]",
+		Short: "Clone or adopt a repository and attach it to the selected backend's guest",
 		Long: "Clone the exact remote into the derived workspace path, or verify and adopt a " +
-			"checkout that is already there, give the operator and hermes shared access, and " +
-			"register the project with Hermes before recording it in config. Nothing on the " +
-			"guest is reset, cleaned or deleted, so a rerun after a failure finishes the work.\n\n" +
+			"checkout that is already there, give the operator and the backend identity shared " +
+			"access, register the project if the backend keeps a registry, and only then record " +
+			"it. Nothing on the guest is reset, cleaned or deleted, so a rerun after a failure " +
+			"finishes the work.\n\n" +
+			"The registry is shared by every instance, the checkouts are not: a project exists " +
+			"once, in one guest per backend that has materialized it. Rerun with the id alone " +
+			"and no remote — `torio project add demo --backend claude-code` — to materialize an " +
+			"already registered project in another backend's guest, using the remote already on " +
+			"record. That is a separate step rather than something an interactive command does " +
+			"for you, because cloning reaches a Git remote.\n\n" +
 			"Without --id the project id is <name> itself, which must be a lowercase slug " +
 			"(letters, digits, inner hyphens); pass --id to choose one explicitly.",
-		Args: cobra.ExactArgs(2),
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := a.opContext(cmd)
 			defer cancel()
@@ -74,10 +84,20 @@ func newProjectAddCmd(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			name, remote := args[0], args[1]
+			name := args[0]
 			projectID := id
 			if projectID == "" {
 				projectID = name
+			}
+			var remote string
+			if len(args) == 2 {
+				remote = args[1]
+			} else {
+				known, err := findRegistered(service, projectID)
+				if err != nil {
+					return err
+				}
+				remote, name = known.Remote, known.DisplayName
 			}
 			report, err := service.Add(ctx, projects.AddRequest{
 				ID:          projectID,
@@ -94,8 +114,34 @@ func newProjectAddCmd(a *app) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&id, "id", "", "project id (slug) to use instead of <name>")
-	cmd.Flags().BoolVar(&use, "use", false, "make the project active in Hermes after a successful add")
+	cmd.Flags().BoolVar(&use, "use", false, "make the project active in the backend's registry after a successful add")
 	return cmd
+}
+
+// findRegistered resolves an already-registered project by id, for the one-
+// argument form of `project add`.
+//
+// It reads the shared registry rather than accepting a remote the operator
+// retyped, so materializing a project in a second backend's guest cannot
+// silently attach a different repository under a name that already means
+// something. An unregistered id is a usage error naming the missing argument:
+// there is nothing on record to complete it from.
+func findRegistered(service projectService, id string) (projects.Project, error) {
+	list, err := service.List()
+	if err != nil {
+		return projects.Project{}, mapProjectError("project.add", err)
+	}
+	for _, p := range list {
+		if p.ID == id {
+			return p, nil
+		}
+	}
+	return projects.Project{}, &CLIError{
+		Exit:    ExitUsage,
+		Code:    "USAGE",
+		Command: "project.add",
+		Message: fmt.Sprintf("project %q is not registered, so there is no remote on record; pass one: torio project add %s <remote>", id, id),
+	}
 }
 
 func newProjectListCmd(a *app) *cobra.Command {
@@ -192,6 +238,79 @@ func newProjectRemoveCmd(a *app) *cobra.Command {
 // newProjectEnterCmd opens an ordinary interactive project session. The SSH
 // transport disables agent forwarding; project shell remains the explicit
 // push-capable boundary.
+// newProjectAgentCmd opens the backend's own session in a checkout. It
+// completes the triad: `enter` is you without push capability, `shell` is you
+// with it, `agent` is the agent, which never has it.
+//
+// It carries no machine output for the same reason `enter` does not: it hands
+// the operator's terminal to a remote process, so there is no document to emit.
+func newProjectAgentCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "agent <id>",
+		Short: "Open the backend's own session in a project checkout",
+		Long: "Start the configured backend inside the project checkout, running as the " +
+			"backend's guest identity rather than as you.\n\n" +
+			"No SSH agent is forwarded and the connection is never multiplexed, so the " +
+			"session cannot reach a Git remote and cannot inherit a connection that " +
+			"can. The agent edits and commits in a tree it owns; pushing stays yours, " +
+			"from `torio project shell <id>`, after you have read what it did.\n\n" +
+			"Inside the box the backend runs without permission prompts. That is not a " +
+			"weakening: the prompt was a control inside the agent's own process, and " +
+			"the box replaced it with ones the agent cannot reach — an unprivileged " +
+			"identity, a closed group set, no route to a remote, and the edge of the " +
+			"VM.\n\n" +
+			"A backend that declares no interactive session has nothing to open here. " +
+			"This command is interactive and does not support --json.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if a.jsonOut {
+				return &CLIError{
+					Exit:    ExitUsage,
+					Code:    "USAGE",
+					Command: "project.agent",
+					Message: "project agent is interactive and has no machine output; drop --json",
+				}
+			}
+			if a.backend.Session() == nil {
+				return &CLIError{
+					Exit:    ExitPrecondition,
+					Code:    "BACKEND_NO_SESSION",
+					Command: "project.agent",
+					Message: fmt.Sprintf("backend %q declares no interactive session; its surface is the guest service it runs (torio serve status)", a.backend.Identity().Name),
+				}
+			}
+			service, err := a.projectService("project.agent")
+			if err != nil {
+				return err
+			}
+			ctx, cancel := a.opContext(cmd)
+			session, err := service.EnterPreflight(ctx, args[0])
+			cancel()
+			if err != nil {
+				return mapProjectError("project.agent", err)
+			}
+			agentCmd, err := a.newAgentSpec(session.Project.Path)
+			if err != nil {
+				return mapLimaError("project.agent", err)
+			}
+			if _, err := fmt.Fprintf(a.stdout,
+				"%s: starting %s in %s as the backend identity\n"+
+					"  No SSH agent is forwarded. The agent can commit here; pushing is yours, from `torio project shell %s`\n",
+				session.Project.ID, a.backend.Identity().Name, session.Project.Path, session.Project.ID); err != nil {
+				return err
+			}
+			runErr := a.newInteractive().RunInteractive(cmd.Context(), agentCmd)
+			if _, err := fmt.Fprintf(a.stdout, "%s: agent session ended. Review what it did before you push.\n", session.Project.ID); err != nil {
+				return err
+			}
+			if runErr != nil {
+				return mapInteractiveSessionError("project.agent", "agent session", runErr)
+			}
+			return nil
+		},
+	}
+}
+
 func newProjectEnterCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "enter <id>",
@@ -362,7 +481,12 @@ func (a *app) projectService(command string) (projectService, error) {
 			Message: err.Error(),
 		}
 	}
-	return a.newProjects(a.newLima(), lima.BootstrapOptions{OperatorUser: operatorUser}), nil
+	// The backend travels with the options, exactly as it does for `vm`, `brain`
+	// and `backend`. Without it the project manager falls back to the backend
+	// Torio shipped first, so on any other instance every `project` command
+	// verified the wrong identity's bootstrap, resolved the wrong workspace, and
+	// asked for a session the wrong backend declares.
+	return a.newProjects(a.newLima(), lima.BootstrapOptions{OperatorUser: operatorUser, Backend: a.backend}), nil
 }
 
 // projectData is the registry identity of one project. The remote is safe to
@@ -391,12 +515,18 @@ type projectListData struct {
 	Count    int           `json:"count"`
 }
 
+// projectShowData mirrors `serve status`: the declaration comes first, because
+// it decides whether the block after it means anything. On a backend that keeps
+// no registry the `hermes` object is absent rather than all-false — an object
+// full of falses reads as "the registration is missing", which is a different
+// statement from "there is nowhere to register".
 type projectShowData struct {
 	projectData
-	Checkout projectCheckoutData `json:"checkout"`
-	Hermes   projectHermesData   `json:"hermes"`
-	Issues   []string            `json:"issues"`
-	NextStep string              `json:"next_step"`
+	Checkout         projectCheckoutData `json:"checkout"`
+	RegistryDeclared bool                `json:"registry_declared"`
+	Hermes           *projectHermesData  `json:"hermes,omitempty"`
+	Issues           []string            `json:"issues"`
+	NextStep         string              `json:"next_step"`
 }
 
 type projectCheckoutData struct {
@@ -427,8 +557,14 @@ type projectUseData struct {
 	NextStep string `json:"next_step"`
 }
 
+// projectRemoveData keeps the three hermes_* flags flat and always present, so
+// the envelope a Hermes instance emits is byte-for-byte what it was. On a
+// backend that keeps no registry all three are false, and registry_declared is
+// what says why: there was nothing to archive, rather than an archival that
+// failed to happen.
 type projectRemoveData struct {
 	projectData
+	RegistryDeclared      bool     `json:"registry_declared"`
 	HermesArchived        bool     `json:"hermes_archived"`
 	HermesAlreadyArchived bool     `json:"hermes_already_archived"`
 	HermesAbsent          bool     `json:"hermes_absent"`
@@ -443,8 +579,12 @@ func projectView(p projects.Project) projectData {
 }
 
 func (a *app) emitProjectAdd(report projects.AddReport) error {
+	// `use` selects the active project in the backend's registry, so on a
+	// backend that declares none it is a command that fails closed by design.
+	// Naming it as the next step would send the operator to a `NO_REGISTRY`
+	// error to learn something Torio already knows here.
 	next := "torio project use " + report.Project.ID
-	if report.Activated {
+	if report.Activated || a.backend.Registry() == nil {
 		next = "torio project enter " + report.Project.ID
 	}
 	if a.jsonOut {
@@ -510,13 +650,15 @@ func (a *app) emitProjectList(list []projects.Project) error {
 
 func (a *app) emitProjectShow(report projects.ShowReport) error {
 	next := showNextStep(report)
+	declared := a.backend.Registry() != nil
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("project.show", projectShowData{
-			projectData: projectView(report.Project),
-			Checkout:    checkoutView(report.Checkout),
-			Hermes:      hermesView(report.Hermes),
-			Issues:      notes(report.Issues),
-			NextStep:    next,
+			projectData:      projectView(report.Project),
+			Checkout:         checkoutView(report.Checkout),
+			RegistryDeclared: declared,
+			Hermes:           hermesView(declared, report.Hermes),
+			Issues:           notes(report.Issues),
+			NextStep:         next,
 		}))
 	}
 	state := "ok"
@@ -527,20 +669,27 @@ func (a *app) emitProjectShow(report projects.ShowReport) error {
 	if len(report.Issues) > 0 {
 		issues = strings.Join(report.Issues, ",")
 	}
+	// The label follows the declaration, not just its value. `hermes:` on a box
+	// that runs a different agent names a backend that is not there, whatever
+	// the value beside it says.
+	registration := fmt.Sprintf("  hermes:    %s\n", hermesState(report.Hermes))
+	if !declared {
+		registration = fmt.Sprintf("  registry:  none declared by backend %q\n", a.backend.Identity().Name)
+	}
 	_, err := fmt.Fprintf(a.stdout,
 		"%s: %s\n"+
 			"  path:      %s\n"+
 			"  remote:    %s\n"+
 			"  checkout:  present=%t repository=%t origin=%t clean=%t shared=%t\n"+
 			"  ownership: %s:%s %s\n"+
-			"  hermes:    %s\n"+
+			"%s"+
 			"  issues:    %s\n"+
 			"next: %s\n",
 		report.Project.ID, state, report.Project.Path, report.Project.Remote,
 		report.Checkout.PathExists, report.Checkout.Repository, report.Checkout.OriginMatches,
 		report.Checkout.Clean, report.Checkout.SharedPermissions,
 		report.Checkout.Owner, report.Checkout.Group, report.Checkout.Mode,
-		hermesState(report.Hermes), issues, next)
+		registration, issues, next)
 	return err
 }
 
@@ -562,6 +711,7 @@ func (a *app) emitProjectRemove(report projects.RemoveReport) error {
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("project.remove", projectRemoveData{
 			projectData:           projectView(report.Project),
+			RegistryDeclared:      a.backend.Registry() != nil,
 			HermesArchived:        report.HermesArchived,
 			HermesAlreadyArchived: report.HermesAlreadyArchived,
 			HermesAbsent:          report.HermesAbsent,
@@ -571,8 +721,13 @@ func (a *app) emitProjectRemove(report projects.RemoveReport) error {
 			NextStep:              next,
 		}))
 	}
+	// The default branch claims an archival happened, so a backend that keeps no
+	// registry needs its own: nothing was archived there, and saying otherwise
+	// asserts an action Torio did not take.
 	hermes := "hermes project archived"
 	switch {
+	case a.backend.Registry() == nil:
+		hermes = "no registry to archive it from"
 	case report.HermesAlreadyArchived:
 		hermes = "hermes project already archived"
 	case report.HermesAbsent:
@@ -628,8 +783,15 @@ func checkoutView(c projects.CheckoutStatus) projectCheckoutData {
 	}
 }
 
-func hermesView(h projects.HermesStatus) projectHermesData {
-	return projectHermesData{
+// hermesView returns the registration block, or nil when the backend declares
+// no registry. Nil is what keeps the block out of the envelope entirely: there
+// is no registration to describe, so describing one as missing would report a
+// shape as a fault.
+func hermesView(declared bool, h projects.HermesStatus) *projectHermesData {
+	if !declared {
+		return nil
+	}
+	return &projectHermesData{
 		Present:        h.Present,
 		Archived:       h.Archived,
 		PrimaryMatches: h.PrimaryMatches,
@@ -737,7 +899,10 @@ func mapProjectError(command string, err error) *CLIError {
 	switch perr.Kind {
 	case projects.KindInvalidConfig:
 		return &CLIError{Exit: ExitUsage, Code: code, Command: command, Message: perr.Error()}
-	case projects.KindPrecondition:
+	case projects.KindPrecondition, projects.KindNoRegistry:
+		// no_registry maps where serve's no_service maps: managing a capability
+		// the backend never declared is an unmet precondition, not a guest that
+		// failed.
 		return &CLIError{Exit: ExitPrecondition, Code: code, Command: command, Message: perr.Error()}
 	case projects.KindAuth:
 		return &CLIError{Exit: ExitPermission, Code: code, Command: command, Message: perr.Error()}

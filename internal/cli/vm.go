@@ -8,6 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/wzslr321/torio/internal/backend"
+	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
 )
@@ -83,6 +85,13 @@ func newVMInitCmd(a *app) *cobra.Command {
 			"(image digest, empty mounts, no persistent SSH agent forwarding). " +
 			"Incompatible existing instances fail closed — there is no --force and Torio " +
 			"never recreates or deletes them.\n\n" +
+			"An instance runs one agent backend, chosen by the global --backend flag " +
+			"and recorded in this instance's config. That flag also selects which box " +
+			"this is, so `vm init --backend NAME` builds the box for that agent rather " +
+			"than converting the one you have: a second backend is a second VM, never a " +
+			"second agent inside one, because two identities sharing a workspace would " +
+			"contend over the same checkouts and make every custody statement " +
+			"ambiguous.\n\n" +
 			"Defaults: 4 CPUs, 8GiB memory, 60GiB disk. Next step after success: torio vm start.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -97,11 +106,19 @@ func newVMInitCmd(a *app) *cobra.Command {
 					Message: err.Error(),
 				}
 			}
+			// The backend is settled and recorded before the VM exists. It is a
+			// creation-time fact about the instance: the guest is provisioned
+			// for one identity, so a box that came up for one backend cannot be
+			// re-declared as another by editing a document afterwards.
+			if err := a.declareBackend(a.backendName); err != nil {
+				return err
+			}
 			res, err := a.newLima().Init(ctx, lima.InitOptions{
 				CPUs:         cpus,
 				Memory:       memory,
 				Disk:         disk,
 				OperatorUser: opUser,
+				Backend:      a.backend,
 			})
 			if err != nil {
 				return mapLimaError("vm.init", err)
@@ -115,9 +132,67 @@ func newVMInitCmd(a *app) *cobra.Command {
 	return cmd
 }
 
+// declareBackend settles which backend this instance runs and records it before
+// anything creates a VM for it.
+//
+// A rerun with no flag keeps what the instance already declares, so init stays
+// idempotent. A flag naming a different backend than the instance already
+// declares is a usage error: switching the agent a provisioned guest runs is
+// not an edit, it is a new instance, and silently accepting the flag would
+// leave a guest built for one identity being driven as another.
+//
+// The pre-run rejects that pair before any command runs, so nothing should
+// reach the branch below. It stays because this is the function that writes the
+// declaration, and a write path may not depend on a check made somewhere else
+// to know what it is allowed to persist.
+func (a *app) declareBackend(name string) error {
+	if name == "" {
+		return nil
+	}
+	if _, err := backend.Lookup(name); err != nil {
+		return usageError(err.Error())
+	}
+	current := a.runtime.File.Backend
+	if current == "" && name == backend.DefaultName {
+		// Nothing to record: an absent declaration already means the default.
+		return nil
+	}
+	if current != "" && current != name {
+		return &CLIError{
+			Exit:    ExitUsage,
+			Code:    "BACKEND_MISMATCH",
+			Command: "vm.init",
+			Message: fmt.Sprintf("instance %q already declares backend %q; --backend %q would re-point a provisioned guest. Each backend gets its own instance, so `torio vm init --backend %s` builds one rather than converting this one.",
+				lima.InstanceName, current, name, name),
+		}
+	}
+	if current == name {
+		return nil
+	}
+	file := a.runtime.File
+	file.SchemaVersion = config.ConfigSchemaVersion
+	file.Backend = name
+	if err := config.WriteFile(a.runtime.Paths.ConfigFile, file); err != nil {
+		return &CLIError{
+			Exit:    ExitUsage,
+			Code:    "BACKEND_DECLARATION_FAILED",
+			Command: "vm.init",
+			Message: err.Error(),
+		}
+	}
+	a.runtime.File = file
+	b, err := backend.Lookup(name)
+	if err != nil {
+		return usageError(err.Error())
+	}
+	a.backend = b
+	return nil
+}
+
 // vmInitData is the `data` object for a successful `vm init`.
 type vmInitData struct {
 	Name          string `json:"name"`
+	Backend       string `json:"backend"`
 	Created       bool   `json:"created"`
 	Unchanged     bool   `json:"unchanged"`
 	ImageLocation string `json:"image_location"`
@@ -130,6 +205,7 @@ func (a *app) emitVMInit(res lima.InitResult) error {
 	if a.jsonOut {
 		data := vmInitData{
 			Name:          lima.InstanceName,
+			Backend:       a.backend.Identity().Name,
 			Created:       res.Created,
 			Unchanged:     !res.Created,
 			ImageLocation: res.ImageLocation,
@@ -240,7 +316,7 @@ func newVMBootstrapCmd(a *app) *cobra.Command {
 					Message: err.Error(),
 				}
 			}
-			rep, err := a.newLima().Bootstrap(ctx, lima.BootstrapOptions{OperatorUser: opUser})
+			rep, err := a.newLima().Bootstrap(ctx, lima.BootstrapOptions{OperatorUser: opUser, Backend: a.backend})
 			if err != nil {
 				ce := mapLimaError("vm.bootstrap", err)
 				// Surface the checks recorded up to the failure (already bounded and
@@ -286,27 +362,35 @@ func (a *app) emitVMState(command string, state lima.State) error {
 }
 
 // vmBootstrapData is the `data` object for a successful `vm bootstrap`. It
-// carries the proven checks plus the persistent Hermes locations the operator
-// needs for the connection handoff — no secrets, no raw output.
+// carries the proven checks plus the guest locations the operator needs for the
+// connection handoff — no secrets, no raw output.
+//
+// `hermes_home` is a legacy alias for `home`, emitted on every backend so no
+// existing reader breaks. New readers should use `home`, which is the identity's
+// home whichever backend owns it.
 type vmBootstrapData struct {
 	Instance      string      `json:"instance"`
+	Backend       string      `json:"backend"`
 	Checks        []checkData `json:"checks"`
 	GuestUser     string      `json:"guest_user"`
+	Home          string      `json:"home"`
 	HermesHome    string      `json:"hermes_home"`
 	ProfilePath   string      `json:"profile_path"`
 	BrainPath     string      `json:"brain_path"`
 	WorkspacePath string      `json:"workspace_path"`
 }
 
-func bootstrapData(rep lima.BootstrapReport) vmBootstrapData {
+func bootstrapData(rep lima.BootstrapReport, id backend.Identity) vmBootstrapData {
 	return vmBootstrapData{
 		Instance:      rep.Instance,
+		Backend:       id.Name,
 		Checks:        checkPayload(rep.Checks),
-		GuestUser:     lima.HermesUser,
-		HermesHome:    lima.HermesHome,
-		ProfilePath:   lima.HermesProfilePath,
-		BrainPath:     lima.HermesBrainPath,
-		WorkspacePath: lima.HermesWorkspacePath,
+		GuestUser:     id.GuestUser,
+		Home:          id.Home,
+		HermesHome:    id.Home,
+		ProfilePath:   id.ProfilePath,
+		BrainPath:     id.BrainPath,
+		WorkspacePath: id.WorkspacePath,
 	}
 }
 
@@ -326,20 +410,43 @@ func bootstrapReportDetails(rep lima.BootstrapReport) map[string]any {
 // stable command path). The post-bootstrap action to reach Hermes stays operator-controlled.
 func (a *app) emitVMBootstrap(rep lima.BootstrapReport) error {
 	if a.jsonOut {
-		return writeJSON(a.stdout, successEnvelope("vm.bootstrap", bootstrapData(rep)))
+		return writeJSON(a.stdout, successEnvelope("vm.bootstrap", bootstrapData(rep, a.backend.Identity())))
 	}
 	if err := a.writeCheckLines(rep.Checks); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintf(a.stdout,
-		"\nHermes path ready on %s.\n"+
-			"Persistent Hermes home:    %s\n"+
+	id := a.backend.Identity()
+	if _, err := fmt.Fprintf(a.stdout,
+		"\nBackend %s ready on %s.\n"+
+			"Guest identity:            %s\n"+
+			"Persistent home:           %s\n"+
 			"Persistent profile:        %s\n"+
 			"Persistent Second Brain:   %s\n"+
-			"Persistent workspace:      %s\n"+
-			"Reach Hermes (operator-controlled): torio vm ssh -- sudo -u %s -- hermes --version\n",
-		rep.Instance, lima.HermesHome, lima.HermesProfilePath, lima.HermesBrainPath, lima.HermesWorkspacePath, lima.HermesUser)
-	return err
+			"Persistent workspace:      %s\n",
+		id.Name, rep.Instance, id.GuestUser, id.Home, id.ProfilePath, id.BrainPath, id.WorkspacePath); err != nil {
+		return err
+	}
+	return a.writeBootstrapNextStep(rep)
+}
+
+// writeBootstrapNextStep prints the one thing the operator should do next, which
+// differs by what the backend declares and by what bootstrap just observed. A
+// backend with a credential it has not been granted yet needs a login before
+// anything else is worth trying.
+func (a *app) writeBootstrapNextStep(rep lima.BootstrapReport) error {
+	if credentialState(rep, a.backend.StatusChecks().Auth) == "absent" {
+		_, err := fmt.Fprintf(a.stdout, "next: torio backend login\n")
+		return err
+	}
+	if a.backend.Service() != nil {
+		_, err := fmt.Fprintf(a.stdout, "next: torio serve install\n")
+		return err
+	}
+	if a.backend.Session() != nil {
+		_, err := fmt.Fprintf(a.stdout, "next: torio project add <id> <remote>, then torio project agent <id>\n")
+		return err
+	}
+	return nil
 }
 
 // emitVMSSH renders an ssh Result. A non-zero remote exit is never reported as

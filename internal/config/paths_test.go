@@ -259,9 +259,9 @@ func TestResolveInstanceErrorDoesNotEchoTheValue(t *testing.T) {
 	}
 }
 
-// A named instance gets its own registry, derived rather than remembered.
-// Sharing one would let `project list` show the daily projects while talking to
-// a test VM.
+// A named instance gets its own document, derived rather than remembered. What
+// it holds is what the instance owns: the backend it was provisioned for and
+// the settings a command against it runs under.
 func TestNamedInstanceGetsItsOwnConfigDir(t *testing.T) {
 	base := t.TempDir()
 
@@ -311,6 +311,126 @@ func TestExplicitConfigWinsOverTheInstance(t *testing.T) {
 	}
 	if p.Instance != "torio-test" {
 		t.Errorf("instance = %q, want it resolved even with --config", p.Instance)
+	}
+}
+
+// TestEveryInstanceSharesOneRegistry is the property the whole switch rests on:
+// a project is something the operator attached, not something an instance owns,
+// so changing which box a command talks to must not change which projects
+// exist. The instance still moves its own document, which is what keeps the
+// backend declaration and the settings separate.
+func TestEveryInstanceSharesOneRegistry(t *testing.T) {
+	base := t.TempDir()
+
+	def, err := ResolvePaths(Options{Getenv: envOnly("XDG_CONFIG_HOME", base)})
+	if err != nil {
+		t.Fatalf("ResolvePaths() error = %v", err)
+	}
+	named, err := ResolvePaths(Options{Getenv: func(k string) string {
+		switch k {
+		case "XDG_CONFIG_HOME":
+			return base
+		case InstanceEnvKey:
+			return "torio-claude-code"
+		}
+		return ""
+	}})
+	if err != nil {
+		t.Fatalf("ResolvePaths() error = %v", err)
+	}
+
+	want := filepath.Join(base, appDir, registryFileName)
+	if def.RegistryFile != want {
+		t.Errorf("default instance registry = %q, want %q", def.RegistryFile, want)
+	}
+	if named.RegistryFile != want {
+		t.Errorf("named instance registry = %q, want the shared %q", named.RegistryFile, want)
+	}
+	if def.ConfigFile == named.ConfigFile {
+		t.Error("the two instances share a config document; only the registry is shared")
+	}
+}
+
+// A registry resolved next to an explicit --config, for the same reason the
+// instance document is: everything contained in the config dir resolves
+// alongside it, so a test harness pointing --config somewhere gets a registry
+// there too rather than writing into the operator's real one.
+func TestExplicitConfigCarriesItsOwnRegistry(t *testing.T) {
+	dir := t.TempDir()
+	explicit := filepath.Join(dir, "elsewhere.json")
+	p, err := ResolvePaths(Options{ConfigPath: explicit})
+	if err != nil {
+		t.Fatalf("ResolvePaths() error = %v", err)
+	}
+	if want := filepath.Join(dir, registryFileName); p.RegistryFile != want {
+		t.Errorf("registry = %q, want %q", p.RegistryFile, want)
+	}
+}
+
+// TestInstanceForBackendDerivesOneBoxPerBackend pins the mapping the routing
+// flag depends on. The default backend keeps DefaultInstance so a box created
+// before any of this is still the one an unflagged command talks to.
+func TestInstanceForBackendDerivesOneBoxPerBackend(t *testing.T) {
+	for _, tc := range []struct{ backend, want string }{
+		{"", DefaultInstance},
+		{"hermes", DefaultInstance},
+		{"claude-code", InstancePrefix + "claude-code"},
+	} {
+		got, err := InstanceForBackend(tc.backend, "hermes")
+		if err != nil {
+			t.Fatalf("InstanceForBackend(%q): %v", tc.backend, err)
+		}
+		if got != tc.want {
+			t.Errorf("InstanceForBackend(%q) = %q, want %q", tc.backend, got, tc.want)
+		}
+		if !instancePattern.MatchString(got) {
+			t.Errorf("derived instance %q is not a valid instance name", got)
+		}
+	}
+}
+
+// A backend name that cannot derive a valid instance is refused rather than
+// sanitized. The derived name reaches a limactl argv and a config path segment,
+// so it gets the same shape rule every instance name does.
+func TestInstanceForBackendRefusesANameItCannotDerive(t *testing.T) {
+	for _, bad := range []string{"Has Space", "../etc", strings.Repeat("x", 64)} {
+		if got, err := InstanceForBackend(bad, "hermes"); err == nil {
+			t.Errorf("InstanceForBackend(%q) = %q, want an error", bad, got)
+		}
+	}
+}
+
+// TestTheEnvironmentWinsOverADerivedInstance pins the precedence. TORIO_INSTANCE
+// names a box directly and is the only way to reach one whose name Torio did
+// not derive, so a flag must never be able to redirect an invocation that
+// already named its target.
+func TestTheEnvironmentWinsOverADerivedInstance(t *testing.T) {
+	got, err := ResolveInstance(Options{
+		Getenv:   envOnly(InstanceEnvKey, "torio-ci-claude"),
+		Instance: InstancePrefix + "claude-code",
+	})
+	if err != nil {
+		t.Fatalf("ResolveInstance: %v", err)
+	}
+	if got != "torio-ci-claude" {
+		t.Errorf("instance = %q, want the one the environment named", got)
+	}
+
+	got, err = ResolveInstance(Options{Getenv: envFunc(nil), Instance: InstancePrefix + "claude-code"})
+	if err != nil {
+		t.Fatalf("ResolveInstance: %v", err)
+	}
+	if want := InstancePrefix + "claude-code"; got != want {
+		t.Errorf("instance = %q, want the derived %q", got, want)
+	}
+}
+
+// A derived name is validated on the way in like every other one. Nothing in
+// this build can produce a malformed one, which is exactly why the check must
+// not depend on that staying true.
+func TestResolveInstanceValidatesADerivedName(t *testing.T) {
+	if _, err := ResolveInstance(Options{Getenv: envFunc(nil), Instance: "../etc"}); err == nil {
+		t.Fatal("a malformed derived instance name was accepted")
 	}
 }
 

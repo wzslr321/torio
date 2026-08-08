@@ -224,3 +224,46 @@ func TestValidateOperatorUserRejectsInjection(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderedTemplateProvisionsOnlyTheDeclaredBackendsIdentity pins the reason
+// the provisioning block is substituted rather than fixed.
+//
+// A guest is built for one agent. Provisioning a second agent identity into
+// torio-projects "just in case" would widen who can read every checkout on the
+// box, for a backend nothing on it will ever run — so a rendered template must
+// carry exactly the declared backend's identity and layout, and the base
+// package list must not carry another backend's build dependencies either.
+func TestRenderedTemplateProvisionsOnlyTheDeclaredBackendsIdentity(t *testing.T) {
+	text, err := renderTemplate(InitOptions{OperatorUser: "operator"}.withDefaults(), testProfile)
+	if err != nil {
+		t.Fatalf("renderTemplate: %v", err)
+	}
+	got := string(text)
+
+	id := Hermes().Identity()
+	for _, want := range []string{
+		"useradd --create-home --shell /bin/bash --user-group " + id.GuestUser,
+		"usermod -aG " + TorioProjectsGroup + " " + id.GuestUser,
+		"install -d -o " + id.GuestUser + " -g " + TorioProjectsGroup + " -m 2770 " + id.WorkspacePath,
+		"install -d -o " + id.GuestUser + " -g " + id.GuestUser + " -m 0750 " + id.ProfilePath,
+		"install -d -o " + id.GuestUser + " -g " + id.GuestUser + " -m 0750 " + id.BrainPath,
+		"gpasswd -d " + id.GuestUser + " " + dockerGroup,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("rendered template is missing the declared backend's provisioning: %q", want)
+		}
+	}
+
+	// The backend's build dependencies belong to the backend, not to every
+	// guest Torio creates.
+	base := got[strings.Index(got, "apt-get install -y --no-install-recommends"):]
+	base = base[:strings.Index(base, "\n")]
+	for _, dep := range hermesBuildDeps {
+		if dep == "git" || dep == "curl" || dep == "ca-certificates" {
+			continue // genuinely universal; the base list carries these
+		}
+		if strings.Contains(base, dep) {
+			t.Errorf("base package list carries the backend-specific dependency %q", dep)
+		}
+	}
+}

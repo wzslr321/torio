@@ -34,6 +34,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/guestexec"
 	"github.com/wzslr321/torio/internal/lima"
@@ -55,79 +56,91 @@ var _ Guest = (*lima.Adapter)(nil)
 type Adapter struct {
 	// Guest reaches the VM. Tests inject a fake; production wires *lima.Adapter.
 	Guest Guest
+
+	// identity is the guest identity the unit runs as; spec is the service the
+	// configured backend declares, nil when it declares none.
+	identity backend.Identity
+	spec     *backend.ServiceSpec
 }
 
-// New returns an Adapter backed by guest.
-func New(guest Guest) *Adapter { return &Adapter{Guest: guest} }
-
-// The fixed, repository-controlled service facts. Loopback bind is a hard
-// invariant (docs/contracts/cli.md); the values are constants —
-// never caller input — so the generated unit and every probe target a single,
-// auditable loopback endpoint and can never be widened to a public bind.
-const (
-	// UnitName is the custom user unit Torio owns for the backend.
-	UnitName = "hermes-serve.service"
-	// unitDir is the hermes user's systemd unit directory.
-	unitDir = lima.HermesHome + "/.config/systemd/user"
-	// unitPath is the installed unit's absolute path.
-	unitPath = unitDir + "/" + UnitName
-	// stagingPath is where a freshly rendered unit is written and validated
-	// before it is atomically moved into place. It keeps a .service suffix so
-	// `systemd-analyze verify` accepts it, and lives in the same directory as
-	// unitPath so the move is an atomic same-filesystem rename.
-	stagingPath = unitDir + "/hermes-serve-staging.service"
-
-	// BindHost/BindPort are the discovered `hermes serve` loopback defaults. The
-	// unit pins them explicitly so the bind can never drift off loopback.
-	BindHost = "127.0.0.1"
-	BindPort = 9119
-	// StatusPath is the unauthenticated readiness endpoint (verified: 200 with a
-	// JSON version; /api/health|info|version are 401).
-	StatusPath = "/api/status"
-
-	// hermesShim is the stable `hermes` launcher path the bootstrap installs on
-	// sudo's secure_path; the unit's ExecStart uses it as an absolute path.
-	hermesShim = "/usr/local/bin/hermes"
-	// workingDir is the Hermes install directory (`hermes --version` reports it),
-	// used as the service WorkingDirectory.
-	workingDir = lima.HermesHome + "/hermes-agent"
-)
-
-// EndpointURL is the loopback readiness URL probed on the guest. It is fixed to
-// the pinned loopback host/port and the status path.
-func EndpointURL() string {
-	return "http://" + BindHost + ":" + strconv.Itoa(BindPort) + StatusPath
+// New returns an Adapter driving b's declared service over guest. A backend
+// that declares no service still produces a usable Adapter: every operation
+// then answers Declared() == false rather than failing on a nil field, so the
+// CLI can report the truthful state instead of an invented failure.
+func New(guest Guest, b backend.Backend) *Adapter {
+	return &Adapter{Guest: guest, identity: b.Identity(), spec: b.Service()}
 }
+
+// Declared reports whether the configured backend runs a guest service at all.
+func (a *Adapter) Declared() bool { return a.spec != nil }
+
+// Backend is the configured backend's identity name, for reports that have to
+// say which backend answered.
+func (a *Adapter) Backend() string { return a.identity.Name }
+
+// UnitName is the user unit Torio owns for the backend, empty when the backend
+// declares no service.
+func (a *Adapter) UnitName() string {
+	if a.spec == nil {
+		return ""
+	}
+	return a.spec.UnitName
+}
+
+func (a *Adapter) unitDir() string  { return a.spec.UnitDir }
+func (a *Adapter) unitPath() string { return a.spec.UnitDir + "/" + a.spec.UnitName }
+
+// stagingPath is where a freshly rendered unit is written and validated before
+// it is atomically moved into place. It keeps a .service suffix so
+// `systemd-analyze verify` accepts it, and lives in the same directory as the
+// unit so the move is an atomic same-filesystem rename.
+func (a *Adapter) stagingPath() string {
+	return a.spec.UnitDir + "/" + strings.TrimSuffix(a.spec.UnitName, ".service") + "-staging.service"
+}
+
+// EndpointURL is the loopback readiness URL probed on the guest.
+func (a *Adapter) EndpointURL() string { return a.spec.EndpointURL() }
+
+// user is the guest identity every unit-scoped command runs as.
+func (a *Adapter) user() string { return a.identity.GuestUser }
 
 // runtimeDir resolves the hermes user's XDG_RUNTIME_DIR (/run/user/<uid>) by
 // probing `id -u hermes`. A user unit is reached through this runtime directory;
 // resolving the uid (rather than hardcoding it) keeps the adapter correct if the
 // guest is rebuilt, and fails closed on any unparseable/absent uid.
 func (a *Adapter) runtimeDir(ctx context.Context, op string) (string, *Error) {
-	res, err := a.Guest.SSH(ctx, []string{"id", "-u", lima.HermesUser})
+	res, err := a.Guest.SSH(ctx, []string{"id", "-u", a.user()})
 	if err != nil {
 		return "", fromGuestErr(op, err)
 	}
 	if res.ExitCode != 0 {
-		return "", &Error{Op: op, Kind: KindGuestCommandFailed, Err: cmdErr("id -u hermes", res)}
+		return "", &Error{Op: op, Kind: KindGuestCommandFailed, Err: cmdErr("id -u "+a.user(), res)}
 	}
 	uidStr := strings.TrimSpace(string(res.Stdout))
 	uid, perr := strconv.Atoi(uidStr)
 	if perr != nil || uid < 0 {
-		return "", &Error{Op: op, Kind: KindGuestCommandFailed, Err: fmt.Errorf("could not resolve the hermes uid")}
+		return "", &Error{Op: op, Kind: KindGuestCommandFailed, Err: fmt.Errorf("could not resolve the %s uid", a.user())}
 	}
 	return "/run/user/" + strconv.Itoa(uid), nil
 }
 
-// userctl builds `sudo -n -u hermes -- env XDG_RUNTIME_DIR=<rt> systemctl --user <args...>`.
+// userctl builds `sudo -n -u <user> -- env XDG_RUNTIME_DIR=<rt> systemctl --user <args...>`.
 // systemctl --user needs the runtime directory to reach the user manager.
-func userctl(rt string, args ...string) []string {
-	return userEnv(rt, append([]string{"systemctl", "--user"}, args...)...)
+func (a *Adapter) userctl(rt string, args ...string) []string {
+	return a.userEnv(rt, append([]string{"systemctl", "--user"}, args...)...)
 }
 
-// userEnv builds `sudo -n -u hermes -- env XDG_RUNTIME_DIR=<rt> <args...>` for a
+// userEnv builds `sudo -n -u <user> -- env XDG_RUNTIME_DIR=<rt> <args...>` for a
 // non-systemctl guest command that still needs the user runtime dir (journalctl
 // --user, systemd-analyze --user).
-func userEnv(rt string, args ...string) []string {
-	return guestexec.UserExec(append([]string{"env", "XDG_RUNTIME_DIR=" + rt}, args...)...)
+func (a *Adapter) userEnv(rt string, args ...string) []string {
+	return guestexec.UserExecAs(a.user(), append([]string{"env", "XDG_RUNTIME_DIR=" + rt}, args...)...)
+}
+
+// noServiceErr is the fail-closed answer to a request to manage a service the
+// configured backend does not declare. It names the backend, because the
+// operator's next question is always which one they are talking to.
+func (a *Adapter) noServiceErr(op string) *Error {
+	return &Error{Op: op, Kind: KindNoService,
+		Err: fmt.Errorf("backend %q declares no guest service; there is nothing to %s", a.identity.Name, op)}
 }
