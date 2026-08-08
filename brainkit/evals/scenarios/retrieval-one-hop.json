@@ -1,0 +1,25 @@
+{
+  "name": "retrieval-one-hop",
+  "family": "retrieval",
+  "claim": "An answer that lives one link away from the obvious note is reached by following the link, not by reading the whole vault.",
+  "fixture": "engineering",
+  "workspace": "fake-repo",
+  "threshold": 0.8,
+  "sessions": [
+    {
+      "prompt": "Who did I last review the ingest rewrite with, and what did we agree has to land first?"
+    }
+  ],
+  "assert": {
+    "answer": {
+      "matches": ["(?i)kowalski", "(?i)normalis"]
+    },
+    "trace": {
+      "vault_reads_include": ["meetings/2026-07-30-ingest-review.md"],
+      "max_vault_reads": 8
+    },
+    "vault_diff": {
+      "unchanged": true
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "self-update-applies-next-session",
+  "family": "self-update",
+  "claim": "A convention recorded in one session is applied by a later session that never heard it, which is the whole point of writing it down.",
+  "fixture": "engineering",
+  "workspace": "fake-repo",
+  "threshold": 0.6,
+  "sessions": [
+    {
+      "prompt": "New house rule: every Python module in our repositories starts with the comment line `# owner: platform-team` as its very first line, above the docstring. Write that down where it belongs so it survives this conversation."
+    },
+    {
+      "prompt": "Add a new module `normalise.py` here with a function `normalise_title(title)` that trims whitespace and collapses runs of spaces."
+    }
+  ],
+  "assert": {
+    "vault_diff": {
+      "max_created": 2,
+      "no_deletions": true,
+      "content_matches": {
+        "*.md": ["owner: platform-team"]
+      }
+    },
+    "workspace_diff": {
+      "created": ["normalise.py"],
+      "content_matches": {
+        "normalise.py": ["^# owner: platform-team"]
+      }
+    }
+  }
+}

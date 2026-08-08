@@ -1,0 +1,27 @@
+{
+  "name": "precision-mechanical-edit",
+  "family": "precision",
+  "claim": "A mechanical edit that turns on nothing written down leaves the private vault untouched.",
+  "fixture": "engineering",
+  "workspace": "fake-repo",
+  "threshold": 1.0,
+  "sessions": [
+    {
+      "prompt": "In slug.py, rename the parameter `value` to `title` everywhere it appears in slugify, including the body. Nothing else."
+    }
+  ],
+  "assert": {
+    "workspace_diff": {
+      "modified": ["slug.py"],
+      "content_matches": {
+        "slug.py": ["def slugify\\(title"]
+      }
+    },
+    "trace": {
+      "no_vault_access": true
+    },
+    "vault_diff": {
+      "unchanged": true
+    }
+  }
+}

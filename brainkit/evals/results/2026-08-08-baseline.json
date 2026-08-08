@@ -1,0 +1,263 @@
+{
+  "meta": {
+    "label": "baseline",
+    "date": "2026-08-08",
+    "model": "claude-sonnet-5",
+    "runner": "claude-code",
+    "isolation": "loose \u2014 the operator's HOME, user plugins disabled, user skills also loaded (scored again from the recorded run)",
+    "hooks": false,
+    "trials": 5,
+    "cost": 10.696,
+    "skills": [
+      "1on1",
+      "dwight",
+      "hermes-discord-sweep",
+      "deep-research",
+      "brain-kit:brain-capture",
+      "brain-kit:brain-daily",
+      "brain-kit:brain-meeting",
+      "brain-kit:brain-people",
+      "brain-kit:brain-search",
+      "brain-kit:brain-triage",
+      "design-sync",
+      "dataviz",
+      "update-config",
+      "verify",
+      "debug",
+      "code-review",
+      "simplify",
+      "batch",
+      "fewer-permission-prompts",
+      "doctor",
+      "loop",
+      "schedule",
+      "claude-api",
+      "run",
+      "run-skill-generator"
+    ],
+    "note": "This is the kit as it shipped: six skills, no map of the vault in context. It is\nthe number the next change is measured against, and it is worth reading in one\nspecific way.\n\n**The `precision` column is not a result here.** 10/10 looks like the agent\ncarefully declining to open the vault when a task does not call for it. The\ntranscripts say otherwise: it never opened the vault at any point, in any\nscenario, unless the prompt said the word \"notes\". Asked to write a pull request\ndescription in a repository whose vault records the exact three headings the\nhouse style requires, it wrote its own headings and never looked. Asked how the\nguest image is pinned \u2014 a decision written down in that vault \u2014 four runs in five\nanswered \"I don't have anything on this, not in memory and not in this repo\".\n\nSo `precision` 10/10 and `linkage` 0/10 are one fact seen twice. An agent that\ndoes not know a vault exists passes every test that asks it to leave the vault\nalone, and that is not the property those tests were written to find.\n\n**What the skills do have** is discipline once they are engaged. Where the prompt\nnamed the vault, retrieval was targeted and honest: `retrieval-one-hop` and\n`retrieval-read-budget` are 5/5, meaning the right note was found by following a\nlink rather than by reading the tree, and inside a read budget. The retrieval\nskill is good. It is simply not consulted.\n\n**The writing half fails outright**, and separately from all of that:\n`self-update-records-correction` is 0/5 because a standing rule the user states\ngoes into assistant-side memory rather than the user's vault.\n\nThe run that follows this one adds the session-start vault map and changes only\nthat.\n"
+  },
+  "scenarios": [
+    {
+      "name": "linkage-pr-description",
+      "family": "linkage",
+      "claim": "Asked for a PR description with no mention of notes, the agent finds the recorded house style and writes to it.",
+      "threshold": 0.8,
+      "trials": 5,
+      "passed": 0,
+      "rate": 0.0,
+      "met": false,
+      "cost": 0.5866,
+      "failures": {
+        "answer matches /(?m)^#+\\s*Risk\\b/": {
+          "count": 5,
+          "detail": "No other callers reference `slugify` in the repo, and there's no test suite present. Here's the PR description:\n\n---\n\n## Add accent-stripping and length limiting to `slugify`\n\n### Summary\nExtends `slugify()` in `slug.py` with two opt-in parameters:\n\n- `strip_accents=True` (default): Unicode-normalizes the input (NFKD) and drops combining marks before slugging, so accented characters (e.g. `\u00e9`, `\u00f1`\u2026"
+        },
+        "agent read resources/writing-style.md": {
+          "count": 5,
+          "detail": "reads=[] searches=0 touched=False"
+        },
+        "answer matches /(?m)^#+\\s*What\\b/": {
+          "count": 4,
+          "detail": "No other callers reference `slugify` in the repo, and there's no test suite present. Here's the PR description:\n\n---\n\n## Add accent-stripping and length limiting to `slugify`\n\n### Summary\nExtends `slugify()` in `slug.py` with two opt-in parameters:\n\n- `strip_accents=True` (default): Unicode-normalizes the input (NFKD) and drops combining marks before slugging, so accented characters (e.g. `\u00e9`, `\u00f1`\u2026"
+        },
+        "answer matches /(?m)^#+\\s*Why\\b/": {
+          "count": 1,
+          "detail": "## Slug PR description\n\n**Title:** Add accent stripping and max-length truncation to `slugify`\n\n### Summary\n- `slugify` now decomposes and strips combining accent marks (e.g. `\u00e9` \u2192 `e`) via `unicodedata.normalize(\"NFKD\", ...)` before separator normalisation, so accented titles no longer collapse into `-` runs. Controlled by a new `strip_accents=True` param, default on.\n- Added an opt-in `max_lengt\u2026"
+        }
+      },
+      "skipped": [],
+      "example": "/var/folders/9v/nhpg1y0n6w9cz12qq6vsx4_h0000gn/T/torio-brain-evals-2026-08-08-gh3tc07p/linkage-pr-description/trial-1"
+    },
+    {
+      "name": "linkage-test-conventions",
+      "family": "linkage",
+      "claim": "Asked for tests with no mention of notes, the agent finds the recorded testing conventions and carries the two mandatory cases into the file it writes.",
+      "threshold": 0.8,
+      "trials": 5,
+      "passed": 0,
+      "rate": 0.0,
+      "met": false,
+      "cost": 0.9997,
+      "failures": {
+        "workspace: test_slug.py contains ['empty input', 'unicode']": {
+          "count": 5,
+          "detail": "candidates=['test_slug.py']"
+        },
+        "agent read resources/testing-conventions.md": {
+          "count": 5,
+          "detail": "reads=[] searches=0 touched=False"
+        }
+      },
+      "skipped": [],
+      "example": "/var/folders/9v/nhpg1y0n6w9cz12qq6vsx4_h0000gn/T/torio-brain-evals-2026-08-08-gh3tc07p/linkage-test-conventions/trial-1"
+    },
+    {
+      "name": "precision-general-question",
+      "family": "precision",
+      "claim": "A general question with no personal content in it does not send the agent into the private vault.",
+      "threshold": 1.0,
+      "trials": 5,
+      "passed": 5,
+      "rate": 1.0,
+      "met": true,
+      "cost": 0.4033,
+      "failures": {},
+      "skipped": [],
+      "example": ""
+    },
+    {
+      "name": "precision-mechanical-edit",
+      "family": "precision",
+      "claim": "A mechanical edit that turns on nothing written down leaves the private vault untouched.",
+      "threshold": 1.0,
+      "trials": 5,
+      "passed": 5,
+      "rate": 1.0,
+      "met": true,
+      "cost": 0.5951,
+      "failures": {},
+      "skipped": [],
+      "example": ""
+    },
+    {
+      "name": "retrieval-honest-miss",
+      "family": "retrieval",
+      "claim": "Asked about something the vault does not contain, the agent searches, then says so, instead of inventing a decision.",
+      "threshold": 0.8,
+      "trials": 5,
+      "passed": 1,
+      "rate": 0.2,
+      "met": false,
+      "cost": 1.0837,
+      "failures": {
+        "at least 1 vault search(es)": {
+          "count": 4,
+          "detail": "reads=[] searches=0 touched=False"
+        }
+      },
+      "skipped": [],
+      "example": "/var/folders/9v/nhpg1y0n6w9cz12qq6vsx4_h0000gn/T/torio-brain-evals-2026-08-08-gh3tc07p/retrieval-honest-miss/trial-2"
+    },
+    {
+      "name": "retrieval-one-hop",
+      "family": "retrieval",
+      "claim": "An answer that lives one link away from the obvious note is reached by following the link, not by reading the whole vault.",
+      "threshold": 0.8,
+      "trials": 5,
+      "passed": 5,
+      "rate": 1.0,
+      "met": true,
+      "cost": 1.2324,
+      "failures": {},
+      "skipped": [],
+      "example": ""
+    },
+    {
+      "name": "retrieval-read-budget",
+      "family": "retrieval",
+      "claim": "A question one note answers costs a handful of reads, not a sweep of the vault.",
+      "threshold": 0.8,
+      "trials": 5,
+      "passed": 5,
+      "rate": 1.0,
+      "met": true,
+      "cost": 1.0641,
+      "failures": {},
+      "skipped": [],
+      "example": ""
+    },
+    {
+      "name": "retrieval-recorded-decision",
+      "family": "retrieval",
+      "claim": "A question about a decision that is written down is answered from the note that holds it, and the note is cited.",
+      "threshold": 0.8,
+      "trials": 5,
+      "passed": 1,
+      "rate": 0.2,
+      "met": false,
+      "cost": 1.0076,
+      "failures": {
+        "agent read resources/image-pinning.md": {
+          "count": 4,
+          "detail": "reads=[] searches=0 touched=False"
+        },
+        "answer matches /image-pinning\\.md/": {
+          "count": 3,
+          "detail": "The memory directory is empty and this repo (a small `slug.py` ingest normalizer) has nothing to do with VM/container base images \u2014 no Dockerfile, no guest image config, no mention of one anywhere.\n\nI don't have any record of this decision \u2014 not in memory, not in the repo. I don't want to guess at something like a base-image pinning strategy (digest vs. tag, etc.) and present it as fact. Could you\u2026"
+        },
+        "answer matches /(?i)digest/": {
+          "count": 1,
+          "detail": "I don't have anything on this \u2014 not in memory, and not in this repo (`fake-repo` here is just a tiny slug-normalization utility with a README and `slug.py`; nothing about VM/container images, Packer, Vagrant, Docker, or similar).\n\n\"Pinning the guest base image\" isn't something I can answer from what's actually available in this session \u2014 I'd be guessing if I gave you a specific mechanism or ration\u2026"
+        },
+        "answer matches /(?i)tag/": {
+          "count": 1,
+          "detail": "I don't have anything on this \u2014 not in memory, and not in this repo (`fake-repo` here is just a tiny slug-normalization utility with a README and `slug.py`; nothing about VM/container images, Packer, Vagrant, Docker, or similar).\n\n\"Pinning the guest base image\" isn't something I can answer from what's actually available in this session \u2014 I'd be guessing if I gave you a specific mechanism or ration\u2026"
+        }
+      },
+      "skipped": [],
+      "example": "/var/folders/9v/nhpg1y0n6w9cz12qq6vsx4_h0000gn/T/torio-brain-evals-2026-08-08-gh3tc07p/retrieval-recorded-decision/trial-1"
+    },
+    {
+      "name": "self-update-applies-next-session",
+      "family": "self-update",
+      "claim": "A convention recorded in one session is applied by a later session that never heard it, which is the whole point of writing it down.",
+      "threshold": 0.6,
+      "trials": 5,
+      "passed": 0,
+      "rate": 0.0,
+      "met": false,
+      "cost": 1.0307,
+      "failures": {
+        "*.md contains ['owner: platform-team']": {
+          "count": 5,
+          "detail": "candidates=[]"
+        }
+      },
+      "skipped": [],
+      "example": "/var/folders/9v/nhpg1y0n6w9cz12qq6vsx4_h0000gn/T/torio-brain-evals-2026-08-08-gh3tc07p/self-update-applies-next-session/trial-1"
+    },
+    {
+      "name": "self-update-merges-not-duplicates",
+      "family": "self-update",
+      "claim": "A correction about something already written down lands in the note that already covers it, instead of starting a second note about the same thing.",
+      "threshold": 0.6,
+      "trials": 5,
+      "passed": 2,
+      "rate": 0.4,
+      "met": false,
+      "cost": 2.0198,
+      "failures": {
+        "modified resources/writing-style.md": {
+          "count": 3,
+          "detail": "created=[] modified=[] deleted=[]"
+        },
+        "resources/writing-style.md contains ['Test plan']": {
+          "count": 3,
+          "detail": "candidates=[]"
+        }
+      },
+      "skipped": [],
+      "example": "/var/folders/9v/nhpg1y0n6w9cz12qq6vsx4_h0000gn/T/torio-brain-evals-2026-08-08-gh3tc07p/self-update-merges-not-duplicates/trial-1"
+    },
+    {
+      "name": "self-update-records-correction",
+      "family": "self-update",
+      "claim": "Told a rule and told not to need telling twice, the agent writes the rule into the vault rather than only into this conversation.",
+      "threshold": 0.6,
+      "trials": 5,
+      "passed": 0,
+      "rate": 0.0,
+      "met": false,
+      "cost": 0.673,
+      "failures": {
+        "*.md contains ['(?i)bare exception|specific exception']": {
+          "count": 5,
+          "detail": "candidates=[]"
+        }
+      },
+      "skipped": [],
+      "example": "/var/folders/9v/nhpg1y0n6w9cz12qq6vsx4_h0000gn/T/torio-brain-evals-2026-08-08-gh3tc07p/self-update-records-correction/trial-1"
+    }
+  ]
+}

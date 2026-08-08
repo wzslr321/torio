@@ -44,6 +44,17 @@ Six skills the agent reaches for on its own, when what you are doing needs them.
 One subagent, `brain-librarian`, does the bulk work — a thirty-item inbox, every
 index, every link — somewhere other than the conversation you are working in.
 
+And one thing that is not a skill: at the start of every session, a map of your
+vault goes into the agent's context — the path, your root `index.md`, the
+directories and how many notes are in each. Never note contents.
+
+That map is the difference between an agent that *can* read your notes and one
+that knows they are there. Whether a given question turns on something you wrote
+down is a judgement worth leaving to a model; whether the vault exists is not.
+If you have no vault, or the path does not resolve, nothing is added and nothing
+is said — this runs in every session, including all the ones that have nothing
+to do with notes.
+
 ## The standard
 
 [`STANDARD.md`](STANDARD.md) is the normative part, and it is short. Eight note

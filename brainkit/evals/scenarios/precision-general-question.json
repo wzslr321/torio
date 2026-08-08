@@ -1,0 +1,24 @@
+{
+  "name": "precision-general-question",
+  "family": "precision",
+  "claim": "A general question with no personal content in it does not send the agent into the private vault.",
+  "fixture": "engineering",
+  "workspace": "fake-repo",
+  "threshold": 1.0,
+  "sessions": [
+    {
+      "prompt": "Explain what `git rebase --onto` does and when you would reach for it instead of a plain rebase. Just explain it; change nothing."
+    }
+  ],
+  "assert": {
+    "answer": {
+      "matches": ["(?i)rebase"]
+    },
+    "trace": {
+      "no_vault_access": true
+    },
+    "vault_diff": {
+      "unchanged": true
+    }
+  }
+}

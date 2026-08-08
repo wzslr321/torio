@@ -354,3 +354,30 @@ for a decade is in exactly this position on the day they point this kit at it,
 and a standard that rejects it on arrival is a standard nobody adopts. The
 conforming half and the older half sit side by side, and the boundary moves only
 where someone was editing anyway.
+
+## 9. What a rendering owes the agent
+
+A *rendering* is whatever installs this kit into a particular agent: a plugin, a
+guest image, a set of files copied into a configuration directory.
+
+A rendering SHOULD place a map of the vault in the agent's context at the start
+of a session, without being asked. The map carries the vault's path, its root
+`index.md`, the directories with their curated descriptions, and how many notes
+each holds. It MUST NOT carry note bodies.
+
+The reason is a division of labour. Everything else in this kit is a request to
+a model: whether a given prompt is the kind of prompt that should reach for the
+vault is a judgement, and a judgement is what a model is for. Whether the vault
+*exists* is not a judgement, and leaving it to be rediscovered by inference each
+session makes the most reliable part of the system the least reliable.
+
+A rendering that does this MUST stay silent when there is no vault, when the
+path does not resolve, or when the directory fails the `type: vault` test in §7.
+A rendering runs in every session, including all the ones that have nothing to
+do with a vault, and one that guesses in those sessions is worse than one that
+does nothing.
+
+The map is not retrieval and does not replace it. It is what makes retrieval
+targeted: an agent that knows a `resources/` directory exists and what it is for
+searches it, where an agent that knows nothing either reads everything or reads
+nothing.

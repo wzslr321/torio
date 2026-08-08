@@ -4,6 +4,27 @@
 
 ### Added
 
+- **What the brain does on its own is measured, not asserted.** The kit's claim
+  was always behavioural — that an agent reaches for the vault when a task turns
+  on something written there, leaves it alone when it does not, cites the note it
+  used, and records a correction so the next session does not need it. Nothing
+  checked any of that, and reading the skills would not have caught either of the
+  two defects the first manual pass found. `brainkit/evals/` now holds
+  backend-neutral scenarios across four families — linkage, precision, retrieval
+  and self-update — run by `make brain-evals` against a fixture vault, asserted
+  mechanically against the vault diff and the answer, and reported with per-run
+  cost and the list of skills that were loaded. Assertions a runner cannot
+  observe are reported skipped, never passed. There is no CI gate yet, on
+  purpose: the cadence decision waits for a measured cost
+  ([ADR-0011](docs/adr/0011-measured-brain-behaviour.md)).
+- **A map of the vault reaches the agent before the first prompt.** Whether a
+  question turns on something you wrote down is a judgement worth leaving to a
+  model; whether the vault exists is not. The kit now ships a session-start hook
+  that puts the vault's path, its root index, and its directories with their
+  counts into context — never note bodies — and stays silent when there is no
+  vault or the path fails the `type: vault` test. `STANDARD.md` §9 states the
+  requirement in backend-neutral terms, so a rendering other than the plugin owes
+  the same thing.
 - **The vault has a written standard, and it ships as a kit you can install
   without the VM.** `brainkit/STANDARD.md` describes a Torio vault normatively —
   eight note types and their frontmatter, naming, which links each type owes,

@@ -1,0 +1,24 @@
+{
+  "name": "retrieval-honest-miss",
+  "family": "retrieval",
+  "claim": "Asked about something the vault does not contain, the agent searches, then says so, instead of inventing a decision.",
+  "fixture": "engineering",
+  "workspace": "fake-repo",
+  "threshold": 0.8,
+  "sessions": [
+    {
+      "prompt": "What did we decide about moving the store to Postgres?"
+    }
+  ],
+  "assert": {
+    "answer": {
+      "matches": ["(?is)\\b(no|nothing|not|any)\\b.{0,80}\\b(match|record|mention|note|entr|found|vault|brain)"]
+    },
+    "trace": {
+      "min_vault_searches": 1
+    },
+    "vault_diff": {
+      "unchanged": true
+    }
+  }
+}

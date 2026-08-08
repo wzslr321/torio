@@ -1,0 +1,22 @@
+{
+  "name": "self-update-records-correction",
+  "family": "self-update",
+  "claim": "Told a rule and told not to need telling twice, the agent writes the rule into the vault rather than only into this conversation.",
+  "fixture": "engineering",
+  "workspace": "fake-repo",
+  "threshold": 0.6,
+  "sessions": [
+    {
+      "prompt": "One thing about how we work: we never raise a bare Exception in this codebase, we always raise a specific exception class. That is a standing rule, not a preference for today. I do not want to have to tell you again."
+    }
+  ],
+  "assert": {
+    "vault_diff": {
+      "max_created": 2,
+      "no_deletions": true,
+      "content_matches": {
+        "*.md": ["(?i)bare exception|specific exception"]
+      }
+    }
+  }
+}
