@@ -3,6 +3,7 @@ package lima
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/wzslr321/torio/internal/execx"
@@ -210,6 +211,128 @@ func TestStatusRejectsRecordWithEmptyStatus(t *testing.T) {
 	var lerr *Error
 	if !errors.As(err, &lerr) {
 		t.Fatalf("Status must fail closed on a record with empty status; got err=%v", err)
+	}
+	if lerr.Kind != KindMalformedOutput {
+		t.Fatalf("Kind = %v, want %v", lerr.Kind, KindMalformedOutput)
+	}
+}
+
+// TestListTorioInstancesReturnsOnlyTorioOwnedBoxes pins what a status poll is
+// allowed to claim is Torio's. Ownership is decided by name, so the default
+// instance and every derived one are in, and a neighbouring VM the operator
+// runs for something else is not — reporting it would say an agent is not
+// running on a box that never had one.
+func TestListTorioInstancesReturnsOnlyTorioOwnedBoxes(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{
+		{result: stdoutResult(strings.Join([]string{
+			fixtureInstanceJSON("torio-claude-code", "Running"),
+			fixtureInstanceJSON("some-other-vm", "Running"),
+			fixtureInstanceJSON("torio", "Stopped"),
+		}, "\n"))},
+	}}
+	a := New(fr)
+
+	got, err := a.ListTorioInstances(context.Background())
+	if err != nil {
+		t.Fatalf("ListTorioInstances: unexpected error: %v", err)
+	}
+	want := []InstanceInfo{
+		{Name: "torio", State: StateStopped, RawStatus: "Stopped"},
+		{Name: "torio-claude-code", State: StateRunning, RawStatus: "Running"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("instances = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("instances[%d] = %v, want %v", i, got[i], want[i])
+		}
+	}
+
+	args := fr.callArgs(0)
+	if !equalArgs(args, []string{"list", "--json", "--tty=false"}) {
+		t.Fatalf("argv = %v, want the host-side list command", args)
+	}
+}
+
+// TestListTorioInstancesIncludesAnExplicitlyNamedBox covers the gap the derived
+// prefix leaves: TORIO_INSTANCE names a box directly, and such a box carries no
+// name Torio could recognize. The caller passes the instance it resolved, and a
+// poll that skipped it would report nothing about the very box the operator is
+// working in.
+func TestListTorioInstancesIncludesAnExplicitlyNamedBox(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{
+		{result: stdoutResult(strings.Join([]string{
+			fixtureInstanceJSON("scratch-box", "Running"),
+			fixtureInstanceJSON("another-vm", "Running"),
+		}, "\n"))},
+	}}
+	a := New(fr)
+
+	got, err := a.ListTorioInstances(context.Background(), "scratch-box")
+	if err != nil {
+		t.Fatalf("ListTorioInstances: unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "scratch-box" {
+		t.Fatalf("instances = %v, want only the explicitly named box", got)
+	}
+}
+
+// TestListTorioInstancesSkipsAnInvalidName pins that a name from external tool
+// output is validated before it is returned. A name Torio could not have
+// created is not Torio's box, and it would otherwise reach a `limactl` argv and
+// a rendered line.
+func TestListTorioInstancesSkipsAnInvalidName(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{
+		{result: stdoutResult(strings.Join([]string{
+			fixtureInstanceJSON("torio-Bad_Name", "Running"),
+			fixtureInstanceJSON("torio", "Running"),
+		}, "\n"))},
+	}}
+	a := New(fr)
+
+	got, err := a.ListTorioInstances(context.Background())
+	if err != nil {
+		t.Fatalf("ListTorioInstances: unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "torio" {
+		t.Fatalf("instances = %v, want the invalid name skipped", got)
+	}
+}
+
+// TestListTorioInstancesFailsClosedOnUnrecognizedStatus mirrors Status: a status
+// string Torio does not recognize means its model of limactl is wrong, which is
+// not a fact about one box and must not be rendered as one.
+func TestListTorioInstancesFailsClosedOnUnrecognizedStatus(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{
+		{result: stdoutResult(fixtureInstanceJSON("torio", "Hibernating"))},
+	}}
+	a := New(fr)
+
+	_, err := a.ListTorioInstances(context.Background())
+	var lerr *Error
+	if !errors.As(err, &lerr) {
+		t.Fatalf("ListTorioInstances must fail closed on an unrecognized status; got err=%v", err)
+	}
+	if lerr.Kind != KindMalformedOutput {
+		t.Fatalf("Kind = %v, want %v", lerr.Kind, KindMalformedOutput)
+	}
+}
+
+func TestListTorioInstancesRejectsTruncatedListOutput(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{
+		{result: execx.Result{
+			ExitCode:        0,
+			Stdout:          []byte(fixtureInstanceJSON("torio", "Running")),
+			StdoutTruncated: true,
+		}},
+	}}
+	a := New(fr)
+
+	_, err := a.ListTorioInstances(context.Background())
+	var lerr *Error
+	if !errors.As(err, &lerr) {
+		t.Fatalf("ListTorioInstances must fail closed on truncated list output; got err=%v", err)
 	}
 	if lerr.Kind != KindMalformedOutput {
 		t.Fatalf("Kind = %v, want %v", lerr.Kind, KindMalformedOutput)

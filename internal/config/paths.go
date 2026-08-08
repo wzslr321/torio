@@ -46,6 +46,17 @@ var instancePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$
 // as one in `limactl list`, alongside whatever else the operator runs.
 const InstancePrefix = DefaultInstance + "-"
 
+// ValidInstanceName reports whether name is a well-formed instance name.
+//
+// It exists for the one caller that meets instance names it did not derive:
+// a status poll reads them out of `limactl list --json`, which is external
+// tool output. A name from there reaches a `limactl` argv element and a
+// rendered line, so it is held to the same slug rule as a name Torio derives
+// rather than trusted for having been printed by a neighbouring process.
+func ValidInstanceName(name string) bool {
+	return instancePattern.MatchString(name)
+}
+
 // InstanceForBackend returns the instance that runs the named backend.
 //
 // The mapping is derived rather than recorded because the alternative — a table

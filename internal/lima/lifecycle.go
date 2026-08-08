@@ -75,7 +75,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 // new session, and tearing the master down under a running `torio project shell`
 // would take the operator's own session with it.
 func (a *Adapter) refreshSession(ctx context.Context, op string) error {
-	prefix := guestShellArgs()
+	prefix := guestShellArgs(a.target())
 	args := append([]string{"shell", "--reconnect"}, prefix[1:]...)
 	res, err := a.runRaw(ctx, append(args, "true")...)
 	if err != nil {

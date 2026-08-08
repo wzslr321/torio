@@ -23,14 +23,15 @@ import (
 // working directory carries no meaning here; "/" is the one directory every
 // identity on the guest can enter.
 //
-// It is built at call time because cli.Run selects InstanceName during process
-// startup. Capturing InstanceName in a package-level slice would permanently
-// retain the default instance and route named-instance commands to the wrong VM.
-func guestShellArgs() []string {
-	return []string{"shell", "--tty=false", "--workdir", "/", InstanceName, "--"}
+// The instance is a parameter because two things choose it: cli.Run selects one
+// during process startup, and a status poll addresses others through
+// ForInstance. Capturing either in a package-level slice would permanently
+// retain the value it had at initialization and route commands to the wrong VM.
+func guestShellArgs(instance string) []string {
+	return []string{"shell", "--tty=false", "--workdir", "/", instance, "--"}
 }
 
-// SSH runs command inside InstanceName via `limactl shell`. Each element of
+// SSH runs command inside the adapter's target instance via `limactl shell`. Each element of
 // command is passed as a separate argv entry — never joined into a shell
 // string — and a literal "--" always precedes it so a command token that
 // looks like a flag (e.g. "--looks-like-a-flag") can never be reinterpreted
@@ -50,7 +51,7 @@ func (a *Adapter) SSH(ctx context.Context, command []string) (execx.Result, erro
 func (a *Adapter) SSHInput(ctx context.Context, stdin []byte, command []string) (execx.Result, error) {
 	const op = "ssh"
 
-	prefix := guestShellArgs()
+	prefix := guestShellArgs(a.target())
 	args := make([]string, 0, len(command)+len(prefix)+1)
 	args = append(args, prefix...)
 	args = append(args, command...)
