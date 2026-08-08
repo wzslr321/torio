@@ -1,7 +1,7 @@
 # ADR-0009: One backend per instance, declared by a contract; Claude Code is the second one
 
 - Status: Accepted
-- Date: 2026-08-07
+- Date: 2026-08-08
 - Applies to: `internal/backend`, `internal/lima`, `internal/serve`,
   `internal/projects`, `internal/brain`, `internal/config`, `internal/cli`
 
@@ -29,16 +29,76 @@ of two lies — a fabricated failure, or a check that passes without checking.
 ### One backend per instance
 
 An instance declares its backend once, at `vm init`, and the declaration lives
-in that instance's config document. Multi-backend means multiple Lima
-instances, which the `TORIO_INSTANCE` mechanism already supports; an existing
-box keeps running what it already runs, because a config that names no backend
-means Hermes.
+in that instance's config document. Multi-backend means multiple Lima instances;
+an existing box keeps running what it already runs, because a config that names
+no backend means Hermes.
 
 Rejected: a backend per project. Two agent identities would then share
 `torio-projects` and contend over the same checkouts, and every custody
 statement in ADR-0003 would have to be made twice, per project, for no daily
 value. The unit of isolation in this product is the VM; making it the project
 would weaken it without making anything easier.
+
+### The operator names the agent, not the box
+
+The rule above is about the guest. The first version of it leaked into the
+operator's hands: reaching a second backend meant knowing an instance name,
+exporting `TORIO_INSTANCE` on every command, and keeping a separate project
+registry per box. That made a daily task — try this repository under the other
+agent — into a setup. The isolation was the constraint; the operator paying for
+it was an accident of where the config happened to live.
+
+So `--backend NAME` is a global flag that names the agent an invocation is
+about, and the instance follows. The mapping is **derived**: the default backend
+keeps `torio`, every other is `torio-<backend>`. A recorded mapping — a table of
+instance names — would make the operator responsible for a fact Torio can
+compute, and would give two places to disagree about which box runs which agent.
+
+`TORIO_INSTANCE` keeps naming a box directly and wins over the flag. It is the
+only way to reach an instance whose name Torio did not derive, so a flag must
+not be able to redirect an invocation that already named its target. Given both,
+the flag and the instance's declaration must agree; an absent declaration is
+compared as the default backend rather than as "unset", or `--backend
+claude-code` against a legacy Hermes box would read as a match. On an instance
+with no document yet — the ordinary state before `vm init` — the flag is the
+declaration.
+
+### One registry, one checkout per backend
+
+The project registry moved out of the instance document into `projects.json` in
+the config root, shared by every instance under it. A project is something the
+operator attached, not something an instance owns, so switching which box a
+command talks to must not switch which projects exist. What an instance does own
+— the backend it was provisioned for, the settings a command against it runs
+under — stays in its own document, and a registry write no longer re-persists
+either.
+
+Checkouts are not shared and cannot be: each is owned by one backend's guest
+identity, under that backend's workspace root. A registered project therefore
+exists in zero or more guests, and `project add <id>` with no remote
+materializes it in one more, from the remote on record. It stays a separate step
+rather than something `project agent` does on demand, because cloning reaches a
+Git remote — the same reason nothing else in this product reaches the network
+behind an interactive command.
+
+Migration is a read, not a command. The **default** instance's legacy `projects`
+array is used until `projects.json` exists — whichever instance a command
+selects, because that is where the one registry lived — and it is left in place
+when the first write creates the shared document. Downgrading has to find its
+projects where it left them, and reversing this has to be removing one file.
+
+Rejected: two agent identities in one VM, with separate per-identity workspaces.
+It buys boot time and disk, and it does not weaken the boundary against the host
+— two unprivileged uids on one Linux box is ordinary isolation. What it costs is
+that every isolation proof has to be made pairwise, so `claude` not reaching
+`hermes`' credential, workspace and socket becomes a standing obligation rather
+than something the VM edge already answers. That is paying the clearest sentence
+this product has for gigabytes.
+
+Rejected: merging a non-default instance's legacy registry into the shared one.
+Those were separate registries per instance, which is the thing being abolished;
+choosing what a merge means is not a decision this layer can make safely. The
+entries stay in that document, to copy across or leave.
 
 ### The contract, and what "declared" means
 
@@ -203,12 +263,22 @@ because it shares none of that history.
   emitted, unchanged, on a Hermes instance.
 - `e2e/platform` gains a second, labelled journey. The Hermes journey is
   untouched and stays the default gate.
+- The host writes a second document, `projects.json`. It is the first persistent
+  host state besides `config.json` since ADR-0001, and it is held to the same
+  rules: contained join, mode-private, owned-by-EUID, opened no-follow, strict
+  decode, secret shapes refused, crash-safe write with a read-back.
+- `project show` and `project remove` carry `registry_declared`, as
+  `serve status` carries `service_declared`. When it is false they say nothing
+  about a registration: an object of all-falses reads as one that went missing,
+  which is a different statement from there being nowhere to register.
 - `AGENTS.md` invariants that named `hermes` now name "the agent identity", and
   the meta-invariant gains managed settings as its second worked example.
 
 ## Rejected alternatives
 
-Collected above, at the decisions they belong to: a backend per project; the
+Collected above, at the decisions they belong to: a backend per project; two
+agent identities inside one VM; a recorded table of instance names instead of a
+derived one; merging a non-default instance's legacy registry; the
 agent as the Lima login user; reusing the `hermes` identity for a second agent;
 the vendor installer as root and the npm install route; copying the host
 credential into the guest; a session-scoped push grant (deferred, not refused);
