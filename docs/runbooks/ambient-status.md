@@ -24,7 +24,7 @@ $ torio status >/dev/null && echo ok
 ok
 ```
 
-## The one line every recipe shares
+## The line, in plain text
 
 ```jq
 # ~/.config/torio/status.jq
@@ -54,17 +54,75 @@ have; use the zsh recipe below, not the tmux one.
 
 ## In tmux
 
+A status bar is glanced at, not read. The line above works there, but every box
+arrives in the same colour, so finding the one that wants you means reading all
+of them — which is the cost the bar existed to remove. tmux interprets its own
+style sequences in the output of `#()`, so let the state arrive as colour and
+shape and let the words be the confirmation:
+
+```jq
+# ~/.config/torio/tmux.jq
+def age($s):
+  if   $s < 60    then "\($s)s"
+  elif $s < 3600  then "\(($s / 60)    | floor)m"
+  elif $s < 86400 then "\(($s / 3600)  | floor)h"
+  else                 "\(($s / 86400) | floor)d" end;
+
+# Every box on this bar has "torio" in its name, so the derived half carries no
+# information; where the name is one Torio derived, the backend is the half
+# worth the width. A box named some other way keeps its own name.
+def shortname:
+  (.backend.name // "") as $b
+  | if $b != "" and (.instance == "torio" or .instance == "torio-" + $b)
+    then $b else .instance end;
+
+def chip:
+  shortname as $n
+  | if .waiting.state == "known" and .waiting.waiting then
+      "#[fg=#141927,bg=#f0b24a,bold] \($n) needs you \(age(.waiting.age_seconds // 0)) #[default]"
+    elif .box != "running" then
+      "#[fg=#4a5268]○ \($n) off#[default]"
+    elif .session.state == "known" and (.session.sessions | length) > 0 then
+      "#[fg=#5fd48a]●#[fg=#ccd3e8] \($n) \(.session.sessions | length)#[default]"
+    elif .session.state == "known" then
+      "#[fg=#4a5268]○ \($n)#[default]"
+    elif .session.state == "not-applicable" and .last_progress.state == "known" then
+      "#[fg=#8fb3ff]·#[fg=#8a93ad] \($n) \(age(.last_progress.age_seconds // 0))#[default]"
+    elif .session.state == "not-applicable" then
+      "#[fg=#4a5268]— \($n)#[default]"
+    else
+      "#[fg=#f0b24a]?#[fg=#8a93ad] \($n)#[default]"
+    end;
+
+[ .data.instances[] | chip ] | join("#[fg=#3a4159]  #[default]")
+```
+
 ```tmux
 # ~/.tmux.conf
 set -g status-interval 15
-set -g status-right-length 80
-set -g status-right "#(torio status --json | jq -rf ~/.config/torio/status.jq)"
+set -g status-right-length 120
+set -g status-right "#(torio status --json | jq -rf ~/.config/torio/tmux.jq)"
 ```
+
+Exactly one state is loud: a box that wants you inverts — dark text on amber,
+bold — so it is found without reading. Everything else recedes in proportion to
+how little it asks of you: a live agent gets a green dot and its count, a box
+that is merely working gets a muted middot and how long ago, a stopped or idle
+box is barely there, and only a genuine unknown gets amber back.
+
+The words stay because colour alone is not an answer. `needs you 7m` says how
+long it has been waiting; a bar that only turned orange would leave you guessing
+whether it just happened.
 
 `status-right-length` is not optional decoration: tmux truncates the right-hand
 status at forty characters by default, and two boxes already exceed that — the
 end of the line, which is where the second box's state is, disappears without
 saying so.
+
+Nothing an agent wrote reaches these sequences. Every value in the document is
+an instance name, a backend name, an enumerated kind or a number, which is a
+property of the schema rather than of this recipe — see
+[`../contracts/status.md`](../contracts/status.md).
 
 Fifteen seconds is a reasonable interval. The poll costs one host-side
 `limactl list` plus a handful of small guest commands per running box, and takes
