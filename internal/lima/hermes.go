@@ -136,6 +136,9 @@ func (b hermesBackend) reconcileInstall(ctx context.Context, r backend.StepRunne
 	if present.ExitCode == 0 {
 		return b.verifyGitPin(ctx, r, name)
 	}
+	if !r.Reconcile() {
+		return r.Fail(name, "no hermes launcher at "+hermesTarget, "run `torio vm bootstrap`, which installs the pinned agent")
+	}
 
 	if err := b.installDeps(ctx, r, name); err != nil {
 		return err
@@ -241,6 +244,9 @@ func (hermesBackend) reconcileShim(ctx context.Context, r backend.StepRunner) er
 		r.Record(name, true, "shim already correct")
 		return nil
 	}
+	if !r.Reconcile() {
+		return r.Fail(name, "the hermes shim does not point at "+hermesTarget, "run `torio vm bootstrap`, which repoints "+hermesShimPath)
+	}
 	ln, err := r.Probe(ctx, name, "sudo", "-n", "ln", "-sfn", hermesTarget, hermesShimPath)
 	if err != nil {
 		return err
@@ -275,13 +281,57 @@ func (hermesBackend) VerifyVersion(ctx context.Context, r backend.StepRunner) er
 	return nil
 }
 
-// VerifyGuardrails has nothing to check. Hermes' own behaviour is shaped by
-// files it owns and can rewrite — hooks, and the MCP server list in its
-// config.yaml. Those are checked where the custody boundary they belong to is
-// checked (`torio mcp status`), and they are drift detectors there, not
-// boundaries. Restating them here would suggest bootstrap enforces something it
-// does not.
-func (hermesBackend) VerifyGuardrails(context.Context, backend.StepRunner) error { return nil }
+// VerifyGuardrails reports the MCP servers this backend is configured with.
+//
+// It enforces nothing, and the file it reads is one the agent owns and can
+// rewrite — config.yaml is not on the Hermes write denylist, which is ADR-0004's
+// own premise for why the entries there are a default rather than a control. So
+// the verdict is recorded and bootstrap continues even when it is negative: the
+// command that treats a bypass as a failure is `torio mcp status`, where the
+// custody boundary is what is being verified.
+//
+// It is recorded here all the same, because this backend declares the check in
+// StatusChecks and `torio backend status` reads the bootstrap report. A check
+// that exists only in the broker report is a check that surface can never show,
+// and an operator would see silence where the answer is "none configured" and
+// the same silence where it is "three, and one of them bypasses the broker".
+func (hermesBackend) VerifyGuardrails(ctx context.Context, r backend.StepRunner) error {
+	const name = hermesMCPServersCheck
+
+	kind, err := r.Probe(ctx, name, "sudo", "-n", "stat", "-c", "%F", HermesConfigPath)
+	if err != nil {
+		return err
+	}
+	if kind.ExitCode != 0 {
+		// No configuration is no MCP server. A probe that failed for any other
+		// reason is not absence and must not be recorded as one.
+		absent, err := r.Probe(ctx, name, "sudo", "-n", "test", "!", "-e", HermesConfigPath)
+		if err != nil {
+			return err
+		}
+		if absent.ExitCode != 0 {
+			r.Record(name, false, "could not read the Hermes configuration")
+			return nil
+		}
+		r.Record(name, true, "no Hermes configuration")
+		return nil
+	}
+	if strings.TrimSpace(string(kind.Stdout)) != "regular file" {
+		r.Record(name, false, "the Hermes configuration is not a regular file")
+		return nil
+	}
+	doc, err := r.Probe(ctx, name, "sudo", "-n", "cat", HermesConfigPath)
+	if err != nil {
+		return err
+	}
+	if doc.ExitCode != 0 {
+		r.Record(name, false, "could not read the Hermes configuration")
+		return nil
+	}
+	finding := hermesMCPServersFinding(scanMCPServers(string(doc.Stdout)))
+	r.Record(name, finding.OK, finding.Detail)
+	return nil
+}
 
 // ProbeAuth has nothing to report. Hermes takes its provider credential
 // interactively, in its own profile, and Torio has never had a way to observe

@@ -600,6 +600,8 @@ func bootstrapHappyResp() []scriptedResp {
 		{res: out("root:root 755\n")},                             // stat operator shell helper og/mode
 		{res: out("regular file\n")},                              // stat project enter helper type
 		{res: out("root:root 755\n")},                             // stat project enter helper og/mode
+		{res: out("regular file\n")},                              // stat hermes config type
+		{res: out("model:\n  provider: custom\n")},                // cat hermes config (no mcp_servers)
 	}
 }
 
