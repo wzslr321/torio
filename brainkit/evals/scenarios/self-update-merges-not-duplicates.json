@@ -1,0 +1,23 @@
+{
+  "name": "self-update-merges-not-duplicates",
+  "family": "self-update",
+  "claim": "A correction about something already written down lands in the note that already covers it, instead of starting a second note about the same thing.",
+  "fixture": "engineering",
+  "workspace": "fake-repo",
+  "threshold": 0.6,
+  "sessions": [
+    {
+      "prompt": "From now on a pull request description also needs a `## Test plan` section, after Risk. Make sure that is written down the way the rest of our PR rules are, so nobody has to remember it."
+    }
+  ],
+  "assert": {
+    "vault_diff": {
+      "modified": ["resources/writing-style.md"],
+      "not_created": ["resources/*"],
+      "no_deletions": true,
+      "content_matches": {
+        "resources/writing-style.md": ["Test plan"]
+      }
+    }
+  }
+}

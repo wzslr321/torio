@@ -211,6 +211,11 @@ That gives you the vault, its format, and the rituals that keep it worth having
 against a directory of notes you already have: a note without frontmatter stays
 valid to read, so nothing is rewritten on arrival.
 
+How much of that is real rather than well written is measured, not claimed:
+[`brainkit/evals/`](brainkit/evals/README.md) hands an agent a fixture vault and
+checks what it actually did — including whether it leaves the vault alone when
+the task has nothing to do with it.
+
 What it does not give you is a boundary. Those are instructions to a model
 running on your workstation with your permissions, which is the gap the VM
 closes and the reason the rest of this README exists. Same standard, same vault
@@ -257,6 +262,9 @@ If one of these is yours, [`CONTRIBUTING.md`](CONTRIBUTING.md) has the how and
   first run, every command in order.
 - [`brainkit/STANDARD.md`](brainkit/STANDARD.md): what a Torio vault is — the
   note types, the naming, the links, and what an agent may do to it.
+- [`brainkit/evals/`](brainkit/evals/README.md): the behavioural benchmark that
+  measures whether an agent holding the kit actually behaves that way, and the
+  reports it has produced.
 - [`docs/adr/`](docs/adr/README.md): the accepted decisions. Why the VM is the
   trust boundary, why write capability is operator-carried, why the egress
   allowlist was rejected.

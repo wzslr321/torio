@@ -1,0 +1,26 @@
+{
+  "name": "linkage-pr-description",
+  "family": "linkage",
+  "claim": "Asked for a PR description with no mention of notes, the agent finds the recorded house style and writes to it.",
+  "fixture": "engineering",
+  "workspace": "fake-repo",
+  "git": true,
+  "threshold": 0.8,
+  "sessions": [
+    {
+      "prompt": "Write the pull request description for the change I have in the working tree here."
+    }
+  ],
+  "assert": {
+    "answer": {
+      "matches": ["(?m)^#+\\s*What\\b", "(?m)^#+\\s*Why\\b", "(?m)^#+\\s*Risk\\b"]
+    },
+    "trace": {
+      "vault_reads_include": ["resources/writing-style.md"],
+      "max_vault_reads": 8
+    },
+    "vault_diff": {
+      "unchanged": true
+    }
+  }
+}

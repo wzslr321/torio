@@ -1,4 +1,4 @@
-.PHONY: validate nvim-smoke e2e platform-e2e fmt fmt-check vet docs docs-check package-release
+.PHONY: validate nvim-smoke e2e platform-e2e brain-evals fmt fmt-check vet docs docs-check package-release
 
 docs:
 	python3 scripts/build_docs.py
@@ -52,6 +52,20 @@ platform-e2e:
 		./platform -ginkgo.v \
 		-ginkgo.label-filter="$$PLATFORM_E2E_LABEL_FILTER" \
 		-ginkgo.junit-report="$(abspath $(PLATFORM_E2E_ARTIFACT_DIR))/ginkgo-junit.xml"
+
+# The Brain Kit behavioural benchmark: hand a real agent a fixture vault and
+# check what it actually did. It drives a real model, so it costs real money and
+# is never part of `validate` or CI — ADR-0011 records why the cadence decision
+# waits for a measured cost rather than an intuition.
+#
+# TRIALS scales the sample; SCENARIO or ARGS="--family …" narrows it.
+# `--dry-run` validates the scenarios and spends nothing.
+TRIALS ?= 5
+MODEL ?= sonnet
+
+brain-evals:
+	python3 scripts/brain_evals.py --trials $(TRIALS) --model $(MODEL) \
+		$(if $(SCENARIO),--scenario $(SCENARIO),) $(ARGS)
 
 # Build + package a release tarball per supported host into dist/.
 # Usage: make package-release VERSION=1.0.0

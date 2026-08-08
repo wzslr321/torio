@@ -1,0 +1,25 @@
+{
+  "name": "retrieval-recorded-decision",
+  "family": "retrieval",
+  "claim": "A question about a decision that is written down is answered from the note that holds it, and the note is cited.",
+  "fixture": "engineering",
+  "workspace": "fake-repo",
+  "threshold": 0.8,
+  "sessions": [
+    {
+      "prompt": "How do we pin the guest base image, and why that way rather than the obvious alternative?"
+    }
+  ],
+  "assert": {
+    "answer": {
+      "matches": ["(?i)digest", "(?i)tag", "image-pinning\\.md"]
+    },
+    "trace": {
+      "vault_reads_include": ["resources/image-pinning.md"],
+      "max_vault_reads": 8
+    },
+    "vault_diff": {
+      "unchanged": true
+    }
+  }
+}

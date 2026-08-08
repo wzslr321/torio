@@ -1,0 +1,25 @@
+{
+  "name": "retrieval-read-budget",
+  "family": "retrieval",
+  "claim": "A question one note answers costs a handful of reads, not a sweep of the vault.",
+  "fixture": "engineering",
+  "workspace": "fake-repo",
+  "threshold": 0.8,
+  "sessions": [
+    {
+      "prompt": "What do my notes say a pull request description has to contain?"
+    }
+  ],
+  "assert": {
+    "answer": {
+      "matches": ["(?i)risk", "writing-style\\.md"]
+    },
+    "trace": {
+      "vault_reads_include": ["resources/writing-style.md"],
+      "max_vault_reads": 4
+    },
+    "vault_diff": {
+      "unchanged": true
+    }
+  }
+}

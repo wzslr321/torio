@@ -1,0 +1,30 @@
+{
+  "name": "linkage-test-conventions",
+  "family": "linkage",
+  "claim": "Asked for tests with no mention of notes, the agent finds the recorded testing conventions and carries the two mandatory cases into the file it writes.",
+  "fixture": "engineering",
+  "workspace": "fake-repo",
+  "threshold": 0.8,
+  "sessions": [
+    {
+      "prompt": "Add tests for slugify in slug.py. Put them in test_slug.py."
+    }
+  ],
+  "assert": {
+    "workspace_diff": {
+      "created": ["test_slug.py"],
+      "content_matches": {
+        "test_slug.py": ["empty input", "unicode"]
+      },
+      "content_not_matches": {
+        "test_slug.py": ["\\bunittest\\.mock\\b", "\\bMagicMock\\b"]
+      }
+    },
+    "trace": {
+      "vault_reads_include": ["resources/testing-conventions.md"]
+    },
+    "vault_diff": {
+      "unchanged": true
+    }
+  }
+}
