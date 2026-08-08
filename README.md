@@ -148,11 +148,12 @@ stdout; flags, exit codes and each command's contract are in the
 
 ## Which agent runs inside
 
-An instance runs one agent backend, chosen when the VM is created and recorded
-in that instance's config. A second backend means a second instance
-(`TORIO_INSTANCE`), never a second agent inside one VM: two agent identities
-sharing one workspace would contend over the same checkouts and make every
-custody statement ambiguous.
+One VM runs one agent identity, and a second backend means a second VM — never
+a second agent inside one, because two identities sharing a workspace would
+contend over the same checkouts and make every custody statement ambiguous.
+
+You do not track which VM that is. `--backend` names the agent and Torio finds
+its box: the default one is `torio`, the rest are `torio-<backend>`.
 
 | | `hermes` (default) | `claude-code` |
 | --- | --- | --- |
@@ -162,14 +163,23 @@ custody statement ambiguous.
 | Pinned by | an upstream commit | a version, checksum-verified |
 
 ```bash
-TORIO_INSTANCE=claudebox torio vm init --backend claude-code
-TORIO_INSTANCE=claudebox torio vm start
-TORIO_INSTANCE=claudebox torio vm bootstrap --timeout 10m
-TORIO_INSTANCE=claudebox torio backend login          # the box gets its own grant
-TORIO_INSTANCE=claudebox torio project add demo https://github.com/you/demo
-TORIO_INSTANCE=claudebox torio project agent demo     # the agent works here
-TORIO_INSTANCE=claudebox torio project shell demo     # you review, and push
+torio vm init --backend claude-code
+torio vm start --backend claude-code
+torio vm bootstrap --backend claude-code --timeout 10m
+torio backend login --backend claude-code       # the box gets its own grant
+torio project add demo --backend claude-code    # already attached elsewhere? clone it here
+torio project agent demo --backend claude-code  # the agent works here
+torio project shell demo --backend claude-code  # you review, and push
 ```
+
+The project registry is shared, so `demo` is attached once and `project list`
+says the same thing whichever backend you select. The checkouts are not shared
+and cannot be — each is owned by one guest identity — so `project add <id>`
+with no remote is the step that gives a backend its own working tree, from the
+remote already on record. What passes between the two trees is what you push.
+
+`TORIO_INSTANCE` still names a box directly, for a test VM or a second box
+running the same backend.
 
 Inside the box the agent runs without permission prompts, and that is the
 inversion worth understanding. A prompt is a control inside the agent's own

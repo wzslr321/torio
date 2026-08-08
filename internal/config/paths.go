@@ -15,6 +15,10 @@ const (
 	appDir = "torio"
 	// configFileName is the default config document within the config dir.
 	configFileName = "config.json"
+	// registryFileName is the project registry document. It sits in the config
+	// root rather than in an instance's directory, because the registry is
+	// shared by every instance under that root.
+	registryFileName = "projects.json"
 	// instancesDir groups the config of every non-default instance. It sits
 	// inside the trusted config dir, so ADR-0001's path rules cover it without
 	// a second boundary to reason about.
@@ -37,16 +41,57 @@ const (
 // traverse a path or be read as a flag.
 var instancePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`)
 
+// InstancePrefix is what a derived instance name starts with. It is
+// DefaultInstance plus a separator so every box Torio derives is recognizable
+// as one in `limactl list`, alongside whatever else the operator runs.
+const InstancePrefix = DefaultInstance + "-"
+
+// InstanceForBackend returns the instance that runs the named backend.
+//
+// The mapping is derived rather than recorded because the alternative — a table
+// of instance names the operator maintains — makes the operator responsible for
+// a fact Torio can compute, and gives two places to disagree about which box
+// runs which agent. The default backend keeps DefaultInstance so an existing
+// box, created before any of this, is still the one an unflagged command talks
+// to.
+//
+// The caller resolves the backend name; this function only shapes it. An empty
+// name means the default backend, for the same reason an absent `backend` field
+// in a config document does.
+func InstanceForBackend(name string, defaultBackend string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || name == defaultBackend {
+		return DefaultInstance, nil
+	}
+	derived := InstancePrefix + name
+	if !instancePattern.MatchString(derived) {
+		return "", fmt.Errorf("backend %q does not derive a valid instance name", name)
+	}
+	return derived, nil
+}
+
 // ResolveInstance returns the managed instance name for this invocation.
 //
-// Unset gives DefaultInstance, which is the pre-ADR-0001 behaviour exactly. A
-// set-but-malformed value is an error rather than a silent fall back to the
+// The environment wins over everything. TORIO_INSTANCE names a box directly and
+// is the only way to reach one whose name Torio did not derive — a test VM, a
+// second box running the same backend — so a flag must not be able to redirect
+// an invocation that already named its target. When it is unset, an explicit
+// Instance (which the CLI derives from --backend) is used, and with neither the
+// answer is DefaultInstance, which is the pre-ADR-0001 behaviour exactly.
+//
+// A set-but-malformed value is an error rather than a silent fall back to the
 // default: falling back would send a command meant for a test VM to the
 // operator's daily one, which is the failure this whole mechanism exists to
 // prevent. The error states the rule and never echoes the value.
 func ResolveInstance(opts Options) (string, error) {
 	raw := strings.TrimSpace(opts.getenv(InstanceEnvKey))
 	if raw == "" {
+		if derived := strings.TrimSpace(opts.Instance); derived != "" {
+			if !instancePattern.MatchString(derived) {
+				return "", errors.New("derived instance name is not a valid instance name")
+			}
+			return derived, nil
+		}
 		return DefaultInstance, nil
 	}
 	if !instancePattern.MatchString(raw) {
@@ -68,6 +113,13 @@ var errNoHome = errors.New("config: cannot determine home directory and XDG base
 type Options struct {
 	// ConfigPath is the explicit --config value ("" if not given).
 	ConfigPath string
+	// Instance is the instance this invocation derived for itself, empty when
+	// it derived none. It is consulted only when TORIO_INSTANCE is unset (see
+	// ResolveInstance), and every construction of Options within one invocation
+	// must carry the same value — the registry resolves its own paths, and one
+	// that disagreed about the instance would read a different document than
+	// the command it serves.
+	Instance string
 	// Getenv reads environment variables. If nil, os.Getenv is used.
 	Getenv func(string) string
 	// HomeDir returns the user home directory. If nil, os.UserHomeDir is used.
@@ -101,10 +153,25 @@ type Paths struct {
 	Instance string
 	// ConfigDir is the trusted directory holding the config document.
 	ConfigDir string
+	// RegistryFile is the project registry document, which is shared by every
+	// instance under the same config root. It is deliberately not inside
+	// ConfigDir: a project is something the operator attached, not something an
+	// instance owns, so switching which box a command talks to must not switch
+	// which projects exist (ADR-0009 revisited).
+	//
+	// It may not exist. A registry that has never been written is read from
+	// RootConfigFile's legacy `projects` array instead (see ResolveRegistry).
+	RegistryFile string
 	// ConfigFile is the resolved config document path. It defaults to
 	// ConfigDir/config.json but is the canonical explicit path when --config
 	// was given. It may not exist (absent default config is a valid first run).
 	ConfigFile string
+	// RootConfigFile is the default instance's config document — the same as
+	// ConfigFile whenever that instance is the one selected. It is resolved
+	// because it is where the registry lived before it was shared, and an
+	// installation that has not migrated yet keeps its projects there whichever
+	// instance a command selects.
+	RootConfigFile string
 	// explicitConfig records whether ConfigFile came from --config. An explicit
 	// path that does not exist is an error; an absent default is a valid first
 	// run (see Load).
@@ -143,17 +210,36 @@ func ResolvePaths(opts Options) (Paths, error) {
 		}
 		p.ConfigFile = abs
 		p.ConfigDir = filepath.Dir(abs)
+		p.RootConfigFile = abs
 		p.explicitConfig = true
+		rf, err := containedJoin(p.ConfigDir, registryFileName)
+		if err != nil {
+			return Paths{}, err
+		}
+		p.RegistryFile = rf
 	} else {
 		configHome, err := opts.xdgBase("XDG_CONFIG_HOME", ".config")
 		if err != nil {
 			return Paths{}, err
 		}
 		p.ConfigDir = filepath.Join(configHome, appDir)
-		// A named instance gets its own registry. Sharing one would let
-		// `project list` show the daily projects while talking to a test VM,
-		// and `project add` write a test project into the real registry — so
-		// the separation is derived, never something to remember (ADR-0001).
+		// The registry is resolved from the root, before the instance can move
+		// ConfigDir underneath it. Every instance under this root reads and
+		// writes the same document.
+		rf, err := containedJoin(p.ConfigDir, registryFileName)
+		if err != nil {
+			return Paths{}, err
+		}
+		p.RegistryFile = rf
+		root, err := containedJoin(p.ConfigDir, configFileName)
+		if err != nil {
+			return Paths{}, err
+		}
+		p.RootConfigFile = root
+		// A named instance gets its own document. What it holds is what the
+		// instance owns and nothing else: which backend the box was
+		// provisioned for, and the settings a command against it runs under.
+		// The separation is derived, never something to remember (ADR-0001).
 		if instance != DefaultInstance {
 			// One contained segment at a time: containedJoin validates a single
 			// file name, which is exactly the guarantee wanted here — the

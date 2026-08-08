@@ -77,11 +77,12 @@ reassigned: recycling a code would silently change the meaning of an existing 4.
 ```text
 --json                 machine output
 --config PATH          explicit non-secret config
+--backend NAME         the agent this invocation is about; selects its instance
 --timeout DURATION     bounded operation; cannot exceed the policy maximum
 --verbose              more redacted diagnostics on stderr
 ```
 
-That is the full list. All four are real persistent flags, accepted before and
+That is the full list. All five are real persistent flags, accepted before and
 after a subcommand; an unknown flag is rejected (usage, exit 2), never silently
 accepted. `--config` resolves to the typed configuration (see
 [`config.md`](config.md)) used by the command — it is not merely parsed. A
@@ -91,6 +92,48 @@ There is no global `--force`. A command may have a narrow, documented recovery
 flag, but none may bypass verification or the credential boundary: `vm init` does
 not recreate a non-matching instance, `brain import` does not overwrite existing
 data, and `project remove` does not delete a checkout.
+
+### `--backend` and the instance it selects
+
+One instance runs one agent identity, and that has not changed. What `--backend`
+changes is who has to remember which box that is: the operator names the agent,
+and the instance follows.
+
+The mapping is derived, not recorded. The default backend is `torio`, so a box
+created before this flag existed is still the one an unflagged command talks to;
+every other backend is `torio-<backend>`. There is no table of instance names to
+maintain and so no second place that can disagree about which box runs which
+agent.
+
+`TORIO_INSTANCE` still names a box directly and **wins over the flag**. It is the
+only way to reach an instance whose name Torio did not derive — a test VM, or a
+second box running the same backend — so a flag must not be able to redirect an
+invocation that already named its target. Given both, the instance's declared
+backend and the flag must agree; they cannot on a derived instance, and a
+disagreement on a named one is a usage error (`BACKEND_MISMATCH`, exit 2) rather
+than a guest built for one identity being driven as another. An instance with no
+config document yet declares nothing, which is the ordinary state before
+`vm init` — there the flag is the declaration.
+
+### The project registry is shared, the checkouts are not
+
+The registry lives at `projects.json` in the config root and is read by every
+instance under it. A project is something the operator attached, not something an
+instance owns, so switching which box a command talks to does not switch which
+projects exist. Everything an instance does own — the backend it was provisioned
+for, the settings a command against it runs under — stays in that instance's own
+`config.json`.
+
+Checkouts do not follow, and cannot: each is owned by one backend's guest
+identity, under that backend's workspace root. So a registered project exists in
+zero or more guests, and `project add <id> --backend NAME` materializes it in one
+more, using the remote already on record. That is a separate step rather than
+something `project agent` does on demand, because cloning reaches a Git remote.
+
+An installation that predates the shared registry keeps its projects in the
+instance document's `projects` array; that array is read until `projects.json`
+exists and is **not deleted** when it does. Reversing the migration is removing
+one file.
 
 ### `--help` and `--json`
 
@@ -129,14 +172,15 @@ torio vm ssh -- COMMAND...
   `qemu`/`x86_64` on Linux; see ADR-0002). A
   non-matching instance is **fail-closed** (exit 6): there is no `--force`, and
   Torio never recreates, resets or deletes an existing VM.
-- `--backend NAME` declares which agent backend this instance runs, and is
-  recorded in the instance's config before the VM is created. It defaults to
+- The global `--backend NAME` both selects the instance and, on `init`, is
+  recorded in that instance's config before the VM is created. It defaults to
   `hermes`, which is also what an instance that declares nothing runs. A rerun
   without the flag keeps the declaration; a rerun naming a *different* backend
   is a usage error (`BACKEND_MISMATCH`, exit 2), because the guest is
   provisioned for one agent identity and re-declaring it would leave a guest
-  built for one being driven as another. A second backend means a second
-  instance (`TORIO_INSTANCE`)
+  built for one being driven as another. `torio vm init --backend NAME` is
+  therefore how a second backend gets its box: it builds one rather than
+  converting the one you have
   ([ADR-0009](../adr/0009-backend-contract-and-claude-code.md)).
 - `--cpus`/`--memory`/`--disk` size the VM at **creation**; defaults are 4 vCPU,
   `8GiB` and `60GiB`. These are the only operator values substituted into the
@@ -293,7 +337,7 @@ Torio does not claim that this is a backup and verifies nothing about it.
 ### Projects
 
 ```text
-torio project add <name> <remote> [--id SLUG] [--use]
+torio project add <name> [remote] [--id SLUG] [--use]
 torio project list
 torio project show <id>
 torio project use <id>
@@ -312,18 +356,28 @@ torio project shell <id>
 - **The project registry is a declared capability**, exactly as the guest service
   is. A backend that keeps none — a project is a directory it is started in —
   clones, verifies and records the checkout as usual, and reports that there was
-  nowhere to register it. `show` raises no registration issue, because a
-  registration that could never exist is not a missing one; `use` fails closed
-  with `NO_REGISTRY` (exit 3) naming the backend, since there is no active
-  project to select ([ADR-0009](../adr/0009-backend-contract-and-claude-code.md)).
+  nowhere to register it. `show` and `remove` carry `registry_declared` first,
+  as `serve status` carries `service_declared`, and when it is false they say
+  nothing about a registration: `show` omits the `hermes` object rather than
+  emitting one of all-falses, which reads as a registration that went missing,
+  and `remove` does not report an archival it did not perform. `use` fails
+  closed with `NO_REGISTRY` (exit 3) naming the backend, since there is no
+  active project to select
+  ([ADR-0009](../adr/0009-backend-contract-and-claude-code.md)).
 - **Torio stores no Git credentials.** A remote the guest cannot already read
   non-interactively is fail-closed (exit 7) — the remedy is a human granting
   access outside Torio, not a retry.
 - `add` clones exactly the given remote into the derived path **or** verifies and
-  adopts a checkout already there, gives the operator and `hermes` shared access,
-  and registers the project with Hermes before writing to the config. Nothing on
-  the guest is reset, cleaned or deleted, so a rerun after an error finishes the
-  work. `--use` makes the project active on success.
+  adopts a checkout already there, gives the operator and the backend identity
+  shared access, and registers the project where the backend keeps a registry
+  before writing to the config. Nothing on the guest is reset, cleaned or
+  deleted, so a rerun after an error finishes the work. `--use` makes the
+  project active on success.
+- `add <id>` with **no remote** materializes an already registered project in
+  the selected backend's guest, from the remote on record. The remote is read
+  rather than retyped: a typo would put a different repository behind an
+  identifier that already means something. An unregistered id has nothing to
+  complete from and is a usage error (exit 2).
 - Whether a Hermes project already holds the slug is decided from command
   **output**, never from an exit code: `hermes project show` has exited both 0
   and non-zero for a project that does not exist, depending on its version. When

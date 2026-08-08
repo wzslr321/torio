@@ -11,8 +11,16 @@ error.
 | `torio backend login` | Open an interactive terminal on the guest as the backend identity and start the backend so its own login flow runs. Interactive, so `--json` is a usage error. |
 
 Which backend an instance runs is fixed at `torio vm init --backend NAME` and
-recorded in that instance's config. A second backend means a second instance
-(`TORIO_INSTANCE`), never a second agent inside one VM.
+recorded in that instance's config. A second backend means a second instance,
+never a second agent inside one VM.
+
+You do not track which instance that is. `--backend NAME` is a global flag: it
+names the agent an invocation is about and selects the box that runs it — the
+default backend keeps `torio`, the rest are `torio-<backend>`. `TORIO_INSTANCE`
+still names a box directly, for a test VM or a second box running the same
+backend, and wins over the flag; given both, a disagreement between the flag and
+what the instance declares is a usage error rather than a guest built for one
+identity being driven as another.
 
 `login` grants the *box* a credential, not you. It is issued to the guest
 identity and can be revoked without touching your own, and Torio never copies a

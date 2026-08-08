@@ -77,7 +77,6 @@ func newVMInitCmd(a *app) *cobra.Command {
 	var cpus int
 	var memory string
 	var disk string
-	var backendName string
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create or verify the Torio VM from the trusted template",
@@ -86,11 +85,13 @@ func newVMInitCmd(a *app) *cobra.Command {
 			"(image digest, empty mounts, no persistent SSH agent forwarding). " +
 			"Incompatible existing instances fail closed — there is no --force and Torio " +
 			"never recreates or deletes them.\n\n" +
-			"An instance runs one agent backend, chosen here and recorded in this " +
-			"instance's config. Running a second backend means a second instance " +
-			"(TORIO_INSTANCE), never a second agent inside one VM: two agent " +
-			"identities sharing one workspace would contend over the same checkouts " +
-			"and make every custody statement ambiguous.\n\n" +
+			"An instance runs one agent backend, chosen by the global --backend flag " +
+			"and recorded in this instance's config. That flag also selects which box " +
+			"this is, so `vm init --backend NAME` builds the box for that agent rather " +
+			"than converting the one you have: a second backend is a second VM, never a " +
+			"second agent inside one, because two identities sharing a workspace would " +
+			"contend over the same checkouts and make every custody statement " +
+			"ambiguous.\n\n" +
 			"Defaults: 4 CPUs, 8GiB memory, 60GiB disk. Next step after success: torio vm start.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -109,7 +110,7 @@ func newVMInitCmd(a *app) *cobra.Command {
 			// creation-time fact about the instance: the guest is provisioned
 			// for one identity, so a box that came up for one backend cannot be
 			// re-declared as another by editing a document afterwards.
-			if err := a.declareBackend(backendName); err != nil {
+			if err := a.declareBackend(a.backendName); err != nil {
 				return err
 			}
 			res, err := a.newLima().Init(ctx, lima.InitOptions{
@@ -128,7 +129,6 @@ func newVMInitCmd(a *app) *cobra.Command {
 	cmd.Flags().IntVar(&cpus, "cpus", 0, "vCPU count (default 4)")
 	cmd.Flags().StringVar(&memory, "memory", "", "memory size, e.g. 8GiB (default 8GiB)")
 	cmd.Flags().StringVar(&disk, "disk", "", "disk size, e.g. 60GiB (default 60GiB)")
-	cmd.Flags().StringVar(&backendName, "backend", "", "agent backend for this instance (default hermes); fixed at creation")
 	return cmd
 }
 
@@ -140,6 +140,11 @@ func newVMInitCmd(a *app) *cobra.Command {
 // declares is a usage error: switching the agent a provisioned guest runs is
 // not an edit, it is a new instance, and silently accepting the flag would
 // leave a guest built for one identity being driven as another.
+//
+// The pre-run rejects that pair before any command runs, so nothing should
+// reach the branch below. It stays because this is the function that writes the
+// declaration, and a write path may not depend on a check made somewhere else
+// to know what it is allowed to persist.
 func (a *app) declareBackend(name string) error {
 	if name == "" {
 		return nil
@@ -157,8 +162,8 @@ func (a *app) declareBackend(name string) error {
 			Exit:    ExitUsage,
 			Code:    "BACKEND_MISMATCH",
 			Command: "vm.init",
-			Message: fmt.Sprintf("instance %q already declares backend %q; --backend %q would re-point a provisioned guest. Use a separate instance (TORIO_INSTANCE) for a different backend.",
-				lima.InstanceName, current, name),
+			Message: fmt.Sprintf("instance %q already declares backend %q; --backend %q would re-point a provisioned guest. Each backend gets its own instance, so `torio vm init --backend %s` builds one rather than converting this one.",
+				lima.InstanceName, current, name, name),
 		}
 	}
 	if current == name {

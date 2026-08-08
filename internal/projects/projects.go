@@ -326,23 +326,39 @@ type FileRegistry struct {
 	Options config.Options
 }
 
-// Load reads the config document. A first run with no document on disk is not
-// an error: it yields an empty registry the first mutation will persist.
+// Load reads the instance document and overlays the resolved project registry
+// on it. A first run with neither on disk is not an error: it yields an empty
+// registry the first mutation will persist.
+//
+// The overlay is where the migration lives, and config.ResolveRegistry owns
+// which document currently holds the projects. What matters here is that the
+// registry never comes from the instance document this call just loaded: that
+// document is the instance's own — its backend, its settings — and reading a
+// registry out of it is what made switching instances switch projects.
 func (r FileRegistry) Load() (config.File, error) {
 	rt, err := config.Load(r.Options)
 	if err != nil {
 		return config.File{}, err
 	}
+	projects, err := config.ResolveRegistry(rt.Paths)
+	if err != nil {
+		return config.File{}, err
+	}
+	rt.File.Projects = projects
 	return rt.File, nil
 }
 
-// Save persists f to the resolved config path.
+// Save persists the registry to the shared document.
+//
+// Only the projects are written. The rest of f is the instance's own document,
+// which this path has no business rewriting: a project addition must not be
+// what re-persists a backend declaration or a timeout.
 func (r FileRegistry) Save(f config.File) error {
 	paths, err := config.ResolvePaths(r.Options)
 	if err != nil {
 		return err
 	}
-	return config.WriteFile(paths.ConfigFile, f)
+	return config.WriteRegistry(paths.RegistryFile, f.Projects)
 }
 
 var _ Registry = FileRegistry{}

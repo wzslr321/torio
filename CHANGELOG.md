@@ -26,11 +26,41 @@
 - `torio backend status` and `torio backend login`: what this instance runs and
   what it declares, and the terminal where an operator grants the box a
   credential of its own. Torio stores, forwards and reads none of it.
-- `torio vm init --backend NAME` declares which agent an instance runs, fixed at
-  creation. A second backend means a second instance (`TORIO_INSTANCE`).
+- **`--backend NAME`, a global flag: name the agent, and Torio finds its box.**
+  One instance still runs one agent identity — that is what makes every custody
+  statement provable — but the operator no longer carries the bookkeeping. The
+  instance is *derived* from the backend (`torio` for the default one,
+  `torio-<backend>` for the rest), so there is no table of names to maintain and
+  no second place that can disagree about which box runs which agent.
+  `TORIO_INSTANCE` still names a box directly and wins over the flag; given
+  both, a disagreement between the flag and what the instance declares is a
+  usage error rather than a guest built for one identity being driven as
+  another. `torio vm init --backend NAME` is how a second backend gets its box.
+- **One project registry, shared by every instance.** It moved out of the
+  instance document into `projects.json` in the config root. A project is
+  something the operator attached, not something an instance owns, so switching
+  which box a command talks to no longer switches which projects exist —
+  `project list` says the same thing whichever backend is selected, and the
+  workspace path it reports moves with the backend that owns the checkout.
+  Migration is a read, not a command: the legacy `projects` array is used until
+  `projects.json` exists, and is **left in place** when it does, so reversing
+  this is removing one file.
+- `torio project add <id>` with no remote materializes an already registered
+  project in the selected backend's guest, from the remote on record. Checkouts
+  cannot be shared — each is owned by one backend's guest identity — so this is
+  the explicit step that gives a second backend its own working tree. It stays a
+  separate command rather than something `project agent` does on demand, because
+  cloning reaches a Git remote.
 
 ### Changed
 
+- `project show` and `project remove` finish what the declared-absent registry
+  started. `show` printed `hermes: absent` and an object of all-falses on a
+  Claude Code box — naming a backend that is not running there and reporting its
+  registration as gone; `remove` claimed it had archived a Hermes project when
+  there was none to archive. Both now carry `registry_declared`, as `serve
+  status` carries `service_declared`, and say nothing about a registration when
+  it is false. A Hermes instance's envelope is unchanged.
 - Config schema `"3"` carries the backend. `"2"` is still read: it predates the
   field, names no backend, and an instance that names none is running Hermes —
   which is what every existing box already is. An older binary refuses a `"3"`

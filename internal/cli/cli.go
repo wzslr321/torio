@@ -33,11 +33,18 @@ type app struct {
 	build  BuildInfo
 
 	// Populated from persistent flags / pre-run.
-	jsonOut    bool
-	verbose    bool
-	timeout    time.Duration
-	configPath string
-	logger     *slog.Logger
+	jsonOut     bool
+	verbose     bool
+	timeout     time.Duration
+	configPath  string
+	backendName string
+	logger      *slog.Logger
+
+	// instance is the managed instance this invocation talks to, resolved once
+	// in PersistentPreRunE. It is held here because every config path in the
+	// invocation must be resolved against the same one — a registry that
+	// re-derived it would be free to disagree with the command it serves.
+	instance string
 
 	// runtime is the resolved configuration (paths + config document). It is
 	// populated by PersistentPreRunE and consumed by command execution.
@@ -115,12 +122,10 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 	}
 	if a.newProjects == nil {
 		a.newProjects = func(adapter *lima.Adapter, opts lima.BootstrapOptions) projectService {
-			// The registry resolves the same canonical config path this
-			// invocation was started with, so --config applies to the project
-			// registry exactly as it does to everything else.
-			return projects.New(adapter, projects.FileRegistry{
-				Options: config.Options{ConfigPath: a.configPath},
-			}, opts)
+			// The registry resolves the same canonical paths this invocation
+			// was started with, so --config and the resolved instance apply to
+			// the project registry exactly as they do to everything else.
+			return projects.New(adapter, projects.FileRegistry{Options: a.configOptions()}, opts)
 		}
 	}
 	// The workspace root is read at call time, not at wiring time: the backend
@@ -152,18 +157,6 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 	if a.lookupOperatorUser == nil {
 		a.lookupOperatorUser = defaultLookupOperatorUser
 	}
-	// The managed instance is fixed here, once, before the command tree runs and
-	// before anything can touch a VM or a config path (ADR-0001). It comes from
-	// the environment rather than a flag, so it does not depend on flag parsing
-	// and cannot be forgotten on an individual invocation. A malformed name is a
-	// usage error: falling back to the default would send a command meant for a
-	// test VM to the operator's daily one.
-	instance, err := config.ResolveInstance(config.Options{})
-	if err != nil {
-		return fail(a.stdout, a.stderr, firstNonFlag(args), wantsJSON(args), usageError(err.Error()))
-	}
-	lima.InstanceName = instance
-
 	// An unsupported host is rejected here, once, rather than deep inside the
 	// first command that needs a pin. The adapter still fails closed on its own
 	// (lima.Adapter.profile), but that message would arrive after an operator
@@ -216,12 +209,25 @@ func newRootCmd(a *app) *cobra.Command {
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			a.logger = newLogger(a.stderr, a.verbose)
 
+			// The managed instance is fixed here, once, before any command can
+			// touch a VM or a config path (ADR-0001). --backend names the agent
+			// this invocation is about and the instance that runs it follows;
+			// TORIO_INSTANCE still names a box directly and wins, so a flag can
+			// never redirect an invocation that already named its target. A
+			// malformed name is a usage error: falling back to the default
+			// would send a command meant for a test VM to the operator's daily
+			// one.
+			if err := a.resolveInstance(); err != nil {
+				return usageError(err.Error())
+			}
+			lima.InstanceName = a.instance
+
 			// Resolve the configuration: the XDG config path plus --config,
 			// loading and strictly validating the on-disk config document. A
 			// resolution/validation failure is a usage/schema error (exit 2).
 			// config.Load never surfaces secret-shaped material, and the final
 			// error renderer redacts known shapes as defense in depth.
-			rt, err := config.Load(config.Options{ConfigPath: a.configPath})
+			rt, err := config.Load(a.configOptions())
 			if err != nil {
 				return usageError(err.Error())
 			}
@@ -244,9 +250,9 @@ func newRootCmd(a *app) *cobra.Command {
 			// usage error rather than a silent fallback: a document written by a
 			// newer Torio must not have its commands run against a different
 			// agent than it names.
-			b, err := backend.Lookup(rt.File.Backend)
+			b, err := a.resolveBackend()
 			if err != nil {
-				return usageError(err.Error())
+				return err
 			}
 			a.backend = b
 
@@ -267,6 +273,8 @@ func newRootCmd(a *app) *cobra.Command {
 	root.PersistentFlags().BoolVar(&a.verbose, "verbose", false, "emit more redacted diagnostics on stderr")
 	root.PersistentFlags().DurationVar(&a.timeout, "timeout", config.DefaultTimeout, "bound the operation; cannot exceed the policy maximum")
 	root.PersistentFlags().StringVar(&a.configPath, "config", "", "path to an explicit non-secret config file")
+	root.PersistentFlags().StringVar(&a.backendName, "backend", "",
+		"agent backend this invocation is about; selects the instance that runs it (default hermes)")
 
 	root.AddCommand(newVersionCmd(a))
 	root.AddCommand(newVMCmd(a))
@@ -276,6 +284,79 @@ func newRootCmd(a *app) *cobra.Command {
 	root.AddCommand(newBackendCmd(a))
 	root.AddCommand(newMCPCmd(a))
 	return root
+}
+
+// configOptions are the config inputs of this invocation. Everything that
+// resolves a path — the loader, the project registry — must build its Options
+// through here, so one invocation can never read two instances.
+func (a *app) configOptions() config.Options {
+	return config.Options{ConfigPath: a.configPath, Instance: a.instance}
+}
+
+// resolveInstance settles which box this invocation talks to.
+//
+// The instance is derived from the backend rather than recorded against it. A
+// table of instance names would make the operator responsible for a fact Torio
+// can compute, and would give two places to disagree about which box runs which
+// agent; deriving it means the answer is the same every time it is asked. An
+// unknown backend name is rejected here rather than deriving an instance for a
+// backend this build cannot run.
+func (a *app) resolveInstance() error {
+	if a.backendName != "" {
+		if _, err := backend.Lookup(a.backendName); err != nil {
+			return err
+		}
+	}
+	derived, err := config.InstanceForBackend(a.backendName, backend.DefaultName)
+	if err != nil {
+		return err
+	}
+	// Derived first, then resolved: ResolveInstance is what decides whether the
+	// environment or the derivation wins, and that decision belongs in one
+	// place rather than being re-made by every caller.
+	instance, err := config.ResolveInstance(config.Options{ConfigPath: a.configPath, Instance: derived})
+	if err != nil {
+		return err
+	}
+	a.instance = instance
+	return nil
+}
+
+// resolveBackend settles which agent this invocation is about, from what the
+// instance declares and what --backend asked for.
+//
+// The two must agree. They can only disagree when TORIO_INSTANCE named a box
+// directly — a derived instance is named after the backend that derived it —
+// and that disagreement is exactly the mistake worth stopping: a guest built
+// for one identity driven as another. An absent declaration means the default
+// backend, so it is compared as the default rather than as "unset", or
+// `--backend claude-code` against the Hermes box would read as a match.
+//
+// A document that was never written declares nothing at all, which is the
+// ordinary state of a derived instance before `vm init`. There the flag is the
+// declaration.
+func (a *app) resolveBackend() (backend.Backend, error) {
+	declared := a.runtime.File.Backend
+	if declared == "" {
+		declared = backend.DefaultName
+	}
+	if a.backendName != "" {
+		if a.runtime.ConfigLoaded && declared != a.backendName {
+			return nil, &CLIError{
+				Exit: ExitUsage,
+				Code: "BACKEND_MISMATCH",
+				Message: fmt.Sprintf(
+					"instance %q runs backend %q, not %q; drop %s or pass --backend %s",
+					a.instance, declared, a.backendName, config.InstanceEnvKey, declared),
+			}
+		}
+		declared = a.backendName
+	}
+	b, err := backend.Lookup(declared)
+	if err != nil {
+		return nil, usageError(err.Error())
+	}
+	return b, nil
 }
 
 // newLogger returns a slog logger writing diagnostics to w (stderr). Level is
