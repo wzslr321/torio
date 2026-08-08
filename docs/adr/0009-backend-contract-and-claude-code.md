@@ -48,6 +48,13 @@ fixed order — identity, membership, isolation, install-and-pin, version,
 guardrails, credential presence. Three capabilities are *declarable*: a project
 registry, a guest service, an interactive session. Nil is a first-class answer.
 
+A backend also declares its Brain retrieval skill — where it discovers skills,
+and the document installed there. The document travels with the backend for the
+same reason the session helper does: it names the tools one agent has and the
+vault path one identity owns, so there is no backend-neutral wording to share.
+A single shared skill would have to name one backend's tools, and installing it
+into another would tell that agent to call tools it does not have.
+
 This is the load-bearing half of the decision, so it is stated as a rule rather
 than left to each command:
 
@@ -83,8 +90,19 @@ union; each backend declares its half.
 
 - **Identity.** A dedicated guest user, `claude`: no sudo, and its supplementary
   group set is exactly the shared workspace group. Bootstrap proves the absent
-  sudo the same way the broker user's is proven — `sudo -n -l -U` must exit
-  exactly 1, because exit 0 and any other exit both fail to prove absence.
+  sudo by asking about the identity from a caller that already holds root —
+  `sudo -n -l -U claude` — and reading the answer out of the output, not the
+  exit code.
+
+  This was first written against the exit code, on the assumption that exit 1
+  meant "may run no commands". A real guest disproved it: sudo 1.9.15 exits 0
+  for that query whether the identity may run everything or nothing, so the
+  check could never pass and the backend could never bootstrap. Asking the
+  question *as* `claude` instead does exit 1 — but with "a password is
+  required", which is the same 1 a password-gated grant produces, and would
+  report OK for exactly the identity this check exists to catch. So the two
+  answers are matched positively in the C locale, and anything else, including
+  silence, fails closed.
 
   Rejected: running the agent as the Lima login user. That user holds
   passwordless root on the guest, so an agent running as it would sit *above*

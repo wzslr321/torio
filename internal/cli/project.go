@@ -436,7 +436,12 @@ func (a *app) projectService(command string) (projectService, error) {
 			Message: err.Error(),
 		}
 	}
-	return a.newProjects(a.newLima(), lima.BootstrapOptions{OperatorUser: operatorUser}), nil
+	// The backend travels with the options, exactly as it does for `vm`, `brain`
+	// and `backend`. Without it the project manager falls back to the backend
+	// Torio shipped first, so on any other instance every `project` command
+	// verified the wrong identity's bootstrap, resolved the wrong workspace, and
+	// asked for a session the wrong backend declares.
+	return a.newProjects(a.newLima(), lima.BootstrapOptions{OperatorUser: operatorUser, Backend: a.backend}), nil
 }
 
 // projectData is the registry identity of one project. The remote is safe to
@@ -811,7 +816,10 @@ func mapProjectError(command string, err error) *CLIError {
 	switch perr.Kind {
 	case projects.KindInvalidConfig:
 		return &CLIError{Exit: ExitUsage, Code: code, Command: command, Message: perr.Error()}
-	case projects.KindPrecondition:
+	case projects.KindPrecondition, projects.KindNoRegistry:
+		// no_registry maps where serve's no_service maps: managing a capability
+		// the backend never declared is an unmet precondition, not a guest that
+		// failed.
 		return &CLIError{Exit: ExitPrecondition, Code: code, Command: command, Message: perr.Error()}
 	case projects.KindAuth:
 		return &CLIError{Exit: ExitPermission, Code: code, Command: command, Message: perr.Error()}

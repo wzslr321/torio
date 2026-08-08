@@ -170,11 +170,17 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 		version := torio.mustRun("backend-version", "vm.ssh", versionArgs...)
 		expectData(version, map[string]any{"exit_code": float64(0)})
 
-		// The identity must not be able to become root. `sudo -n -l -U` exits 1
-		// for "may run no commands", and this asserts the live guest agrees with
-		// what bootstrap proved.
-		noSudo, _ := torio.run("backend-no-sudo", "vm.ssh", "vm", "ssh", "--", "sudo", "-n", "-l", "-U", profile.user)
-		expectData(noSudo, map[string]any{"exit_code": float64(1)})
+		// The identity must not be able to become root, asserted on the live guest
+		// against what bootstrap proved.
+		//
+		// The answer is the sentence, not the exit status. Asked by a caller that
+		// already holds root, sudo 1.9.15 exits 0 whether the identity may run
+		// everything or nothing — this spec asserted exit 1 and was wrong about a
+		// real guest, in the same way the bootstrap check was. So the guest reads
+		// its own answer and the exit code carries only that verdict here.
+		noSudo := torio.mustRun("backend-no-sudo", "vm.ssh", "vm", "ssh", "--",
+			"sh", "-c", "LC_ALL=C sudo -n -l -U "+profile.user+" | grep -q 'is not allowed to run sudo'")
+		expectData(noSudo, map[string]any{"exit_code": float64(0)})
 
 		backendStatus := torio.mustRun("backend-status", "backend.status", "backend", "status")
 		expectData(backendStatus, map[string]any{
@@ -209,7 +215,13 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 			"native_filesystem":  true,
 			"path":               profile.vault,
 			"project_registered": profile.declaresRegistry,
+			"retrieval_skill":    "installed",
 		})
+		// Where the backend actually looks, read as the identity that reads it.
+		// A report saying "installed" and a file the agent can open are two
+		// different claims, and only the second makes the vault reachable.
+		skill := torio.mustRun("brain-skill-present", "vm.ssh", "vm", "ssh", "--", "sudo", "-u", profile.user, "--", "test", "-f", profile.skillFile)
+		expectData(skill, map[string]any{"exit_code": float64(0)})
 	}, SpecTimeout(15*time.Minute))
 
 	It("reports honestly about a service the backend does not declare", Label(guestStage), func(ctx SpecContext) {
@@ -292,9 +304,15 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 		if profile.declaresService {
 			stoppedService := torio.mustRun("serve-stop", "serve.stop", "serve", "stop")
 			expectData(stoppedService, map[string]any{"active": false})
+			stoppedAgain := torio.mustRun("serve-stop-idempotent", "serve.stop", "serve", "stop")
+			expectData(stoppedAgain, map[string]any{"active": false})
+		} else {
+			// Stopping a service the backend never declared is the same operator
+			// error as installing one, and refusing it is the contract holding —
+			// not something to route around by asking for it anyway.
+			_, err := torio.run("serve-stop-undeclared", "serve.stop", "serve", "stop")
+			Expect(err).To(HaveOccurred(), "stopping a service the backend does not declare must fail closed")
 		}
-		stoppedAgain := torio.mustRun("serve-stop-idempotent", "serve.stop", "serve", "stop")
-		expectData(stoppedAgain, map[string]any{"active": false})
 		stoppedVM := torio.mustRun("vm-stop", "vm.stop", "vm", "stop")
 		expectData(stoppedVM, map[string]any{"state": "stopped"})
 		stoppedVMAgain := torio.mustRun("vm-stop-idempotent", "vm.stop", "vm", "stop")

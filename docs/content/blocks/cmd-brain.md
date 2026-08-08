@@ -46,10 +46,11 @@ than as a fault:
 
 - **Registration.** A backend that keeps no project registry has nothing to
   register the vault with. The vault is reached by path, so nothing is lost.
-- **The retrieval skill.** Torio installs it only where the backend discovers
-  skills *and* a skill exists that is written for that backend. The one Torio
-  ships names another backend's tools and vault path; installing it elsewhere
-  would tell an agent to call tools it does not have. The state is then
-  `not_applicable`, which is deliberately not `not_installed` — reporting a
-  missing thing where nothing is missing teaches operators to ignore the report
-  that matters.
+- **The retrieval skill.** Each backend ships its own, because a retrieval skill
+  names the tools one agent has and the vault path one identity owns: the Hermes
+  skill calls `search_files` under `/home/hermes/brain`, the Claude Code skill
+  calls `Grep` under `/home/claude/brain`. Torio installs the one the backend
+  declares, at the path that backend discovers skills in, and `brain status`
+  names that path. A backend that declares none reports `not_applicable`, which
+  is deliberately not `not_installed` — reporting a missing thing where nothing
+  is missing teaches operators to ignore the report that matters.

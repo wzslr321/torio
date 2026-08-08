@@ -19,6 +19,7 @@ package claudecode
 
 import (
 	"context"
+	_ "embed"
 
 	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/lima"
@@ -99,21 +100,26 @@ install -d -o root -g root -m 0755 ` + installDir + `
 `
 }
 
-// BrainSkill declares no skill root, and the reason is content rather than
-// plumbing.
+// BrainSkill installs the retrieval skill into the personal skill root Claude
+// Code walks, `~/.claude/skills`, where one copy is visible from every checkout
+// the agent is started in.
 //
-// Claude Code does discover skills, under ~/.claude/skills, and the plumbing to
-// install one there is in place. What does not exist yet is a retrieval skill
-// written for it: the one Torio ships names another backend's tools and another
-// backend's vault path, so installing it here would tell the agent to call
-// tools it does not have against a directory that does not exist. That is worse
-// than installing nothing, and `brain status` says "not applicable" rather than
-// reporting a missing thing.
+// There is no category. Claude Code routes by reading each skill's description
+// and deciding, so a skill is not competing for a position in a static
+// alphabetical index the way it is on the other backend — which is the entire
+// reason that mechanism exists there and the reason it is absent here.
 //
-// The vault is still a vault without it — a git-versioned directory the agent
-// can read, in a checkout-shaped layout it already knows how to search. Writing
-// the skill is a content task, and it gets its own change.
-func (claudeBackend) BrainSkill() backend.BrainSkill { return backend.BrainSkill{} }
+// The payload is this backend's own text, not a shared document. It names the
+// tools this agent has — `Grep`, `Glob`, `Read` — and the vault path this
+// identity owns. The other backend's skill names neither, which is why
+// installing it here would have told the agent to call tools it does not have
+// against a directory that does not exist.
+func (claudeBackend) BrainSkill() backend.BrainSkill {
+	return backend.BrainSkill{Root: ProfilePath + "/skills", Payload: embeddedBrainSkill}
+}
+
+//go:embed templates/skill/SKILL.md
+var embeddedBrainSkill []byte
 
 // Registry is nil: Claude Code keeps no project registry. A project is a
 // directory it is started in, and its per-project state is files inside that

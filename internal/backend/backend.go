@@ -241,7 +241,8 @@ func (s *ServiceSpec) EndpointURL() string {
 	return "http://" + s.BindHost + ":" + strconv.Itoa(s.BindPort) + s.StatusPath
 }
 
-// BrainSkill is a backend's skill-discovery layout.
+// BrainSkill is a backend's skill-discovery layout and the retrieval skill it
+// gets installed there.
 //
 // Root is the directory the backend walks for skills. An empty Root means the
 // backend discovers none, and Torio installs none: the vault is still a vault,
@@ -252,10 +253,40 @@ func (s *ServiceSpec) EndpointURL() string {
 // renders a static, alphabetically ordered skill index whose position decides
 // whether a skill is seen at all. A backend that has no such index leaves it
 // empty and the skill sits directly under Root.
+//
+// Payload is the SKILL.md the backend gets, and it belongs to the backend for
+// the same reason the session helper does: a retrieval skill is instructions
+// addressed to one particular agent, naming the tools that agent has and the
+// vault path that agent's identity owns. There is no backend-neutral text to
+// share — a single payload would have to name one backend's tools, and
+// installing it into another would tell that agent to call tools it does not
+// have. So the skill travels with the backend, and a backend that has a Root
+// but no Payload installs nothing rather than something wrong.
+//
+// CategoryPayload is the category description, and is required exactly when
+// Category is set: a category directory without one is a heading with no text
+// under it in the index the model reads.
 type BrainSkill struct {
-	Root     string
-	Category string
+	Root            string
+	Category        string
+	Payload         []byte
+	CategoryPayload []byte
 }
+
+// Installable reports whether there is both somewhere to put the retrieval
+// skill and something to put there. Both halves are the backend's own
+// declaration, so this is the one condition every caller asks.
+func (s BrainSkill) Installable() bool {
+	return s.Root != "" && len(s.Payload) > 0
+}
+
+// BrainSkillName is the directory the retrieval skill is installed in, and the
+// name inside its own frontmatter. It is one name across every backend because
+// it identifies one product surface: an operator reading two boxes' guests
+// should not have to learn that the same skill is called something else on each,
+// and a backend that renamed it would silently stop matching what documentation
+// and error messages tell the operator to look for.
+const BrainSkillName = "torio-brain"
 
 // SessionSpec is a backend an operator opens an interactive session with,
 // inside a checkout, as the backend's own identity.

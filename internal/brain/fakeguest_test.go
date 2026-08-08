@@ -111,17 +111,29 @@ func initializedFake() *fakeGuest {
 	return f
 }
 
+// The payloads this package's tests are written against. They are the Hermes
+// backend's own declaration, reached the way production reaches it, because the
+// retrieval skill now travels with the backend rather than living here — and a
+// test that kept its own copy would pass while the shipped one drifted.
+func hermesSkillPayload() ([]byte, string, error) {
+	return declaredPayload(lima.Hermes().BrainSkill().Payload)
+}
+
+func hermesCategoryPayload() ([]byte, string, error) {
+	return declaredPayload(lima.Hermes().BrainSkill().CategoryPayload)
+}
+
 // withInstalledSkill puts the current embedded payload on the fake guest with
 // the ownership and mode a real install produces.
 func (f *fakeGuest) withInstalledSkill(t *testing.T) *fakeGuest {
 	t.Helper()
-	_, digest, err := retrievalSkill()
+	_, digest, err := hermesSkillPayload()
 	if err != nil {
-		t.Fatalf("retrievalSkill() error = %v", err)
+		t.Fatalf("hermesSkillPayload() error = %v", err)
 	}
-	_, categoryDigest, err := retrievalCategory()
+	_, categoryDigest, err := hermesCategoryPayload()
 	if err != nil {
-		t.Fatalf("retrievalCategory() error = %v", err)
+		t.Fatalf("hermesCategoryPayload() error = %v", err)
 	}
 	f.skillDirMode = "750"
 	f.skillPresent = true

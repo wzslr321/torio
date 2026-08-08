@@ -58,16 +58,20 @@ func exit(c int) execx.Result   { return execx.Result{ExitCode: c} }
 // custody claim rests on, and the one place where "I could not tell" must not
 // read as "no".
 //
-// `sudo -n -l -U <user>` exits 1 for "may run no commands". Exit 0 means it may
-// run something. Every other exit means the question could not be asked — and a
-// check that treats that as a no reports OK precisely when it cannot see, so
-// one sudoers or PATH change would turn it green on a guest where nothing
-// holds.
+// The fixtures are transcripts from a real guest, sudo 1.9.15p5 on Ubuntu
+// 24.04, because the earlier version of this check was written against the exit
+// code and the exit code does not carry the answer: asked by root, `sudo -l -U`
+// exits 0 whether the user may run everything or nothing. A check keyed on
+// exit 1 could therefore never pass, and the whole backend could never
+// bootstrap.
 func TestNoSudoAcceptsOnlyTheDocumentedNoAnswer(t *testing.T) {
-	const probe = "sudo -n -l -U " + User
+	const probe = "env LC_ALL=C sudo -n -l -U " + User
+	const denied = "User claude is not allowed to run sudo on lima-torio-ci-claude.\n"
+	const granted = "Matching Defaults entries for claude on lima-torio-ci-claude:\n    env_reset\n\n" +
+		"User claude may run the following commands on lima-torio-ci-claude:\n    (ALL) NOPASSWD: ALL\n"
 
-	t.Run("exit 1 is the only pass", func(t *testing.T) {
-		r := newFakeRunner(map[string]execx.Result{probe: exit(1)})
+	t.Run("the denial sentence is the pass", func(t *testing.T) {
+		r := newFakeRunner(map[string]execx.Result{probe: out(denied)})
 		if err := verifyNoSudo(context.Background(), r); err != nil {
 			t.Fatalf("verifyNoSudo: %v", err)
 		}
@@ -76,8 +80,8 @@ func TestNoSudoAcceptsOnlyTheDocumentedNoAnswer(t *testing.T) {
 		}
 	})
 
-	t.Run("exit 0 fails", func(t *testing.T) {
-		r := newFakeRunner(map[string]execx.Result{probe: exit(0)})
+	t.Run("a grant fails even though sudo exited 0", func(t *testing.T) {
+		r := newFakeRunner(map[string]execx.Result{probe: out(granted)})
 		if err := verifyNoSudo(context.Background(), r); err == nil {
 			t.Fatal("an identity that may run sudo commands passed the check")
 		}
@@ -86,8 +90,25 @@ func TestNoSudoAcceptsOnlyTheDocumentedNoAnswer(t *testing.T) {
 		}
 	})
 
-	for _, code := range []int{2, 127, 255} {
+	// Silence is the case that matters most. It is what a truncated, redirected
+	// or reworded sudo produces, and it is not a denial — inferring "no sudo"
+	// from the absence of a grant is how this check would come to pass on a
+	// guest it can no longer see.
+	t.Run("an unrecognized answer fails closed", func(t *testing.T) {
+		for _, answer := range []string{"", "sudo: unknown user claude\n", "some future phrasing\n"} {
+			r := newFakeRunner(map[string]execx.Result{probe: out(answer)})
+			if err := verifyNoSudo(context.Background(), r); err == nil {
+				t.Fatalf("%q was read as proof of no sudo", answer)
+			}
+		}
+	})
+
+	for _, code := range []int{1, 2, 127, 255} {
 		t.Run("an unanswerable question fails closed", func(t *testing.T) {
+			// Exit 1 is in this list deliberately. Asked as the identity itself
+			// rather than about it, sudo exits 1 saying "a password is required"
+			// — the same 1 a password-gated grant produces, which is exactly the
+			// identity this check exists to catch.
 			r := newFakeRunner(map[string]execx.Result{probe: exit(code)})
 			if err := verifyNoSudo(context.Background(), r); err == nil {
 				t.Fatalf("exit %d was read as proof of no sudo", code)

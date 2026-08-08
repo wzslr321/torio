@@ -3,6 +3,7 @@ package lima
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -297,13 +298,34 @@ install -d -o ` + HermesUser + ` -g ` + HermesUser + ` -m 0750 ` + HermesBrainPa
 `
 }
 
-// BrainSkill points at the profile's skill root and the category the retrieval
-// skill is grouped under. The category is not tidiness: Hermes renders a
-// static, alphabetically ordered index, and a top-level skill sorted near the
-// end of it lost a routing contest against a bundled competitor.
+// BrainSkill points at the profile's skill root, the category the retrieval
+// skill is grouped under, and the payload written there. The category is not
+// tidiness: Hermes renders a static, alphabetically ordered index, and a
+// top-level skill sorted near the end of it lost a routing contest against a
+// bundled competitor.
+//
+// The payload names Hermes' own tools — `search_files`, `read_file` — and the
+// vault path this identity owns, which is why it is declared here rather than
+// held as one shared document: there is no wording that is true for two agents
+// with different tools.
 func (hermesBackend) BrainSkill() backend.BrainSkill {
-	return backend.BrainSkill{Root: HermesProfilePath + "/skills", Category: "brain"}
+	return backend.BrainSkill{
+		Root:            HermesProfilePath + "/skills",
+		Category:        "brain",
+		Payload:         hermesBrainSkill,
+		CategoryPayload: hermesBrainSkillCategory,
+	}
 }
+
+// The retrieval skill and the description of the category it sits in. Both are
+// product surfaces: the category text is what every session is told the vault
+// is, and it is read from this file's frontmatter rather than its body.
+//
+//go:embed templates/skill/SKILL.md
+var hermesBrainSkill []byte
+
+//go:embed templates/skill/DESCRIPTION.md
+var hermesBrainSkillCategory []byte
 
 func (hermesBackend) Registry() backend.ProjectRegistry { return hermesRegistry{} }
 
@@ -341,9 +363,9 @@ const (
 )
 
 // HermesBrainSkillName is the retrieval skill the Brain installs into the
-// Hermes profile. It is named here because the environment hint below has to
+// Hermes profile. It is aliased here because the environment hint below has to
 // name it too, and the two must not be able to drift apart.
-const HermesBrainSkillName = "torio-brain"
+const HermesBrainSkillName = backend.BrainSkillName
 
 // HermesEnvironmentHint is handed to the backend as HERMES_ENVIRONMENT_HINT, an
 // explicit seam Hermes offers a host that wraps it: the text is appended to

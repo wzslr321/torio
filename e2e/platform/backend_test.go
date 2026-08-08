@@ -46,6 +46,11 @@ type backendProfile struct {
 	// to use. Both are per-backend because both are the backend's own.
 	versionCheck   string
 	versionCommand []string
+	// skillFile is where this backend discovers the Brain retrieval skill. It is
+	// asserted as a real file owned by the agent identity, because "installed"
+	// in a report and "present where this agent looks" are different claims —
+	// and the second is the one that decides whether the vault is reachable.
+	skillFile string
 	// declaresRegistry, declaresService and declaresSession are the three
 	// capabilities. A false one is asserted, not skipped: the contract's claim
 	// is that Torio reports an absent capability as a state, and a journey that
@@ -68,6 +73,7 @@ func profileFor(name string) backendProfile {
 			vault:            "/home/claude/brain",
 			versionCheck:     "claude_version",
 			versionCommand:   []string{"sudo", "-u", "claude", "--", "claude", "--version"},
+			skillFile:        "/home/claude/.claude/skills/torio-brain/SKILL.md",
 			declaresRegistry: false,
 			declaresService:  false,
 			declaresSession:  true,
@@ -91,6 +97,7 @@ func profileFor(name string) backendProfile {
 			vault:            "/home/hermes/brain",
 			versionCheck:     "hermes_version",
 			versionCommand:   []string{"sudo", "-u", "hermes", "--", "hermes", "--version"},
+			skillFile:        "/home/hermes/.hermes/skills/brain/torio-brain/SKILL.md",
 			declaresRegistry: true,
 			declaresService:  true,
 			declaresSession:  false,

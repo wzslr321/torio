@@ -303,10 +303,19 @@ torio project enter <id>
 torio project shell <id>
 ```
 
-- **A workspace path is not an input.** It is always derived as
-  `/home/hermes/projects/<id>`, never accepted from the operator and never stored
-  in the config (see [`config.md`](config.md)). Without `--id` the identifier is
-  `<name>` itself, which must be a lowercase slug.
+- **A workspace path is not an input.** It is always derived from the configured
+  backend's workspace and the identifier — `/home/hermes/projects/<id>` on
+  Hermes, `/home/claude/projects/<id>` on Claude Code — never accepted from the
+  operator and never stored in the config (see [`config.md`](config.md)).
+  Without `--id` the identifier is `<name>` itself, which must be a lowercase
+  slug.
+- **The project registry is a declared capability**, exactly as the guest service
+  is. A backend that keeps none — a project is a directory it is started in —
+  clones, verifies and records the checkout as usual, and reports that there was
+  nowhere to register it. `show` raises no registration issue, because a
+  registration that could never exist is not a missing one; `use` fails closed
+  with `NO_REGISTRY` (exit 3) naming the backend, since there is no active
+  project to select ([ADR-0009](../adr/0009-backend-contract-and-claude-code.md)).
 - **Torio stores no Git credentials.** A remote the guest cannot already read
   non-interactively is fail-closed (exit 7) — the remedy is a human granting
   access outside Torio, not a retry.

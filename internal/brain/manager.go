@@ -274,20 +274,27 @@ func (m *Manager) activateRetrieval(ctx context.Context, op string, report *Init
 // rewritten atomically from a staging file outside the skill discovery root.
 // A pre-category installation is retired first — see removeLegacySkill.
 func (m *Manager) installSkill(ctx context.Context, op string) (updated bool, retErr error) {
-	if m.skillRoot() == "" {
-		// The backend discovers no skills Torio can install into. The vault is
-		// still a vault — it is a git-versioned directory the agent can read —
-		// and pretending to install a retrieval surface it will never load
-		// would be worse than saying so.
+	skill := m.backend().BrainSkill()
+	if !skill.Installable() {
+		// The backend discovers no skills Torio can install into, or ships no
+		// skill written for it. The vault is still a vault — it is a
+		// git-versioned directory the agent can read — and pretending to install
+		// a retrieval surface it will never load would be worse than saying so.
 		return false, nil
 	}
-	payload, digest, err := retrievalSkill()
+	payload, digest, err := m.retrievalSkill()
 	if err != nil {
-		return false, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("embedded retrieval skill unavailable")}
+		return false, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("declared retrieval skill unavailable")}
 	}
-	category, categoryDigest, err := retrievalCategory()
-	if err != nil {
-		return false, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("embedded retrieval skill category unavailable")}
+	// The category description exists only where the backend groups skills under
+	// one. Its digest stays empty otherwise, and the probe skips the path.
+	var category []byte
+	var categoryDigest string
+	if skill.Category != "" {
+		category, categoryDigest, err = m.retrievalCategory()
+		if err != nil {
+			return false, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("declared retrieval skill category unavailable")}
+		}
 	}
 	probe, err := m.probeSkill(ctx, op, digest, categoryDigest)
 	if err != nil {
@@ -308,12 +315,18 @@ func (m *Manager) installSkill(ctx context.Context, op string) (updated bool, re
 	if err := m.removeLegacySkill(ctx, op); err != nil {
 		return false, err
 	}
-	if err := m.mustRun(ctx, op, KindGuestCommand, "create retrieval skill category directory",
+	// With a category this creates it; without one it creates the discovery root
+	// itself, which the backend's own provisioning has no reason to have made.
+	// Either way the directory the skill lands in exists and is owned by the
+	// identity that reads it.
+	if err := m.mustRun(ctx, op, KindGuestCommand, "create retrieval skill directory root",
 		guestexec.RootExec("install", "-d", "-o", m.agentUser(), "-g", m.agentUser(), "-m", "0750", m.skillCategoryPath())); err != nil {
 		return false, err
 	}
-	if err := m.writeSkillFile(ctx, op, "retrieval skill category description", category, m.skillCategoryFilePath()); err != nil {
-		return false, err
+	if m.skillCategoryFilePath() != "" {
+		if err := m.writeSkillFile(ctx, op, "retrieval skill category description", category, m.skillCategoryFilePath()); err != nil {
+			return false, err
+		}
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "create retrieval skill directory",
 		guestexec.RootExec("install", "-d", "-o", m.agentUser(), "-g", m.agentUser(), "-m", "0750", m.skillPath())); err != nil {
@@ -358,6 +371,11 @@ func (m *Manager) writeSkillFile(ctx context.Context, op, what string, payload [
 // swept up if removing that file left it empty; anything else under the old
 // path is not Torio's to delete, and by then it is no longer a skill.
 func (m *Manager) removeLegacySkill(ctx context.Context, op string) error {
+	// A backend that groups no skills under a category never installed one at a
+	// pre-category path, so there is nothing superseded to retire.
+	if m.legacySkillPath() == "" {
+		return nil
+	}
 	link, err := m.testPath(ctx, op, "-L", m.legacySkillPath())
 	if err != nil {
 		return err
@@ -388,7 +406,7 @@ type skillProbe struct {
 }
 
 func (m *Manager) probeSkill(ctx context.Context, op, digest, categoryDigest string) (skillProbe, error) {
-	if m.skillRoot() == "" {
+	if !m.backend().BrainSkill().Installable() {
 		return skillProbe{state: SkillNotApplicable}, nil
 	}
 	for _, path := range []string{m.skillFilePath(), m.skillPath(), m.skillCategoryFilePath(), m.skillCategoryPath()} {
@@ -405,13 +423,16 @@ func (m *Manager) probeSkill(ctx context.Context, op, digest, categoryDigest str
 	}
 	// A copy still sitting at the pre-category path is drift even when the new
 	// one is perfect: two files claiming the same skill name make skill_view
-	// refuse to load either of them.
-	legacy, err := m.testPath(ctx, op, "-f", m.legacySkillPath()+"/SKILL.md")
-	if err != nil {
-		return skillProbe{}, err
-	}
-	if legacy {
-		return skillProbe{state: SkillDrift}, nil
+	// refuse to load either of them. A backend with no category never had a
+	// pre-category path, and testing one would be testing "/SKILL.md".
+	if m.legacySkillPath() != "" {
+		legacy, err := m.testPath(ctx, op, "-f", m.legacySkillPath()+"/SKILL.md")
+		if err != nil {
+			return skillProbe{}, err
+		}
+		if legacy {
+			return skillProbe{state: SkillDrift}, nil
+		}
 	}
 	for _, path := range []string{m.skillCategoryPath(), m.skillPath()} {
 		dir, err := m.testPath(ctx, op, "-d", path)
@@ -422,7 +443,13 @@ func (m *Manager) probeSkill(ctx context.Context, op, digest, categoryDigest str
 			return skillProbe{state: SkillNotInstalled}, nil
 		}
 	}
+	// The category description is checked exactly where one exists. An absent
+	// path is not an absent file: `test -f ""` fails, and a probe that read that
+	// as "not installed" would report a skill it had just written as missing.
 	for _, path := range []string{m.skillFilePath(), m.skillCategoryFilePath()} {
+		if path == "" {
+			continue
+		}
 		file, err := m.testPath(ctx, op, "-f", path)
 		if err != nil {
 			return skillProbe{}, err
@@ -445,6 +472,9 @@ func (m *Manager) probeSkill(ctx context.Context, op, digest, categoryDigest str
 		{m.skillFilePath(), digest},
 		{m.skillCategoryFilePath(), categoryDigest},
 	} {
+		if spec.path == "" {
+			continue
+		}
 		sum, err := m.run(ctx, op, guestexec.UserExecAs(m.agentUser(), "sha256sum", "--", spec.path))
 		if err != nil {
 			return skillProbe{}, err
@@ -473,6 +503,9 @@ func (m *Manager) skillOwnershipSecure(ctx context.Context, op string) (bool, er
 		{m.skillPath(), "750"},
 		{m.skillFilePath(), "640"},
 	} {
+		if spec.path == "" {
+			continue
+		}
 		meta, err := m.run(ctx, op, guestexec.RootExec("stat", "-c", "%U:%G %a", spec.path))
 		if err != nil {
 			return false, err
@@ -501,13 +534,25 @@ func (m *Manager) Status(ctx context.Context) (StatusReport, error) {
 	return m.inspectStatus(ctx, op)
 }
 
+// newStatusReport is what every status answer starts from, including the ones
+// that return before any guest command runs. The skill state it starts at is
+// therefore the backend's declaration, not a fixed "not installed": a report
+// that bailed out early on a backend which declares no skill must not claim one
+// is missing, and SkillPath must be empty rather than name a file no backend
+// would ever write.
 func (m *Manager) newStatusReport() StatusReport {
-	return StatusReport{
+	report := StatusReport{
 		Path:       m.vault(),
 		GitState:   GitMissing,
 		SkillState: SkillNotInstalled,
 		Issues:     []string{},
 	}
+	if !m.backend().BrainSkill().Installable() {
+		report.SkillState = SkillNotApplicable
+		return report
+	}
+	report.SkillPath = m.skillFilePath()
+	return report
 }
 
 func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, error) {
@@ -519,18 +564,23 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 	report.ProjectRegistered = registered
 	report.ProjectConflict = projectConflict
 
-	// The skill lives under the Hermes profile, not under the Brain, so probe it
-	// before the vault: an uninitialized or drifted Brain returns early below and
-	// must still report honest skill state. Skill drift is deliberately kept out
-	// of the Brain's own State — it is drift `brain init` repairs, and folding it
-	// in would make Init refuse to run the very repair it needs to perform.
-	_, digest, err := retrievalSkill()
-	if err != nil {
-		return report, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("embedded retrieval skill unavailable")}
-	}
-	_, categoryDigest, err := retrievalCategory()
-	if err != nil {
-		return report, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("embedded retrieval skill category unavailable")}
+	// The skill lives under the backend's own profile, not under the Brain, so
+	// probe it before the vault: an uninitialized or drifted Brain returns early
+	// below and must still report honest skill state. Skill drift is deliberately
+	// kept out of the Brain's own State — it is drift `brain init` repairs, and
+	// folding it in would make Init refuse to run the very repair it needs to
+	// perform.
+	var digest, categoryDigest string
+	declared := m.backend().BrainSkill()
+	if declared.Installable() {
+		if _, digest, err = m.retrievalSkill(); err != nil {
+			return report, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("declared retrieval skill unavailable")}
+		}
+		if declared.Category != "" {
+			if _, categoryDigest, err = m.retrievalCategory(); err != nil {
+				return report, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("declared retrieval skill category unavailable")}
+			}
+		}
 	}
 	skill, err := m.probeSkill(ctx, op, digest, categoryDigest)
 	if err != nil {
@@ -733,13 +783,19 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 	}
 
 	report.ManagedScaffold = scaffoldComplete && gitRepo && !report.GitHasRemote && !hasSymlink
+	// Registration is only a condition where a backend has a registry. Without
+	// that clause an unregistered vault is drift on a backend that has nowhere to
+	// register it, `init` repairs nothing, and its own postcondition then fails —
+	// which is to say the Brain could never be initialized at all on such a
+	// backend, however healthy the vault on disk.
+	registrationDeclared := m.backend().Registry() != nil
 	switch {
 	case !report.PathSecure || !report.NativeFilesystem || !report.ManagedScaffold:
 		report.State = StateDrift
 	case projectConflict:
 		report.Issues = append(report.Issues, "project_slug_conflict")
 		report.State = StateDrift
-	case !registered:
+	case registrationDeclared && !registered:
 		report.Issues = append(report.Issues, "project_not_registered")
 		report.State = StateDrift
 	default:

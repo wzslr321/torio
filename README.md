@@ -207,11 +207,6 @@ Torio does less than it will. Where it is going, roughly in order:
   [ADR-0004](docs/adr/0004-mcp-credential-custody-and-egress.md).
 - **More hosts.** arm64 Linux is one table row plus an image digest away; it
   waits on someone booting and verifying it, not on design.
-- **A retrieval skill for the second backend.** The Second Brain works on a
-  Claude Code box — vault, git history, import — but the skill that points an
-  agent at it is written for Hermes' tools. Installing it elsewhere would tell
-  an agent to call tools it does not have, so `brain status` says
-  `not_applicable` and Torio installs nothing.
 - **Editor integration.** A Neovim panel already ships in
   [`integrations/neovim`](integrations/neovim/README.md): `:Torio` lists
   projects, opens routine or push-capable terminals, reports health, and shows

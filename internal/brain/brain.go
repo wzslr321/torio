@@ -6,7 +6,9 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"errors"
 
+	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/lima"
 )
 
@@ -17,11 +19,11 @@ const (
 	ProjectSlug = "second-brain"
 	// ProjectName is the human-facing Hermes Project name.
 	ProjectName = "Second Brain"
-	// SkillName is the directory name of the global retrieval skill. Hermes
-	// discovers skills by walking $HERMES_HOME/skills recursively and reading
-	// each SKILL.md, so one installed copy is visible in every session and
-	// every working directory. There is no project-local skills directory.
-	SkillName = lima.HermesBrainSkillName
+	// SkillName is the directory name of the global retrieval skill. Every
+	// backend Torio supports discovers skills by walking a root recursively and
+	// reading each SKILL.md, so one installed copy is visible in every session
+	// and every working directory. There is no project-local skills directory.
+	SkillName = backend.BrainSkillName
 	// SkillCategory is the directory the skill is grouped under, and it is a
 	// deliberate choice rather than a tidy-up.
 	//
@@ -77,9 +79,6 @@ const (
 	// that does not match what Torio ships. Named once so the writer and the
 	// repair that clears it cannot drift apart.
 	issueSkillDrift = "retrieval_skill_drift"
-
-	skillTemplate         = "templates/skill/SKILL.md"
-	skillCategoryTemplate = "templates/skill/DESCRIPTION.md"
 )
 
 var canonicalDirectories = []string{
@@ -101,29 +100,33 @@ var canonicalFiles = []string{
 //go:embed templates/*.md
 var scaffoldFS embed.FS
 
-//go:embed templates/skill/SKILL.md templates/skill/DESCRIPTION.md
-var skillFS embed.FS
-
-// retrievalSkill returns the embedded skill payload and its content digest. The
-// digest is what makes installation idempotent and drift detectable without ever
-// reading Brain content: Torio compares the guest file's sha256 against this,
-// never the file's bytes.
-func retrievalSkill() ([]byte, string, error) {
-	return embeddedPayload(skillTemplate)
+// retrievalSkill returns the backend's skill payload and its content digest.
+// The digest is what makes installation idempotent and drift detectable without
+// ever reading Brain content: Torio compares the guest file's sha256 against
+// this, never the file's bytes.
+//
+// The payload comes from the backend rather than from this package, because a
+// retrieval skill names the tools one agent has and the vault path one identity
+// owns. This package installs it and verifies it; it does not know what it says.
+func (m *Manager) retrievalSkill() ([]byte, string, error) {
+	return declaredPayload(m.backend().BrainSkill().Payload)
 }
 
-// retrievalCategory returns the embedded category description and its digest.
+// retrievalCategory returns the backend's category description and its digest.
 // It is installed and drift-checked exactly like the skill payload: the
 // category line is a product surface too, and an operator who edits it changes
 // what every session is told about the vault.
-func retrievalCategory() ([]byte, string, error) {
-	return embeddedPayload(skillCategoryTemplate)
+func (m *Manager) retrievalCategory() ([]byte, string, error) {
+	return declaredPayload(m.backend().BrainSkill().CategoryPayload)
 }
 
-func embeddedPayload(name string) ([]byte, string, error) {
-	payload, err := skillFS.ReadFile(name)
-	if err != nil {
-		return nil, "", err
+// declaredPayload digests what a backend declared. An empty payload is an error
+// rather than an empty install: reaching here means the backend declared a
+// skill root, and writing a zero-byte SKILL.md into it would leave the agent a
+// skill that says nothing where the report claims one is installed.
+func declaredPayload(payload []byte) ([]byte, string, error) {
+	if len(payload) == 0 {
+		return nil, "", errors.New("backend declares no payload")
 	}
 	sum := sha256.Sum256(payload)
 	return payload, hex.EncodeToString(sum[:]), nil
@@ -186,7 +189,13 @@ type StatusReport struct {
 	ProjectRegistered bool
 	ProjectConflict   bool
 	SkillState        SkillState
-	Issues            []string
+	// SkillPath is the guest file the retrieval skill is installed at, empty
+	// when the backend declares none. It is reported rather than derived by the
+	// caller because the path is the backend's, and an operator told to look at
+	// one backend's path while running another has been told a falsehood by a
+	// command whose whole job is to say what is true.
+	SkillPath string
+	Issues    []string
 }
 
 // InitReport distinguishes a fresh scaffold from an idempotent verification or

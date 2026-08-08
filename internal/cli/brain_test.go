@@ -312,6 +312,7 @@ func TestMapBrainErrorExitCodes(t *testing.T) {
 func TestBrainInitReportsRetrievalSkillActivation(t *testing.T) {
 	status := initializedBrainReport()
 	status.SkillState = brain.SkillInstalled
+	status.SkillPath = brain.SkillFilePath
 	service := &fakeBrainService{initReport: brain.InitReport{
 		Created:      true,
 		SkillUpdated: true,
@@ -343,6 +344,29 @@ func TestBrainInitReportsRetrievalSkillActivation(t *testing.T) {
 	}
 }
 
+// TestBrainSkillPathFollowsTheReport pins that the path an operator is told to
+// look at is the one the guest actually has. It used to be a constant naming
+// the Hermes profile, which every Claude Code box would have been handed with
+// full confidence by the command whose only job is to report what is there.
+func TestBrainSkillPathFollowsTheReport(t *testing.T) {
+	const claudePath = "/home/claude/.claude/skills/torio-brain/SKILL.md"
+	status := initializedBrainReport()
+	status.SkillState = brain.SkillInstalled
+	status.SkillPath = claudePath
+	service := &fakeBrainService{statusReport: status}
+
+	code, stdout, stderr := runBrainCLI(t, []string{"brain", "status"}, service)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, claudePath) {
+		t.Errorf("status does not name the backend's own skill path: %q", stdout)
+	}
+	if strings.Contains(stdout, brain.SkillFilePath) {
+		t.Errorf("status names another backend's skill path: %q", stdout)
+	}
+}
+
 // An unchanged payload must not tell the operator to restart anything, and a
 // drifted one must point at the command that repairs it.
 func TestBrainStatusReportsRetrievalSkillHonestly(t *testing.T) {
@@ -350,10 +374,21 @@ func TestBrainStatusReportsRetrievalSkillHonestly(t *testing.T) {
 		name      string
 		state     brain.SkillState
 		wantHuman string
+		// avoidHuman is text that must not appear. It exists for the state whose
+		// text and JSON used to disagree: a backend that declares no skill was
+		// told in prose to run `torio brain init` to install one, while the
+		// envelope beside it correctly said not_applicable.
+		avoidHuman string
 	}{
-		{"installed", brain.SkillInstalled, "cannot tell"},
-		{"not installed", brain.SkillNotInstalled, "torio brain init"},
-		{"drift", brain.SkillDrift, "torio brain init"},
+		{name: "installed", state: brain.SkillInstalled, wantHuman: "cannot tell"},
+		{name: "not installed", state: brain.SkillNotInstalled, wantHuman: "torio brain init"},
+		{name: "drift", state: brain.SkillDrift, wantHuman: "torio brain init"},
+		{
+			name:       "not applicable",
+			state:      brain.SkillNotApplicable,
+			wantHuman:  "no retrieval skill to install",
+			avoidHuman: "torio brain init",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -370,6 +405,9 @@ func TestBrainStatusReportsRetrievalSkillHonestly(t *testing.T) {
 			}
 			if !strings.Contains(stdout, tc.wantHuman) {
 				t.Errorf("human status omits %q: %q", tc.wantHuman, stdout)
+			}
+			if tc.avoidHuman != "" && strings.Contains(stdout, tc.avoidHuman) {
+				t.Errorf("human status contradicts the %q envelope by saying %q: %q", tc.state, tc.avoidHuman, stdout)
 			}
 
 			code, stdout, stderr = runBrainCLI(t, []string{"brain", "status", "--json"}, service)

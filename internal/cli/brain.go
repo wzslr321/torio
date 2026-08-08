@@ -133,7 +133,7 @@ func newBrainStatusCmd(a *app) *cobra.Command {
 				cliErr.Details = brainStatusDetails(report)
 				return cliErr
 			}
-			return a.emitBrainStatus("brain.status", report, brainSkillNotes(report.SkillState, false))
+			return a.emitBrainStatus("brain.status", report, brainSkillNotes(report.SkillState, report.SkillPath, false))
 		},
 	}
 }
@@ -234,7 +234,7 @@ func (a *app) emitBrainInit(report brain.InitReport) error {
 	if _, err := fmt.Fprintf(a.stdout, "Second Brain %s at %s.\n", action, report.Status.Path); err != nil {
 		return err
 	}
-	return a.emitBrainStatus("brain.init", report.Status, brainSkillNotes(report.Status.SkillState, report.SkillUpdated))
+	return a.emitBrainStatus("brain.init", report.Status, brainSkillNotes(report.Status.SkillState, report.Status.SkillPath, report.SkillUpdated))
 }
 
 func transferData(report brain.TransferReport) brainTransferData {
@@ -293,23 +293,33 @@ func (a *app) emitBrainTransfer(command string, report brain.TransferReport) err
 }
 
 // brainSkillNotes states what Torio actually verified. It checked a file on the
-// guest; it has no way to inspect a running Hermes backend, which caches the
-// skill prompt per process and does not rebuild it when a file appears.
-func brainSkillNotes(state brain.SkillState, updated bool) []string {
+// guest; it cannot inspect a running agent process, which reads its skills at
+// startup and does not rebuild that when a file appears.
+//
+// The path comes from the report because it is the backend's path. Naming a
+// fixed one here would have every Claude Code box told to look under the Hermes
+// profile — a wrong answer printed with full confidence by the command whose
+// only job is to report what is on the guest.
+func brainSkillNotes(state brain.SkillState, path string, updated bool) []string {
 	switch {
+	case state == brain.SkillNotApplicable:
+		return []string{
+			"This backend discovers no skills, so there is no retrieval skill to install.",
+			"The vault is still readable: it is a directory the agent can search by path.",
+		}
 	case state == brain.SkillInstalled && updated:
 		return []string{
-			"Retrieval skill written to " + brain.SkillFilePath + ".",
-			"Hermes caches the skill prompt per backend process: start a new session to use it.",
+			"Retrieval skill written to " + path + ".",
+			"Agents read their skills at startup: start a new session to use it.",
 		}
 	case state == brain.SkillInstalled:
 		return []string{
-			"Retrieval skill already current at " + brain.SkillFilePath + ".",
+			"Retrieval skill already current at " + path + ".",
 			"Torio verified the file only; it cannot tell whether a running session has loaded it.",
 		}
 	case state == brain.SkillDrift:
 		return []string{
-			"Retrieval skill at " + brain.SkillFilePath + " does not match the payload Torio ships.",
+			"Retrieval skill at " + path + " does not match the payload Torio ships.",
 			"Run 'torio brain init' to reinstall it, then start a new session.",
 		}
 	default:

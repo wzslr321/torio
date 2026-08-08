@@ -42,6 +42,48 @@
   is still emitted, unchanged, on a Hermes instance.
 - The Second Brain's vault, staging and lock follow the backend identity that
   owns them, instead of being fixed at one backend's home.
+- The Brain's retrieval skill is now the backend's own, declared alongside the
+  root it is discovered in. Claude Code gets a skill written for Claude Code —
+  `Grep`, `Glob` and `Read` over `/home/claude/brain`, installed at
+  `~/.claude/skills/torio-brain/` and uncategorized, because it routes by
+  reading descriptions rather than by position in a static index. The Hermes
+  skill and its category grouping are unchanged.
+- `brain status` and `brain init` name the skill path from the report instead of
+  a constant. The constant was the Hermes profile path, which every Claude Code
+  box would have been told to look at.
+
+### Fixed
+
+- `vm bootstrap` could never succeed on a Claude Code instance. Its no-sudo
+  proof required `sudo -n -l -U claude` to exit 1, and sudo 1.9.15 exits 0 for
+  that query whether the identity may run everything or nothing — the answer is
+  in the output. The check now matches sudo's two sentences in the C locale and
+  fails closed on anything else, including silence. Found by running the backend
+  on a real guest; every unit and transcript test passed throughout.
+- Every `torio project` command ran as the wrong agent on a non-Hermes
+  instance. The project manager derives the guest identity, workspace, registry
+  and interactive session from the backend in its options and falls back to the
+  first backend Torio shipped when handed none — and the CLI handed it none.
+  `project add` on a Claude Code box therefore demanded a `hermes` user the
+  guest does not have, and `project agent` would have asked the fallback backend
+  for a session it does not declare.
+- `project show` reported `hermes_project_absent` on every project on a backend
+  that keeps no registry — an issue naming a registration that could never have
+  existed, on a healthy checkout. `project use` there failed with a registration
+  error telling the operator to re-run `project add`, which cannot create what is
+  missing; it now fails with `no_registry` naming the backend, where serve's
+  `no_service` already pointed.
+- `brain init` could never reach `initialized` on a backend with no project
+  registry. An unregistered vault counted as drift regardless of whether there
+  was anywhere to register it, so `init` reported drift it could not repair and
+  then failed its own postcondition — on a vault that was healthy on disk.
+  Registration is now a condition only where a registry is declared.
+- `brain status` told an operator on a backend that declares no retrieval skill
+  to run `torio brain init` to install one, while the JSON envelope beside it
+  correctly reported `not_applicable`. It now says the same thing in both.
+- Installing a retrieval skill for a backend with no skill category probed
+  `/SKILL.md` and `test -f ""`. No shipped backend reached that path before; the
+  Claude Code skill does.
 
 ### Known
 

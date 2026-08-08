@@ -271,13 +271,20 @@ func (m *Manager) Show(ctx context.Context, id string) (ShowReport, error) {
 		return report, err
 	}
 	report.Hermes = hermes
-	switch {
-	case hermes.Conflicts():
-		report.Issues = append(report.Issues, "hermes_project_slug_conflict")
-	case !hermes.Present:
-		report.Issues = append(report.Issues, "hermes_project_absent")
-	case hermes.Archived:
-		report.Issues = append(report.Issues, "hermes_project_archived")
+	// Registration issues exist only where a registry does. Without this clause
+	// every project on a backend that keeps none reports `hermes_project_absent`
+	// forever — an issue naming a registration that was never possible, on a
+	// checkout with nothing wrong with it, which is how an operator learns to
+	// read the issues list as noise.
+	if m.projectRegistry() != nil {
+		switch {
+		case hermes.Conflicts():
+			report.Issues = append(report.Issues, "hermes_project_slug_conflict")
+		case !hermes.Present:
+			report.Issues = append(report.Issues, "hermes_project_absent")
+		case hermes.Archived:
+			report.Issues = append(report.Issues, "hermes_project_archived")
+		}
 	}
 	return report, nil
 }
@@ -295,6 +302,13 @@ func (m *Manager) Use(ctx context.Context, id string) (UseReport, error) {
 	}
 	report.Project = view(entry, workspace)
 
+	// There is no active project to select where there is no registry to select
+	// it in. Naming that is the honest answer; the registration error below would
+	// tell an operator to run `project add` to fix something `add` cannot create.
+	if m.projectRegistry() == nil {
+		return report, &Error{Op: op, Kind: KindNoRegistry, Err: fmt.Errorf(
+			"backend %q declares no project registry; there is no active project to select", m.identity().Name)}
+	}
 	if err := m.requirePrepared(ctx, op); err != nil {
 		return report, err
 	}
@@ -337,6 +351,9 @@ func (m *Manager) Remove(ctx context.Context, id string) (RemoveReport, error) {
 		return report, err
 	}
 	switch {
+	case m.projectRegistry() == nil:
+		// Nothing to archive and nothing missing. Reporting the registration as
+		// absent would describe a registration that could never have existed.
 	case hermes.Conflicts():
 		return report, &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("the Hermes project holding slug %q points elsewhere; refusing to archive it", id)}
 	case !hermes.Present:
