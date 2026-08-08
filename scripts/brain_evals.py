@@ -37,6 +37,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 ROOT = Path(__file__).resolve().parents[1]
 KIT = ROOT / "brainkit"
@@ -213,6 +214,33 @@ class SessionResult:
     tool_calls: list[dict]
     environment: dict
     error: str | None = None
+
+
+class Runner(Protocol):
+    """What a backend has to offer before it can be measured.
+
+    Deliberately small, because everything above it is data. A second backend is
+    an implementation of these five members and a `--runner` flag; it is not a
+    second set of scenarios, and if it ever needs one, the scenario format is
+    what got it wrong.
+
+    `observes_tools` is the honest part. A backend that cannot report which files
+    its agent read says so here, and every `trace` assertion is then reported
+    skipped rather than passed — so the vault diff and the answer, which any
+    backend can be judged on, carry that run on their own.
+    """
+
+    name: str
+    observes_tools: bool
+
+    def describe(self) -> str:
+        """One line for the report: what was in the room besides the kit."""
+
+    def prepare(self, workdir: Path) -> None:
+        """Set up anything shared by every session of this run."""
+
+    def run(self, prompt: str, cwd: Path, vault: Path, transcript: Path) -> SessionResult:
+        """One session, from a clean context, with the vault at `vault`."""
 
 
 class ClaudeCodeRunner:
@@ -676,7 +704,7 @@ def replay_trial(scenario: dict, index: int, workdir: Path) -> Trial | None:
     return Trial(scenario["name"], index, checks, cost, None, workdir, environment)
 
 
-def run_trial(scenario: dict, index: int, runner: ClaudeCodeRunner, run_root: Path) -> Trial:
+def run_trial(scenario: dict, index: int, runner: Runner, run_root: Path) -> Trial:
     workdir = run_root / scenario["name"] / f"trial-{index + 1}"
     workdir.mkdir(parents=True, exist_ok=True)
 

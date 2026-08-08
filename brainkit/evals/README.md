@@ -181,6 +181,36 @@ ambiguous. The cost lands on fixture design: a convention in a fixture note has
 to be specific enough to be visible, like a required `## Risk` heading or a
 literal `# owner: platform-team` line, rather than "writes clearly".
 
+## Another backend
+
+Torio runs more than one agent and intends to run more, so a suite that could
+only speak to one of them would measure the kit on one backend and say nothing
+about the product. Adding a second is a runner, not a second set of scenarios —
+and if it ever needs its own scenarios, the scenario format is what got it wrong.
+
+A runner is five members, stated as a `Protocol` in `scripts/brain_evals.py`:
+`name`, `observes_tools`, `describe()`, `prepare()`, `run()`. The shipped one is
+about 90 lines of a 1000-line harness; nothing in `scenarios/` or `fixtures/`
+names a backend at all. `scripts/test_brain_evals.py` drives the whole trial path
+with a runner that is not Claude Code and does not exist, so the seam stays real
+rather than aspirational.
+
+The honest part is `observes_tools`. A backend that cannot report which files its
+agent touched sets it to `False`, and every `trace` assertion is then **skipped,
+never passed**. The two strongest assertion groups survive that intact — the
+vault diff and the answer are observable from any agent you can hand a prompt and
+a directory — so such a backend still gets a real measurement, with a smaller
+part of it visible. What it must not do is score higher for seeing less.
+
+What does not travel is the *rendering*. The session-start vault map ships here
+as a Claude Code plugin hook; another backend needs its own plumbing for the same
+job, which is why `STANDARD.md` §9 states the requirement in terms of what a
+rendering owes the agent rather than in terms of hooks.
+
+Numbers do not travel either. A report names its model and its runner because a
+pass-rate is a fact about a pair. A second backend earns its own reports; it does
+not inherit these.
+
 ## Fixtures
 
 A fixture is a directory under `fixtures/` with a `vault/` and optionally a

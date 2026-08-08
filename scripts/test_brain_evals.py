@@ -120,6 +120,57 @@ class TraceOfToolCalls(unittest.TestCase):
         self.assertEqual((trace.reads, trace.searches), ([], 0))
 
 
+class RunnerSeam(unittest.TestCase):
+    """A second backend is a runner, not a second set of scenarios.
+
+    These tests exist because "backend-neutral" is the kind of claim that stays
+    true only while something checks it. They drive the whole trial path with a
+    runner that is not Claude Code and does not exist.
+    """
+
+    class FakeRunner:
+        name = "fake"
+        observes_tools = False
+
+        def __init__(self, answer: str = "done") -> None:
+            self.answer = answer
+            self.prompts: list[str] = []
+
+        def describe(self) -> str:
+            return "a runner invented by a test"
+
+        def prepare(self, workdir: Path) -> None:
+            pass
+
+        def run(self, prompt: str, cwd: Path, vault: Path, transcript: Path) -> be.SessionResult:
+            self.prompts.append(prompt)
+            transcript.write_text("", encoding="utf-8")
+            return be.SessionResult(self.answer, 0.0, [], {"model": "fake-1"}, None)
+
+    def test_the_shipped_runner_satisfies_the_protocol(self) -> None:
+        runner = be.ClaudeCodeRunner(Path("/kit"), "sonnet", "loose", 10, 60)
+        for member in ("name", "observes_tools", "describe", "prepare", "run"):
+            self.assertTrue(hasattr(runner, member), member)
+
+    def test_a_foreign_runner_can_be_measured(self) -> None:
+        scenario = be.load_scenario(be.SCENARIO_DIR / "retrieval-honest-miss.json")
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = self.FakeRunner("Nothing in the vault matches those terms.")
+            trial = be.run_trial(scenario, 0, runner, Path(tmp))
+        self.assertIsNone(trial.error)
+        self.assertEqual(len(runner.prompts), len(scenario["sessions"]))
+
+    def test_a_runner_that_cannot_see_tools_skips_rather_than_passes(self) -> None:
+        scenario = be.load_scenario(be.SCENARIO_DIR / "retrieval-honest-miss.json")
+        with tempfile.TemporaryDirectory() as tmp:
+            trial = be.run_trial(scenario, 0, self.FakeRunner("Nothing matches in your notes."), Path(tmp))
+        statuses = {c.status for c in trial.checks}
+        self.assertIn("skip", statuses)
+        self.assertNotIn("fail", statuses)
+        # And the assertions any backend can carry still did their work.
+        self.assertTrue([c for c in trial.checks if c.status == "pass"])
+
+
 class Frontmatter(unittest.TestCase):
     def test_reads_flat_scalars(self) -> None:
         fields = be.frontmatter("---\ntype: capture\nsource: manual\n---\nbody\n")
