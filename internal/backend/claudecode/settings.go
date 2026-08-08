@@ -42,16 +42,24 @@ var embeddedManagedSettings []byte
 // side effect of editing a string.
 func ManagedSettings() []byte { return embeddedManagedSettings }
 
-// VerifyGuardrails proves the managed settings are the ones Torio wrote, and
-// reports what MCP servers the guest is configured with.
+// VerifyGuardrails proves the managed settings and the helper they run are the
+// ones Torio wrote, and reports what MCP servers the guest is configured with.
 //
-// Neither is a boundary and both say so where they are recorded. The first is a
-// root-owned file whose content is compared by digest; the second reads a file
-// the agent owns and can rewrite at will, so it is a drift detector in the
-// strictest sense — it answers "what is configured right now", never "what is
-// allowed".
+// None of the three is a boundary and each says so where it is recorded. The
+// first two are root-owned files whose content is compared by digest; the third
+// reads a file the agent owns and can rewrite at will, so it is a drift detector
+// in the strictest sense — it answers "what is configured right now", never
+// "what is allowed".
+//
+// The helper is verified here rather than beside the session helper because it
+// exists only for what the settings ask of it: the settings name it as a hook,
+// so settings that were installed and a helper that was not is a guardrail with
+// a hole in the middle, and both halves belong in one check.
 func (claudeBackend) VerifyGuardrails(ctx context.Context, r backend.StepRunner) error {
 	if err := reconcileManagedSettings(ctx, r); err != nil {
+		return err
+	}
+	if err := reconcileWaitingMarkerHelper(ctx, r); err != nil {
 		return err
 	}
 	return reportMCPServers(ctx, r)
@@ -122,8 +130,14 @@ func reconcileManagedSettings(ctx context.Context, r backend.StepRunner) error {
 		return r.Fail(name, "could not read the managed settings digest", "verify "+managedSettingsPath+" on the guest")
 	}
 	if got[0] != wantHex {
+		// Two different things reach here and the operator has to be able to
+		// tell them apart: someone with root on the guest edited the file, or
+		// Torio's own embedded settings moved on and this box still carries the
+		// previous ones. Neither is repaired in place — a guardrail that rewrites
+		// itself is one whose changes nobody reviews — so both are answered the
+		// same way, by an operator who looks at the file and then removes it.
 		return r.Fail(name, "managed settings content has drifted from the version Torio installs",
-			"inspect "+managedSettingsPath+"; drift is reported, never repaired in place")
+			"inspect "+managedSettingsPath+"; if it is the previous version Torio shipped, remove it and re-run `torio vm bootstrap` to install the current one")
 	}
 	r.Record(name, true, "root:root "+mode+" sha256="+wantHex[:12])
 	return nil
