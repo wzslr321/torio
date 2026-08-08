@@ -38,10 +38,16 @@ type registryJSON struct {
 // Load's are: the path is caller-controlled and the document is operator-
 // authored.
 func LoadRegistry(path string) (_ []Project, _ bool, err error) {
+	return loadRegistry(path, true)
+}
+
+func loadRegistry(path string, checkParent bool) (_ []Project, _ bool, err error) {
 	defer func() { err = redactErr(err) }()
 
-	if err := statTrustedDirIfExists(filepath.Dir(path)); err != nil {
-		return nil, false, err
+	if checkParent {
+		if err := statTrustedDirIfExists(filepath.Dir(path)); err != nil {
+			return nil, false, err
+		}
 	}
 
 	f, err := openTrustedFile(path)
@@ -79,7 +85,7 @@ func LoadRegistry(path string) (_ []Project, _ bool, err error) {
 // abolished; merging two registries is not a decision this function can make
 // safely, and the file is left untouched either way.
 func ResolveRegistry(paths Paths) ([]Project, error) {
-	shared, present, err := LoadRegistry(paths.RegistryFile)
+	shared, present, err := loadRegistry(paths.RegistryFile, !paths.explicitConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -122,6 +128,16 @@ func legacyProjects(path string) (_ []Project, err error) {
 // Entries are sorted by ID before marshalling, so the same set of projects
 // always produces the same bytes regardless of the order they were attached in.
 func WriteRegistry(path string, projects []Project) (err error) {
+	return writeRegistry(path, projects, true)
+}
+
+// WriteRegistryForPaths persists the registry at paths.RegistryFile using the
+// same parent-directory trust rule as ResolveRegistry.
+func WriteRegistryForPaths(paths Paths, projects []Project) error {
+	return writeRegistry(paths.RegistryFile, projects, !paths.explicitConfig)
+}
+
+func writeRegistry(path string, projects []Project, checkParent bool) (err error) {
 	defer func() { err = redactErr(err) }()
 
 	out := slices.Clone(projects)
@@ -140,13 +156,15 @@ func WriteRegistry(path string, projects []Project) (err error) {
 	}
 	data = append(data, '\n')
 
-	if err := statTrustedDirIfExists(filepath.Dir(path)); err != nil {
-		return fmt.Errorf("config: trusted directory: %w", err)
+	if checkParent {
+		if err := statTrustedDirIfExists(filepath.Dir(path)); err != nil {
+			return fmt.Errorf("config: trusted directory: %w", err)
+		}
 	}
 	if err := writeFilePrivate(path, data); err != nil {
 		return err
 	}
-	return verifyPersistedRegistry(path, out)
+	return verifyPersistedRegistry(path, out, checkParent)
 }
 
 // verifyPersistedRegistry re-reads the document through the trusted read path
@@ -156,8 +174,8 @@ func WriteRegistry(path string, projects []Project) (err error) {
 //
 // A mismatch is reported, not repaired: the rename already happened, so the
 // operator decides what the file should contain.
-func verifyPersistedRegistry(path string, want []Project) error {
-	got, present, err := LoadRegistry(path)
+func verifyPersistedRegistry(path string, want []Project, checkParent bool) error {
+	got, present, err := loadRegistry(path, checkParent)
 	if err != nil {
 		return fmt.Errorf("config: read back written project registry: %w", err)
 	}
