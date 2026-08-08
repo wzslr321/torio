@@ -163,6 +163,7 @@ func TestCollectAdmitsCanvasOnlyAfterValidation(t *testing.T) {
 	writeFile(t, src, "board.canvas", `{"nodes":[],"edges":[]}`, 0o644)
 	writeFile(t, src, "fake.canvas", "not json at all", 0o644)
 	writeFile(t, src, "array.canvas", `["nodes"]`, 0o644)
+	writeFile(t, src, "object.canvas", `{"token":"not a canvas"}`, 0o644)
 
 	manifest, report, err := Collect(src, "")
 	if err != nil {
@@ -171,8 +172,8 @@ func TestCollectAdmitsCanvasOnlyAfterValidation(t *testing.T) {
 	if manifest.Files() != 1 || manifest.Entries[0].Path != "board.canvas" {
 		t.Fatalf("manifest = %#v, want only the valid canvas", manifest.Entries)
 	}
-	if report.Skipped[SkipInvalidCanvas] != 2 {
-		t.Fatalf("skipped invalid canvases = %d, want 2", report.Skipped[SkipInvalidCanvas])
+	if report.Skipped[SkipInvalidCanvas] != 3 {
+		t.Fatalf("skipped invalid canvases = %d, want 3", report.Skipped[SkipInvalidCanvas])
 	}
 	if report.Attachments != 1 {
 		t.Fatalf("attachments = %d, want 1", report.Attachments)

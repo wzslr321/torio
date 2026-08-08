@@ -263,7 +263,7 @@ func stageFile(root, dst, rel string) (Entry, error) {
 }
 
 // validCanvas reports whether path holds an Obsidian canvas: a single bounded
-// JSON object. The extension alone is not enough — `.canvas` is the one
+// JSON object with its required node and edge lists. The extension alone is not enough — `.canvas` is the one
 // allowlisted type whose payload Torio actually interprets, and admitting
 // arbitrary bytes under it would turn the allowlist into a bypass.
 func validCanvas(path string) (bool, error) {
@@ -279,11 +279,14 @@ func validCanvas(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	var board map[string]any
+	var board struct {
+		Nodes []json.RawMessage `json:"nodes"`
+		Edges []json.RawMessage `json:"edges"`
+	}
 	if err := json.Unmarshal(payload, &board); err != nil {
 		return false, nil
 	}
-	return true, nil
+	return board.Nodes != nil && board.Edges != nil, nil
 }
 
 // Digest is the content manifest hash: sha256 over one
