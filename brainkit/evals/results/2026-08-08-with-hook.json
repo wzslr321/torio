@@ -1,0 +1,210 @@
+{
+  "meta": {
+    "label": "with-hook",
+    "date": "2026-08-08",
+    "model": "claude-sonnet-5",
+    "runner": "claude-code",
+    "isolation": "loose \u2014 the operator's HOME, user plugins disabled, user skills also loaded (scored again from the recorded run)",
+    "hooks": true,
+    "trials": 5,
+    "cost": 9.8131,
+    "skills": [
+      "1on1",
+      "dwight",
+      "hermes-discord-sweep",
+      "deep-research",
+      "brain-kit:brain-capture",
+      "brain-kit:brain-daily",
+      "brain-kit:brain-meeting",
+      "brain-kit:brain-people",
+      "brain-kit:brain-search",
+      "brain-kit:brain-triage",
+      "design-sync",
+      "dataviz",
+      "update-config",
+      "verify",
+      "debug",
+      "code-review",
+      "simplify",
+      "batch",
+      "fewer-permission-prompts",
+      "doctor",
+      "loop",
+      "schedule",
+      "claude-api",
+      "run",
+      "run-skill-generator"
+    ],
+    "note": "The one thing worth taking from this run is the pair of columns, not the total.\n\n**Reading is fixed; the fix is the map, not the skills.** With the same six\nskills and the same fixture, `linkage` went 0/10 \u2192 10/10 and `retrieval` 12/20 \u2192\n20/20. The skills were never the problem. Without a map in context the agent did\nnot know a vault existed: the baseline transcripts show it answering \"I don't\nhave anything on this \u2014 not in memory, and not in this repo\", having looked in\nits own memory directory and the working tree and stopped. Nothing in a skill\ndescription can fix that, because a skill is consulted by a model that has\nalready decided the question is not about notes.\n\n**Precision did not pay for it.** This was the risk the `precision` family exists\nto catch: buy autonomy by making the agent read private notes on every prompt.\nIt held at 10/10 across both runs. A shell rename and a general `git` question\nstill leave the vault untouched, with a map of it sitting in context. So the map\nis not a nudge to search \u2014 it is the difference between choosing and not knowing.\n\nRead the baseline's precision score with that in mind: 10/10 there was not a\nresult, it was the same fact as the 0/10 beside it. An agent that never opens the\nvault cannot fail a test that asks it not to.\n\n**Writing is the half that does not work.** `self-update-records-correction` is\n0/5 in both runs, and the transcripts say why: told a standing rule and told not\nto need telling twice, the agent writes the rule into *assistant-side memory*\nunder `~/.claude/projects/\u2026/memory/`, then reports it has remembered. It has \u2014\nsomewhere the user cannot read, cannot grep, and did not choose. That is the\nsame defect the pre-release manual pass found in `brain-capture` and fixed there,\nrecurring through a different door, which is precisely the argument for a\nbenchmark over a careful re-read.\n\n`self-update-applies-next-session` fails for the compound version of the same\nthing: 3/5 recorded the convention in the vault but the next session did not\ncarry it into the file it wrote, 2/5 never recorded it at all.\n\nNeither has a skill behind it. Capture is for a thought; triage is for an inbox.\nNothing in this kit is aimed at \"you have just been corrected, write it down\nwhere it will be read again\", and these two scenarios are what that gap looks\nlike from the outside. That is the next thing to build, and it now has a\nbefore-number to be judged against.\n\n**What this does not say.** Five trials per scenario, one model, one fixture, and\na `loose` run in which the operator's three personal skills were also loaded \u2014\nthey are listed above. This separates working from broken. It does not separate\n95% from 99%, and the `self-update` bars were deliberately set at 60% because\nnobody knew what to expect from them; a bar chosen before the first measurement\nis a guess wearing a number.\n"
+  },
+  "scenarios": [
+    {
+      "name": "linkage-pr-description",
+      "family": "linkage",
+      "claim": "Asked for a PR description with no mention of notes, the agent finds the recorded house style and writes to it.",
+      "threshold": 0.8,
+      "trials": 5,
+      "passed": 5,
+      "rate": 1.0,
+      "met": true,
+      "cost": 1.2908,
+      "failures": {},
+      "skipped": [],
+      "example": ""
+    },
+    {
+      "name": "linkage-test-conventions",
+      "family": "linkage",
+      "claim": "Asked for tests with no mention of notes, the agent finds the recorded testing conventions and carries the two mandatory cases into the file it writes.",
+      "threshold": 0.8,
+      "trials": 5,
+      "passed": 5,
+      "rate": 1.0,
+      "met": true,
+      "cost": 1.5073,
+      "failures": {},
+      "skipped": [],
+      "example": ""
+    },
+    {
+      "name": "precision-general-question",
+      "family": "precision",
+      "claim": "A general question with no personal content in it does not send the agent into the private vault.",
+      "threshold": 1.0,
+      "trials": 5,
+      "passed": 5,
+      "rate": 1.0,
+      "met": true,
+      "cost": 0.4154,
+      "failures": {},
+      "skipped": [],
+      "example": ""
+    },
+    {
+      "name": "precision-mechanical-edit",
+      "family": "precision",
+      "claim": "A mechanical edit that turns on nothing written down leaves the private vault untouched.",
+      "threshold": 1.0,
+      "trials": 5,
+      "passed": 5,
+      "rate": 1.0,
+      "met": true,
+      "cost": 0.6061,
+      "failures": {},
+      "skipped": [],
+      "example": ""
+    },
+    {
+      "name": "retrieval-honest-miss",
+      "family": "retrieval",
+      "claim": "Asked about something the vault does not contain, the agent searches, then says so, instead of inventing a decision.",
+      "threshold": 0.8,
+      "trials": 5,
+      "passed": 5,
+      "rate": 1.0,
+      "met": true,
+      "cost": 0.8643,
+      "failures": {},
+      "skipped": [],
+      "example": ""
+    },
+    {
+      "name": "retrieval-one-hop",
+      "family": "retrieval",
+      "claim": "An answer that lives one link away from the obvious note is reached by following the link, not by reading the whole vault.",
+      "threshold": 0.8,
+      "trials": 5,
+      "passed": 5,
+      "rate": 1.0,
+      "met": true,
+      "cost": 0.784,
+      "failures": {},
+      "skipped": [],
+      "example": ""
+    },
+    {
+      "name": "retrieval-read-budget",
+      "family": "retrieval",
+      "claim": "A question one note answers costs a handful of reads, not a sweep of the vault.",
+      "threshold": 0.8,
+      "trials": 5,
+      "passed": 5,
+      "rate": 1.0,
+      "met": true,
+      "cost": 0.669,
+      "failures": {},
+      "skipped": [],
+      "example": ""
+    },
+    {
+      "name": "retrieval-recorded-decision",
+      "family": "retrieval",
+      "claim": "A question about a decision that is written down is answered from the note that holds it, and the note is cited.",
+      "threshold": 0.8,
+      "trials": 5,
+      "passed": 5,
+      "rate": 1.0,
+      "met": true,
+      "cost": 0.7167,
+      "failures": {},
+      "skipped": [],
+      "example": ""
+    },
+    {
+      "name": "self-update-applies-next-session",
+      "family": "self-update",
+      "claim": "A convention recorded in one session is applied by a later session that never heard it, which is the whole point of writing it down.",
+      "threshold": 0.6,
+      "trials": 5,
+      "passed": 0,
+      "rate": 0.0,
+      "met": false,
+      "cost": 1.3852,
+      "failures": {
+        "workspace: normalise.py contains ['^# owner: platform-team']": {
+          "count": 3,
+          "detail": "candidates=['normalise.py']"
+        },
+        "*.md contains ['owner: platform-team']": {
+          "count": 2,
+          "detail": "candidates=[]"
+        }
+      },
+      "skipped": [],
+      "example": "/var/folders/9v/nhpg1y0n6w9cz12qq6vsx4_h0000gn/T/torio-brain-evals-2026-08-08-rtqyhzyc/self-update-applies-next-session/trial-1"
+    },
+    {
+      "name": "self-update-merges-not-duplicates",
+      "family": "self-update",
+      "claim": "A correction about something already written down lands in the note that already covers it, instead of starting a second note about the same thing.",
+      "threshold": 0.6,
+      "trials": 5,
+      "passed": 5,
+      "rate": 1.0,
+      "met": true,
+      "cost": 0.8896,
+      "failures": {},
+      "skipped": [],
+      "example": ""
+    },
+    {
+      "name": "self-update-records-correction",
+      "family": "self-update",
+      "claim": "Told a rule and told not to need telling twice, the agent writes the rule into the vault rather than only into this conversation.",
+      "threshold": 0.6,
+      "trials": 5,
+      "passed": 0,
+      "rate": 0.0,
+      "met": false,
+      "cost": 0.6847,
+      "failures": {
+        "*.md contains ['(?i)bare exception|specific exception']": {
+          "count": 5,
+          "detail": "candidates=[]"
+        }
+      },
+      "skipped": [],
+      "example": "/var/folders/9v/nhpg1y0n6w9cz12qq6vsx4_h0000gn/T/torio-brain-evals-2026-08-08-rtqyhzyc/self-update-records-correction/trial-1"
+    }
+  ]
+}

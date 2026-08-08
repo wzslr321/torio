@@ -4,7 +4,7 @@
     "date": "2026-08-08",
     "model": "claude-sonnet-5",
     "runner": "claude-code",
-    "isolation": "replayed from a recorded run",
+    "isolation": "loose \u2014 the operator's HOME, user plugins disabled, user skills also loaded (scored again from the recorded run)",
     "hooks": false,
     "trials": 5,
     "cost": 10.696,
@@ -34,7 +34,8 @@
       "claude-api",
       "run",
       "run-skill-generator"
-    ]
+    ],
+    "note": "This is the kit as it shipped: six skills, no map of the vault in context. It is\nthe number the next change is measured against, and it is worth reading in one\nspecific way.\n\n**The `precision` column is not a result here.** 10/10 looks like the agent\ncarefully declining to open the vault when a task does not call for it. The\ntranscripts say otherwise: it never opened the vault at any point, in any\nscenario, unless the prompt said the word \"notes\". Asked to write a pull request\ndescription in a repository whose vault records the exact three headings the\nhouse style requires, it wrote its own headings and never looked. Asked how the\nguest image is pinned \u2014 a decision written down in that vault \u2014 four runs in five\nanswered \"I don't have anything on this, not in memory and not in this repo\".\n\nSo `precision` 10/10 and `linkage` 0/10 are one fact seen twice. An agent that\ndoes not know a vault exists passes every test that asks it to leave the vault\nalone, and that is not the property those tests were written to find.\n\n**What the skills do have** is discipline once they are engaged. Where the prompt\nnamed the vault, retrieval was targeted and honest: `retrieval-one-hop` and\n`retrieval-read-budget` are 5/5, meaning the right note was found by following a\nlink rather than by reading the tree, and inside a read budget. The retrieval\nskill is good. It is simply not consulted.\n\n**The writing half fails outright**, and separately from all of that:\n`self-update-records-correction` is 0/5 because a standing rule the user states\ngoes into assistant-side memory rather than the user's vault.\n\nThe run that follows this one adds the session-start vault map and changes only\nthat.\n"
   },
   "scenarios": [
     {

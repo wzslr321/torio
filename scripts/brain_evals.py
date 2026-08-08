@@ -858,6 +858,30 @@ def render(summaries: list[dict], meta: dict, baseline: dict | None) -> str:
 # --------------------------------------------------------------------------
 
 
+def sweep_agent_memory(run_root: Path) -> int:
+    """Remove the per-project memory the agent wrote for this run's directories.
+
+    Under loose isolation the agent runs as the operator, so anything it decides
+    to remember lands in the operator's own configuration — one directory per
+    trial working directory, which is dozens per run. The benchmark found that
+    the hard way: a scenario asking the agent to record a standing rule showed it
+    writing that rule into assistant-side memory rather than the user's vault,
+    which is a finding about the kit *and* a mess this leaves behind.
+
+    Only paths carrying this run's unique directory name are removed, so nothing
+    the operator kept is in scope.
+    """
+    projects = Path(os.path.expanduser("~/.claude/projects"))
+    if not projects.is_dir():
+        return 0
+    removed = 0
+    for path in projects.glob(f"*{run_root.name}*"):
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+            removed += 1
+    return removed
+
+
 def stage_kit(destination: Path, hooks: bool) -> Path:
     """A copy of the kit, so a run measures a stated variant rather than the tree.
 
@@ -956,7 +980,20 @@ def main() -> int:
             print(f"nothing to replay under {run_root}", file=sys.stderr)
             return 2
         args.trials = max(len(v) for v in results.values() if v)
-        isolation = "replayed from a recorded run"
+        # The isolation is a property of the sample, not of the scoring, so it
+        # is carried over from the run rather than described as "replayed".
+        # Losing it would let a report understate what was in the room.
+        # A missing record means unknown, and unknown is written down as
+        # unknown. Falling back to the flags on this invocation is how a report
+        # ends up calling a `loose` sample `strict` — the default of a flag
+        # nobody passed is not evidence about a run that happened yesterday.
+        if "isolation" not in recorded:
+            isolation = "not recorded by that run, so unknown here"
+        elif recorded["isolation"] == "strict":
+            isolation = "strict — isolated HOME, only the kit was loaded"
+        else:
+            isolation = "loose — the operator's HOME, user plugins disabled, user skills also loaded"
+        isolation += " (scored again from the recorded run)"
     else:
         run_root = Path(tempfile.mkdtemp(prefix=f"torio-brain-evals-{date}-"))
         runner = ClaudeCodeRunner(
@@ -985,6 +1022,11 @@ def main() -> int:
                 mark = "pass" if trial.passed else "FAIL"
                 note = f" ({trial.error})" if trial.error else ""
                 print(f"  {mark:<4} {scenario['name']} trial {index + 1}{note}", flush=True)
+
+        if args.isolation == "loose":
+            swept = sweep_agent_memory(run_root)
+            if swept:
+                print(f"\nswept {swept} per-project memory directories this run left in your ~/.claude")
 
     summaries = [summarise(s, sorted(results[s["name"]], key=lambda t: t.index)) for s in scenarios]
     environment = next((t.environment for ts in results.values() for t in ts if t.environment), {})

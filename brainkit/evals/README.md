@@ -91,6 +91,19 @@ Comparing two runs:
 python3 scripts/brain_evals.py --baseline results/2026-08-08-baseline.json --label with-hook
 ```
 
+## What has been measured
+
+| Run | Overall | What it showed |
+| --- | --- | --- |
+| [2026-08-08, skills only](results/2026-08-08-baseline.md) | 24/55 | The retrieval skill is good and almost never consulted. Without a map of the vault in context the agent did not know one existed, so `linkage` scored 0/10 — and `precision` scored 10/10 for the same reason, not a different one. |
+| [2026-08-08, with the vault map](results/2026-08-08-with-hook.md) | 45/55 | Same skills, same fixture, one hook: `linkage` 0/10 → 10/10 and `retrieval` 12/20 → 20/20, with `precision` unchanged at 10/10. Autonomy did not cost privacy. Writing is still the broken half. |
+
+The open finding both runs agree on: told a standing rule, the agent records it
+in assistant-side memory rather than the user's vault — somewhere the user
+cannot read, cannot grep, and did not choose. That is the same defect the
+pre-release manual pass found in `brain-capture`, arriving through a different
+door, and it is why this directory exists.
+
 ## The families
 
 | Family | Asks |
