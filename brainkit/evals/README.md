@@ -20,8 +20,16 @@ make brain-evals ARGS="--family precision --trials 3"
 python3 scripts/brain_evals.py --dry-run   # validate scenarios, spend nothing
 ```
 
-A run costs real money, because it drives a real agent. `--dry-run` is free and
-is the right first move after editing a scenario.
+A run drives a real agent, so it spends real tokens. What it spends them *from*
+depends on how you are authenticated: with `ANTHROPIC_API_KEY` set, an API
+account is billed; on a Claude subscription, the run draws against that plan's
+usage and nothing is billed.
+
+Reports state token spend valued at API list prices, because that is the number
+the agent reports and the only one comparable between runs. On a subscription it
+is a valuation, not an invoice — read it as "this run was worth about that much
+of my usage". `--dry-run` spends nothing and is the right first move after
+editing a scenario.
 
 ### Scoring a finished run again
 

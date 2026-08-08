@@ -787,7 +787,14 @@ def render(summaries: list[dict], meta: dict, baseline: dict | None) -> str:
     lines.append(f"- Runner: `{meta['runner']}`, isolation {meta['isolation']}")
     lines.append(f"- Kit hooks: {'installed' if meta['hooks'] else 'removed for this run'}")
     lines.append(f"- Trials per scenario: {meta['trials']}")
-    lines.append(f"- Cost: ${meta['cost']:.2f}")
+    # Not "cost". The agent reports what these tokens would list for on the API,
+    # and a run authenticated with a subscription is not billed that — it spends
+    # usage. Calling the estimate a cost reads as an invoice, which is a thing
+    # this report has no business implying.
+    lines.append(f"- Token spend, valued at API list prices: ${meta['cost']:.2f}. "
+                 "On a subscription this is not an amount billed; it is what the "
+                 "tokens would have cost through the API, and what the run drew "
+                 "against the plan's usage.")
     lines.append("")
     lines.append(
         "A rate is a fraction of trials, not a probability. "
@@ -1056,7 +1063,8 @@ def main() -> int:
 
     missed = [s["name"] for s in summaries if not s["met"]]
     print(f"\nreport: {out}")
-    print(f"cost:   ${meta['cost']:.2f}")
+    print(f"tokens: ${meta['cost']:.2f} at API list prices "
+          f"({'billed' if os.environ.get('ANTHROPIC_API_KEY') else 'drawn against subscription usage, not billed'})")
     if missed:
         print(f"missed the bar: {', '.join(missed)}")
     return 1 if missed else 0

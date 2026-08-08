@@ -375,6 +375,14 @@ class Rendering(unittest.TestCase):
     def test_a_report_refuses_to_call_a_fraction_a_probability(self) -> None:
         self.assertIn("not a probability", be.render([self.summary()], self.meta(), None))
 
+    def test_a_report_does_not_present_a_token_valuation_as_a_bill(self) -> None:
+        # A subscription run is not billed the API list price of its tokens.
+        # Labelling the estimate "cost" reads as an invoice, and a report has no
+        # business implying one.
+        text = be.render([self.summary()], self.meta(), None)
+        self.assertIn("not an amount billed", text)
+        self.assertNotIn("- Cost:", text)
+
     def test_failures_carry_their_first_observation(self) -> None:
         summary = self.summary(
             passed=1, met=False,
