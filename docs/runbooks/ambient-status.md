@@ -14,7 +14,17 @@ Read that before writing a recipe of your own, above all the part about `state`:
 a field with `"state": "unknown"` still carries a `false` beside it, and a recipe
 that reads the `false` will tell you an agent is fine when nobody could reach it.
 
-## A tmux status line
+Every recipe below calls `torio` by name and assumes the one on your `PATH` is
+this build. Check before you debug the recipe — an older `torio` has no `status`
+subcommand, exits 2, and every one of these renders as an empty string with no
+error anywhere you would look:
+
+```console
+$ torio status >/dev/null && echo ok
+ok
+```
+
+## The one line every recipe shares
 
 ```jq
 # ~/.config/torio/status.jq
@@ -27,13 +37,7 @@ def cell:
 [ .data.instances[] | cell ] | join("  │  ")
 ```
 
-```tmux
-# ~/.tmux.conf
-set -g status-interval 15
-set -g status-right "#(torio status --json | jq -rf ~/.config/torio/status.jq)"
-```
-
-Which on a two-box host reads:
+Which on a two-box host renders:
 
 ```text
 torio —  │  torio-claude-code NEEDS YOU
@@ -43,26 +47,71 @@ The `—` is Hermes reporting that a session is not a thing it has, not a box wi
 nothing running. Keeping the two apart is the point of the glyph; if you collapse
 them into `0` you will eventually read a box you cannot see into as quiet.
 
+Where that line goes depends on what you run. A terminal with a status bar of
+its own — tmux, zellij, a multiplexer — has somewhere to put it. A terminal
+without one does not, and the prompt is the only always-visible surface you
+have; use the zsh recipe below, not the tmux one.
+
+## In tmux
+
+```tmux
+# ~/.tmux.conf
+set -g status-interval 15
+set -g status-right-length 80
+set -g status-right "#(torio status --json | jq -rf ~/.config/torio/status.jq)"
+```
+
+`status-right-length` is not optional decoration: tmux truncates the right-hand
+status at forty characters by default, and two boxes already exceed that — the
+end of the line, which is where the second box's state is, disappears without
+saying so.
+
 Fifteen seconds is a reasonable interval. The poll costs one host-side
 `limactl list` plus a handful of small guest commands per running box, and takes
 well under a second on two boxes — but it is a poll, so pick an interval you are
 happy running forever rather than the smallest one that works.
 
-## A shell prompt segment
+## In the prompt, with no multiplexer
 
-Same document, shorter output. This one prints nothing at all when nothing wants
-you, so the prompt stays quiet on a normal day:
+A bare terminal has no status bar, so the prompt is the surface. The catch is
+that a prompt is rendered synchronously: a command in it stalls the shell for as
+long as it runs, and this one enters VMs.
 
-```bash
-torio_waiting() {
-  torio status --json 2>/dev/null \
-    | jq -r '[.data.instances[] | select(.waiting.state=="known" and .waiting.waiting) | .instance] | join(" ")'
+So it does not run in the prompt. It runs after each command, in the background,
+into a file the prompt reads — the prompt shows the state as of your last
+command and never waits for anything:
+
+```zsh
+# ~/.zshrc
+TORIO_STATUS_CACHE=${TMPDIR:-/tmp}/torio-status.txt
+
+torio_status_refresh() {
+  ( torio status --json 2>/dev/null \
+      | jq -rf ~/.config/torio/status.jq > "$TORIO_STATUS_CACHE.tmp" 2>/dev/null \
+      && mv -f "$TORIO_STATUS_CACHE.tmp" "$TORIO_STATUS_CACHE" ) &!
 }
+autoload -Uz add-zsh-hook
+add-zsh-hook precmd torio_status_refresh
+
+RPROMPT='%F{244}$(cat "$TORIO_STATUS_CACHE" 2>/dev/null)%f'
 ```
 
-A prompt runs this on every command, so put it behind a cache if your boxes are
-many or your machine is busy — a file written by the tmux poll above, read by the
-prompt, is enough.
+`&!` is zsh for "run it detached and do not report on it", which is what keeps a
+slow poll from printing a job notice into your prompt. The rename is what keeps
+the prompt from ever reading a half-written line.
+
+If you would rather see nothing on a quiet day, swap the jq file for the shorter
+question — which boxes want you — and let the prompt stay empty the rest of the
+time:
+
+```zsh
+RPROMPT='%F{214}$(cat "$TORIO_STATUS_CACHE" 2>/dev/null)%f'
+```
+
+```jq
+# ~/.config/torio/waiting.jq
+[ .data.instances[] | select(.waiting.state == "known" and .waiting.waiting) | .instance ] | join(" ")
+```
 
 ## Being told, rather than looking
 
