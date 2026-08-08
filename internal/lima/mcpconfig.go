@@ -36,7 +36,7 @@ const mcpServersKey = "mcp_servers"
 // realistic cause, which is a config that drifted or an `hermes mcp add` run by
 // hand, not an adversary composing a parser differential.
 func (a *Adapter) verifyHermesMCPServers(ctx context.Context, rep *MCPBrokerReport) error {
-	const name = "hermes_mcp_servers"
+	const name = hermesMCPServersCheck
 
 	st, kind, err := a.statPath(ctx, rep, name, HermesConfigPath)
 	if err != nil {

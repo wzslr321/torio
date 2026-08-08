@@ -31,7 +31,7 @@ const credentialPath = ProfilePath + "/.credentials.json"
 // this grant belongs to the box and can be revoked without touching the
 // operator's own.
 func (claudeBackend) ProbeAuth(ctx context.Context, r backend.StepRunner) error {
-	const name = "claude_auth"
+	const name = authCheck
 	res, err := r.Probe(ctx, name, "sudo", "-n", "-u", User, "--", "test", "-s", credentialPath)
 	if err != nil {
 		return err

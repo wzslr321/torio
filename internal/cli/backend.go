@@ -68,9 +68,13 @@ type backendStatusData struct {
 	Backend string `json:"backend"`
 	User    string `json:"user"`
 	Version string `json:"version"`
-	// Credentials is "present", "absent" or "not-applicable" — the last for a
-	// backend Torio has no offline way to ask, which is a different answer from
-	// "absent" and must not be rendered as one.
+	// Credentials is "present", "absent", "not-applicable" or "unknown".
+	//
+	// "not-applicable" is for a backend that declares no auth check, which is a
+	// different answer from "absent" and must not be rendered as one.
+	// "unknown" is for a backend that declares one whose result is missing from
+	// the report: Torio had a way to ask and has no answer, which is not the
+	// same as having no way to ask.
 	Credentials string `json:"credentials"`
 	// The capabilities the backend declares. They are reported even when false,
 	// because "this backend has no service" is the answer to a question
@@ -86,15 +90,21 @@ type backendStatusData struct {
 
 func (a *app) emitBackendStatus(rep lima.BootstrapReport) error {
 	id := a.backend.Identity()
+	// The check names come from the backend. They were once built by appending
+	// to the registered name, which read one backend's report correctly and
+	// silently missed the other's entirely.
+	checks := a.backend.StatusChecks()
+	version, _ := checkDetail(rep, checks.Version)
+	mcpServers, _ := checkDetail(rep, checks.MCPServers)
 	data := backendStatusData{
 		Backend:          id.Name,
 		User:             id.GuestUser,
-		Version:          checkDetail(rep, id.Name+"_version"),
-		Credentials:      credentialState(checkDetail(rep, id.Name+"_auth")),
+		Version:          version,
+		Credentials:      credentialState(rep, checks.Auth),
 		RegistryDeclared: a.backend.Registry() != nil,
 		ServiceDeclared:  a.backend.Service() != nil,
 		SessionDeclared:  a.backend.Session() != nil,
-		MCPServers:       checkDetail(rep, id.Name+"_mcp_servers"),
+		MCPServers:       mcpServers,
 	}
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("backend.status", data))
@@ -115,25 +125,39 @@ func (a *app) emitBackendStatus(rep lima.BootstrapReport) error {
 	return nil
 }
 
-// checkDetail returns the recorded detail of one bootstrap check, empty when
-// the backend recorded no such check. An absent check is not a failure here:
-// a backend records only what it actually has.
-func checkDetail(rep lima.BootstrapReport, name string) string {
+// checkDetail returns the recorded detail of one bootstrap check and whether
+// the check is in the report at all. The two are separate answers: a check that
+// recorded an empty detail and a check that never ran are the same string and
+// must not become the same claim. An unnamed check is never found.
+func checkDetail(rep lima.BootstrapReport, name string) (string, bool) {
+	if name == "" {
+		return "", false
+	}
 	for _, c := range rep.Checks {
 		if c.Name == name {
-			return c.Detail
+			return c.Detail, true
 		}
 	}
-	return ""
+	return "", false
 }
 
-// credentialState renders the auth probe's detail as one of three answers.
-// "not-applicable" is deliberately distinct from "absent": a backend Torio has
-// no offline way to ask about has not been found to be logged out.
-func credentialState(detail string) string {
-	switch {
-	case detail == "":
+// credentialState renders the auth check as one of four answers, each of which
+// says something different about what Torio actually did.
+//
+// "not-applicable" means the backend declares no auth check — there was no way
+// to ask. "unknown" means it declares one and the report has no result for it —
+// there was a way to ask and no answer came back. Collapsing the second into
+// the first is how a box that holds a credential comes to report that its state
+// is unknowable, and collapsing either into "absent" claims a logged-out box on
+// no evidence.
+func credentialState(rep lima.BootstrapReport, name string) string {
+	if name == "" {
 		return "not-applicable"
+	}
+	detail, found := checkDetail(rep, name)
+	switch {
+	case !found:
+		return "unknown"
 	case len(detail) >= 7 && detail[:7] == "credent" && contains(detail, "present"):
 		return "present"
 	default:

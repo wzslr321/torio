@@ -136,6 +136,10 @@ type Backend interface {
 	// Session is the backend's interactive session, nil when it declares none.
 	Session() *SessionSpec
 
+	// StatusChecks names the bootstrap checks `torio backend status` reads
+	// back out of the report.
+	StatusChecks() StatusChecks
+
 	// BrainSkill is where this backend discovers skills, so Torio can install
 	// the vault's retrieval skill somewhere the agent will actually find it.
 	BrainSkill() BrainSkill
@@ -145,6 +149,32 @@ type Backend interface {
 	// runs as root on every boot, so every step must be idempotent, and it is
 	// the only place a backend shapes the guest before bootstrap can verify it.
 	ProvisionScript() string
+}
+
+// StatusChecks names the bootstrap checks the status renderer reads back. A
+// backend declares them because a check name belongs to the steps that record
+// it, and is not derivable from the name the backend is registered under.
+//
+// Deriving it was tried and was wrong in the way that matters. The renderer
+// built `<identity name>_auth`, which happened to be what the first backend
+// called its check and was not what the second one called anything — so a box
+// that had proven it held a credential reported that nobody could ask. That is
+// the failure this contract exists to prevent, arriving through the reporting
+// layer instead of through a probe.
+//
+// An empty name is a declaration, not a gap, exactly as a nil Registry is: the
+// backend records no such check. The renderer must say so rather than read an
+// absent check as a negative answer.
+type StatusChecks struct {
+	// Version is the check whose detail is the installed version.
+	Version string
+	// Auth is the check whose detail answers whether a credential is held.
+	// Empty when the backend has no offline way to ask, which is reported as
+	// not-applicable and never as logged out.
+	Auth string
+	// MCPServers is the check listing the configured MCP servers by name.
+	// Empty when the backend is not an MCP client.
+	MCPServers string
 }
 
 // Transport is the one-shot guest command channel a capability surface uses.

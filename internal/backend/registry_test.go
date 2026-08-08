@@ -24,6 +24,7 @@ func (stub) Service() *ServiceSpec                              { return nil }
 func (stub) Session() *SessionSpec                              { return nil }
 func (stub) ProvisionScript() string                            { return "" }
 func (stub) BrainSkill() BrainSkill                             { return BrainSkill{} }
+func (stub) StatusChecks() StatusChecks                         { return StatusChecks{} }
 
 // TestLookupEmptyNameResolvesTheDefault pins the compatibility rule: a config
 // document written before instances declared a backend names none, and such an

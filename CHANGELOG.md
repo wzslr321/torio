@@ -84,6 +84,24 @@
 
 ### Fixed
 
+- `backend status` reported a Claude Code box's credential as **not-applicable**
+  — the answer that means Torio has no way to ask — on a box whose auth probe
+  had run and found one. The renderer built its lookup key by appending `_auth`
+  to the name the backend is registered under, which happened to be what the
+  first backend called its check and matched nothing on the second, so the
+  version and the MCP server list went missing the same way and `vm bootstrap`
+  never told an unauthenticated operator to log in. A backend now *declares*
+  the checks the report is read by. The credential answer gained a fourth
+  state, **unknown**, for a check that was declared and produced no result:
+  having no way to ask and getting no answer are different facts, and both are
+  different from being logged out.
+- `backend login` opened Claude Code in the operator's home directory. `sudo -H`
+  sets `HOME` and leaves the working directory inherited from the ssh session,
+  and the agent identity is deliberately unable to traverse that directory —
+  so the first thing an operator saw was the agent reporting two unreadable
+  settings files and offering to repair them, on a box where nothing was wrong.
+  The session now starts in the agent's own home, chosen after `sudo` so it does
+  not depend on the operator reaching that directory either.
 - `vm bootstrap` could never succeed on a Claude Code instance. Its no-sudo
   proof required `sudo -n -l -U claude` to exit 1, and sudo 1.9.15 exits 0 for
   that query whether the identity may run everything or nothing — the answer is

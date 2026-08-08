@@ -30,10 +30,17 @@ yours. Torio sees none of the flow — it builds the transport and hands over th
 terminal. No SSH agent is forwarded, so a login session cannot reach a Git
 remote.
 
-`status` answers three states for the credential, and the third is not a
-softened second: **present**, **absent**, and **not-applicable** for a backend
-Torio has no offline way to ask. A backend it cannot ask has not been found to
-be logged out.
+`status` answers four states for the credential, and only two of them are
+findings. **present** and **absent** are what a probe returned.
+**not-applicable** is for a backend that declares no credential check at all,
+and **unknown** is for one that declares a check whose result is missing from
+the report.
+
+The distinctions are the point. A backend Torio cannot ask has not been found to
+be logged out, and a backend Torio could ask but did not hear back from has not
+been found to be unaskable. Each of the last two is one command's worth of
+difference for an operator, and collapsing them is how a box that holds a
+credential comes to report that its state is unknowable.
 
 For a backend that is a native MCP client, `status` also lists the MCP servers
 the guest is configured with, by name. Read that as what is configured, never as

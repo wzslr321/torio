@@ -46,6 +46,24 @@ func (hermesBackend) Identity() backend.Identity {
 
 func (hermesBackend) RequiredPaths() []backend.PathSpec { return bootstrapRequiredPaths }
 
+// The names of the checks the status renderer reads back, as constants shared
+// with the steps that record them.
+const (
+	hermesVersionCheck    = "hermes_version"
+	hermesMCPServersCheck = "hermes_mcp_servers"
+)
+
+// StatusChecks declares no auth check, because ProbeAuth has nothing to report:
+// Hermes takes its provider credential from the operator's own session rather
+// than holding one. That is why the renderer answers not-applicable here, and
+// the answer is a declaration rather than a check that came back empty.
+func (hermesBackend) StatusChecks() backend.StatusChecks {
+	return backend.StatusChecks{
+		Version:    hermesVersionCheck,
+		MCPServers: hermesMCPServersCheck,
+	}
+}
+
 // VerifyIdentity proves the dedicated non-root service user exists.
 func (hermesBackend) VerifyIdentity(ctx context.Context, r backend.StepRunner) error {
 	const name = "hermes_user"
@@ -238,7 +256,7 @@ func (hermesBackend) reconcileShim(ctx context.Context, r backend.StepRunner) er
 // hermes user, via the bare `hermes` name resolved by the shim on sudo's
 // secure_path.
 func (hermesBackend) VerifyVersion(ctx context.Context, r backend.StepRunner) error {
-	const name = "hermes_version"
+	const name = hermesVersionCheck
 	res, err := r.Probe(ctx, name, "sudo", "-n", "-u", HermesUser, "--", "hermes", "--version")
 	if err != nil {
 		return err

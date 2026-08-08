@@ -54,6 +54,16 @@ const (
 	WorkspacePath = "/home/claude/projects"
 )
 
+// The names of the checks `torio backend status` reads back. They are
+// constants rather than literals repeated at each site so that the name a step
+// records and the name the renderer looks up cannot drift apart — which is the
+// only way the report can claim a credential state nobody probed.
+const (
+	versionCheck    = "claude_version"
+	authCheck       = "claude_auth"
+	mcpServersCheck = "claude_mcp_servers"
+)
+
 func (claudeBackend) Identity() backend.Identity {
 	return backend.Identity{
 		Name:          "claude-code",
@@ -132,6 +142,17 @@ func (claudeBackend) Registry() backend.ProjectRegistry { return nil }
 // absent service as an unready one would teach an operator to ignore the state
 // that means a real backend has died.
 func (claudeBackend) Service() *backend.ServiceSpec { return nil }
+
+// StatusChecks names this backend's own checks. They are prefixed with the
+// guest identity rather than with the registered name `claude-code`, and the
+// renderer is told which is which instead of guessing.
+func (claudeBackend) StatusChecks() backend.StatusChecks {
+	return backend.StatusChecks{
+		Version:    versionCheck,
+		Auth:       authCheck,
+		MCPServers: mcpServersCheck,
+	}
+}
 
 func (claudeBackend) Session() *backend.SessionSpec {
 	return &backend.SessionSpec{

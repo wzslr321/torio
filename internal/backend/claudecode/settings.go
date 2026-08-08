@@ -172,7 +172,7 @@ const mcpConfigPath = Home + "/.claude.json"
 // and revoke at the provider. It never fails a bootstrap: what it finds is a
 // fact about the box, not a defect in it.
 func reportMCPServers(ctx context.Context, r backend.StepRunner) error {
-	const name = "claude_mcp_servers"
+	const name = mcpServersCheck
 	res, err := r.Probe(ctx, name, "sudo", "-n", "-u", User, "--",
 		"test", "-f", mcpConfigPath)
 	if err != nil {

@@ -250,7 +250,7 @@ func manifestChecksum(doc []byte, platform string) (string, error) {
 // Equality, not containment: the pin exists so that what runs is knowable, and
 // "the output mentioned the version somewhere" is a weaker claim than it looks.
 func (claudeBackend) VerifyVersion(ctx context.Context, r backend.StepRunner) error {
-	const name = "claude_version"
+	const name = versionCheck
 	res, err := r.Probe(ctx, name, "sudo", "-n", "-u", User, "-H", "--", "claude", "--version")
 	if err != nil {
 		return err

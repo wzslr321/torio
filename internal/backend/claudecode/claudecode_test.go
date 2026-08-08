@@ -157,7 +157,7 @@ func TestAgentSessionHelperRunsAFixedCommandAsTheAgent(t *testing.T) {
 // helper: a helper exists to stop a host-composed value from becoming a remote
 // command, and there is no such value here.
 func TestLoginArgvCarriesNoCallerInput(t *testing.T) {
-	want := []string{"sudo", "-n", "-u", User, "-H", "--", commandPath}
+	want := []string{"sudo", "-n", "-u", User, "-H", "--", "env", "--chdir=" + Home, "--", commandPath}
 	got := loginArgv()
 	if len(got) != len(want) {
 		t.Fatalf("loginArgv() = %v, want %v", got, want)
@@ -165,6 +165,52 @@ func TestLoginArgvCarriesNoCallerInput(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("loginArgv() = %v, want %v", got, want)
+		}
+	}
+}
+
+// TestLoginStartsTheAgentInItsOwnHome pins the rule -H does not cover. -H sets
+// HOME; the working directory is inherited from the ssh session, which lands in
+// the operator's home — a directory this identity cannot traverse. Claude Code
+// resolves project-scoped settings from the working directory, so starting it
+// there made it report two unreadable settings files and offer to repair them,
+// on a box where nothing was wrong.
+func TestLoginStartsTheAgentInItsOwnHome(t *testing.T) {
+	argv := loginArgv()
+	var chdir string
+	for _, a := range argv {
+		if strings.HasPrefix(a, "--chdir=") {
+			chdir = strings.TrimPrefix(a, "--chdir=")
+		}
+	}
+	if chdir != Home {
+		t.Fatalf("login argv starts the agent in %q, want its own home %q: %v", chdir, Home, argv)
+	}
+	// After sudo, so the chdir happens as the agent identity into a directory
+	// it owns, rather than depending on the operator being able to reach it.
+	sudo, chdirAt := -1, -1
+	for i, a := range argv {
+		if a == "sudo" && sudo < 0 {
+			sudo = i
+		}
+		if strings.HasPrefix(a, "--chdir=") {
+			chdirAt = i
+		}
+	}
+	if sudo < 0 || chdirAt < sudo {
+		t.Fatalf("the working directory is chosen before the identity is: %v", argv)
+	}
+}
+
+// TestLoginArgvSurvivesARemoteShell pins the constraint that rules out the
+// obvious fix. This argv is joined with spaces by ssh and re-parsed by the
+// operator's login shell on the guest, so a `cd X && exec Y` — which is exactly
+// what the agent session helper does, because it is a script and not an argv —
+// would be re-parsed rather than run.
+func TestLoginArgvSurvivesARemoteShell(t *testing.T) {
+	for _, arg := range loginArgv() {
+		if strings.ContainsAny(arg, "&|;<>()$`\\\"' \t\n*?[]{}!~#") {
+			t.Errorf("login argv element %q carries a character a remote shell re-parses", arg)
 		}
 	}
 }

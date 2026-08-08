@@ -434,8 +434,7 @@ func (a *app) emitVMBootstrap(rep lima.BootstrapReport) error {
 // backend with a credential it has not been granted yet needs a login before
 // anything else is worth trying.
 func (a *app) writeBootstrapNextStep(rep lima.BootstrapReport) error {
-	id := a.backend.Identity()
-	if credentialState(checkDetail(rep, id.Name+"_auth")) == "absent" {
+	if credentialState(rep, a.backend.StatusChecks().Auth) == "absent" {
 		_, err := fmt.Fprintf(a.stdout, "next: torio backend login\n")
 		return err
 	}
