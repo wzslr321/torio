@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -29,7 +30,8 @@ const (
 )
 
 func newStatusCmd(a *app) *cobra.Command {
-	return &cobra.Command{
+	var format string
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Report every Torio box and what its agent is doing",
 		Long: "Poll every box Torio owns and report, for each, whether it is running, which " +
@@ -45,18 +47,53 @@ func newStatusCmd(a *app) *cobra.Command {
 			"The poll covers the default box, every box whose name Torio derived from a " +
 			"backend, and the box TORIO_INSTANCE names for this invocation. A box named " +
 			"directly by any other means is outside it. `--config` does not redirect the " +
-			"documents read here: each box's backend is read from the document that box owns.",
+			"documents read here: each box's backend is read from the document that box owns.\n\n" +
+			"`--format tmux` and `--format prompt` collapse the report onto one line for a " +
+			"status bar or a shell prompt. `torio status setup` prints the configuration that " +
+			"puts one there.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := a.checkStatusFormat(format); err != nil {
+				return err
+			}
 			ctx, cancel := a.opContext(cmd)
 			defer cancel()
 			rep, err := a.newPoller().Poll(ctx)
 			if err != nil {
+				// A one-line surface is refreshed on a timer by something that
+				// shows whatever arrives, so silence there reads as a quiet
+				// host rather than as a broken poll. Say so on the line, and
+				// still fail: the exit code is what a script reads.
+				if format != formatTable {
+					fmt.Fprintln(a.stdout, unreachableLine(format))
+				}
 				return mapLimaError("status", err)
 			}
-			return a.emitStatus(rep)
+			return a.emitStatus(rep, format)
 		},
 	}
+	cmd.Flags().StringVar(&format, "format", formatTable,
+		"how to print the report: "+strings.Join(statusFormats, ", "))
+	return cmd
+}
+
+// checkStatusFormat refuses a format this build does not have, and refuses the
+// one combination that asks for two answers at once.
+//
+// `--json` is the machine contract — one envelope, schema-versioned — and a
+// line is a rendering of it. Printing both would break the single-envelope rule
+// every other command holds to; picking one silently would make the operator
+// guess which. Neither is worth the convenience.
+func (a *app) checkStatusFormat(format string) error {
+	if !slices.Contains(statusFormats, format) {
+		return usageError(fmt.Sprintf("unknown --format %q; known formats are %s",
+			format, strings.Join(statusFormats, ", ")))
+	}
+	if a.jsonOut && format != formatTable {
+		return usageError(fmt.Sprintf(
+			"--json and --format %s are two different outputs; pass one", format))
+	}
+	return nil
 }
 
 // newPoller wires the status poll to this invocation's host access.
@@ -128,9 +165,16 @@ func backendForDerivedInstance(instance string) string {
 	return ""
 }
 
-func (a *app) emitStatus(rep status.Report) error {
+func (a *app) emitStatus(rep status.Report, format string) error {
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("status", rep))
+	}
+	if format != formatTable {
+		// An empty line on a host with no boxes is the correct answer there,
+		// and the only one that does not take space on a surface the operator
+		// did not ask for.
+		_, err := fmt.Fprintln(a.stdout, renderStatusLine(format, rep))
+		return err
 	}
 	if len(rep.Instances) == 0 {
 		_, err := fmt.Fprint(a.stdout, "no instances\nnext: torio vm init\n")
