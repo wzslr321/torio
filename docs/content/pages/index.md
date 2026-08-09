@@ -2,14 +2,14 @@
 output: site/index.html
 nav: Home
 order: 1
-title: Torio — run AI coding agents on a Linux VM that holds no credentials
-description: Torio is a thin control plane that runs AI coding agents and your repositories on a Linux VM on your workstation. The VM is the trust boundary: an agent that gets confused or prompt-injected cannot reach your host, your tokens, or your remotes. It creates a VM per agent backend, keeps each backend healthy, reports which box needs you, and leaves credentials, the tunnel, and every Git write to you.
+title: Torio — context for your agent, and none of your credentials
+description: Agents work best with context and worst with credentials. Torio runs an agent backend on a Linux VM on your workstation with the repositories you named and a private Markdown vault it can search, and puts no credential there at all. It creates a VM per agent backend, reports which box needs you, and leaves credentials, the tunnel, and every Git write to you.
 ---
 
 <section class="hero">
 <p class="hero-eyebrow">Thin control plane · macOS and Linux</p>
-<h1 class="hero-title">Run AI coding agents on a Linux VM that holds none of your credentials.</h1>
-<p class="hero-lede">Torio creates the Linux VM, runs the agent backend you choose inside it (Hermes on the VM's own loopback by default, Claude Code as a per-session process), and gives the model access to exactly the repositories you listed. The VM is the trust boundary: an agent that gets confused or prompt-injected reaches no token of yours and no remote, because there is none to reach. It commits; you push, from a session you opened, after reading what it did.</p>
+<h1 class="hero-title">Agents work best with context and worst with credentials.<br>Torio hands them one and not the other.</h1>
+<p class="hero-lede">Torio creates the Linux VM, runs the agent backend you choose inside it (Hermes on the VM's own loopback by default, Claude Code as a per-session process), gives it exactly the repositories you listed, and keeps a private Markdown vault it can search. What it never puts there is a credential: an agent that gets confused or prompt-injected reaches no token of yours and no remote. It commits; you push, from a session you opened, after reading what it did.</p>
 <p class="hero-actions"><a class="btn btn-primary" href="tutorials.html#get-started">Get started</a><a class="btn btn-quiet" href="#pieces">See how it fits together</a></p>
 </section>
 

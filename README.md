@@ -4,15 +4,19 @@
 [![release](https://img.shields.io/github/v/release/wzslr321/torio)](https://github.com/wzslr321/torio/releases)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Run AI coding agents on a Linux VM that holds none of your credentials.
+Agents work best with context and worst with credentials. Torio hands them one
+and not the other.
 
-Torio is a thin control plane over [Lima](https://lima-vm.io): one Go binary
-that creates a VM on your macOS or Linux workstation, runs an agent backend
-inside it (Hermes as a guest service, or Claude Code per session), and
-attaches the repositories you name. It has no daemon, no state beyond one
-non-secret config file, and no credentials at all. The VM is the trust
-boundary: an agent that gets confused or prompt-injected cannot reach your
-host, your tokens, or your remotes.
+One Go binary over [Lima](https://lima-vm.io) creates a Linux VM on your macOS
+or Linux workstation, runs an agent backend inside it (Hermes as a guest
+service, or Claude Code per session), attaches the repositories you name, and
+keeps a private Markdown vault the agent can search. What it never puts there
+is a credential: an agent that gets confused or prompt-injected reaches no
+token of yours and no remote. It commits; you push, after reading what it did.
+
+Torio is not the AI, not the VM, and not the chat window. It is the layer that
+brings those into a known-good state and then gets out of the way. It has no
+daemon and no state beyond one non-secret config file.
 
 ![An agent commits inside the VM, its push is refused for want of a credential, and the operator pushes the same commit from a session of their own](docs/demo/torio-demo.gif)
 
@@ -24,8 +28,7 @@ A permission prompt is a control inside the agent's own process. It can be
 ignored, and in practice it is clicked through. Torio replaces it with
 controls the agent cannot reach: an unprivileged identity with no `sudo`, a
 closed group set, a binary it cannot rewrite, no credential that reaches a Git
-remote, and the edge of a VM. The agent commits; you push, after reading what
-it did.
+remote, and the edge of a VM.
 
 Write capability against a remote exists only inside a session you open, and
 it leaves with you:
