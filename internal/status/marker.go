@@ -29,11 +29,9 @@ const (
 	// written by a hook this binary does not understand is unknown, not a
 	// guess.
 	MarkerSchemaVersion = "2"
-	// legacyMarkerSchemaVersion is the single-session shape written by the
-	// unmerged first implementation. Reading it gives an existing development
-	// box an honest transition while bootstrap reports and replaces the old
-	// helper; new code never writes it.
-	legacyMarkerSchemaVersion = "1"
+	// MaxMarkerWaits bounds both the document and the work needed to rank it.
+	// Session ids are bounded separately, so the complete marker stays small.
+	MaxMarkerWaits = 64
 	// MarkerTTL is how long a marker is trusted, measured from its modification
 	// time.
 	//
@@ -46,30 +44,15 @@ const (
 	MarkerTTL = time.Hour
 )
 
-// The kinds a marker may declare. They are a closed set because this value
-// reaches a rendered line: an agent that could put arbitrary text here would be
-// writing directly into the operator's terminal.
-const (
-	// KindPermission is an agent blocked on a permission decision.
-	KindPermission = "permission"
-	// KindNotification is an agent asking for attention for any other reason.
-	KindNotification = "notification"
-)
-
 // markerDoc is the marker's wire shape. It deliberately carries no free-text
 // field: there is nothing an agent could write here that a renderer would print.
 type markerDoc struct {
-	SchemaVersion string `json:"schema_version"`
-	Kind          string `json:"kind,omitempty"`
-	// PID is the process that is waiting, zero when the hook did not record
-	// one. It is what ranks the marker below liveness.
-	PID   int          `json:"pid,omitempty"`
-	Waits []markerWait `json:"waits,omitempty"`
+	SchemaVersion string       `json:"schema_version"`
+	Waits         []markerWait `json:"waits,omitempty"`
 }
 
 type markerWait struct {
 	SessionID string `json:"session_id"`
-	Kind      string `json:"kind"`
 	PID       int    `json:"pid"`
 	SinceUnix int64  `json:"since_unix"`
 }
@@ -93,36 +76,26 @@ func decodeMarker(data []byte) (markerDoc, error) {
 	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
 		return markerDoc{}, errors.New("unexpected trailing data after JSON document")
 	}
-	switch doc.SchemaVersion {
-	case legacyMarkerSchemaVersion:
-		if doc.Waits != nil || !knownMarkerKind(doc.Kind) || doc.PID < 0 {
-			return markerDoc{}, errors.New("invalid legacy marker shape")
-		}
-	case MarkerSchemaVersion:
-		if doc.Kind != "" || doc.PID != 0 || doc.Waits == nil {
-			return markerDoc{}, errors.New("invalid aggregate marker shape")
-		}
-		seen := make(map[string]struct{}, len(doc.Waits))
-		for _, wait := range doc.Waits {
-			if !validSessionID(wait.SessionID) {
-				return markerDoc{}, errors.New("invalid marker session id")
-			}
-			if _, exists := seen[wait.SessionID]; exists {
-				return markerDoc{}, errors.New("duplicate marker session id")
-			}
-			seen[wait.SessionID] = struct{}{}
-			if !knownMarkerKind(wait.Kind) || wait.PID <= 0 || wait.SinceUnix <= 0 {
-				return markerDoc{}, errors.New("invalid marker wait")
-			}
-		}
-	default:
+	if doc.SchemaVersion != MarkerSchemaVersion {
 		return markerDoc{}, fmt.Errorf("unsupported marker schema version %q", doc.SchemaVersion)
 	}
+	if doc.Waits == nil || len(doc.Waits) > MaxMarkerWaits {
+		return markerDoc{}, errors.New("invalid marker shape")
+	}
+	seen := make(map[string]struct{}, len(doc.Waits))
+	for _, wait := range doc.Waits {
+		if !validSessionID(wait.SessionID) {
+			return markerDoc{}, errors.New("invalid marker session id")
+		}
+		if _, exists := seen[wait.SessionID]; exists {
+			return markerDoc{}, errors.New("duplicate marker session id")
+		}
+		seen[wait.SessionID] = struct{}{}
+		if wait.PID <= 0 || wait.SinceUnix <= 0 {
+			return markerDoc{}, errors.New("invalid marker wait")
+		}
+	}
 	return doc, nil
-}
-
-func knownMarkerKind(kind string) bool {
-	return kind == KindPermission || kind == KindNotification
 }
 
 func validSessionID(id string) bool {
@@ -156,55 +129,18 @@ func markerTrusted(e statEntry, owner string) bool {
 //
 // Liveness wins in both directions and that is the point. A marker naming a pid
 // that is gone reports not-waiting: the agent that asked has died, and nobody
-// is coming to answer a question nobody is asking any more. A marker naming no
-// pid is read against the box as a whole, so it survives only while something
-// is still running there.
-func waitingFromMarker(doc markerDoc, e statEntry, sessions []Session, guestNow time.Time) WaitingField {
-	if doc.SchemaVersion == MarkerSchemaVersion {
-		return waitingFromAggregateMarker(doc, sessions, guestNow)
-	}
-	markerAge := guestNow.Sub(e.mtime)
-	if markerAge < 0 || markerAge > MarkerTTL {
-		return unknownWaiting()
-	}
-	alive := false
-	if doc.PID == 0 {
-		alive = len(sessions) > 0
-	} else {
-		for _, s := range sessions {
-			if s.PID == doc.PID {
-				alive = true
-				break
-			}
-		}
-	}
-	if !alive {
-		return WaitingField{State: Known, Waiting: false, Waits: []Wait{}}
-	}
-	wait := Wait{
-		Kind:       doc.Kind,
-		PID:        doc.PID,
-		AgeSeconds: int64(markerAge / time.Second),
-	}
-	return WaitingField{
-		State:      Known,
-		Waiting:    true,
-		Waits:      []Wait{wait},
-		Kind:       doc.Kind,
-		PID:        doc.PID,
-		AgeSeconds: wait.AgeSeconds,
-	}
-}
-
-func waitingFromAggregateMarker(doc markerDoc, sessions []Session, guestNow time.Time) WaitingField {
-	live := make(map[int]struct{}, len(sessions))
+// is coming to answer a question nobody is asking any more. The wait must also
+// be no older than the current process start, so a reused pid cannot revive it.
+func waitingFromMarker(doc markerDoc, sessions []Session, guestNow time.Time) WaitingField {
+	live := make(map[int]int64, len(sessions))
 	for _, session := range sessions {
-		live[session.PID] = struct{}{}
+		live[session.PID] = guestNow.Unix() - session.AgeSeconds
 	}
 	waits := make([]Wait, 0, len(doc.Waits))
 	expired := false
 	for _, marker := range doc.Waits {
-		if _, ok := live[marker.PID]; !ok {
+		startedAt, ok := live[marker.PID]
+		if !ok || marker.SinceUnix < startedAt {
 			continue
 		}
 		age := guestNow.Unix() - marker.SinceUnix
@@ -214,7 +150,6 @@ func waitingFromAggregateMarker(doc markerDoc, sessions []Session, guestNow time
 		}
 		waits = append(waits, Wait{
 			SessionID:  marker.SessionID,
-			Kind:       marker.Kind,
 			PID:        marker.PID,
 			AgeSeconds: age,
 		})
@@ -225,13 +160,9 @@ func waitingFromAggregateMarker(doc markerDoc, sessions []Session, guestNow time
 		}
 		return WaitingField{State: Known, Waiting: false, Waits: []Wait{}}
 	}
-	first := waits[0]
 	return WaitingField{
-		State:      Known,
-		Waiting:    true,
-		Waits:      waits,
-		Kind:       first.Kind,
-		PID:        first.PID,
-		AgeSeconds: first.AgeSeconds,
+		State:   Known,
+		Waiting: true,
+		Waits:   waits,
 	}
 }

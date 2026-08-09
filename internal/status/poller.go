@@ -267,7 +267,7 @@ func (p *Poller) waiting(ctx context.Context, instance string, t backend.Transpo
 		p.diagnose(instance, "waiting", err)
 		return unknownWaiting()
 	}
-	return waitingFromMarker(doc, *marker, session.Sessions, guestNow)
+	return waitingFromMarker(doc, session.Sessions, guestNow)
 }
 
 // run executes one fixed argv as the backend identity and returns its standard

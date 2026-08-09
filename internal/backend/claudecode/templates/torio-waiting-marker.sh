@@ -25,16 +25,14 @@ die() {
   exit 64
 }
 
-[ "$#" -eq 1 ] || die 'expected exactly one argument: a marker kind, or clear'
+[ "$#" -eq 1 ] || die 'expected exactly one argument: set or clear'
 
 case "$1" in
   clear)
     action='clear'
-    kind=''
     ;;
-  permission|notification)
+  set)
     action='set'
-    kind="$1"
     ;;
   *)
     die 'unrecognized argument'
@@ -74,10 +72,7 @@ if [ "$action" = 'set' ]; then
   [ "$waiting_pid" -gt 0 ] || die 'could not identify the waiting session process'
 fi
 
-now=0
-if [ "$action" = 'set' ]; then
-  now="$(/usr/bin/date +%s)"
-fi
+now="$(/usr/bin/date +%s)"
 
 # Written through a staging file in the same directory so a poll never reads a
 # half-written document, and created 0600 from the start rather than tightened
@@ -91,43 +86,47 @@ jq_filter='
   def valid_session_id:
     type == "string" and length > 0 and length <= 128
     and test("^[A-Za-z0-9_-]+$");
-  def valid_kind: . == "permission" or . == "notification";
   def valid_wait:
     type == "object"
-    and keys == ["kind", "pid", "session_id", "since_unix"]
+    and keys == ["pid", "session_id", "since_unix"]
     and (.session_id | valid_session_id)
-    and (.kind | valid_kind)
     and (.pid | type == "number" and . > 0 and floor == .)
     and (.since_unix | type == "number" and . > 0 and floor == .);
   def valid_doc:
     type == "object"
     and keys == ["schema_version", "waits"]
     and .schema_version == "2"
-    and (.waits | type == "array" and all(.[]; valid_wait));
+    and (.waits | type == "array")
+    and (.waits | length <= 64)
+    and (.waits | all(.[]; valid_wait));
 
   if . == null then {"schema_version":"2","waits":[]}
   elif valid_doc then .
   else error("invalid existing waiting marker")
   end
+  | .waits |= map(select(
+      .since_unix >= ($now - 3600)
+      and .since_unix <= $now
+    ))
   | .waits |= map(select(.session_id != $session_id))
   | if $action == "set" then
       .waits += [{
         "session_id": $session_id,
-        "kind": $kind,
         "pid": $pid,
         "since_unix": $now
       }]
     else . end
+  | if (.waits | length) > 64 then .waits = .waits[-64:] else . end
 '
 
 if [ -e "$marker" ]; then
   /usr/bin/jq -e \
-    --arg action "$action" --arg session_id "$session_id" --arg kind "$kind" \
+    --arg action "$action" --arg session_id "$session_id" \
     --argjson pid "$waiting_pid" --argjson now "$now" \
     "$jq_filter" "$marker" >"$tmp" || die 'existing waiting marker is invalid'
 else
   /usr/bin/jq -ne \
-    --arg action "$action" --arg session_id "$session_id" --arg kind "$kind" \
+    --arg action "$action" --arg session_id "$session_id" \
     --argjson pid "$waiting_pid" --argjson now "$now" \
     "null | $jq_filter" >"$tmp"
 fi

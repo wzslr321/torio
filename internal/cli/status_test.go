@@ -279,17 +279,14 @@ func TestCompactAge(t *testing.T) {
 
 func TestWaitingCellNamesOneSessionAndCountsTheRest(t *testing.T) {
 	f := status.WaitingField{
-		State:      status.Known,
-		Waiting:    true,
-		Kind:       "notification",
-		PID:        1234,
-		AgeSeconds: 420,
+		State:   status.Known,
+		Waiting: true,
 		Waits: []status.Wait{
-			{SessionID: "a", Kind: "notification", PID: 1234, AgeSeconds: 420},
-			{SessionID: "b", Kind: "permission", PID: 1235, AgeSeconds: 30},
+			{SessionID: "a", PID: 1234, AgeSeconds: 420},
+			{SessionID: "b", PID: 1235, AgeSeconds: 30},
 		},
 	}
-	if got, want := waitingCell(f), "notification 7m pid 1234 +1"; got != want {
+	if got, want := waitingCell(f), "yes 7m pid 1234 +1"; got != want {
 		t.Fatalf("waiting cell = %q, want %q", got, want)
 	}
 }

@@ -14,7 +14,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/local/bin/torio-waiting-marker notification"
+            "command": "/usr/local/bin/torio-waiting-marker set"
           }
         ]
       }
@@ -24,7 +24,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/local/bin/torio-waiting-marker notification"
+            "command": "/usr/local/bin/torio-waiting-marker set"
           }
         ]
       }

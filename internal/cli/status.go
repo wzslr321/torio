@@ -218,11 +218,9 @@ func sessionCell(f status.SessionField) string {
 	}
 }
 
-// waitingCell names the kind rather than saying yes, because the kind is what
-// tells the operator whether the agent is blocked or merely calling out, and
-// names the session when the marker recorded one — on a box running two agents
-// "something here wants you" is only half an answer. Both are enumerated or
-// numeric; nothing an agent wrote reaches this line.
+// waitingCell names the first session and counts the rest — on a box running
+// two agents, "something here wants you" is only half an answer. Every value is
+// numeric or a bounded identifier; nothing an agent wrote reaches this line.
 func waitingCell(f status.WaitingField) string {
 	switch {
 	case f.State == status.NotApplicable:
@@ -231,14 +229,15 @@ func waitingCell(f status.WaitingField) string {
 		return glyphUnknown
 	case !f.Waiting:
 		return "no"
-	case f.PID != 0:
-		cell := f.Kind + " " + compactAge(f.AgeSeconds) + " pid " + strconv.Itoa(f.PID)
+	case len(f.Waits) > 0:
+		first := f.Waits[0]
+		cell := "yes " + compactAge(first.AgeSeconds) + " pid " + strconv.Itoa(first.PID)
 		if len(f.Waits) > 1 {
 			cell += " +" + strconv.Itoa(len(f.Waits)-1)
 		}
 		return cell
 	default:
-		return f.Kind + " " + compactAge(f.AgeSeconds)
+		return glyphUnknown
 	}
 }
 

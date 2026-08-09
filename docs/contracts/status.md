@@ -24,8 +24,8 @@ crash and a poll faithfully relays the lie.
       "session":       { "state": "known", "sessions": [
                            { "pid": 1234, "started_at": "2026-08-08T20:11:04Z", "age_seconds": 612 } ] },
       "waiting":       { "state": "known", "waiting": true, "waits": [
-                           { "session_id": "abc123", "kind": "permission",
-                             "pid": 1234, "age_seconds": 120 } ] },
+                           { "session_id": "abc123", "pid": 1234,
+                             "age_seconds": 120 } ] },
       "last_progress": { "state": "not-applicable" }
     }
   ]
@@ -70,12 +70,9 @@ means nothing there.
   proven answer that nothing is running.
 - **`waiting`** — whether a human is being waited on. `waits` is always an
   array, with one entry per live waiting session. `session_id` is the bounded
-  identifier Claude supplies to every hook, `kind` is `permission` or
-  `notification`, `pid` names the matching live process and `age_seconds` is
-  that entry's age. The compatibility summary fields `kind`, `pid` and
-  `age_seconds` name the first wait; renderers use them for a bounded one-line
-  answer and use `waits` for the count. An unrecognized value makes the whole
-  field `unknown` rather than reaching a renderer.
+  identifier Claude supplies to every hook, `pid` names the matching live
+  process and `age_seconds` is that entry's age. `waits` is the only copy of
+  those facts; renderers use its first entry and its length.
 - **`last_progress`** — the newest modification time among files the backend
   cannot help writing while it works, as `at` (RFC 3339, UTC) and `age_seconds`.
   Deliberately not "when the last message was recorded": a backend that writes a
@@ -166,7 +163,6 @@ it refused, an unrecognized `kind` refused.
   "waits": [
     {
       "session_id": "abc123",
-      "kind": "permission",
       "pid": 1234,
       "since_unix": 1786222152
     }
@@ -194,12 +190,14 @@ boundary**: the agent runs as that same identity and can forge or remove its own
 marker. Root ownership protects the helper and managed hook configuration from
 silent retuning; it cannot make an agent-owned status signal authoritative.
 
-**Age** — every wait older than **one hour**, measured from its `since_unix`
+**Age and size** — every wait older than **one hour**, measured from its `since_unix`
 against the guest clock, expires. The empty document itself does not expire: it
 is the persistent proof that bootstrap installed a working marker integration.
 A wait nobody cleared would otherwise stay on the surface forever, and an
 operator who learns to ignore one stale plea ignores the real one beside it.
-One expired entry does not hide another live, fresh wait.
+One expired entry does not hide another live, fresh wait. Each helper update
+prunes expired entries and keeps at most 64; the reader refuses a larger
+document.
 
 **Rank** — liveness wins, in both directions. Each entry whose pid is gone is
 dropped; where liveness itself is `unknown`, so is waiting. The box reports
@@ -223,8 +221,8 @@ at `/usr/local/bin/torio-waiting-marker`:
 
 | Event | Argument |
 |---|---|
-| `Notification` | `notification` |
-| `Stop` | `notification` |
+| `Notification` | `set` |
+| `Stop` | `set` |
 | `UserPromptSubmit` | `clear` |
 | `SessionEnd` | `clear` |
 
@@ -235,7 +233,7 @@ is a drift detector and readiness fact, not a security boundary. A box
 bootstrapped before the hooks existed reports `waiting` as unknown until the
 operator resolves the reported drift and bootstraps it again.
 
-The helper takes exactly one argument, matched against a fixed list. From
+The helper takes exactly one argument, `set` or `clear`. From
 standard input it selects only the validated `session_id`; Claude Code also
 feeds hooks fields containing session text, and none of them is copied, logged
 or rendered.

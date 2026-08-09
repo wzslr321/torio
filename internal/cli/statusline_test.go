@@ -28,7 +28,7 @@ func runningBox(name, backend string) status.Instance {
 // just happened.
 func TestTmuxChipPerState(t *testing.T) {
 	waiting := runningBox("torio-claude-code", "claude-code")
-	waiting.Waiting = status.WaitingField{State: status.Known, Waiting: true, Kind: "permission", AgeSeconds: 420}
+	waiting.Waiting = status.WaitingField{State: status.Known, Waiting: true, Waits: []status.Wait{{PID: 1, AgeSeconds: 420}}}
 
 	live := runningBox("torio-claude-code", "claude-code")
 	live.Session.Sessions = []status.Session{{PID: 1}, {PID: 2}}
@@ -98,13 +98,11 @@ func TestTmuxChipPerState(t *testing.T) {
 func TestTmuxChipCountsSeveralWaitingSessions(t *testing.T) {
 	in := runningBox("torio-claude-code", "claude-code")
 	in.Waiting = status.WaitingField{
-		State:      status.Known,
-		Waiting:    true,
-		Kind:       "notification",
-		AgeSeconds: 420,
+		State:   status.Known,
+		Waiting: true,
 		Waits: []status.Wait{
-			{SessionID: "a", Kind: "notification", PID: 1, AgeSeconds: 420},
-			{SessionID: "b", Kind: "permission", PID: 2, AgeSeconds: 30},
+			{SessionID: "a", PID: 1, AgeSeconds: 420},
+			{SessionID: "b", PID: 2, AgeSeconds: 30},
 		},
 	}
 
@@ -120,7 +118,7 @@ func TestTmuxChipCountsSeveralWaitingSessions(t *testing.T) {
 // counted along with them.
 func TestPromptLineCarriesNoEscapes(t *testing.T) {
 	waiting := runningBox("torio-claude-code", "claude-code")
-	waiting.Waiting = status.WaitingField{State: status.Known, Waiting: true, Kind: "notification", AgeSeconds: 30}
+	waiting.Waiting = status.WaitingField{State: status.Known, Waiting: true, Waits: []status.Wait{{PID: 1, AgeSeconds: 30}}}
 	live := runningBox("torio", "hermes")
 	live.Session = status.SessionField{State: status.NotApplicable, Sessions: []status.Session{}}
 
@@ -160,7 +158,7 @@ func TestPromptDoesNotCollapseUnknownIntoQuiet(t *testing.T) {
 func TestWaitingIsNeverMaskedByAnotherState(t *testing.T) {
 	in := runningBox("torio-claude-code", "claude-code")
 	in.Box = "stopped"
-	in.Waiting = status.WaitingField{State: status.Known, Waiting: true, Kind: "permission", AgeSeconds: 5}
+	in.Waiting = status.WaitingField{State: status.Known, Waiting: true, Waits: []status.Wait{{PID: 1, AgeSeconds: 5}}}
 
 	if got := promptCell(in); got != "NEEDS YOU" {
 		t.Errorf("prompt cell = %q, want the waiting state to win", got)

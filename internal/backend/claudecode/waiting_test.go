@@ -32,8 +32,8 @@ func TestManagedSettingsRunTheInstalledHelper(t *testing.T) {
 	// leaves a plea nobody withdrew; clearing without setting is a surface that
 	// never says anything.
 	want := map[string]string{
-		"Notification":     "notification",
-		"Stop":             "notification",
+		"Notification":     "set",
+		"Stop":             "set",
 		"UserPromptSubmit": "clear",
 		"SessionEnd":       "clear",
 	}
@@ -56,14 +56,14 @@ func TestManagedSettingsRunTheInstalledHelper(t *testing.T) {
 }
 
 // The helper writes the convention the reader enforces. Both sides name the
-// same file, the same schema version and the same kinds, and neither is free to
+// same file and the same schema version, and neither is free to
 // move without the other.
 func TestWaitingMarkerHelperWritesTheConventionTheReaderEnforces(t *testing.T) {
 	script := string(WaitingMarkerScript())
 	for _, want := range []string{
 		`marker="$HOME/.` + strings.TrimPrefix(status.MarkerFileName, ".") + `"`,
 		`"schema_version":"` + status.MarkerSchemaVersion + `"`,
-		`permission|notification)`,
+		`set)`,
 		`chmod 0600 "$tmp"`,
 		`mv -T -- "$tmp" "$marker"`,
 	} {
@@ -82,18 +82,6 @@ func TestWaitingMarkerHelperWritesTheConventionTheReaderEnforces(t *testing.T) {
 	// shell read or cat would let prose enter the marker path unchecked.
 	if strings.Contains(script, "read ") || strings.Contains(script, "cat -") || strings.Contains(script, "$(cat)") {
 		t.Error("the helper reads its standard input without the bounded jq selector")
-	}
-}
-
-// The kinds the helper accepts are exactly the ones the reader recognizes. A
-// kind on one side only is a marker written and then refused, which renders as
-// unknown for as long as its author keeps writing it.
-func TestWaitingMarkerKindsAgreeWithTheReader(t *testing.T) {
-	script := string(WaitingMarkerScript())
-	for _, kind := range []string{status.KindPermission, status.KindNotification} {
-		if !strings.Contains(script, kind) {
-			t.Errorf("waiting-marker helper does not accept the kind %q the reader recognizes", kind)
-		}
 	}
 }
 
@@ -148,6 +136,16 @@ func TestWaitingMarkerHelperKeepsIndependentSessionEntries(t *testing.T) {
 	}
 	if !strings.Contains(script, `/usr/bin/sync -f "$HOME"`) {
 		t.Error("the helper does not fsync the marker directory after publishing")
+	}
+	for _, want := range []string{
+		`.since_unix >= ($now - 3600)`,
+		`.since_unix <= $now`,
+		`.waits | length <= 64`,
+		`.waits[-64:]`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("waiting-marker helper does not prune and cap state: missing %q", want)
+		}
 	}
 }
 

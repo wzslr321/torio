@@ -145,12 +145,16 @@ func tmuxCell(in status.Instance) string {
 	n := shortName(in)
 	switch {
 	case in.Waiting.State == status.Known && in.Waiting.Waiting:
+		age := int64(0)
+		if len(in.Waiting.Waits) > 0 {
+			age = in.Waiting.Waits[0].AgeSeconds
+		}
 		if len(in.Waiting.Waits) > 1 {
 			return fmt.Sprintf("#[fg=%s,bg=%s,bold] %s needs you %d · %s #[default]",
-				barWaitingFG, barWaitingBG, n, len(in.Waiting.Waits), compactAge(in.Waiting.AgeSeconds))
+				barWaitingFG, barWaitingBG, n, len(in.Waiting.Waits), compactAge(age))
 		}
 		return fmt.Sprintf("#[fg=%s,bg=%s,bold] %s needs you %s #[default]",
-			barWaitingFG, barWaitingBG, n, compactAge(in.Waiting.AgeSeconds))
+			barWaitingFG, barWaitingBG, n, compactAge(age))
 	case in.Box == string(lima.StateStopped):
 		return fmt.Sprintf("#[fg=%s]○ %s off#[default]", barDim, n)
 	case in.Box != string(lima.StateRunning), in.Waiting.State == status.Unknown:

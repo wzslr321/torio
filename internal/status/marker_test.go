@@ -16,11 +16,10 @@ func markerEnv(owner, mode string, mtime int64, body string) guestEnv {
 	return e
 }
 
-func markerDocJSON(kind string, pid int) string {
-	if pid == 0 {
-		return fmt.Sprintf(`{"schema_version":%q,"kind":%q}`, legacyMarkerSchemaVersion, kind)
-	}
-	return fmt.Sprintf(`{"schema_version":%q,"kind":%q,"pid":%d}`, legacyMarkerSchemaVersion, kind, pid)
+func markerDocJSON(pid int, since int64) string {
+	return fmt.Sprintf(
+		`{"schema_version":%q,"waits":[{"session_id":"session-a","pid":%d,"since_unix":%d}]}`,
+		MarkerSchemaVersion, pid, since)
 }
 
 func pollWithMarker(t *testing.T, env guestEnv) WaitingField {
@@ -32,25 +31,22 @@ func pollWithMarker(t *testing.T, env guestEnv) WaitingField {
 // The marker's whole purpose: an agent asked for a decision, and the operator
 // is told which box is holding.
 func TestWaitingIsReportedForAFreshOwnedMarkerWithALiveProcess(t *testing.T) {
-	env := markerEnv(testUser, "600", testGuestNow-120, markerDocJSON(KindPermission, 1234))
+	env := markerEnv(testUser, "600", testGuestNow-120, markerDocJSON(1234, testGuestNow-120))
 
 	got := pollWithMarker(t, env)
 
 	if got.State != Known || !got.Waiting {
 		t.Fatalf("waiting = %+v, want a proven wait", got)
 	}
-	if got.Kind != KindPermission {
-		t.Errorf("kind = %q, want %q", got.Kind, KindPermission)
-	}
-	if got.AgeSeconds != 120 {
-		t.Errorf("age = %d, want the marker's own age on the guest clock", got.AgeSeconds)
+	if len(got.Waits) != 1 || got.Waits[0].AgeSeconds != 120 {
+		t.Errorf("waits = %+v, want the wait age measured on the guest clock", got.Waits)
 	}
 }
 
 // Liveness outranks the marker. The process that asked is gone, so nobody is
 // coming to answer a question nobody is asking any more.
 func TestWaitingIsFalseWhenTheProcessThatAskedIsGone(t *testing.T) {
-	env := markerEnv(testUser, "600", testGuestNow-120, markerDocJSON(KindPermission, 9999))
+	env := markerEnv(testUser, "600", testGuestNow-120, markerDocJSON(9999, testGuestNow-120))
 
 	got := pollWithMarker(t, env)
 
@@ -63,7 +59,9 @@ func TestWaitingIsFalseWhenTheProcessThatAskedIsGone(t *testing.T) {
 // never ends. It is unknown and not false: something was written and this poll
 // cannot say what became of it.
 func TestWaitingIsUnknownForAnExpiredMarker(t *testing.T) {
-	env := markerEnv(testUser, "600", testGuestNow-int64(MarkerTTL.Seconds())-1, markerDocJSON(KindPermission, 1234))
+	env := markerEnv(testUser, "600", testGuestNow-60,
+		markerDocJSON(1234, testGuestNow-int64(MarkerTTL.Seconds())-1))
+	env.ps = " 1234 7200 " + testProcess + "\n"
 
 	got := pollWithMarker(t, env)
 
@@ -97,7 +95,7 @@ func TestWaitingIsUnknownForAMarkerThatFailsItsGate(t *testing.T) {
 		{"the mode is unreadable", testUser, "rw-"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			env := markerEnv(tc.owner, tc.mode, testGuestNow-60, markerDocJSON(KindPermission, 1234))
+			env := markerEnv(tc.owner, tc.mode, testGuestNow-60, markerDocJSON(1234, testGuestNow-60))
 			g := &fakeGuest{env: env}
 
 			got := pollOne(g, testBackend{spec: specWith(testProcess, true)})
@@ -120,12 +118,10 @@ func TestWaitingIsUnknownForAMarkerThatCannotBeVouchedFor(t *testing.T) {
 		body string
 	}{
 		{"not JSON", "{"},
-		{"unknown field", `{"schema_version":"1","kind":"permission","detail":"rm -rf /"}`},
-		{"trailing document", markerDocJSON(KindPermission, 1234) + markerDocJSON(KindPermission, 1234)},
-		{"unsupported schema version", `{"schema_version":"99","kind":"permission"}`},
-		{"legacy fields in aggregate schema", `{"schema_version":"2","kind":"permission","waits":[]}`},
-		{"aggregate fields in legacy schema", `{"schema_version":"1","kind":"permission","waits":[]}`},
-		{"unrecognized kind", `{"schema_version":"1","kind":"[31mred"}`},
+		{"unknown field", `{"schema_version":"2","waits":[],"detail":"rm -rf /"}`},
+		{"trailing document", markerDocJSON(1234, testGuestNow-60) + markerDocJSON(1234, testGuestNow-60)},
+		{"unsupported schema version", `{"schema_version":"99","waits":[]}`},
+		{"unshipped kind", `{"schema_version":"2","waits":[{"session_id":"a","kind":"permission","pid":1234,"since_unix":1}]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := markerEnv(testUser, "600", testGuestNow-60, tc.body)
@@ -134,9 +130,6 @@ func TestWaitingIsUnknownForAMarkerThatCannotBeVouchedFor(t *testing.T) {
 
 			if got.State != Unknown {
 				t.Fatalf("waiting state = %q, want %q", got.State, Unknown)
-			}
-			if got.Kind != "" {
-				t.Errorf("kind = %q, want nothing from a marker that was refused", got.Kind)
 			}
 		})
 	}
@@ -188,18 +181,43 @@ func TestWaitingWaitsIsNeverNull(t *testing.T) {
 	}
 }
 
+func TestWaitingFieldHasNoDuplicateSummary(t *testing.T) {
+	field := WaitingField{
+		State:   Known,
+		Waiting: true,
+		Waits: []Wait{{
+			SessionID:  "session-a",
+			PID:        1234,
+			AgeSeconds: 30,
+		}},
+	}
+	body, err := json.Marshal(field)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(body, &top); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"kind", "pid", "age_seconds"} {
+		if _, exists := top[key]; exists {
+			t.Errorf("waiting JSON duplicates waits[] in top-level %q: %s", key, body)
+		}
+	}
+}
+
 // A marker that names its session makes the answer actionable: on a box running
 // two agents, "something here wants you" is only half an answer.
 func TestWaitingCarriesTheSessionTheMarkerNamed(t *testing.T) {
-	env := markerEnv(testUser, "600", testGuestNow-30, markerDocJSON(KindNotification, 1234))
+	env := markerEnv(testUser, "600", testGuestNow-30, markerDocJSON(1234, testGuestNow-30))
 
 	got := pollWithMarker(t, env)
 
 	if got.State != Known || !got.Waiting {
 		t.Fatalf("waiting = %+v, want a proven wait", got)
 	}
-	if got.PID != 1234 {
-		t.Errorf("pid = %d, want the session the marker named", got.PID)
+	if len(got.Waits) != 1 || got.Waits[0].PID != 1234 {
+		t.Errorf("waits = %+v, want the session the marker named", got.Waits)
 	}
 }
 
@@ -208,8 +226,8 @@ func TestWaitingCarriesTheSessionTheMarkerNamed(t *testing.T) {
 func TestWaitingReportsEveryLiveSessionInTheMarker(t *testing.T) {
 	env := markerEnv(testUser, "600", testGuestNow-30, fmt.Sprintf(
 		`{"schema_version":"`+MarkerSchemaVersion+`","waits":[`+
-			`{"session_id":"session-a","kind":"notification","pid":1234,"since_unix":%d},`+
-			`{"session_id":"session-b","kind":"permission","pid":1235,"since_unix":%d}]}`,
+			`{"session_id":"session-a","pid":1234,"since_unix":%d},`+
+			`{"session_id":"session-b","pid":1235,"since_unix":%d}]}`,
 		testGuestNow-30, testGuestNow-10))
 	env.ps = " 1234 600 " + testProcess + "\n 1235 300 " + testProcess + "\n"
 
@@ -226,18 +244,17 @@ func TestWaitingReportsEveryLiveSessionInTheMarker(t *testing.T) {
 	}
 }
 
-// A marker with no session is still an answer about the box, ranked against
-// every session on it. The field says so by carrying no pid rather than a zero
-// that reads like one.
-func TestWaitingWithoutASessionCarriesNoPID(t *testing.T) {
-	env := markerEnv(testUser, "600", testGuestNow-30, markerDocJSON(KindNotification, 0))
+func TestWaitingRejectsAWaitOlderThanTheReusedPID(t *testing.T) {
+	env := markerEnv(testUser, "600", testGuestNow-5, fmt.Sprintf(
+		`{"schema_version":"%s","waits":[{"session_id":"old-session","pid":1234,"since_unix":%d}]}`,
+		MarkerSchemaVersion, testGuestNow-120))
+	// PID 1234 belongs to a process started only 30 seconds ago. The marker is
+	// older, so it cannot describe this process even though the number matches.
+	env.ps = " 1234 30 " + testProcess + "\n"
 
 	got := pollWithMarker(t, env)
 
-	if got.State != Known || !got.Waiting {
-		t.Fatalf("waiting = %+v, want a proven wait", got)
-	}
-	if got.PID != 0 {
-		t.Errorf("pid = %d, want none", got.PID)
+	if got.State != Known || got.Waiting {
+		t.Fatalf("waiting = %+v, want a reused PID to discard the stale wait", got)
 	}
 }

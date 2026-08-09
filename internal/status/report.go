@@ -112,25 +112,8 @@ type WaitingField struct {
 	State   FieldState `json:"state"`
 	Waiting bool       `json:"waiting"`
 	// Waits identifies every live session currently asking for attention. It is
-	// always an array so a renderer can count it without interpreting the
-	// compatibility summary fields below.
+	// always an array so a renderer can count it directly.
 	Waits []Wait `json:"waits"`
-	// Kind, PID and AgeSeconds summarize the first wait for bounded human
-	// renderers. Waits is the complete machine answer.
-	// Kind is why, and is one of a fixed set. An unrecognized value makes the
-	// whole field unknown rather than reaching a renderer.
-	Kind string `json:"kind,omitempty"`
-	// PID is which session is waiting, when the marker recorded one, and it
-	// always appears in Sessions above. It is what makes the answer actionable
-	// on a box running several agents: without it the field says something here
-	// wants you and cannot say which.
-	//
-	// Zero means the marker named no session, which is not an error: the field
-	// is then a statement about the box, ranked against every session on it.
-	PID int `json:"pid,omitempty"`
-	// AgeSeconds is how long the wait has been outstanding, from the marker's
-	// modification time against the guest's clock.
-	AgeSeconds int64 `json:"age_seconds,omitempty"`
 }
 
 // Wait is one live session represented by the fixed waiting document. Every
@@ -138,7 +121,6 @@ type WaitingField struct {
 // the status schema.
 type Wait struct {
 	SessionID  string `json:"session_id,omitempty"`
-	Kind       string `json:"kind"`
 	PID        int    `json:"pid,omitempty"`
 	AgeSeconds int64  `json:"age_seconds"`
 }
