@@ -105,19 +105,8 @@ func shellQuote(s string) string {
 
 const tmuxSetup = `# Torio ambient status. Add to ~/.tmux.conf, then: tmux source-file ~/.tmux.conf
 # Nothing here writes to that file; this is text to place, not a change to apply.
-
-# The chips are drawn for a dark bar. Drop these two lines if your theme sets one.
-set -g default-terminal "tmux-256color"
-set -g status-style bg=#1b2032,fg=#ccd3e8
-
-# tmux truncates the right-hand status at 40 characters, and two boxes already
-# exceed that: the end of the line goes missing without saying so.
-set -g status-right-length 120
-
-# The poll is one host-side list plus a few small guest commands per running box.
-# Pick an interval you are content to run forever, not the smallest one that works.
-set -g status-interval 15
-set -g status-right "#(%s status --format=tmux)"
+# Append only Torio's cell; the existing theme, content, length and interval stay yours.
+set -ag status-right " #(%s status --format=tmux)"
 `
 
 const zshSetup = `# Torio ambient status. Add to ~/.zshrc, then: exec zsh

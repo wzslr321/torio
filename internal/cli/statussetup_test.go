@@ -96,6 +96,25 @@ func TestSetupSaysWhereItBelongsAndTouchesNothing(t *testing.T) {
 	}
 }
 
+func TestTmuxSetupAppendsOnlyItsOwnStatusCell(t *testing.T) {
+	_, snippet, _ := runSetup(t, []string{"status", "setup", "tmux"})
+
+	if !strings.Contains(snippet, `set -ag status-right`) {
+		t.Errorf("snippet = %q, want Torio appended to the existing right status", snippet)
+	}
+	for _, setting := range []string{
+		"default-terminal",
+		"status-style",
+		"status-right-length",
+		"status-interval",
+		`set -g status-right`,
+	} {
+		if strings.Contains(snippet, setting) {
+			t.Errorf("snippet changes unrelated tmux setting %q", setting)
+		}
+	}
+}
+
 // The generated prompt must work in zsh's default option set. PROMPT_SUBST is
 // off there; relying on it renders a literal `$(cat ...)` for a user whose
 // dotfiles did not happen to enable the option for another prompt framework.
