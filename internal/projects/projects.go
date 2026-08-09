@@ -235,6 +235,9 @@ var enterPreconditions = []string{
 type EnterSession struct {
 	EnterSpec
 	Verified []string
+	// Review is what the checkout looked like at this moment, on the same terms
+	// as ShellSession.Review: description, never verification.
+	Review ReviewContext
 }
 
 // ShellSpec is the data an interactive operator shell needs, and nothing more.

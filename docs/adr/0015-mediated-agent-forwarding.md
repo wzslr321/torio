@@ -2,6 +2,9 @@
 
 - Status: Accepted
 - Date: 2026-08-09
+- Superseded in part by:
+  [ADR-0016](0016-session-scoped-push-grant.md), for the deferred session-scoped
+  grant: it is no longer deferred, and this record is what made it answerable.
 - Supersedes in part: the "Write capability" section of
   [ADR-0003](0003-ownership-split-and-operator-carried-write.md), for what
   `ssh -A` puts inside the guest.

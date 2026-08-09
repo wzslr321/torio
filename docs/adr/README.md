@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-Fourteen records cover the decisions that govern the delivered binary, the vault
+Fifteen records cover the decisions that govern the delivered binary, the vault
 standard it writes against, how both are published, and how the behaviour that
 standard asks for is measured.
 
@@ -20,6 +20,7 @@ standard asks for is measured.
 | [0013](0013-mcp-managed-client-config-and-activation.md) | Claude's MCP route is root-managed configuration, and the broker unit activates only after the last required login |
 | [0014](0014-okf-profile-divergence-and-log-files.md) | The OKF profile adopts `log.md`, drops frontmatter from directory indexes, and names its one remaining divergence |
 | [0015](0015-mediated-agent-forwarding.md) | An operator session forwards an agent Torio serves, holding one pinned key, that asks before every signature |
+| [0016](0016-session-scoped-push-grant.md) | An agent session may ask to push; the signature it needs stops at the operator, and no pinned key means no grant |
 
 ## Rules
 

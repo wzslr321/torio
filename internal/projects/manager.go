@@ -430,6 +430,8 @@ func (m *Manager) EnterPreflight(ctx context.Context, id string) (EnterSession, 
 	}
 	session.Verified = append(session.Verified, "shared_permissions")
 
+	session.Review = m.reviewContext(ctx, op, session.Project.Path)
+
 	return session, nil
 }
 

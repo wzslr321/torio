@@ -86,11 +86,16 @@ type app struct {
 	// a shared constructor loses.
 	newMediatedShellSpec func(projectPath, agentSocket string) (execx.InteractiveCommand, error)
 	newAgentSpec         func(projectPath string) (execx.InteractiveCommand, error)
-	newInteractive       func() execx.InteractiveRunner
-	newMCPLoginSpec      func(service string) (execx.InteractiveCommand, error)
-	installMCP           func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerInstallReport, error)
-	verifyMCP            func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerReport, error)
-	activateMCP          func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerActivationReport, error)
+	// newAgentPushSpec is newAgentSpec plus the remote-forwarded socket of the
+	// mediated agent. Separate for the same reason as newMediatedShellSpec: the
+	// no-push argv keeps its own pinned test, and the test that forbids
+	// ForwardAgent from the agent transport keeps covering the default.
+	newAgentPushSpec func(projectPath, hostSocket, guestSocket string) (execx.InteractiveCommand, error)
+	newInteractive   func() execx.InteractiveRunner
+	newMCPLoginSpec  func(service string) (execx.InteractiveCommand, error)
+	installMCP       func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerInstallReport, error)
+	verifyMCP        func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerReport, error)
+	activateMCP      func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerActivationReport, error)
 
 	// lookupOperatorUser resolves the Lima login identity for `vm init`.
 	// Production uses the current OS user; tests inject a fixed name.
@@ -164,6 +169,16 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 				helper = session.HelperPath
 			}
 			return lima.ProjectAgentSpec(helper, a.backend.Identity().WorkspacePath, p)
+		}
+	}
+	if a.newAgentPushSpec == nil {
+		a.newAgentPushSpec = func(p, hostSocket, guestSocket string) (execx.InteractiveCommand, error) {
+			session := a.backend.Session()
+			helper := ""
+			if session != nil {
+				helper = session.PushHelperPath
+			}
+			return lima.ProjectAgentPushSpec(helper, a.backend.Identity().WorkspacePath, p, hostSocket, guestSocket)
 		}
 	}
 	if a.newInteractive == nil {

@@ -59,19 +59,22 @@ func (m *mediation) stop() {
 // weaker mode by accident: a document with no `operator_key` was written by an
 // operator who has not chosen a key, and choosing one for them is choosing which
 // key a guest may use (ADR-0015).
-func (a *app) startMediation(session projects.ShellSession) (*mediation, error) {
+func (a *app) startMediation(command string, sessionCtx sshagent.SessionContext) (*mediation, error) {
 	pin := a.runtime.File.OperatorKey
 	if pin == "" {
 		return nil, nil
 	}
+	fail := func(err error) error {
+		return &CLIError{Exit: ExitPrecondition, Code: "PRECONDITION_FAILED", Command: command, Message: err.Error()}
+	}
 
 	dial, err := sshagent.UpstreamFromEnv()
 	if err != nil {
-		return nil, &CLIError{Exit: ExitPrecondition, Code: "PRECONDITION_FAILED", Command: "project.shell", Message: err.Error()}
+		return nil, fail(err)
 	}
 	pinned, err := sshagent.PinIdentity(dial, pin)
 	if err != nil {
-		return nil, &CLIError{Exit: ExitPrecondition, Code: "PRECONDITION_FAILED", Command: "project.shell", Message: err.Error()}
+		return nil, fail(err)
 	}
 
 	audit, err := openAuditFile(filepath.Join(a.runtime.Paths.ConfigDir, agentAuditFileName))
@@ -80,13 +83,13 @@ func (a *app) startMediation(session projects.ShellSession) (*mediation, error) 
 		// whose decisions cannot be recorded would refuse every signature at
 		// the dialog instead, which is the same outcome reached later and worse
 		// explained.
-		return nil, &CLIError{Exit: ExitPrecondition, Code: "PRECONDITION_FAILED", Command: "project.shell", Message: err.Error()}
+		return nil, fail(err)
 	}
 
 	socket, err := sshagent.Listen(os.TempDir())
 	if err != nil {
 		_ = audit.Close()
-		return nil, &CLIError{Exit: ExitPrecondition, Code: "PRECONDITION_FAILED", Command: "project.shell", Message: err.Error()}
+		return nil, fail(err)
 	}
 
 	proxy := &sshagent.Proxy{
@@ -94,12 +97,7 @@ func (a *app) startMediation(session projects.ShellSession) (*mediation, error) 
 		Pinned:   pinned,
 		Confirm:  sshagent.DialogConfirmer{},
 		Audit:    sshagent.NewJSONRecorder(audit),
-		Session: sshagent.SessionContext{
-			ProjectID: session.Project.ID,
-			Remote:    session.Project.Remote,
-			Branch:    session.Review.Branch,
-			Ahead:     session.Review.Ahead,
-		},
+		Session:  sessionCtx,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -136,4 +134,16 @@ func openAuditFile(path string) (*os.File, error) {
 		return nil, fmt.Errorf("the agent decision log is mode %04o; it must not be readable by anyone else", perm)
 	}
 	return file, nil
+}
+
+// mediatedContext is what the dialog says about the session asking to sign. It
+// is built from the preflight, which measured it once, before the session opened
+// — never from anything the session reports about itself later.
+func mediatedContext(p projects.Project, review projects.ReviewContext) sshagent.SessionContext {
+	return sshagent.SessionContext{
+		ProjectID: p.ID,
+		Remote:    p.Remote,
+		Branch:    review.Branch,
+		Ahead:     review.Ahead,
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -245,7 +246,8 @@ func newProjectRemoveCmd(a *app) *cobra.Command {
 // It carries no machine output for the same reason `enter` does not: it hands
 // the operator's terminal to a remote process, so there is no document to emit.
 func newProjectAgentCmd(a *app) *cobra.Command {
-	return &cobra.Command{
+	var pushGrant bool
+	cmd := &cobra.Command{
 		Use:   "agent <id>",
 		Short: "Open the backend's own session in a project checkout",
 		Long: "Start the configured backend inside the project checkout, running as the " +
@@ -289,18 +291,70 @@ func newProjectAgentCmd(a *app) *cobra.Command {
 			if err != nil {
 				return mapProjectError("project.agent", err)
 			}
-			agentCmd, err := a.newAgentSpec(session.Project.Path)
+			if !pushGrant {
+				agentCmd, err := a.newAgentSpec(session.Project.Path)
+				if err != nil {
+					return mapLimaError("project.agent", err)
+				}
+				if _, err := fmt.Fprintf(a.stdout,
+					"%s: starting %s in %s as the backend identity\n"+
+						"  No SSH agent is forwarded. The agent can commit here; pushing is yours, from `torio project shell %s`\n",
+					session.Project.ID, a.backend.Identity().Name, session.Project.Path, session.Project.ID); err != nil {
+					return err
+				}
+				runErr := a.newInteractive().RunInteractive(cmd.Context(), agentCmd)
+				if _, err := fmt.Fprintf(a.stdout, "%s: agent session ended. Review what it did before you push.\n", session.Project.ID); err != nil {
+					return err
+				}
+				if runErr != nil {
+					return mapInteractiveSessionError("project.agent", "agent session", runErr)
+				}
+				return nil
+			}
+
+			// A grant with no pinned key would be the old rejected design: a
+			// socket handed to the agent with nothing in front of it. The whole
+			// reason this is offerable is the dialog, so no pin is a refusal
+			// rather than a weaker grant.
+			if a.runtime.File.OperatorKey == "" {
+				return &CLIError{
+					Exit:    ExitPrecondition,
+					Code:    "PRECONDITION_FAILED",
+					Command: "project.agent",
+					Message: "--push-grant needs `operator_key` set in the config document: the grant is the mediated agent, and without a pinned key there is nothing to mediate",
+				}
+			}
+			mediated, err := a.startMediation("project.agent", mediatedContext(session.Project, session.Review))
+			if err != nil {
+				return err
+			}
+			defer mediated.stop()
+
+			guestSocket, err := lima.NewGuestPushSocketPath()
+			if err != nil {
+				return mapLimaError("project.agent", err)
+			}
+			agentCmd, err := a.newAgentPushSpec(session.Project.Path, mediated.SocketPath(), guestSocket)
 			if err != nil {
 				return mapLimaError("project.agent", err)
 			}
 			if _, err := fmt.Fprintf(a.stdout,
 				"%s: starting %s in %s as the backend identity\n"+
-					"  No SSH agent is forwarded. The agent can commit here; pushing is yours, from `torio project shell %s`\n",
-				session.Project.ID, a.backend.Identity().Name, session.Project.Path, session.Project.ID); err != nil {
+					"  This session may ask to push. One pinned key is reachable through Torio; every signature\n"+
+					"  stops at a dialog on this Mac and is recorded in %s\n",
+				session.Project.ID, a.backend.Identity().Name, session.Project.Path,
+				filepath.Join(a.runtime.Paths.ConfigDir, agentAuditFileName)); err != nil {
 				return err
 			}
+			if line := reviewLine(session.Review); line != "" {
+				if _, err := fmt.Fprintf(a.stdout, "  %s\n", line); err != nil {
+					return err
+				}
+			}
 			runErr := a.newInteractive().RunInteractive(cmd.Context(), agentCmd)
-			if _, err := fmt.Fprintf(a.stdout, "%s: agent session ended. Review what it did before you push.\n", session.Project.ID); err != nil {
+			if _, err := fmt.Fprintf(a.stdout,
+				"%s: agent session ended. Torio makes no claim about what was pushed; the decision log says what it allowed.\n",
+				session.Project.ID); err != nil {
 				return err
 			}
 			if runErr != nil {
@@ -309,6 +363,9 @@ func newProjectAgentCmd(a *app) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&pushGrant, "push-grant", false,
+		"Let this session ask to push, through the mediated agent. Every signature waits for your confirmation on this Mac and is recorded. Requires operator_key.")
+	return cmd
 }
 
 func newProjectEnterCmd(a *app) *cobra.Command {
@@ -399,7 +456,7 @@ func newProjectShellCmd(a *app) *cobra.Command {
 			// The proxy is started before the argv is built, because the argv
 			// names its socket. It is stopped on every exit path below, so the
 			// capability cannot outlive the session that carried it.
-			mediated, err := a.startMediation(session)
+			mediated, err := a.startMediation("project.shell", mediatedContext(session.Project, session.Review))
 			if err != nil {
 				return err
 			}
