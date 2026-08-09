@@ -143,6 +143,12 @@ func TestWaitingMarkerHelperKeepsIndependentSessionEntries(t *testing.T) {
     rm -f -- "$marker"`) {
 		t.Error("clear removes the box-wide marker instead of only its session entry")
 	}
+	if strings.Contains(script, `/usr/bin/rm -f -- "$marker"`) {
+		t.Error("the helper removes readiness state instead of publishing an empty marker")
+	}
+	if !strings.Contains(script, `/usr/bin/sync -f "$HOME"`) {
+		t.Error("the helper does not fsync the marker directory after publishing")
+	}
 }
 
 // Bootstrap must prove the parser the root-owned helper invokes. Otherwise a
@@ -167,4 +173,39 @@ func TestWaitingMarkerParserIsAVerifiedDependency(t *testing.T) {
 			t.Fatal("missing jq passed the hook dependency check")
 		}
 	})
+}
+
+func TestBootstrapInitializesPersistentWaitingStateCrashSafely(t *testing.T) {
+	kindProbe := "stat -c %F " + waitingMarkerPath
+	absentProbe := "test ! -e " + waitingMarkerPath
+	installProbe := strings.Join(waitingMarkerStateInstallArgv(), " ")
+	r := newFakeRunner(map[string]execx.Result{
+		kindProbe:    exit(1),
+		absentProbe:  exit(0),
+		installProbe: exit(0),
+	})
+
+	if err := reconcileWaitingMarkerState(context.Background(), r); err != nil {
+		t.Fatalf("reconcileWaitingMarkerState: %v", err)
+	}
+	if r.records["claude_waiting_marker_state_initialized"] == "" {
+		t.Error("initializing the marker recorded no evidence")
+	}
+
+	script := installProbe
+	for _, want := range []string{
+		"mktemp " + Home + "/.torio-waiting.",
+		"chown " + User + ":" + User,
+		"chmod 0600",
+		`sync -f "$tmp"`,
+		"mv -T --",
+		"sync -f " + Home,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("marker initializer is missing %q", want)
+		}
+	}
+	if got := string(initialWaitingMarker); got != `{"schema_version":"2","waits":[]}`+"\n" {
+		t.Errorf("initial marker = %q, want the empty current schema", got)
+	}
 }

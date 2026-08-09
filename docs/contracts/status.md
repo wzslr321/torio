@@ -127,8 +127,11 @@ Per running box, as the backend's own identity, each a fixed argv with no shell:
 
 1. `date +%s` — the guest clock every age is measured against.
 2. `ps -o pid=,etimes=,comm= -u <identity>` — only when a session process is declared.
-3. `stat -c '%n|%U|%a|%Y' <progress paths...> [marker]` — one call for every path fact.
-4. `cat -- <marker>` — only when the marker passed its ownership, mode and age gate.
+3. `find <fixed parent> -maxdepth 1 -name <fixed name> -type f -printf …`
+   — one bounded call per declared path. It prints no other filename and exits
+   zero when the exact name is absent, so absence is not inferred from a failed
+   `stat`.
+4. `cat -- <marker>` — only when the marker passed its ownership and mode gate.
 
 A stopped box is asked nothing: nothing runs there, which proves both that no
 session exists and that nobody on it is waiting. When it last progressed stays
@@ -185,17 +188,18 @@ rendered line could carry.
 **Gate** — the file must be owned by the backend identity and must not be
 group- or world-writable. A marker that fails the gate is `unknown`, never
 absent: "someone else could have written this" and "nobody is waiting" are
-different answers. The gate is checked from the guest's own `stat` output before
+different answers. The gate is checked from the guest's exact-name path fact before
 the content is fetched. This is an operational drift detector, **not a security
 boundary**: the agent runs as that same identity and can forge or remove its own
 marker. Root ownership protects the helper and managed hook configuration from
 silent retuning; it cannot make an agent-owned status signal authoritative.
 
 **Age** — every wait older than **one hour**, measured from its `since_unix`
-against the guest clock, expires. A document older than that is rejected before
-it is read as well. A wait nobody cleared would otherwise stay on the surface
-forever, and an operator who learns to ignore one stale plea ignores the real
-one beside it. One expired entry does not hide another live, fresh wait.
+against the guest clock, expires. The empty document itself does not expire: it
+is the persistent proof that bootstrap installed a working marker integration.
+A wait nobody cleared would otherwise stay on the surface forever, and an
+operator who learns to ignore one stale plea ignores the real one beside it.
+One expired entry does not hide another live, fresh wait.
 
 **Rank** — liveness wins, in both directions. Each entry whose pid is gone is
 dropped; where liveness itself is `unknown`, so is waiting. The box reports
@@ -203,14 +207,14 @@ waiting while at least one fresh entry names a live session.
 
 **Scope** — one fixed document per box, with one entry per session. Updates are
 serialized by a fixed lock and rewrite the document atomically. A set replaces
-only the entry with its `session_id`; a clear removes only that entry and removes
-the document when none remain. Two sessions waiting at once therefore remain
-two independently actionable entries without making the poll enumerate a
-directory.
+only the entry with its `session_id`; a clear removes only that entry and
+publishes an empty document when none remain. Two sessions waiting at once
+therefore remain two independently actionable entries without making the poll
+enumerate a directory. Bootstrap creates that empty document atomically; a
+missing document means hook readiness is `unknown`, never proven quiet.
 
-**Cost of a lost marker** — a missed notification, and nothing else. That is the
-failure this design chose to accept, which is why absence with a live session is
-reported as `known: not waiting` rather than as unknown.
+**Cost of a lost marker** — the waiting field becomes `unknown`. It does not
+turn a broken hook path into a quiet answer.
 
 ### On a Claude Code box
 
@@ -224,11 +228,12 @@ at `/usr/local/bin/torio-waiting-marker`:
 | `UserPromptSubmit` | `clear` |
 | `SessionEnd` | `clear` |
 
-Both files are installed by `torio vm bootstrap` and proven by digest on every
-run: installed when absent, reported and never rewritten when they have drifted.
-A box bootstrapped before the hooks existed reports drift and refuses until the
-settings file is removed and bootstrap runs again — until then its `waiting`
-field reads not-waiting, because no marker is ever written.
+Both root-owned files are installed by `torio vm bootstrap` and proven by digest
+on every run: installed when absent, reported and never rewritten when they have
+drifted. Bootstrap also initializes the private, agent-owned empty marker; this
+is a drift detector and readiness fact, not a security boundary. A box
+bootstrapped before the hooks existed reports `waiting` as unknown until the
+operator resolves the reported drift and bootstraps it again.
 
 The helper takes exactly one argument, matched against a fixed list. From
 standard input it selects only the validated `session_id`; Claude Code also

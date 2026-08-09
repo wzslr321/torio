@@ -18,7 +18,8 @@ import (
 // could read that is kept up to date by the waiting itself. It is therefore the
 // single event-carried field in the schema, and every rule around it exists to
 // bound what a lost or stale event can claim: it ranks below liveness, and it
-// expires on its own.
+// expires on its own. The empty document persists as the readiness fact that
+// bootstrap and the managed hooks are present.
 const (
 	// MarkerFileName is the marker, in the backend identity's home. The
 	// dot-prefixed `.torio-` name is the same convention every other file Torio
@@ -144,13 +145,10 @@ func validSessionID(id string) bool {
 // still checked before content is fetched so a different guest identity cannot
 // speak for it. A marker that fails the gate is unknown rather than absent,
 // because "someone else could have written this" and "nobody is waiting" are
-// not the same answer.
-func markerTrusted(e statEntry, owner string, guestNow time.Time) bool {
-	if e.owner != owner || writableBeyondOwner(e.mode) {
-		return false
-	}
-	age := guestNow.Sub(e.mtime)
-	return age >= 0 && age <= MarkerTTL
+// not the same answer. Age belongs to each wait, not to the persistent empty
+// readiness document.
+func markerTrusted(e statEntry, owner string) bool {
+	return e.owner == owner && !writableBeyondOwner(e.mode)
 }
 
 // waitingFromMarker turns a trusted, decoded marker into the reported field,
@@ -164,6 +162,10 @@ func markerTrusted(e statEntry, owner string, guestNow time.Time) bool {
 func waitingFromMarker(doc markerDoc, e statEntry, sessions []Session, guestNow time.Time) WaitingField {
 	if doc.SchemaVersion == MarkerSchemaVersion {
 		return waitingFromAggregateMarker(doc, sessions, guestNow)
+	}
+	markerAge := guestNow.Sub(e.mtime)
+	if markerAge < 0 || markerAge > MarkerTTL {
+		return unknownWaiting()
 	}
 	alive := false
 	if doc.PID == 0 {
@@ -182,7 +184,7 @@ func waitingFromMarker(doc markerDoc, e statEntry, sessions []Session, guestNow 
 	wait := Wait{
 		Kind:       doc.Kind,
 		PID:        doc.PID,
-		AgeSeconds: int64(guestNow.Sub(e.mtime) / time.Second),
+		AgeSeconds: int64(markerAge / time.Second),
 	}
 	return WaitingField{
 		State:      Known,

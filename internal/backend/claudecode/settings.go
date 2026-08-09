@@ -62,6 +62,9 @@ func (claudeBackend) VerifyGuardrails(ctx context.Context, r backend.StepRunner)
 	if err := reconcileWaitingMarkerHelper(ctx, r); err != nil {
 		return err
 	}
+	if err := reconcileWaitingMarkerState(ctx, r); err != nil {
+		return err
+	}
 	return reportMCPServers(ctx, r)
 }
 

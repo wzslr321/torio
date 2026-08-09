@@ -2,6 +2,7 @@ package status
 
 import (
 	"errors"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -69,51 +70,46 @@ func parseProcesses(out []byte) []process {
 	return live
 }
 
-// statFormat is the `stat -c` format every path fact is read through. The
-// separator is a pipe rather than whitespace because a mode and an owner never
-// contain one, and every path this package stats is a compile-time constant.
-const statFormat = "%n|%U|%a|%Y"
+// pathFactFormat is printed by GNU find for one exact, fixed filename. Unlike
+// stat, find exits zero when that name is absent and non-zero when the directory
+// itself could not be read, so absence cannot be confused with a failed probe.
+const pathFactFormat = "%p|%u|%m|%T@\n"
 
 // statEntry is one path as the guest reported it.
 type statEntry struct {
 	path  string
 	owner string
-	// mode is the `stat -c %a` spelling, which drops leading zeroes.
+	// mode is the GNU numeric permission spelling, which drops leading zeroes.
 	mode  string
 	mtime time.Time
 }
 
-// parseStatEntries reads the output of one `stat` over several paths.
-//
-// A path that does not exist makes `stat` write to standard error and exit
-// non-zero while still printing a line for every path that does, so the caller
-// passes stdout here regardless of the exit code and absence shows up as a
-// missing entry. That is the intended reading: the files this stats are
-// evidence a backend leaves behind, and a backend that has not run yet leaves
-// none.
-func parseStatEntries(out []byte) map[string]statEntry {
-	entries := make(map[string]statEntry)
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		fields := strings.Split(line, "|")
-		if len(fields) != 4 {
-			continue
-		}
-		secs, err := strconv.ParseInt(fields[3], 10, 64)
-		if err != nil {
-			continue
-		}
-		entries[fields[0]] = statEntry{
-			path:  fields[0],
-			owner: fields[1],
-			mode:  fields[2],
-			mtime: time.Unix(secs, 0).UTC(),
-		}
+// parsePathFact accepts either no line (the fixed name is absent) or exactly
+// one line for the path that was asked for. Anything else is untrusted output,
+// not a partial answer.
+func parsePathFact(out []byte, wantPath string) (*statEntry, error) {
+	line := strings.TrimSpace(string(out))
+	if line == "" {
+		return nil, nil
 	}
-	return entries
+	if strings.Contains(line, "\n") {
+		return nil, errUnreadableRecord
+	}
+	fields := strings.Split(line, "|")
+	if len(fields) != 4 || fields[0] != wantPath {
+		return nil, errUnreadableRecord
+	}
+	seconds, err := strconv.ParseFloat(fields[3], 64)
+	if err != nil || seconds < 0 {
+		return nil, errUnreadableRecord
+	}
+	entry := &statEntry{
+		path:  fields[0],
+		owner: fields[1],
+		mode:  fields[2],
+		mtime: time.Unix(int64(seconds), 0).UTC(),
+	}
+	return entry, nil
 }
 
 // writableBeyondOwner reports whether a `stat -c %a` mode grants write to the
@@ -153,9 +149,9 @@ func sessionsNamed(name string, live []process, guestNow time.Time) SessionField
 // newestProgress is the most recent modification time among the paths a backend
 // declared as evidence of work.
 //
-// A path that is absent is not an error and not a zero: a backend that has
-// never run has written none of them, and the honest answer is that nothing is
-// known about when it last progressed.
+// A missing entry is not a zero. The caller has already established that the
+// exact-name lookup completed, and the honest answer when no declared evidence exists is that
+// nothing is known about when the backend last progressed.
 func newestProgress(paths []string, entries map[string]statEntry, guestNow time.Time) ProgressField {
 	var newest time.Time
 	for _, p := range paths {
@@ -179,12 +175,10 @@ func newestProgress(paths []string, entries map[string]statEntry, guestNow time.
 	return ProgressField{State: Known, At: newest.Format(time.RFC3339), AgeSeconds: age}
 }
 
-// statArgv builds the single `stat` call that covers every path a poll needs
-// from one instance.
-func statArgv(paths []string) []string {
-	argv := make([]string, 0, len(paths)+2)
-	argv = append(argv, "stat", "-c", statFormat)
-	return append(argv, paths...)
+// pathFactArgv asks GNU find about one exact fixed name without enumerating or
+// printing any other agent-controlled filename.
+func pathFactArgv(p string) []string {
+	return []string{"find", path.Dir(p), "-maxdepth", "1", "-name", path.Base(p), "-type", "f", "-printf", pathFactFormat}
 }
 
 // The two reasons a poll gives up on a fact that are its own rather than the
@@ -194,7 +188,7 @@ func statArgv(paths []string) []string {
 var (
 	// errUnreadableRecord is a guest command that ran and refused to answer.
 	errUnreadableRecord = errors.New("guest command could not produce the fact")
-	// errUntrustedMarker is a marker file whose ownership, mode or age puts it
+	// errUntrustedMarker is a marker file whose ownership or mode puts it
 	// outside what the convention allows to be read.
 	errUntrustedMarker = errors.New("waiting marker is not owned, not private, or expired")
 )

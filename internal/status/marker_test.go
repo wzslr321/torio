@@ -72,6 +72,17 @@ func TestWaitingIsUnknownForAnExpiredMarker(t *testing.T) {
 	}
 }
 
+func TestAnOldEmptyMarkerStillProvesHookReadiness(t *testing.T) {
+	env := markerEnv(testUser, "600", testGuestNow-int64(MarkerTTL.Seconds())-1,
+		`{"schema_version":"2","waits":[]}`)
+
+	got := pollWithMarker(t, env)
+
+	if got.State != Known || got.Waiting {
+		t.Fatalf("waiting = %+v, want a proven empty marker regardless of file age", got)
+	}
+}
+
 // The ownership and mode gate runs before the content is fetched, so a marker
 // some other identity could have written is never parsed.
 func TestWaitingIsUnknownForAMarkerThatFailsItsGate(t *testing.T) {
@@ -142,7 +153,23 @@ func TestWaitingIsUnknownWhenTheBackendDeclaresNoMarker(t *testing.T) {
 		t.Fatalf("waiting state = %q, want %q", got.Waiting.State, Unknown)
 	}
 	if g.saw(MarkerFileName) {
-		t.Error("the marker path was stat'd for a backend that declares no marker")
+		t.Error("the marker path was read for a backend that declares no marker")
+	}
+}
+
+func TestWaitingIsUnknownWhenADeclaredMarkerIsAbsent(t *testing.T) {
+	env := defaultEnv()
+	env.statLines = statLine(testProgressPath, testUser, "600", testGuestNow-30) + "\n"
+	env.marker = ""
+	g := &fakeGuest{env: env}
+
+	got := pollOne(g, testBackend{spec: specWith(testProcess, true)}).Waiting
+
+	if got.State != Unknown {
+		t.Fatalf("waiting state = %q, want %q until bootstrap has initialized the marker", got.State, Unknown)
+	}
+	if g.saw("cat -- " + testHome + "/" + MarkerFileName) {
+		t.Error("an absent marker was fetched")
 	}
 }
 

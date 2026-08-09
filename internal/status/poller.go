@@ -181,8 +181,9 @@ func (p *Poller) sessions(ctx context.Context, instance string, t backend.Transp
 	return sessionsNamed(spec.SessionProcess, parseProcesses(out), guestNow)
 }
 
-// paths reads every path fact in one call: the progress evidence a backend
-// declared, and the marker file's own ownership, mode and age.
+// paths reads the progress evidence a backend declared and the marker file's
+// own ownership and mode. Each exact name is a separate bounded call so a
+// missing file is distinguishable from a failed directory read.
 func (p *Poller) paths(ctx context.Context, instance string, t backend.Transport, user string, id backend.Identity, spec *backend.StatusSpec, guestNow time.Time) (ProgressField, *statEntry) {
 	paths := append([]string{}, spec.ProgressPaths...)
 	markerPath := ""
@@ -194,15 +195,26 @@ func (p *Poller) paths(ctx context.Context, instance string, t backend.Transport
 		return ProgressField{State: NotApplicable}, nil
 	}
 
-	// A missing path makes `stat` exit non-zero while still printing a line for
-	// every path that exists, so the exit code is deliberately not read here:
-	// absence is one of the answers being asked for.
-	res, err := guestexec.Run(ctx, t, guestexec.UserExecAs(user, statArgv(paths)...))
-	if err != nil {
-		p.diagnose(instance, "paths", err)
-		return unknownProgress(), nil
+	entries := make(map[string]statEntry, len(paths))
+	for _, factPath := range paths {
+		res, err := guestexec.Run(ctx, t, guestexec.UserExecAs(user, pathFactArgv(factPath)...))
+		if err != nil {
+			p.diagnose(instance, "paths", err)
+			return unknownProgress(), nil
+		}
+		if res.ExitCode != 0 {
+			p.diagnose(instance, "paths", errUnreadableRecord)
+			return unknownProgress(), nil
+		}
+		entry, err := parsePathFact(res.Stdout, factPath)
+		if err != nil {
+			p.diagnose(instance, "paths", err)
+			return unknownProgress(), nil
+		}
+		if entry != nil {
+			entries[factPath] = *entry
+		}
 	}
-	entries := parseStatEntries(res.Stdout)
 
 	var marker *statEntry
 	if markerPath != "" {
@@ -211,7 +223,7 @@ func (p *Poller) paths(ctx context.Context, instance string, t backend.Transport
 		}
 	}
 	if len(spec.ProgressPaths) == 0 {
-		// The stat call happened for the marker alone: this backend writes no
+		// The path call happened for the marker alone: this backend writes no
 		// evidence of work, which is a declaration and not an unreadable box.
 		return ProgressField{State: NotApplicable}, marker
 	}
@@ -231,12 +243,13 @@ func (p *Poller) waiting(ctx context.Context, instance string, t backend.Transpo
 		return unknownWaiting()
 	}
 	if marker == nil {
-		// No marker and a readable box: nobody asked, or somebody asked and was
-		// answered. A lost marker costs a missed notification, which is the
-		// failure this design chose to accept.
-		return WaitingField{State: Known, Waiting: false, Waits: []Wait{}}
+		// Bootstrap initializes an empty document and the hook retains it across
+		// clears. Its absence means readiness cannot be proven, not that nobody
+		// asked.
+		p.diagnose(instance, "waiting", errUnreadableRecord)
+		return unknownWaiting()
 	}
-	if !markerTrusted(*marker, user, guestNow) {
+	if !markerTrusted(*marker, user) {
 		p.diagnose(instance, "waiting", errUntrustedMarker)
 		return unknownWaiting()
 	}

@@ -69,19 +69,25 @@ func TestSessionsNamed(t *testing.T) {
 	}
 }
 
-func TestParseStatEntries(t *testing.T) {
-	out := "/home/agent/a|agent|600|1754600000\ngarbage\n/home/agent/b|agent|644|1754600060\n"
-
-	got := parseStatEntries([]byte(out))
-
-	if len(got) != 2 {
-		t.Fatalf("entries = %+v, want the two readable lines", got)
+func TestParsePathFact(t *testing.T) {
+	got, err := parsePathFact([]byte("/home/agent/a|agent|600|1754600000.123\n"), "/home/agent/a")
+	if err != nil {
+		t.Fatalf("parsePathFact: %v", err)
 	}
-	if got["/home/agent/b"].mtime.Unix() != 1754600060 {
-		t.Errorf("mtime = %v, want the second the guest reported", got["/home/agent/b"].mtime)
+	if got == nil || got.mtime.Unix() != 1754600000 || got.owner != "agent" || got.mode != "600" {
+		t.Fatalf("entry = %+v, want the exact path fact", got)
 	}
-	if got["/home/agent/a"].owner != "agent" || got["/home/agent/a"].mode != "600" {
-		t.Errorf("entry = %+v, want owner and mode carried through", got["/home/agent/a"])
+	if absent, err := parsePathFact(nil, "/home/agent/a"); err != nil || absent != nil {
+		t.Fatalf("absent fact = %+v, %v; want nil, nil", absent, err)
+	}
+	for _, out := range []string{
+		"garbage\n",
+		"/home/agent/other|agent|600|1754600000\n",
+		"/home/agent/a|agent|600|1754600000\n/home/agent/a|agent|600|1754600001\n",
+	} {
+		if _, err := parsePathFact([]byte(out), "/home/agent/a"); err == nil {
+			t.Errorf("parsePathFact accepted %q", out)
+		}
 	}
 }
 
@@ -128,9 +134,9 @@ func TestNewestProgress(t *testing.T) {
 	}
 }
 
-func TestStatArgvIsOneCallOverEveryPath(t *testing.T) {
-	got := statArgv([]string{"/a", "/b"})
-	want := []string{"stat", "-c", statFormat, "/a", "/b"}
+func TestPathFactArgvReadsOnlyTheFixedName(t *testing.T) {
+	got := pathFactArgv("/home/agent/.torio-waiting.json")
+	want := []string{"find", "/home/agent", "-maxdepth", "1", "-name", ".torio-waiting.json", "-type", "f", "-printf", pathFactFormat}
 	if len(got) != len(want) {
 		t.Fatalf("argv = %v, want %v", got, want)
 	}

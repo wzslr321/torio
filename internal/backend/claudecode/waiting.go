@@ -18,6 +18,10 @@ import (
 // boundary or proof against that same agent.
 const WaitingMarkerHelper = "/usr/local/bin/torio-waiting-marker"
 
+const waitingMarkerPath = Home + "/.torio-waiting.json"
+
+var initialWaitingMarker = []byte(`{"schema_version":"2","waits":[]}` + "\n")
+
 //go:embed templates/torio-waiting-marker.sh
 var embeddedWaitingMarker []byte
 
@@ -108,9 +112,11 @@ func reconcileWaitingMarkerHelper(ctx context.Context, r backend.StepRunner) err
 
 // verifyWaitingMarkerDependencies proves the parser the helper invokes as the
 // backend identity. A missing parser would make every hook fail before writing
-// the fixed marker while an absent file otherwise reads as known not-waiting.
+// the fixed marker while an absent file otherwise leaves waiting unknown.
 // The exact version is the one measured on the promoted Claude Code 2.1.220
-// guest; compatibility with another jq is not guessed here.
+// guest; compatibility with another jq is not guessed here. Bootstrap also
+// initializes the persistent empty marker, so a missing parser can never sit
+// behind a known quiet answer.
 func verifyWaitingMarkerDependencies(ctx context.Context, r backend.StepRunner) error {
 	const (
 		name        = "claude_waiting_marker_dependencies"
@@ -155,4 +161,67 @@ trap - EXIT
 			"confirm passwordless root provisioning is intact and re-run bootstrap")
 	}
 	return nil
+}
+
+// reconcileWaitingMarkerState initializes the persistent empty document that
+// proves this box has the managed waiting integration. This reads an
+// agent-owned file as a drift detector, not a boundary: the agent can remove or
+// forge it, but absence must then degrade status to unknown rather than quietly
+// claiming that no session needs attention.
+func reconcileWaitingMarkerState(ctx context.Context, r backend.StepRunner) error {
+	const name = "claude_waiting_marker_state"
+	remediation := "run `torio vm bootstrap` to initialize " + waitingMarkerPath
+	kind, err := r.Probe(ctx, name, "stat", "-c", "%F", waitingMarkerPath)
+	if err != nil {
+		return err
+	}
+	if kind.ExitCode == 1 && trimmed(kind.Stdout) == "" {
+		absent, err := r.Probe(ctx, name, "test", "!", "-e", waitingMarkerPath)
+		if err != nil {
+			return err
+		}
+		if absent.ExitCode != 0 {
+			return r.Fail(name, "could not prove the waiting marker path is absent", remediation)
+		}
+		if !r.Reconcile() {
+			return r.Fail(name, "waiting marker state is not initialized", remediation)
+		}
+		res, err := r.ProbeInput(ctx, name, initialWaitingMarker, waitingMarkerStateInstallArgv())
+		if err != nil {
+			return err
+		}
+		if res.ExitCode != 0 {
+			return r.Fail(name, "could not initialize waiting marker state", remediation)
+		}
+		r.Record(name+"_initialized", true, "installed empty agent-owned marker atomically")
+		return nil
+	}
+	if kind.ExitCode != 0 || trimmed(kind.Stdout) != "regular file" {
+		return r.Fail(name, "waiting marker state is not a regular file", remediation)
+	}
+	og, err := r.Probe(ctx, name, "stat", "-c", "%U:%G %a", waitingMarkerPath)
+	if err != nil {
+		return err
+	}
+	owner, group, mode, ok := parseOwnershipMode(og.Stdout)
+	if og.ExitCode != 0 || !ok || owner != User || group != User || mode != "600" {
+		return r.Fail(name, "waiting marker state must be "+User+":"+User+" 600", remediation)
+	}
+	r.Record(name, true, User+":"+User+" 600 (agent-owned drift detector)")
+	return nil
+}
+
+func waitingMarkerStateInstallArgv() []string {
+	script := `
+tmp="$(mktemp ` + Home + `/.torio-waiting.XXXXXX)"
+trap 'rm -f -- "$tmp"' EXIT
+cat >"$tmp"
+chown ` + User + `:` + User + ` "$tmp"
+chmod 0600 "$tmp"
+sync -f "$tmp"
+mv -T -- "$tmp" ` + waitingMarkerPath + `
+sync -f ` + Home + `
+trap - EXIT
+`
+	return []string{"sudo", "-n", "/bin/bash", "-ceu", script}
 }

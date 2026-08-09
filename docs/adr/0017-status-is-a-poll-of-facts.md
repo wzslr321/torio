@@ -112,8 +112,8 @@ exists only at the moment the agent asks, so it is carried by a marker file
 an event writes, consumed with a TTL, and ranked below liveness — a waiting
 marker for a session whose pid is gone renders as gone, and a marker older
 than its TTL renders as unknown, never as a stale plea. The failure cost is
-bounded and asymmetric on purpose: a lost marker is a missed ping, a stale
-marker expires by itself.
+bounded and asymmetric on purpose: a lost marker makes waiting unknown, while a
+stale wait expires by itself.
 
 ### Torio maintains bounded projections, not their surfaces
 

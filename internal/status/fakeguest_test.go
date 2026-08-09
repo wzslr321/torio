@@ -3,6 +3,7 @@ package status
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 	"sync"
 
@@ -28,10 +29,11 @@ type guestEnv struct {
 	now       string
 	ps        string
 	statLines string
+	statRC    int
 	marker    string
 	markerRC  int
 	// truncate names the fact whose output arrives truncated ("clock",
-	// "processes", "stat", "marker").
+	// "processes", "paths", "marker").
 	truncate string
 }
 
@@ -50,8 +52,14 @@ func (f *fakeGuest) SSH(_ context.Context, argv []string) (execx.Result, error) 
 		return f.answer("clock", 0, f.env.now), nil
 	case strings.Contains(j, "ps -o pid=,etimes="):
 		return f.answer("processes", 0, f.env.ps), nil
-	case strings.Contains(j, "stat -c"):
-		return f.answer("stat", 0, f.env.statLines), nil
+	case strings.Contains(j, "find ") && strings.Contains(j, " -printf "):
+		for _, line := range strings.Split(f.env.statLines, "\n") {
+			fields := strings.Split(line, "|")
+			if len(fields) == 4 && strings.Contains(j, " -name "+path.Base(fields[0])+" ") {
+				return f.answer("paths", f.env.statRC, line+"\n"), nil
+			}
+		}
+		return f.answer("paths", f.env.statRC, ""), nil
 	case strings.Contains(j, "cat -- "+testHome+"/"+MarkerFileName):
 		return f.answer("marker", f.env.markerRC, f.env.marker), nil
 	}
@@ -121,7 +129,7 @@ func specWith(process string, marker bool) *backend.StatusSpec {
 	}
 }
 
-// statLine renders one `stat -c` line the way the guest would.
+// statLine renders one exact-name path fact the way the guest would.
 func statLine(path, owner, mode string, mtime int64) string {
 	return fmt.Sprintf("%s|%s|%s|%d", path, owner, mode, mtime)
 }
@@ -148,8 +156,10 @@ func pollBox(g *fakeGuest, b backend.Backend, box Box) Instance {
 // no marker.
 func defaultEnv() guestEnv {
 	return guestEnv{
-		now:       fmt.Sprintf("%d\n", testGuestNow),
-		ps:        " 1234 600 " + testProcess + "\n 1400 12 bash\n",
-		statLines: statLine(testProgressPath, testUser, "600", testGuestNow-30) + "\n",
+		now: fmt.Sprintf("%d\n", testGuestNow),
+		ps:  " 1234 600 " + testProcess + "\n 1400 12 bash\n",
+		statLines: statLine(testProgressPath, testUser, "600", testGuestNow-30) + "\n" +
+			statLine(testHome+"/"+MarkerFileName, testUser, "600", testGuestNow-30) + "\n",
+		marker: `{"schema_version":"2","waits":[]}`,
 	}
 }

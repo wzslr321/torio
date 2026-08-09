@@ -132,13 +132,6 @@ else
     "null | $jq_filter" >"$tmp"
 fi
 
-if /usr/bin/jq -e '.waits | length == 0' "$tmp" >/dev/null; then
-  /usr/bin/rm -f -- "$marker"
-  /usr/bin/rm -f -- "$tmp"
-  trap - EXIT
-  exit 0
-fi
-
 /usr/bin/sync -f "$tmp"
 /usr/bin/mv -T -- "$tmp" "$marker"
 /usr/bin/sync -f "$HOME"

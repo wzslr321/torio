@@ -103,6 +103,21 @@ func TestPollDegradesOneFactAtATime(t *testing.T) {
 	}
 }
 
+func TestPollDoesNotTreatAFailedPathProbeAsQuiet(t *testing.T) {
+	env := defaultEnv()
+	env.statRC = 2
+	g := &fakeGuest{env: env}
+
+	got := pollOne(g, testBackend{spec: specWith(testProcess, true)})
+
+	if got.Progress.State != Unknown {
+		t.Errorf("progress state = %q, want %q after the path probe failed", got.Progress.State, Unknown)
+	}
+	if got.Waiting.State != Unknown {
+		t.Errorf("waiting state = %q, want %q after the marker path probe failed", got.Waiting.State, Unknown)
+	}
+}
+
 // A backend that declares no probe is answered from the declaration, and the
 // guest is not touched at all. Asking anyway would be inventing work to justify
 // an answer already given.
