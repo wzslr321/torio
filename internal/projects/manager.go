@@ -717,8 +717,11 @@ func unreadableRemoteError(op string, key *DeployKey) error {
 		return &Error{Op: op, Kind: KindAuth, Err: errors.New(
 			"the guest cannot read the remote noninteractively; for a private repository use the SSH remote, which Torio can provision a read-only deploy key for")}
 	}
+	// Without a position: the human path prints the key above this line, the JSON
+	// path carries it in the error details, and a message naming a place is wrong
+	// in one of them.
 	return &Error{Op: op, Kind: KindAuth, Err: fmt.Errorf(
-		"the guest cannot read the remote yet; authorize the read-only deploy key above on %s, then run the same command again", key.Host)}
+		"the guest cannot read the remote yet; authorize its read-only deploy key for read access on %s, then run the same command again", key.Host)}
 }
 
 // ensureRemoteReadable proves the guest can read the remote, provisioning a

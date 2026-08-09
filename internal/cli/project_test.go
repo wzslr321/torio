@@ -878,7 +878,7 @@ func TestProjectAddPrintsTheDeployKeyOnStderr(t *testing.T) {
 		addErr: &projects.Error{
 			Op:   "add",
 			Kind: projects.KindAuth,
-			Err:  errors.New("the guest cannot read the remote yet; authorize the read-only deploy key above on github.com, then run the same command again"),
+			Err:  errors.New("the guest cannot read the remote yet; authorize its read-only deploy key for read access on github.com, then run the same command again"),
 		},
 	}
 	code, stdout, stderr := runProjectCLI(t, []string{"project", "add", "demo", "git@github.com:owner/demo.git"}, service)
