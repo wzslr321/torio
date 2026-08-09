@@ -37,11 +37,17 @@ From the base format, unchanged:
 
 - Relative Markdown links between notes are the graph. There is no separate
   link table and no link syntax outside Markdown's own.
-- A directory MAY carry an `index.md` that curates its contents for a reader.
+- Two filenames are reserved and are not notes: `index.md`, which curates a
+  directory's contents, and `log.md`, which records the history of changes at
+  its level. Neither carries frontmatter.
 
 A profile narrows a base format; it does not extend it. Everything below is a
-constraint on how those fields are used in a Torio vault, and a note that
-satisfies the Torio profile is by construction a valid OKF document.
+constraint on how those fields are used in a Torio vault, with **one deliberate
+divergence**: the root `index.md` carries `type: vault`, where the base format
+permits only `okf_version` there. That marker is how a directory is known to be
+a vault (§7), and without it this kit would be guessing about whose files it is
+writing into. Every other file in a conforming Torio vault is a conforming OKF
+document.
 
 **Wikilinks (`[[note]]`) MUST NOT be used.** They resolve against one
 application's private index, so a plain Markdown reader cannot follow them and
@@ -50,12 +56,11 @@ does not get to depend on one tool's resolution rules.
 
 ## 2. Note types
 
-Eight types. A vault MAY define more; the skills in this kit understand these.
+Seven types. A vault MAY define more; the skills in this kit understand these.
 
 | `type` | Lives in | One per |
 | --- | --- | --- |
 | `vault` | `index.md` at the root | vault |
-| `index` | `<dir>/index.md` | directory |
 | `capture` | `inbox/` | captured thought |
 | `daily` | `daily/` | calendar day |
 | `meeting` | `meetings/` | meeting |
@@ -192,38 +197,60 @@ link is not a `resource` note.
 
 Example: [`examples/vault/resources/open-knowledge-format.md`](examples/vault/resources/open-knowledge-format.md).
 
-### 2.7 `index` and `vault`
+### 2.7 `index.md` and the root `vault`
 
 An `index.md` is a curated entry point — a map of what is in a directory and why
 a reader would want it. It is written by hand or by the librarian, never
 generated as a bare file listing: a listing is what `ls` is for.
 
-```yaml
----
-type: index
-title: Projects
-description: What is being worked on, and what is parked.
----
-```
+Keep it short, and put what a reader needs first at the top. A rendering carries
+the root `index.md` into context at the start of a session and bounds how much
+of it it carries (§9), so an index that runs long does not get a smaller share of
+attention — it loses its tail outright, and the tail is where an unwary author
+puts the section that changes most often.
 
-The vault's root `index.md` is the same idea with `type: vault`, and it is what
-identifies a directory as a Torio vault (§7).
+An `index.md` below the root carries **no frontmatter**. It is a body of one or
+more sections, each grouping notes under a heading with a link and a line saying
+why a reader would open it.
+
+The root `index.md` is the one exception, and the only file in the vault that
+diverges from the base format (§1). It declares the vault and the spec version
+it targets:
 
 ```yaml
 ---
 type: vault
 title: Second Brain
 description: A private Markdown vault, written to the Torio Vault standard.
+okf_version: "0.2"
 ---
 ```
 
 Examples: [`examples/vault/index.md`](examples/vault/index.md) and
 [`examples/vault/projects/index.md`](examples/vault/projects/index.md).
 
+### 2.8 `log.md`
+
+A `log.md` MAY appear in any directory, and records the history of changes **at
+that scope** — the vault's own `log.md` carries structural changes, a
+directory's carries what happened to that directory. What happened to one
+project belongs in that project's `## Log` (§4), not here.
+
+It carries no frontmatter. Date headings are ISO 8601 `YYYY-MM-DD`, newest
+first. Entries are prose; a leading bold word (`**Update**`, `**Creation**`,
+`**Deprecation**`) is a convention, not a requirement.
+
+```markdown
+## 2026-08-09
+
+**Update** `initiatives/` merged into `projects/`; both held `type: project`.
+```
+
 ## 3. Layout and naming
 
 ```
 index.md          type: vault — the root map
+log.md            structural change history; no frontmatter (optional)
 todo.md           open actions, plain Markdown, no frontmatter
 inbox/            type: capture — unrouted
 daily/            type: daily
@@ -247,10 +274,10 @@ Filenames:
 - `people/<given>-<family>.md`, `projects/<slug>.md`, `resources/<slug>.md`.
 - One topic per file. A note about two things is two notes and a link.
 
-`todo.md` and `attachments/` are the two things in a vault that are not notes.
-`todo.md` is a working list an agent appends to and a human prunes; giving it
-frontmatter and a type would invite treating it as a queue, which is a different
-product.
+Four things in a vault are not notes: the reserved `index.md` and `log.md`,
+plus `todo.md` and `attachments/`. `todo.md` is a working list an agent appends
+to and a human prunes; giving it frontmatter and a type would invite treating it
+as a queue, which is a different product.
 
 ## 4. Sections
 
@@ -310,8 +337,12 @@ These rules bind every skill in this kit, and any agent working in a vault.
    vault, carry the fact, not the note.
 6. **Write about people carefully.** §2.4's limits are a rule, not advice, and
    they apply to meeting notes too.
-7. **Do not commit.** A vault may be a Git repository. Whoever set it up owns
-   its history; an agent writes files and stops.
+7. **The history belongs to whoever set the vault up.** A vault may be a Git
+   repository. Do not commit unless its owner has said to; where they have, a
+   commit per meaningful change is what they are owed, not a liberty taken.
+   Either way **never push**, and never open a pull request or an issue, or
+   send the vault anywhere. A commit is local and reversible and can be left
+   for its owner to read; nothing past it is either.
 8. **Ask before deleting anything that is not a routed capture.** Triage may
    remove a capture it has merged. Nothing else in the vault is an agent's to
    delete.
@@ -376,6 +407,14 @@ path does not resolve, or when the directory fails the `type: vault` test in §7
 A rendering runs in every session, including all the ones that have nothing to
 do with a vault, and one that guesses in those sessions is worse than one that
 does nothing.
+
+A rendering MUST bound the map — a vault's root index is a document its owner
+controls, and an unbounded one would let a single file decide how a session
+starts. It MUST also state the bound where the person writing an index will meet
+it, rather than only in the code that applies it. An index is written once and
+read at the start of every session afterwards; one that silently loses its most
+useful section teaches nobody anything, least of all the author, who has no way
+to see what arrived.
 
 The map is not retrieval and does not replace it. It is what makes retrieval
 targeted: an agent that knows a `resources/` directory exists and what it is for

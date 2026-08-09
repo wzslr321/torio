@@ -67,7 +67,10 @@ Everything in §6 binds you, and three of them are load-bearing at your scale:
   hundred notes. Do not. It is someone's private thinking, not a draft.
 - **Delete nothing but a routed capture**, and only after the content is
   elsewhere.
-- **Never commit**, even in a vault that is a Git repository.
+- **Leave the history alone.** §6.7 lets a vault's owner ask for commits, but it
+  does not ask you: you run a bulk pass whose result nobody has read yet, and a
+  hundred notes touched under one message is the diff hardest to undo. Report
+  what you changed and let the session that called you commit it.
 
 Never write a secret. If a note contains one, do not move it, do not quote it,
 and say in the report that a note contains material that should be rotated —

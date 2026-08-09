@@ -106,15 +106,24 @@ Every implementation MUST preserve:
 6. A Git remote MUST NOT contain a password, token, query or fragment.
 7. The agent identity has read-only access to an origin; `ssh.forwardAgent` is
    disabled globally.
-8. Write capability **against a Git remote** comes only from a `torio project
-   shell` session and ends with it.
+8. Write capability **against a Git remote** comes only from a session an
+   operator opened, and ends with it. What the session forwards is Torio's own
+   agent: one pinned key, no signature without an operator's confirmation on the
+   host, every decision recorded before it takes effect
+   ([ADR-0015](docs/adr/0015-mediated-agent-forwarding.md)). With no key pinned
+   the session forwards the operator's agent whole, as it always did.
 9. Write capability granted by an MCP server is a **separate channel**: it does
    not pass through `project shell`, does not end with a session, and its scope
    MUST be explicit, enumerable and verified
    ([ADR-0004](docs/adr/0004-mcp-credential-custody-and-egress.md)).
 10. The guest-side operator-session helper is `root:root 0755`; drift is
     reported, never repaired.
-11. Push, merge and release are separate, human-only operations outside the CLI.
+11. A push may be initiated inside the CLI; **every signature it needs is
+    human-only**. `torio project agent --push-grant` gives a session the ability
+    to ask, never to answer, and refuses without a pinned key
+    ([ADR-0016](docs/adr/0016-session-scoped-push-grant.md)). Merge and release
+    remain human-only operations outside the CLI. Nothing signs unattended: an
+    unanswered dialog denies.
 12. Brain transport is one-shot and bounded; payload content never reaches
     stdout, logs or evidence.
 13. The Brain is not injected into a prompt — cross-project access goes through a

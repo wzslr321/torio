@@ -13,8 +13,12 @@ func TestProjectEnterHelperIsAValidNonPushWorkspaceShell(t *testing.T) {
 		t.Skip("bash is not available; the guest helper cannot be parsed here")
 	}
 
+	content, err := projectHelper(embeddedProjectEnter, HermesWorkspacePath, "project enter")
+	if err != nil {
+		t.Fatalf("resolving the guest helper: %v", err)
+	}
 	path := filepath.Join(t.TempDir(), "torio-project-enter")
-	if err := os.WriteFile(path, embeddedProjectEnter, 0o755); err != nil {
+	if err := os.WriteFile(path, content, 0o755); err != nil {
 		t.Fatalf("writing the guest helper: %v", err)
 	}
 	if out, err := exec.Command("bash", "-n", path).CombinedOutput(); err != nil {

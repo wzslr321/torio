@@ -55,6 +55,11 @@ If you have no vault, or the path does not resolve, nothing is added and nothing
 is said — this runs in every session, including all the ones that have nothing
 to do with notes.
 
+Your root `index.md` is carried up to **its first 25 lines below the
+frontmatter**, and the rest is dropped without a word. That is a budget, not a
+suggestion: write the index short and put what matters at the top, because a
+section past the cut is one you will never see arrive.
+
 ## The standard
 
 [`STANDARD.md`](STANDARD.md) is the normative part, and it is short. Eight note

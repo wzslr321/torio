@@ -158,9 +158,11 @@ func (claudeBackend) StatusChecks() backend.StatusChecks {
 
 func (claudeBackend) Session() *backend.SessionSpec {
 	return &backend.SessionSpec{
-		HelperPath: AgentSessionHelper,
-		Helper:     embeddedAgentSession,
-		LoginArgv:  loginArgv(),
+		HelperPath:     AgentSessionHelper,
+		Helper:         embeddedAgentSession,
+		LoginArgv:      loginArgv(),
+		PushHelperPath: AgentPushSessionHelper,
+		PushHelper:     embeddedAgentPushSession,
 	}
 }
 

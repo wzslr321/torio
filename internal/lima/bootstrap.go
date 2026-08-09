@@ -116,10 +116,10 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 	if err := a.verifyNoHostMounts(ctx, &rep); err != nil {
 		return rep, err
 	}
-	if err := a.verifyOperatorShellHelper(ctx, &rep); err != nil {
+	if err := a.verifyOperatorShellHelper(ctx, &rep, b.Identity().WorkspacePath, r.reconcile); err != nil {
 		return rep, err
 	}
-	if err := a.verifyProjectEnterHelper(ctx, &rep, r.reconcile); err != nil {
+	if err := a.verifyProjectEnterHelper(ctx, &rep, b.Identity().WorkspacePath, r.reconcile); err != nil {
 		return rep, err
 	}
 	if err := a.verifyAgentSessionHelper(ctx, &rep, b.Session(), r.reconcile); err != nil {
@@ -294,6 +294,15 @@ func validateRootHelperPath(dest string) error {
 // projectEnterInstallScript is the install for the ordinary workspace-session
 // helper.
 var projectEnterInstallScript = rootHelperInstallScript(ProjectEnterHelper)
+
+// operatorShellInstallScript is the install for the push-capable session helper.
+//
+// It exists because the template is written once, at `vm init`, and never
+// re-rendered: without this the helper could only ever change by recreating the
+// VM, which made a corrected helper undeliverable to a box that already existed.
+// Installing an *absent* file is not repairing drift — invariant 10 stands, and
+// a helper that is present and wrong is still reported and left alone.
+var operatorShellInstallScript = rootHelperInstallScript(OperatorShellHelper)
 
 // hostShareFSTypes is the findmnt -t filter for macOS host-share filesystems. A
 // broad host mount over the guest is an ADR-0002 violation and fails closed.
@@ -555,11 +564,41 @@ func (a *Adapter) verifyNoHostMounts(ctx context.Context, rep *BootstrapReport) 
 // borrow that agent. It must therefore be a regular file (a symlink would move
 // the real content somewhere unowned), owned root:root, and writable by nobody
 // else. `stat` does not dereference by default, so this reads the path itself.
-func (a *Adapter) verifyOperatorShellHelper(ctx context.Context, rep *BootstrapReport) error {
+func (a *Adapter) verifyOperatorShellHelper(ctx context.Context, rep *BootstrapReport, workspaceRoot string, reconcile bool) error {
 	const name = "operator_shell_helper"
 	st, err := a.guestProbe(ctx, rep, name, "stat", "-c", "%F", operatorShellHelperSpec.Path)
 	if err != nil {
 		return err
+	}
+	kind := strings.TrimSpace(string(st.Stdout))
+	if st.ExitCode == 1 && kind == "" {
+		absent, err := a.guestProbe(ctx, rep, name, "test", "!", "-e", operatorShellHelperSpec.Path)
+		if err != nil {
+			return err
+		}
+		if absent.ExitCode != 0 {
+			return a.verifyFailed(rep, name, "could not prove the helper path is absent", operatorShellHelperRemediation)
+		}
+		if !reconcile {
+			return a.verifyFailed(rep, name, "no operator shell helper at "+operatorShellHelperSpec.Path, operatorShellHelperRemediation)
+		}
+		content, err := projectHelper(embeddedProjectShell, workspaceRoot, "operator shell")
+		if err != nil {
+			return a.verifyFailed(rep, name, err.Error(), operatorShellHelperRemediation)
+		}
+		installed, err := a.SSHInput(ctx, content,
+			[]string{"sudo", "-n", "/bin/bash", "-ceu", operatorShellInstallScript})
+		if err != nil {
+			return err
+		}
+		if installed.ExitCode != 0 || installed.StdoutTruncated || installed.StderrTruncated {
+			return a.verifyFailed(rep, name, "could not install the missing operator shell helper", "confirm passwordless root provisioning is intact and re-run bootstrap")
+		}
+		rep.record(name+"_installed", true, "installed embedded helper atomically")
+		st, err = a.guestProbe(ctx, rep, name, "stat", "-c", "%F", operatorShellHelperSpec.Path)
+		if err != nil {
+			return err
+		}
 	}
 	return a.verifyRootHelperFile(ctx, rep, name, "operator shell helper", operatorShellHelperSpec, st,
 		"a writable helper is a privilege-escalation path into a session that carries the operator's forwarded agent",
@@ -618,7 +657,7 @@ func (a *Adapter) verifyRootHelperFile(ctx context.Context, rep *BootstrapReport
 // root-owned regular file provisioned by the Lima template. A helper absent
 // from a VM created by an older Torio is installed from the current embedded
 // bytes. Any existing but drifted path is reported and never overwritten.
-func (a *Adapter) verifyProjectEnterHelper(ctx context.Context, rep *BootstrapReport, reconcile bool) error {
+func (a *Adapter) verifyProjectEnterHelper(ctx context.Context, rep *BootstrapReport, workspaceRoot string, reconcile bool) error {
 	const name = "project_enter_helper"
 	spec := projectEnterHelperSpec
 
@@ -638,7 +677,15 @@ func (a *Adapter) verifyProjectEnterHelper(ctx context.Context, rep *BootstrapRe
 		if !reconcile {
 			return a.verifyFailed(rep, name, "no project enter helper at "+spec.Path, projectEnterHelperRemediation)
 		}
-		installed, err := a.SSHInput(ctx, embeddedProjectEnter,
+		// Resolved for the backend that will run it, exactly as the template
+		// does. Installing the raw embedded bytes here would put a helper on the
+		// guest carrying an unsubstituted placeholder, which refuses every
+		// project rather than the wrong ones.
+		content, err := projectHelper(embeddedProjectEnter, workspaceRoot, "project enter")
+		if err != nil {
+			return a.verifyFailed(rep, name, err.Error(), projectEnterHelperRemediation)
+		}
+		installed, err := a.SSHInput(ctx, content,
 			[]string{"sudo", "-n", "/bin/bash", "-ceu", projectEnterInstallScript})
 		if err != nil {
 			return err
@@ -671,14 +718,30 @@ func (a *Adapter) verifyAgentSessionHelper(ctx context.Context, rep *BootstrapRe
 	if session == nil {
 		return nil
 	}
-	const name = "agent_session_helper"
-	if err := validateRootHelperPath(session.HelperPath); err != nil {
+	if err := a.verifySessionHelper(ctx, rep, "agent_session_helper", "agent session helper",
+		session.HelperPath, session.Helper, reconcile); err != nil {
+		return err
+	}
+	// A backend that declares no push-capable session has nothing to check, and
+	// bootstrap records nothing rather than a check that passed vacuously.
+	if session.PushHelperPath == "" {
+		return nil
+	}
+	return a.verifySessionHelper(ctx, rep, "agent_push_session_helper", "agent push session helper",
+		session.PushHelperPath, session.PushHelper, reconcile)
+}
+
+// verifySessionHelper is the shared body: both entry points are root-owned
+// regular files nobody else may rewrite, installed from embedded bytes when
+// absent and reported, never overwritten, when they have drifted.
+func (a *Adapter) verifySessionHelper(ctx context.Context, rep *BootstrapReport, name, description, helperPath string, content []byte, reconcile bool) error {
+	if err := validateRootHelperPath(helperPath); err != nil {
 		return a.verifyFailed(rep, name,
-			"backend declares an unsafe agent session helper path",
+			"backend declares an unsafe "+description+" path",
 			"fix the backend to declare an absolute canonical path made of plain filename components")
 	}
 	spec := backend.PathSpec{
-		Path:  session.HelperPath,
+		Path:  helperPath,
 		Owner: "root",
 		Group: "root",
 		Modes: []string{"755", "0755"},
@@ -699,15 +762,15 @@ func (a *Adapter) verifyAgentSessionHelper(ctx context.Context, rep *BootstrapRe
 			return a.verifyFailed(rep, name, "could not prove the helper path is absent", remediation)
 		}
 		if !reconcile {
-			return a.verifyFailed(rep, name, "no agent session helper at "+spec.Path, remediation)
+			return a.verifyFailed(rep, name, "no "+description+" at "+spec.Path, remediation)
 		}
-		installed, err := a.SSHInput(ctx, session.Helper,
+		installed, err := a.SSHInput(ctx, content,
 			[]string{"sudo", "-n", "/bin/bash", "-ceu", rootHelperInstallScript(spec.Path)})
 		if err != nil {
 			return err
 		}
 		if installed.ExitCode != 0 || installed.StdoutTruncated || installed.StderrTruncated {
-			return a.verifyFailed(rep, name, "could not install the missing agent session helper", "confirm passwordless root provisioning is intact and re-run bootstrap")
+			return a.verifyFailed(rep, name, "could not install the missing "+description, "confirm passwordless root provisioning is intact and re-run bootstrap")
 		}
 		rep.record(name+"_installed", true, "installed embedded helper atomically")
 		st, err = a.guestProbe(ctx, rep, name, "stat", "-c", "%F", spec.Path)
@@ -715,7 +778,7 @@ func (a *Adapter) verifyAgentSessionHelper(ctx context.Context, rep *BootstrapRe
 			return err
 		}
 	}
-	return a.verifyRootHelperFile(ctx, rep, name, "agent session helper", spec, st,
+	return a.verifyRootHelperFile(ctx, rep, name, description, spec, st,
 		"a writable helper could replace the command an operator opens an agent session with",
 		remediation)
 }

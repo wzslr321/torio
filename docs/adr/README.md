@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-Fourteen records cover the decisions that govern the delivered binary, the vault
+Sixteen records cover the decisions that govern the delivered binary, the vault
 standard it writes against, how both are published, and how the behaviour that
 standard asks for is measured.
 
@@ -16,8 +16,11 @@ standard asks for is measured.
 | [0009](0009-backend-contract-and-claude-code.md) | An instance runs one backend, declared by a contract; a backend declares what it has, and verification checks exactly that; Claude Code is the second one |
 | [0010](0010-okf-vault-standard-and-brain-kit.md) | The vault format is written down as a profile of OKF, and it ships as a kit installable without the VM; the kit is content, Torio is mechanics |
 | [0011](0011-measured-brain-behaviour.md) | What the brain does autonomously is measured against a committed benchmark; scenarios are backend-neutral, the vault diff is the evidence, and no CI gate exists until its cost is known |
-| [0012](0012-mcp-broker-transport-and-oauth.md) | The MCP broker carries Streamable HTTP through operator-authorized OAuth while credentials remain under the broker identity |
-| [0013](0013-mcp-managed-client-config-and-activation.md) | Backend MCP clients use managed relay configuration, and the broker activates only after explicit login |
+| [0012](0012-mcp-broker-transport-and-oauth.md) | The broker carries Streamable HTTP through operator-authorized OAuth; policy is intersected with upstream discovery and the daemon ships as a release payload |
+| [0013](0013-mcp-managed-client-config-and-activation.md) | Claude's MCP route is root-managed configuration, and the broker unit activates only after the last required login |
+| [0014](0014-okf-profile-divergence-and-log-files.md) | The OKF profile adopts `log.md`, drops frontmatter from directory indexes, and names its one remaining divergence |
+| [0015](0015-mediated-agent-forwarding.md) | An operator session forwards an agent Torio serves, holding one pinned key, that asks before every signature |
+| [0016](0016-session-scoped-push-grant.md) | An agent session may ask to push; the signature it needs stops at the operator, and no pinned key means no grant |
 | [0017](0017-status-is-a-poll-of-facts.md) | Cross-instance status is a poll of provable facts with bounded Torio-maintained projections |
 
 ## Rules

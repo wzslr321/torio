@@ -364,6 +364,17 @@ type SessionSpec struct {
 	// reaches it, which is why it needs no root-owned helper to launder it.
 	// Empty when the backend takes no credential of its own.
 	LoginArgv []string
+
+	// PushHelperPath and PushHelper are the second entry point: a session that
+	// may ask to push, taking the project path plus the socket of the mediated
+	// agent (ADR-0015). Both empty when the backend offers no such session, and
+	// a backend that offers one is not thereby offering it by default — the
+	// operator asks for it per session.
+	//
+	// It is a separate helper on purpose. The ordinary one is provably free of
+	// SSH_AUTH_SOCK, which is a guarantee worth more than the duplication costs.
+	PushHelperPath string
+	PushHelper     []byte
 }
 
 // StatusSpec is how a backend answers whether an agent is alive on its box and
