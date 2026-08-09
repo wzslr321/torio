@@ -207,17 +207,18 @@ property of the schema rather than of any one recipe — see
 
 ## When everything says `?`
 
-Ask again with `--verbose`. Each field that could not be proven is logged with
-the box it belongs to and the reason, on stderr, without disturbing the document
-on stdout:
+Ask again with `--verbose`. Each failed reading that degraded a field to
+`unknown` is logged with the box it belongs to and the reason, on stderr,
+without disturbing the document on stdout. A backend that deliberately declares
+no answer is not a failed reading and adds no diagnostic:
 
 ```console
 $ torio status --verbose --json >/dev/null
 time=2026-08-08T22:28:55+02:00 level=DEBUG msg="status fact unproven" instance=torio-claude-code fact=processes reason="bounded guest output was truncated"
 ```
 
-The `fact` names which of the readings failed: `clock`, `processes`, `paths` or
-`waiting`.
+The `fact` names which of the readings failed: `backend`, `clock`, `processes`,
+`paths` or `waiting`.
 
 A whole row of `?` usually means the box is running but not reachable — try
 `torio vm ssh -- true` against it.

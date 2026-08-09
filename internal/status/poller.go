@@ -2,6 +2,7 @@ package status
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/wzslr321/torio/internal/backend"
@@ -32,6 +33,9 @@ type Box struct {
 type Resolution struct {
 	Backend backend.Backend
 	Name    string
+	// Err is why the declaration could not be resolved. It reaches verbose,
+	// redacted diagnostics only; the stable report remains one unknown field.
+	Err error
 }
 
 // Poller reads one status document.
@@ -99,6 +103,11 @@ func (p *Poller) instance(ctx context.Context, box Box) Instance {
 		// declaration of what to read. Unknown propagates rather than being
 		// filled in from the instance name, which is a derivation and not a
 		// declaration.
+		err := res.Err
+		if err == nil {
+			err = errors.New("backend declaration could not be resolved")
+		}
+		p.diagnose(box.Name, "backend", err)
 		return inst
 	}
 	inst.Backend = BackendField{State: Known, Name: res.Name}

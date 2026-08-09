@@ -140,7 +140,7 @@ func (a *app) newPoller() *status.Poller {
 func (a *app) resolveBoxBackend(instance string) status.Resolution {
 	rt, err := config.LoadInstance(instance, a.configOptions())
 	if err != nil {
-		return status.Resolution{}
+		return status.Resolution{Err: err}
 	}
 	name := rt.File.Backend
 	if name == "" {
@@ -148,7 +148,7 @@ func (a *app) resolveBoxBackend(instance string) status.Resolution {
 	}
 	b, err := backend.Lookup(name)
 	if err != nil {
-		return status.Resolution{}
+		return status.Resolution{Err: err}
 	}
 	return status.Resolution{Backend: b, Name: name}
 }

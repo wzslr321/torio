@@ -169,6 +169,24 @@ func TestStatusReportsAnUnknownBackendAsARow(t *testing.T) {
 	}
 }
 
+// Unknown stays a successful row, but verbose mode must say which fact could
+// not be proven. Otherwise the operator is told to ask for diagnostics and gets
+// no explanation for the first field every other guest fact depends on.
+func TestStatusVerboseDiagnosesAnUnresolvedBackend(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: execx.Result{ExitCode: 0, Stdout: []byte(statusListJSON("torio-nosuchbackend", "Running") + "\n")}},
+	}}
+
+	code, _, stderr := runVMWithFake(t, []string{"status", "--verbose"}, fake)
+
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stderr, "fact=backend") {
+		t.Fatalf("stderr = %q, want the unresolved backend fact diagnosed", stderr)
+	}
+}
+
 func TestCompactAge(t *testing.T) {
 	for _, tc := range []struct {
 		seconds int64
