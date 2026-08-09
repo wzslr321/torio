@@ -33,26 +33,21 @@ func UpstreamFromEnv() (func() (net.Conn, error), error) {
 
 // PinIdentity chooses the single key the proxy will offer.
 //
-// want is a fingerprint or a key comment. When it is empty and the agent holds
-// exactly one identity, that identity is the choice: an agent with one key has
-// nothing to narrow, and refusing it would be ceremony rather than a control.
-// When it is empty and the agent holds several, this refuses and lists the
-// fingerprints, because picking one on the operator's behalf is choosing which
-// key a guest may use.
+// want is a fingerprint or a key comment, and it is required. An empty want
+// would leave this function to choose a key on the operator's behalf —
+// mediation by default over the sole loaded key, which is the alternative
+// ADR-0015 rejects. A caller with nothing pinned does not mediate at all;
+// one that reaches here anyway is refused before the agent is even asked.
 func PinIdentity(dial func() (net.Conn, error), want string) (Identity, error) {
+	if want == "" {
+		return Identity{}, errors.New("no key is pinned; set operator_key to the fingerprint or comment of the key a session may use")
+	}
 	ids, err := listIdentities(dial)
 	if err != nil {
 		return Identity{}, err
 	}
-	switch {
-	case len(ids) == 0:
+	if len(ids) == 0 {
 		return Identity{}, errors.New("the SSH agent holds no identity to forward; `ssh-add` the key that can push")
-	case want == "" && len(ids) == 1:
-		return ids[0], nil
-	case want == "":
-		return Identity{}, fmt.Errorf(
-			"the SSH agent holds %d identities and no key is pinned; set operator_key to one of: %s",
-			len(ids), strings.Join(fingerprints(ids), ", "))
 	}
 
 	var matched []Identity

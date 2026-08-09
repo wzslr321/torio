@@ -13,29 +13,17 @@ func agentHolding(ids ...Identity) func() (net.Conn, error) {
 	return (&fakeAgent{identities: ids}).dial
 }
 
-// TestPinIdentityTakesASolitaryKey: an agent with one key has nothing to narrow,
-// so requiring the operator to name it would be ceremony rather than a control.
-func TestPinIdentityTakesASolitaryKey(t *testing.T) {
-	only := goldenIdentity(t)
-	got, err := PinIdentity(agentHolding(only), "")
-	if err != nil {
-		t.Fatalf("PinIdentity() error = %v", err)
-	}
-	if got.Fingerprint() != goldenFingerprint {
-		t.Errorf("PinIdentity() = %s, want %s", got.Fingerprint(), goldenFingerprint)
-	}
-}
-
-// TestPinIdentityRefusesToChooseAmongSeveral proves Torio never picks which key
-// a guest may use. The remedy is in the error, as a fingerprint the operator can
-// paste straight into their config.
-func TestPinIdentityRefusesToChooseAmongSeveral(t *testing.T) {
-	_, err := PinIdentity(agentHolding(goldenIdentity(t), Identity{Blob: []byte("second"), Comment: "personal"}), "")
+// TestPinIdentityRefusesAnEmptyPin proves Torio never picks which key a guest
+// may use — not even when the agent holds exactly one, which is the
+// mediation-by-default design ADR-0015 rejects. The refusal happens before the
+// agent is queried, so no dial function is needed to observe it.
+func TestPinIdentityRefusesAnEmptyPin(t *testing.T) {
+	_, err := PinIdentity(nil, "")
 	if err == nil {
 		t.Fatal("PinIdentity() chose a key on the operator's behalf")
 	}
-	if !strings.Contains(err.Error(), "operator_key") || !strings.Contains(err.Error(), goldenFingerprint) {
-		t.Errorf("PinIdentity() error = %v, want the remedy and the fingerprints", err)
+	if !strings.Contains(err.Error(), "operator_key") {
+		t.Errorf("PinIdentity() error = %v, want the operator_key remedy", err)
 	}
 }
 
@@ -83,7 +71,7 @@ func TestPinIdentityReportsAnUnmatchedPin(t *testing.T) {
 }
 
 func TestPinIdentityReportsAnEmptyAgent(t *testing.T) {
-	_, err := PinIdentity(agentHolding(), "")
+	_, err := PinIdentity(agentHolding(), goldenFingerprint)
 	if err == nil || !strings.Contains(err.Error(), "ssh-add") {
 		t.Errorf("PinIdentity() error = %v, want the empty-agent remedy", err)
 	}
@@ -96,7 +84,7 @@ func TestPinIdentityDropsTheDialCause(t *testing.T) {
 	dial := func() (net.Conn, error) {
 		return nil, errors.New("dial unix /private/tmp/com.apple.launchd.XXXX/Listeners: connect: no such file")
 	}
-	_, err := PinIdentity(dial, "")
+	_, err := PinIdentity(dial, goldenFingerprint)
 	if err == nil {
 		t.Fatal("PinIdentity() succeeded against an agent it could not reach")
 	}
