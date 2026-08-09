@@ -110,10 +110,18 @@ func promptCell(in status.Instance) string {
 	switch {
 	case in.Waiting.State == status.Known && in.Waiting.Waiting:
 		return "NEEDS YOU"
-	case in.Box != string(lima.StateRunning):
+	case in.Box == string(lima.StateStopped):
 		return "off"
+	case in.Box != string(lima.StateRunning):
+		return glyphUnknown
+	case in.Waiting.State == status.Unknown:
+		return glyphUnknown
 	case in.Session.State == status.Known:
 		return strconv.Itoa(len(in.Session.Sessions))
+	case in.Session.State == status.Unknown:
+		return glyphUnknown
+	case in.Progress.State == status.Unknown:
+		return glyphUnknown
 	case in.Session.State == status.NotApplicable:
 		return glyphNotApplicable
 	default:
@@ -143,8 +151,10 @@ func tmuxCell(in status.Instance) string {
 		}
 		return fmt.Sprintf("#[fg=%s,bg=%s,bold] %s needs you %s #[default]",
 			barWaitingFG, barWaitingBG, n, compactAge(in.Waiting.AgeSeconds))
-	case in.Box != string(lima.StateRunning):
+	case in.Box == string(lima.StateStopped):
 		return fmt.Sprintf("#[fg=%s]○ %s off#[default]", barDim, n)
+	case in.Box != string(lima.StateRunning), in.Waiting.State == status.Unknown:
+		return fmt.Sprintf("#[fg=%s]%s#[fg=%s] %s#[default]", barAmber, glyphUnknown, barMuted, n)
 	case in.Session.State == status.Known && len(in.Session.Sessions) > 0:
 		return fmt.Sprintf("#[fg=%s]●#[fg=%s] %s %d#[default]",
 			barLive, barText, n, len(in.Session.Sessions))
@@ -153,6 +163,8 @@ func tmuxCell(in status.Instance) string {
 	case in.Session.State == status.NotApplicable && in.Progress.State == status.Known:
 		return fmt.Sprintf("#[fg=%s]·#[fg=%s] %s %s#[default]",
 			barWorking, barMuted, n, compactAge(in.Progress.AgeSeconds))
+	case in.Session.State == status.NotApplicable && in.Progress.State == status.Unknown:
+		return fmt.Sprintf("#[fg=%s]%s#[fg=%s] %s#[default]", barAmber, glyphUnknown, barMuted, n)
 	case in.Session.State == status.NotApplicable:
 		return fmt.Sprintf("#[fg=%s]%s %s#[default]", barDim, glyphNotApplicable, n)
 	default:

@@ -45,8 +45,21 @@ func TestTmuxChipPerState(t *testing.T) {
 	unreadable := runningBox("torio-claude-code", "claude-code")
 	unreadable.Session = status.SessionField{State: status.Unknown, Sessions: []status.Session{}}
 
+	wakeUnknown := runningBox("torio-claude-code", "claude-code")
+	wakeUnknown.Session.Sessions = []status.Session{{PID: 1}}
+	wakeUnknown.Waiting = status.WaitingField{State: status.Unknown, Waits: []status.Wait{}}
+
+	progressUnknown := runningBox("torio", "hermes")
+	progressUnknown.Session = status.SessionField{State: status.NotApplicable, Sessions: []status.Session{}}
+	progressUnknown.Progress = status.ProgressField{State: status.Unknown}
+
 	stopped := runningBox("torio", "hermes")
 	stopped.Box = "stopped"
+
+	broken := runningBox("torio", "hermes")
+	broken.Box = "broken"
+	broken.Session = status.SessionField{State: status.Unknown, Sessions: []status.Session{}}
+	broken.Waiting = status.WaitingField{State: status.Unknown, Waits: []status.Wait{}}
 
 	for _, tc := range []struct {
 		name string
@@ -65,8 +78,14 @@ func TestTmuxChipPerState(t *testing.T) {
 			"#[fg=" + barDim + "]" + glyphNotApplicable + " hermes#[default]"},
 		{"an unanswered question stays amber", unreadable,
 			"#[fg=" + barAmber + "]" + glyphUnknown + "#[fg=" + barMuted + "] claude-code#[default]"},
+		{"unknown waiting is not hidden by a live session", wakeUnknown,
+			"#[fg=" + barAmber + "]" + glyphUnknown + "#[fg=" + barMuted + "] claude-code#[default]"},
+		{"unknown progress is not rendered as unsupported", progressUnknown,
+			"#[fg=" + barAmber + "]" + glyphUnknown + "#[fg=" + barMuted + "] hermes#[default]"},
 		{"a stopped box says off", stopped,
 			"#[fg=" + barDim + "]○ hermes off#[default]"},
+		{"a broken box is not reported as stopped", broken,
+			"#[fg=" + barAmber + "]" + glyphUnknown + "#[fg=" + barMuted + "] hermes#[default]"},
 	} {
 		if got := tmuxCell(tc.in); got != tc.want {
 			t.Errorf("%s:\n got %q\nwant %q", tc.name, got, tc.want)
@@ -113,6 +132,25 @@ func TestPromptLineCarriesNoEscapes(t *testing.T) {
 	}
 	if strings.ContainsAny(line, "\x1b#") {
 		t.Errorf("line = %q, want no escape or style sequence", line)
+	}
+}
+
+func TestPromptDoesNotCollapseUnknownIntoQuiet(t *testing.T) {
+	wakeUnknown := runningBox("torio-claude-code", "claude-code")
+	wakeUnknown.Session.Sessions = []status.Session{{PID: 1}}
+	wakeUnknown.Waiting = status.WaitingField{State: status.Unknown, Waits: []status.Wait{}}
+
+	progressUnknown := runningBox("torio", "hermes")
+	progressUnknown.Session = status.SessionField{State: status.NotApplicable, Sessions: []status.Session{}}
+	progressUnknown.Progress = status.ProgressField{State: status.Unknown}
+
+	broken := runningBox("torio", "hermes")
+	broken.Box = "broken"
+
+	for _, in := range []status.Instance{wakeUnknown, progressUnknown, broken} {
+		if got := promptCell(in); got != glyphUnknown {
+			t.Errorf("promptCell(%+v) = %q, want %q", in, got, glyphUnknown)
+		}
 	}
 }
 
