@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-Eleven records cover the decisions that govern the delivered binary, the vault
+Twelve records cover the decisions that govern the delivered binary, the vault
 standard it writes against, how both are published, and how the behaviour that
 standard asks for is measured.
 
@@ -17,6 +17,7 @@ standard asks for is measured.
 | [0010](0010-okf-vault-standard-and-brain-kit.md) | The vault format is written down as a profile of OKF, and it ships as a kit installable without the VM; the kit is content, Torio is mechanics |
 | [0011](0011-measured-brain-behaviour.md) | What the brain does autonomously is measured against a committed benchmark; scenarios are backend-neutral, the vault diff is the evidence, and no CI gate exists until its cost is known |
 | [0012](0012-status-is-a-poll-of-facts.md) | Cross-instance status is a poll of provable facts through a declared probe; events may ring a bell but never set the state |
+| [0013](0013-status-projections-are-maintained-by-torio.md) | Torio maintains bounded tmux and prompt projections of its status document without owning operator configuration, a watcher or a cache |
 
 ## Rules
 

@@ -2,6 +2,9 @@
 
 - Status: Accepted
 - Date: 2026-08-08
+- Superseded in part by: [ADR-0013](0013-status-projections-are-maintained-by-torio.md),
+  for the decision that tmux and prompt projections ship only as recipes rather
+  than as maintained Torio renderers
 - Applies to: `internal/backend`, `internal/status`, `internal/lima`,
   `internal/backend/claudecode`, `internal/config`, `internal/cli`
 
