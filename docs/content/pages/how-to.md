@@ -34,6 +34,8 @@ section stands alone; they share their text with
 
 <!-- include: everyday-loop -->
 
+<!-- include: watch-several-agents -->
+
 <!-- include: troubleshooting -->
 
 The full exit-code table is in [Reference](reference.html#readiness).

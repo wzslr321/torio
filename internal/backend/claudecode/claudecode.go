@@ -87,12 +87,14 @@ func (claudeBackend) RequiredPaths() []backend.PathSpec {
 	}
 }
 
-// ProvisionScript creates the identity and its layout. Claude Code ships a
-// single self-contained binary, so unlike the Hermes backend there are no build
-// dependencies to add: a box running this backend carries no compiler
-// toolchain.
+// ProvisionScript creates the identity and its layout. Claude Code itself is a
+// self-contained binary and needs no compiler toolchain; jq is the one runtime
+// dependency Torio adds, for the root-owned hook helper to select a bounded
+// session identifier from Claude's JSON hook document.
 func (claudeBackend) ProvisionScript() string {
-	return `if ! id -u ` + User + ` >/dev/null 2>&1; then
+	return `apt-get install -y --no-install-recommends jq
+
+if ! id -u ` + User + ` >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash --user-group ` + User + `
 fi
 usermod -aG ` + lima.TorioProjectsGroup + ` ` + User + `

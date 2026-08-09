@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
 )
 
@@ -73,6 +74,44 @@ func TestSSHUsesInstanceSelectedAfterPackageInitialization(t *testing.T) {
 				t.Fatalf("argv = %v, want selected instance at argv[4]", got)
 			}
 		})
+	}
+}
+
+// TestSSHForInstanceAddressesItsOwnTargetAndLeavesTheGlobalAlone pins the rule
+// a status poll depends on. The poll asks several boxes in one invocation, and
+// the shape it must never take is assigning the package-level instance around
+// each iteration: that leaves a window in which every other holder of an
+// adapter is addressing the wrong VM, and leaves the global holding the last
+// box polled for whatever runs next.
+func TestSSHForInstanceAddressesItsOwnTargetAndLeavesTheGlobalAlone(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{
+		{result: exitResult(0, "", "")},
+		{result: exitResult(0, "", "")},
+	}}
+	a := New(fr)
+
+	if _, err := a.ForInstance("torio-claude-code").SSH(context.Background(), []string{"true"}); err != nil {
+		t.Fatalf("SSH on a scoped adapter: unexpected error: %v", err)
+	}
+	got := fr.callArgs(0)
+	want := []string{"shell", "--tty=false", "--workdir", "/", "torio-claude-code", "--", "true"}
+	if !equalArgs(got, want) {
+		t.Fatalf("argv = %v, want %v", got, want)
+	}
+
+	if InstanceName != config.DefaultInstance {
+		t.Fatalf("InstanceName = %q after a scoped call, want it untouched (%q)", InstanceName, config.DefaultInstance)
+	}
+
+	// The adapter the scoped copy was made from still addresses the invocation's
+	// own instance: scoping copies, it does not redirect.
+	if _, err := a.SSH(context.Background(), []string{"true"}); err != nil {
+		t.Fatalf("SSH on the original adapter: unexpected error: %v", err)
+	}
+	got = fr.callArgs(1)
+	want = []string{"shell", "--tty=false", "--workdir", "/", InstanceName, "--", "true"}
+	if !equalArgs(got, want) {
+		t.Fatalf("argv = %v, want %v", got, want)
 	}
 }
 

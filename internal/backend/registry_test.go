@@ -22,6 +22,7 @@ func (stub) ProbeAuth(context.Context, StepRunner) error        { return nil }
 func (stub) Registry() ProjectRegistry                          { return nil }
 func (stub) Service() *ServiceSpec                              { return nil }
 func (stub) Session() *SessionSpec                              { return nil }
+func (stub) Status() *StatusSpec                                { return nil }
 func (stub) ProvisionScript() string                            { return "" }
 func (stub) BrainSkill() BrainSkill                             { return BrainSkill{} }
 func (stub) StatusChecks() StatusChecks                         { return StatusChecks{} }

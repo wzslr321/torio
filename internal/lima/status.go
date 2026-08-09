@@ -6,6 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
+	"strings"
+
+	"github.com/wzslr321/torio/internal/config"
 )
 
 // instanceRecord is the subset of `limactl list --json` fields the V1 adapter
@@ -141,17 +145,80 @@ func (a *Adapter) listInstances(ctx context.Context, op string) ([]instanceRecor
 	return out, nil
 }
 
-// currentInstance returns the record matching InstanceName, or nil if no such
-// instance exists (a normal, non-error outcome).
+// currentInstance returns the record matching the adapter's target instance, or
+// nil if no such instance exists (a normal, non-error outcome).
 func (a *Adapter) currentInstance(ctx context.Context, op string) (*instanceRecord, error) {
 	recs, err := a.listInstances(ctx, op)
 	if err != nil {
 		return nil, err
 	}
+	target := a.target()
 	for i := range recs {
-		if recs[i].Name == InstanceName {
+		if recs[i].Name == target {
 			return &recs[i], nil
 		}
 	}
 	return nil, nil
+}
+
+// InstanceInfo is one Torio-owned box and the state Lima reports for it.
+type InstanceInfo struct {
+	Name  string
+	State State
+	// RawStatus is the verbatim limactl status string.
+	RawStatus string
+}
+
+// ListTorioInstances returns every Torio-owned box on the host, name-ordered.
+//
+// Ownership is decided by name, because that is the only thing Lima records
+// about a box that Torio chose: the default instance, and every instance whose
+// name Torio derived from a backend. Lima carries no label Torio could stamp,
+// and inspecting each box to ask what it is would mean entering VMs to answer a
+// question about which VMs to enter.
+//
+// That leaves one gap, and it is the caller's to close: a box TORIO_INSTANCE
+// named directly bears no derived name and is invisible here. Callers pass such
+// names as extra — the CLI passes the instance this invocation resolved — and
+// the documentation states that other directly-named boxes are outside the
+// poll. Guessing instead, by treating every listed box as possibly Torio's,
+// would report other people's VMs as agents that are not running.
+//
+// Names arrive from external tool output and are validated as instance names
+// before they are returned: an unparseable name reaches an argv and a rendered
+// line, and a box whose name Torio could not have created is not Torio's box.
+// An unrecognized status string fails the whole call, exactly as it does for a
+// single instance — it means Torio's model of limactl is wrong, which is not a
+// fact about one box.
+func (a *Adapter) ListTorioInstances(ctx context.Context, extra ...string) ([]InstanceInfo, error) {
+	const op = "status"
+	recs, err := a.listInstances(ctx, op)
+	if err != nil {
+		return nil, err
+	}
+
+	named := make(map[string]bool, len(extra))
+	for _, n := range extra {
+		if n != "" {
+			named[n] = true
+		}
+	}
+
+	var out []InstanceInfo
+	for _, rec := range recs {
+		if !config.ValidInstanceName(rec.Name) {
+			continue
+		}
+		derived := rec.Name == config.DefaultInstance || strings.HasPrefix(rec.Name, config.InstancePrefix)
+		if !derived && !named[rec.Name] {
+			continue
+		}
+		st, ok := mapLimaStatus(rec.Status)
+		if !ok {
+			return nil, &Error{Op: op, Kind: KindMalformedOutput, Err: fmt.Errorf("unrecognized lima status %q", rec.Status)}
+		}
+		out = append(out, InstanceInfo{Name: rec.Name, State: st, RawStatus: rec.Status})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
 }

@@ -4,6 +4,41 @@
 
 ### Added
 
+- **`torio status`, one row per box.** Running several agents, there was no way
+  to ask which of them needs you. This polls every box Torio owns and reports
+  the box state, the backend, what it has running, whether anything there is
+  waiting on a human, and when it last provably did work. Every field is a
+  proven value, `?` for a question that could not be answered, or `—` for one
+  that backend does not answer at all — never a zero standing in for a silence.
+  It exits 0 whenever the poll completes, so a status bar can call it on a
+  timer; only failing to list the boxes at all is an error
+  ([ADR-0017](docs/adr/0017-status-is-a-poll-of-facts.md),
+  [contract](docs/contracts/status.md)).
+- **The status line, and the one command that installs it.**
+  `torio status --format tmux|prompt` collapses the report onto one line for a
+  status bar or a shell prompt, and `torio status setup tmux|zsh` prints the
+  configuration that puts it there. `setup` prints and nothing else: a dotfile
+  belongs to you, and the snippet names the file it goes in so the placing is
+  your step. The snippet calls the binary that printed it rather than `torio`,
+  because an older one earlier on `PATH` exits 2 and every such surface renders
+  that as an empty line. A poll that failed prints `torio: ?` rather than
+  nothing, for the same reason.
+- **A fourth declarable capability.** A backend declares the name its sessions
+  run under, the files whose modification time proves work, and whether its
+  hooks write the waiting marker. Each is separately declarable and each
+  omission is an answer rather than a gap. Claude Code declares its sessions and
+  its marker; Hermes declares its work, and says unknown about a waiting
+  question it cannot answer from disk.
+- **Waiting-marker hooks on a Claude Code box.** `torio vm bootstrap` installs a
+  root-owned helper and names it in the managed settings, so the agent cannot
+  silently retune the hook integration between sessions. **A box
+  bootstrapped before this reports settings drift and refuses**: drift is
+  reported, never repaired in place, so remove
+  `/etc/claude-code/managed-settings.json` and run bootstrap again.
+  The helper keys an atomically rewritten fixed document by Claude's validated
+  `session_id`, so clearing one session no longer clears another session still
+  waiting on the same box. The marker remains agent-owned operational evidence,
+  not a security boundary.
 - **Mediated agent forwarding: a shell that can push forwards one key, and
   every signature stops at a person**
   ([ADR-0015](docs/adr/0015-mediated-agent-forwarding.md)). Config schema `"4"`

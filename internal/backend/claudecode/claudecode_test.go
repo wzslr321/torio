@@ -109,6 +109,16 @@ func TestProvisionScriptCreatesRootOwnedDirectoriesForRootOwnedThings(t *testing
 	}
 }
 
+// The root-owned hook helper parses Claude's hook document with jq. That
+// parser is a runtime dependency of the backend guardrail and must be
+// provisioned deliberately rather than inherited accidentally from one image.
+func TestProvisionScriptInstallsTheWaitingMarkerParser(t *testing.T) {
+	script := New().ProvisionScript()
+	if !strings.Contains(script, "apt-get install -y --no-install-recommends jq") {
+		t.Error("provision script does not install jq for the waiting-marker helper")
+	}
+}
+
 // TestManagedSettingsMatchGolden locks the exact bytes the box installs. What
 // the box tells the agent about permissions and the updater is security-
 // relevant, so changing it must be a reviewed change to a file rather than a

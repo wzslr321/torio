@@ -20,15 +20,22 @@ import (
 // InstanceName is the Lima VM instance this invocation manages.
 //
 // ADR-0002 still holds: exactly one Linux arm64 VM is the trust boundary, and
-// Torio never manages several at once. What ADR-0001 changed is that the
-// operator chooses which one, so a test run and a day's work do not share a
-// Brain.
+// Torio never *manages* several at once — one invocation starts, stops,
+// bootstraps and opens sessions on exactly this instance. What ADR-0001 changed
+// is that the operator chooses which one, so a test run and a day's work do not
+// share a Brain.
 //
 // It is a variable rather than a constant for exactly one reason: internal/cli
 // assigns it once during startup, from a value internal/config has already
 // validated, before any command runs and before anything touches a VM. Nothing
 // else may write it. Read it freely — by the time any command executes it is
 // fixed for the life of the process.
+//
+// A status poll reads several instances (ADR-0017) and is the one caller that
+// addresses a box this name does not name. It does so through ForInstance,
+// which returns an adapter carrying its own target, and never by assigning
+// here: a global that a loop writes and restores is how guest commands once
+// ended up in the wrong VM.
 var InstanceName = config.DefaultInstance
 
 // bin is the default limactl executable name, resolved via PATH.
@@ -50,6 +57,40 @@ type Adapter struct {
 	// exactly how guest commands once ended up addressing the default VM while
 	// lifecycle commands addressed the selected one.
 	Profile Profile
+
+	// instance, when set, is the instance this adapter addresses instead of
+	// InstanceName. Only ForInstance sets it, and nothing clears it: an
+	// adapter's target is fixed when it is made, so a caller holding one cannot
+	// be redirected by whatever a neighbouring loop is doing.
+	instance string
+}
+
+// ForInstance returns a copy of a addressed at the named instance.
+//
+// It exists for the status poll, which asks several boxes the same question in
+// one invocation (ADR-0017). The alternative — assigning InstanceName around
+// each iteration — is the shape that already produced a wrong-VM bug once, and
+// it would leave the global holding the last polled instance for whatever ran
+// next. A copy carries its target in the value the caller is holding, so there
+// is no window in which the process disagrees with itself about which box it is
+// talking to.
+//
+// The name is not validated here. The one caller reads names out of `limactl
+// list --json` and validates them there, where an invalid name is a fact about
+// the enumeration rather than a programming error at the call site.
+func (a *Adapter) ForInstance(name string) *Adapter {
+	c := *a
+	c.instance = name
+	return &c
+}
+
+// target is the instance this adapter addresses: its own when ForInstance gave
+// it one, and otherwise the invocation's.
+func (a *Adapter) target() string {
+	if a.instance != "" {
+		return a.instance
+	}
+	return InstanceName
 }
 
 // New returns an Adapter backed by runner, pinned to the host's profile.

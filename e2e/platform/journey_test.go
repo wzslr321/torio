@@ -18,8 +18,47 @@ import (
 )
 
 const (
-	defaultFixtureRemote = "https://github.com/octocat/Hello-World.git"
-	defaultFixtureCommit = "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
+	defaultFixtureRemote  = "https://github.com/octocat/Hello-World.git"
+	defaultFixtureCommit  = "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
+	waitingHelperExercise = `
+import ctypes,json,os,subprocess
+
+helper="/usr/local/bin/torio-waiting-marker"
+marker="/home/claude/.torio-waiting.json"
+
+def invoke(action, session_id):
+    pid=os.fork()
+    if pid == 0:
+        ctypes.CDLL(None).prctl(15, b"claude", 0, 0, 0)
+        result=subprocess.run(
+            [helper, action],
+            input=json.dumps({"session_id": session_id}),
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        os._exit(result.returncode)
+    return pid
+
+def complete(action, ids):
+    children=[invoke(action, session_id) for session_id in ids]
+    for child in children:
+        _, status=os.waitpid(child, 0)
+        if not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 0:
+            raise SystemExit(1)
+
+complete("set", ["e2e-a", "e2e-b"])
+with open(marker, encoding="utf-8") as handle:
+    waits=json.load(handle)["waits"]
+if sorted(wait["session_id"] for wait in waits) != ["e2e-a", "e2e-b"]:
+    raise SystemExit(2)
+
+complete("clear", ["e2e-a", "e2e-b"])
+with open(marker, encoding="utf-8") as handle:
+    if json.load(handle) != {"schema_version": "2", "waits": []}:
+        raise SystemExit(3)
+`
 )
 
 // The journey splits at the hypervisor boundary. Everything up to and including
@@ -190,6 +229,39 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 			"service_declared":  profile.declaresService,
 			"session_declared":  profile.declaresSession,
 		})
+
+		ambient := torio.mustRun("status-after-bootstrap", "status", "status")
+		instances, ok := ambient.Data["instances"].([]any)
+		Expect(ok).To(BeTrue(), "status data carries no instances array")
+		Expect(instances).To(HaveLen(1))
+		row, ok := instances[0].(map[string]any)
+		Expect(ok).To(BeTrue(), "status instance is not an object")
+		Expect(row["instance"]).To(Equal(instanceName))
+		Expect(row["box"]).To(Equal("running"))
+		backendField, ok := row["backend"].(map[string]any)
+		Expect(ok).To(BeTrue(), "status backend is not an object")
+		Expect(backendField).To(HaveKeyWithValue("state", "known"))
+		Expect(backendField).To(HaveKeyWithValue("name", profile.name))
+
+		if profile.name == backendClaudeCode {
+			waitingField, waitingOK := row["waiting"].(map[string]any)
+			Expect(waitingOK).To(BeTrue(), "status waiting is not an object")
+			Expect(waitingField).To(HaveKeyWithValue("state", "known"))
+			Expect(waitingField).To(HaveKeyWithValue("waiting", false))
+
+			helper := torio.mustRun("waiting-helper-concurrent-set-clear", "vm.ssh",
+				"vm", "ssh", "--", "sudo", "-u", profile.user, "-H", "--",
+				"python3", "-c", waitingHelperExercise)
+			expectData(helper, map[string]any{"exit_code": float64(0)})
+
+			afterHelper := torio.mustRun("status-after-waiting-helper", "status", "status")
+			afterInstances, afterOK := afterHelper.Data["instances"].([]any)
+			Expect(afterOK).To(BeTrue())
+			afterRow := afterInstances[0].(map[string]any)
+			afterWaiting := afterRow["waiting"].(map[string]any)
+			Expect(afterWaiting).To(HaveKeyWithValue("state", "known"))
+			Expect(afterWaiting).To(HaveKeyWithValue("waiting", false))
+		}
 
 		brainInit := torio.mustRun("brain-init", "brain.init", "brain", "init")
 		expectData(brainInit, map[string]any{"created": true, "state": "initialized"})

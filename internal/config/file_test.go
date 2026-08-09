@@ -53,6 +53,82 @@ func writeConfig(t *testing.T, cfgHome, body string) string {
 	return path
 }
 
+// writeInstanceConfig writes the config document a named instance owns.
+func writeInstanceConfig(t *testing.T, cfgHome, instance, body string) string {
+	t.Helper()
+	dir := filepath.Join(cfgHome, appDir, instancesDir, instance)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(dir, configFileName)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write instance config: %v", err)
+	}
+	return path
+}
+
+// TestLoadInstanceReadsTheNamedBoxOwnDocument pins what a status poll needs:
+// each box's own declaration of the backend it runs. Both selections that
+// normally decide which document is read — TORIO_INSTANCE and --config — are
+// deliberately ignored, because a poll asking about several boxes would
+// otherwise report every one of them from whichever document this invocation
+// happened to select.
+func TestLoadInstanceReadsTheNamedBoxOwnDocument(t *testing.T) {
+	cfgHome := t.TempDir()
+	writeConfig(t, cfgHome, `{"schema_version":"3"}`)
+	writeInstanceConfig(t, cfgHome, "torio-claude-code", `{"schema_version":"3","backend":"claude-code"}`)
+
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere.json")
+	if err := os.WriteFile(elsewhere, []byte(`{"schema_version":"3","backend":"hermes"}`), 0o600); err != nil {
+		t.Fatalf("write explicit config: %v", err)
+	}
+
+	rt, err := LoadInstance("torio-claude-code", Options{
+		ConfigPath: elsewhere,
+		Instance:   "torio",
+		Getenv:     envFunc(map[string]string{"XDG_CONFIG_HOME": cfgHome, InstanceEnvKey: "torio"}),
+		HomeDir:    homeFunc(t.TempDir()),
+	})
+	if err != nil {
+		t.Fatalf("LoadInstance: %v", err)
+	}
+	if !rt.ConfigLoaded {
+		t.Fatal("ConfigLoaded = false, want the named instance's document read")
+	}
+	if rt.File.Backend != "claude-code" {
+		t.Errorf("backend = %q, want the named instance's own declaration", rt.File.Backend)
+	}
+	if rt.Paths.Instance != "torio-claude-code" {
+		t.Errorf("instance = %q, want the one asked about", rt.Paths.Instance)
+	}
+}
+
+// A box that has never had a document written is a first run, not a failure:
+// its backend is simply undeclared, and a poll reports that rather than
+// refusing to answer about the other boxes.
+func TestLoadInstanceAbsentDocumentIsNotAnError(t *testing.T) {
+	rt, err := LoadInstance("torio-test", Options{
+		Getenv:  envFunc(map[string]string{"XDG_CONFIG_HOME": t.TempDir()}),
+		HomeDir: homeFunc(t.TempDir()),
+	})
+	if err != nil {
+		t.Fatalf("LoadInstance on an absent document: %v", err)
+	}
+	if rt.ConfigLoaded {
+		t.Error("ConfigLoaded = true, want false for a box with no document")
+	}
+}
+
+func TestLoadInstanceRejectsAnInvalidName(t *testing.T) {
+	_, err := LoadInstance("../escape", Options{
+		Getenv:  envFunc(map[string]string{"XDG_CONFIG_HOME": t.TempDir()}),
+		HomeDir: homeFunc(t.TempDir()),
+	})
+	if err == nil {
+		t.Fatal("LoadInstance accepted a name that is not an instance name")
+	}
+}
+
 func TestLoadAbsentDefaultConfigIsValidFirstRun(t *testing.T) {
 	rt, err := loadWith(t, Options{}, t.TempDir())
 	if err != nil {

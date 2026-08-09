@@ -35,6 +35,8 @@ the repository root also works, but then every command needs the prefix.
 
 <!-- include: cmd-mcp -->
 
+<!-- include: cmd-status -->
+
 <!-- include: cmd-version -->
 
 <!-- include: exit-codes -->

@@ -100,6 +100,11 @@ type app struct {
 	// lookupOperatorUser resolves the Lima login identity for `vm init`.
 	// Production uses the current OS user; tests inject a fixed name.
 	lookupOperatorUser func() (string, error)
+
+	// executablePath is this binary's own path, which `torio status setup`
+	// writes into the configuration it prints. Production reads it from the
+	// kernel; tests inject a fixed path so what they pin is the snippet.
+	executablePath func() (string, error)
 }
 
 // Run builds the command tree, executes it, and returns the process exit code.
@@ -254,6 +259,12 @@ func newRootCmd(a *app) *cobra.Command {
 		},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			a.logger = newLogger(a.stderr, a.verbose)
+			commandPath := cmd.CommandPath()
+			if commandPath == "torio status setup" {
+				// Setup is a pure printer. A selected box, its config and even Lima
+				// are irrelevant to the snippet and must not gate it.
+				return nil
+			}
 
 			// The managed instance is fixed here, once, before any command can
 			// touch a VM or a config path (ADR-0001). --backend names the agent
@@ -267,6 +278,19 @@ func newRootCmd(a *app) *cobra.Command {
 				return usageError(err.Error())
 			}
 			lima.InstanceName = a.instance
+			if commandPath == "torio status" {
+				// Cross-box status reads each box's own document inside the poll.
+				// Loading the invocation's selected document here would let one bad
+				// config abort every row and would make --config contradict the
+				// status contract. Only the explicit/default operation timeout is
+				// global to this poll.
+				if err := (config.Settings{Timeout: a.timeout}).Validate(); err != nil {
+					return usageError(err.Error())
+				}
+				a.logger.Debug("dispatching command", "command", cmd.Name(), "json", a.jsonOut)
+				a.logger.Debug("operation bounded", "timeout", a.timeout)
+				return nil
+			}
 
 			// Resolve the configuration: the XDG config path plus --config,
 			// loading and strictly validating the on-disk config document. A
@@ -323,6 +347,7 @@ func newRootCmd(a *app) *cobra.Command {
 		"agent backend this invocation is about; selects the instance that runs it (default hermes)")
 
 	root.AddCommand(newVersionCmd(a))
+	root.AddCommand(newStatusCmd(a))
 	root.AddCommand(newVMCmd(a))
 	root.AddCommand(newServeCmd(a))
 	root.AddCommand(newBrainCmd(a))

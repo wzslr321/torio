@@ -8,16 +8,16 @@
 // assumed. Anything that runs as a guest identity and reads a filesystem fits
 // inside it. What differs between agents is narrower than it looks: how the
 // binary is installed and pinned, how it reports a version, whether it keeps a
-// project registry, whether it runs as a service, and how an operator opens a
-// session with it.
+// project registry, whether it runs as a service, how an operator opens a
+// session with it, and what it leaves behind that proves an agent is alive.
 //
-// So the contract is those five things plus the identity that owns them, and
-// three of them are declarable: a backend that keeps no project registry, runs
-// no service, or offers no interactive session says so, and Torio reports that
-// as a state rather than inventing a failure. Verification stays honest in both
-// directions — whatever a backend declares, `vm bootstrap` and `serve status`
-// must be able to prove; whatever it declares it has not got, they must not
-// pretend to check.
+// So the contract is those six things plus the identity that owns them, and
+// four of them are declarable: a backend that keeps no project registry, runs
+// no service, offers no interactive session, or leaves no fact a status poll
+// can read says so, and Torio reports that as a state rather than inventing a
+// failure. Verification stays honest in both directions — whatever a backend
+// declares, `vm bootstrap` and `serve status` must be able to prove; whatever
+// it declares it has not got, they must not pretend to check.
 //
 // This package holds no guest mechanics of its own. It imports the transport
 // result type and nothing else, so an implementation can live wherever its
@@ -145,6 +145,8 @@ type Backend interface {
 	Service() *ServiceSpec
 	// Session is the backend's interactive session, nil when it declares none.
 	Session() *SessionSpec
+	// Status is the backend's status probe, nil when it declares none.
+	Status() *StatusSpec
 
 	// StatusChecks names the bootstrap checks `torio backend status` reads
 	// back out of the report.
@@ -373,4 +375,44 @@ type SessionSpec struct {
 	// SSH_AUTH_SOCK, which is a guarantee worth more than the duplication costs.
 	PushHelperPath string
 	PushHelper     []byte
+}
+
+// StatusSpec is how a backend answers whether an agent is alive on its box and
+// what it is doing (ADR-0017). A nil spec is a declaration: `torio status`
+// reports that the backend answers no such question and runs no guest command
+// to discover what it was already told.
+//
+// Every field is separately declarable, because the two backends that exist can
+// prove different halves: one runs a process per session and writes no record
+// of it anywhere, the other runs a single long-lived service and keeps its
+// sessions in a database. An empty field is the same kind of declaration a nil
+// spec is, one question narrower.
+type StatusSpec struct {
+	// SessionProcess is the name a session's process reports in the guest's
+	// process table, as `ps -o comm=` prints it. Empty when the backend runs no
+	// process a session corresponds to, which a poll reports as not-applicable
+	// rather than as an agent that is not running.
+	//
+	// It is a process name rather than a record on disk for two reasons. Neither
+	// backend writes such a record — that was checked against running boxes, not
+	// assumed — and the process table cannot lie about liveness the way a file
+	// left behind by a killed agent does. The name is the one a session is
+	// launched under, which is the backend's own to declare; the kernel truncates
+	// it to fifteen characters, so a longer declaration would silently match
+	// nothing.
+	SessionProcess string
+	// ProgressPaths are guest files whose modification time is evidence the
+	// backend cannot help producing while it works. The newest of them is the
+	// last moment the agent provably progressed. Empty when the backend writes no
+	// such file.
+	//
+	// They are deliberately not "when the last message was written". A backend
+	// that records a row per turn reads as dead for the whole of a long tool
+	// call, which is the wrong answer at exactly the moment an operator is
+	// watching to see whether anyone needs them.
+	ProgressPaths []string
+	// WaitingMarker declares that this backend's hooks write Torio's waiting
+	// marker. False is not "this agent is not waiting": it is the backend having
+	// no way to say so, which a poll reports as unknown.
+	WaitingMarker bool
 }

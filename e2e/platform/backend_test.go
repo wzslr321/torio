@@ -87,6 +87,9 @@ func profileFor(name string) backendProfile {
 				"claude_groups_exact",
 				"claude_install",
 				"claude_managed_settings",
+				"claude_waiting_marker_dependencies",
+				"claude_waiting_marker_helper",
+				"claude_waiting_marker_state",
 				"agent_session_helper",
 			},
 		}

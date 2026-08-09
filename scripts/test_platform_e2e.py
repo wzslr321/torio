@@ -220,6 +220,7 @@ class PlatformE2EContractTests(unittest.TestCase):
             '"vm", "init"',
             '"vm", "start"',
             '"vm", "bootstrap"',
+            '"status"',
             '"brain", "init"',
             '"brain", "import"',
             "brain-fixture-present",
@@ -242,6 +243,12 @@ class PlatformE2EContractTests(unittest.TestCase):
         self.assertIn("ownsInstance = true", text)
         self.assertIn('filepath.Join(repositoryRoot, "e2e/platform/cleanup.sh")', text)
         self.assertNotRegex(text, r"fake|stub|mock")
+
+    def test_journey_executes_the_waiting_helper_on_the_claude_guest(self) -> None:
+        text = JOURNEY.read_text(encoding="utf-8")
+        self.assertIn("torio-waiting-marker", text)
+        self.assertIn("waiting-helper-concurrent-set-clear", text)
+        self.assertIn('profile.name == backendClaudeCode', text)
 
     def test_project_fixture_is_public_and_checks_a_known_commit(self) -> None:
         text = JOURNEY.read_text(encoding="utf-8")
