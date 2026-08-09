@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -40,12 +42,11 @@ func TestStatusReportsAStoppedBoxWithoutEnteringIt(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("stdout = %q, want a header and one row", stdout)
 	}
-	if lines[0] != "INSTANCE\tBOX\tBACKEND\tSESSION\tWAITING\tPROGRESS" {
-		t.Errorf("header = %q", lines[0])
+	if got, want := statusCells(lines[0]), []string{"INSTANCE", "BOX", "BACKEND", "SESSION", "WAITING", "PROGRESS"}; !slices.Equal(got, want) {
+		t.Errorf("header = %q, want %q", got, want)
 	}
-	want := "torio\tstopped\thermes\t0\tno\t" + glyphUnknown
-	if lines[1] != want {
-		t.Errorf("row = %q, want %q", lines[1], want)
+	if got, want := statusCells(lines[1]), []string{"torio", "stopped", "hermes", "0", "no", glyphUnknown}; !slices.Equal(got, want) {
+		t.Errorf("row = %q, want %q", got, want)
 	}
 	if len(fake.calls) != 1 {
 		t.Errorf("host calls = %d, want only the enumeration", len(fake.calls))
@@ -127,10 +128,10 @@ func TestStatusIgnoresTheInvocationConfigAndDegradesPerBox(t *testing.T) {
 			if code != int(ExitOK) {
 				t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
 			}
-			if tc.writeRoot && !strings.Contains(stdout.String(), "torio\tstopped\t"+glyphUnknown) {
+			if tc.writeRoot && !hasStatusRow(stdout.String(), "torio", "stopped", glyphUnknown) {
 				t.Errorf("stdout = %q, want one degraded row", stdout.String())
 			}
-			if !tc.writeRoot && !strings.Contains(stdout.String(), "torio\tstopped\t"+backend.DefaultName) {
+			if !tc.writeRoot && !hasStatusRow(stdout.String(), "torio", "stopped", backend.DefaultName) {
 				t.Errorf("stdout = %q, want the box-owned default document", stdout.String())
 			}
 		})
@@ -223,7 +224,7 @@ func TestStatusReportsAnUnknownBackendAsARow(t *testing.T) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
 	}
 	row := strings.Split(strings.TrimSpace(stdout), "\n")[1]
-	if !strings.HasPrefix(row, "torio-nosuchbackend\tstopped\t"+glyphUnknown) {
+	if got := statusCells(row); len(got) < 3 || !slices.Equal(got[:3], []string{"torio-nosuchbackend", "stopped", glyphUnknown}) {
 		t.Errorf("row = %q, want the backend reported as unknown", row)
 	}
 }
@@ -317,4 +318,79 @@ func TestStatusIsARootCommand(t *testing.T) {
 		}
 	}
 	t.Fatal("torio status is not registered on the root command")
+}
+
+// The table is read by eye, so its columns have to start in the same place on
+// every row. Separating cells with a raw tab delegated that to whatever the
+// reader renders a tab as: aligned only while every cell fits inside one tab
+// stop, and jagged the moment one does not — which the second derived instance
+// name, `torio-claude-code`, already does.
+func TestStatusTableColumnsAlignUnderTheWidestCell(t *testing.T) {
+	fake := &fakeLimaRunner{script: []scriptedResp{
+		{res: execx.Result{ExitCode: 0, Stdout: []byte(
+			statusListJSON("torio", "Stopped") + "\n" +
+				statusListJSON("torio-claude-code", "Stopped") + "\n")}},
+	}}
+
+	code, stdout, stderr := runVMWithFake(t, []string{"status"}, fake)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("stdout = %q, want a header and two rows", stdout)
+	}
+	if strings.ContainsRune(stdout, '\t') {
+		t.Errorf("stdout contains a tab; columns must be padded to a width the writer decided:\n%s", stdout)
+	}
+
+	// Column starts are counted in runes: the glyphs standing in for a missing
+	// answer are multi-byte, and a byte offset would call an aligned table
+	// crooked.
+	for col, want := range columnStarts(lines[0]) {
+		for _, row := range lines[1:] {
+			if got := columnStarts(row); col < len(got) && got[col] != want {
+				t.Errorf("column %d starts at rune %d in %q, want %d (header %q)",
+					col, got[col], row, want, lines[0])
+			}
+		}
+	}
+}
+
+// columnStarts reports the rune offset at which each column begins: the first
+// non-space rune, and every non-space rune that follows two or more spaces.
+func columnStarts(line string) []int {
+	var starts []int
+	gap := 2
+	for i, r := range []rune(line) {
+		if r == ' ' {
+			gap++
+			continue
+		}
+		if gap >= 2 {
+			starts = append(starts, i)
+		}
+		gap = 0
+	}
+	return starts
+}
+
+// statusCells splits a rendered table line back into its values. The writer
+// pads columns with spaces, and a value may itself contain a single space
+// ("yes 3m pid 1234"), so the separator is a run of two or more.
+func statusCells(line string) []string {
+	fields := regexp.MustCompile(`\s{2,}`).Split(strings.TrimSpace(line), -1)
+	return fields
+}
+
+// hasStatusRow reports whether any row begins with these values.
+func hasStatusRow(stdout string, cells ...string) bool {
+	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+		got := statusCells(line)
+		if len(got) >= len(cells) && slices.Equal(got[:len(cells)], cells) {
+			return true
+		}
+	}
+	return false
 }

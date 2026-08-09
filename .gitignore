@@ -23,3 +23,7 @@ artifacts/
 .DS_Store
 .idea/
 .vscode/
+
+# Demo recording: the GIF is committed (README needs it); the MP4 is the
+# preview copy vhs also emits, and two copies of the same take is one too many.
+docs/demo/*.mp4

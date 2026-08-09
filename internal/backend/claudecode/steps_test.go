@@ -17,7 +17,11 @@ import (
 type fakeRunner struct {
 	answers map[string]execx.Result
 	records map[string]string
-	failed  string
+	// calls is every probe in order, so a test can assert what a step did and
+	// not only what it concluded. Cleanup a step performs before failing — the
+	// removal of unverified bytes, say — is visible nowhere else.
+	calls  []string
+	failed string
 }
 
 func newFakeRunner(answers map[string]execx.Result) *fakeRunner {
@@ -28,11 +32,22 @@ var errUnexpectedProbe = errors.New("unexpected probe")
 
 func (f *fakeRunner) Probe(_ context.Context, _ string, argv ...string) (execx.Result, error) {
 	joined := strings.Join(argv, " ")
+	f.calls = append(f.calls, joined)
 	res, ok := f.answers[joined]
 	if !ok {
 		return execx.Result{}, errUnexpectedProbe
 	}
 	return res, nil
+}
+
+// saw reports whether any probe contained sub.
+func (f *fakeRunner) saw(sub string) bool {
+	for _, c := range f.calls {
+		if strings.Contains(c, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *fakeRunner) ProbeInput(_ context.Context, _ string, _ []byte, argv []string) (execx.Result, error) {
