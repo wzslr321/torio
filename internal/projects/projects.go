@@ -6,14 +6,20 @@
 // Two boundaries define the package. The workspace path is always derived from
 // the project ID as /home/hermes/projects/<id> — never taken from an operator,
 // never stored in config — so an attachment cannot point anywhere else on the
-// guest. And Torio never stores, configures or reads Git credentials: every
-// remote operation runs noninteractively as the `hermes` service user, so a
-// repository Torio cannot already read fails closed instead of prompting.
-// Provisioning access is a human, out-of-band act.
+// guest. And Torio holds no Git credential: every remote operation runs
+// noninteractively as the `hermes` service user, so a repository the guest
+// cannot read fails closed instead of prompting.
+//
+// A private SSH remote is the ordinary case of that, so an unreadable one is
+// not the end of the attach. The guest generates its own read-only deploy key,
+// keeps the private half, and reports the public half for the operator to
+// authorize on the forge (ADR-0018). Torio never reads, transports or stores
+// that private half, and authorizing the key stays a human act.
 package projects
 
 import (
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/wzslr321/torio/internal/backend"
@@ -41,8 +47,18 @@ const (
 var gitNoninteractiveEnv = []string{
 	"env",
 	"GIT_TERMINAL_PROMPT=0",
-	"GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
+	gitSSHCommandVar + "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
 }
+
+// gitSSHCommandVar is the assignment prefix a deploy key is appended to, named
+// once so the keyed and keyless environments cannot disagree about it.
+const gitSSHCommandVar = "GIT_SSH_COMMAND="
+
+// publicKeyPattern is the one shape a generated public key may have before this
+// package will carry it into a report. It is deliberately narrow: the value
+// comes back from a guest file and ends up printed, so anything else is treated
+// as unverifiable rather than passed along.
+var publicKeyPattern = regexp.MustCompile(`^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp[0-9]+) [A-Za-z0-9+/=]+( [^\r\n]*)?$`)
 
 // Project is one attached project as this package reports it: the non-secret
 // registry identity plus the path derived from the ID.
@@ -100,6 +116,30 @@ type AddReport struct {
 	// Notes are bounded, non-secret state markers describing what a failure left
 	// behind and what a rerun will finish (see addNote*).
 	Notes []string
+	// DeployKey is the guest-held read-only key this run provisioned for an SSH
+	// remote the guest could not read, nil whenever no key was involved. It is
+	// set on the failure path as well: the public half is the whole point of
+	// that failure, because authorizing it is what a rerun needs.
+	DeployKey *DeployKey
+}
+
+// DeployKey is the public face of a guest-held deploy key. Every field is safe
+// to print. The private half stays in the guest file the identity owns, and
+// nothing in this package reads it.
+type DeployKey struct {
+	// PublicKey is the one line of `<keypath>.pub`, the half meant to be
+	// published.
+	PublicKey string
+	// Host is the SSH host the key has to be authorized on, taken from the
+	// recorded remote and already validated as a hostname.
+	Host string
+	// KeyPath is the guest path of the private half, reported so an operator can
+	// find it, never read.
+	KeyPath string
+	// Generated distinguishes a key this run created from one it found already
+	// on the guest. The second case means the authorization on the forge is what
+	// is still missing, so a rerun alone will not change the outcome.
+	Generated bool
 }
 
 // RemoveReport is the outcome of forgetting a project. The checkout is never

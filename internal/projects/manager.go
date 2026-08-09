@@ -157,8 +157,20 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 		return report, &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("workspace path for %q exists and is not a directory", req.ID)}
 	}
 
-	if err := m.preflightRemote(ctx, op, entry.Remote); err != nil {
+	keyPath, key, err := m.ensureRemoteReadable(ctx, op, req.ID, entry.Remote)
+	if key != nil {
+		report.DeployKey = key
+		if key.Generated {
+			report.Notes = append(report.Notes, "deploy_key_generated")
+		} else {
+			report.Notes = append(report.Notes, "deploy_key_pending_authorization")
+		}
+	}
+	if err != nil {
 		return report, err
+	}
+	if keyPath != "" {
+		report.Notes = append(report.Notes, "deploy_key_used")
 	}
 
 	if !status.PathExists {
@@ -170,7 +182,7 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 		// runaway child cannot exhaust memory, and no bound covers every
 		// repository.
 		if err := m.mustRun(ctx, op, KindGit, "clone the remote",
-			m.gitExec("clone", "--quiet", "--", entry.Remote, workspace)); err != nil {
+			m.gitExecKeyed(keyPath, "clone", "--quiet", "--", entry.Remote, workspace)); err != nil {
 			return report, err
 		}
 		report.Cloned = true
@@ -191,6 +203,13 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 	}
 	for _, user := range []string{m.identity().GuestUser, m.bootstrapOpts.OperatorUser} {
 		if err := m.ensureSafeDirectory(ctx, op, user, workspace); err != nil {
+			return report, err
+		}
+	}
+	if keyPath != "" {
+		// Only now, with a checkout on disk to scope the include to. A fetch the
+		// identity runs on its own reaches the remote the same way this run did.
+		if err := m.provisionGuestGitAccess(ctx, op, req.ID, workspace); err != nil {
 			return report, err
 		}
 	}
@@ -344,6 +363,18 @@ func (m *Manager) Remove(ctx context.Context, id string) (RemoveReport, error) {
 
 	if err := m.requirePrepared(ctx, op); err != nil {
 		return report, err
+	}
+
+	// A deploy key outlives the entry that caused it, the same way the checkout
+	// does. Removing is forgetting, not revoking: withdrawing the authorization
+	// on the forge is the operator's call, and saying so beats leaving a key
+	// nobody remembers granting.
+	held, err := m.testAsUser(ctx, op, "-f", m.deployKeyPath(id))
+	if err != nil {
+		return report, err
+	}
+	if held {
+		report.Notes = append(report.Notes, "deploy_key_retained")
 	}
 
 	hermes, err := m.registryStatus(ctx, op, id, workspace)
@@ -644,12 +675,14 @@ func (m *Manager) requireOperatorUser(op string) error {
 	return nil
 }
 
-// preflightRemote proves the guest can read the remote without a prompt, before
-// anything is cloned. GIT_TERMINAL_PROMPT=0 and SSH BatchMode make a missing
-// credential an immediate failure instead of a hanging prompt — and the failure
-// is reported as an auth problem, because provisioning access is a human act
-// Torio deliberately cannot perform.
-func (m *Manager) preflightRemote(ctx context.Context, op, remote string) error {
+// preflightRemote reports whether the guest can read the remote without a
+// prompt, before anything is cloned. GIT_TERMINAL_PROMPT=0 and SSH BatchMode
+// make a missing credential an immediate answer instead of a hanging prompt.
+//
+// It returns readability rather than an error because an unreadable remote is
+// not always the end: the caller decides whether a deploy key changes it. A
+// transport failure is still an error.
+func (m *Manager) preflightRemote(ctx context.Context, op, remote, keyPath string) (bool, error) {
 	// Asking for HEAD alone, because this proves readability and nothing else
 	// reads the output. An unqualified ls-remote returns every ref the server
 	// advertises, and GitHub advertises refs/pull/* — a busy upstream answered
@@ -661,14 +694,89 @@ func (m *Manager) preflightRemote(ctx context.Context, op, remote string) error 
 	// --exit-code would report that as unreadable when the guest can read it
 	// fine. Readability is already carried by the exit status below — an
 	// unreadable remote exits 128.
-	res, err := m.run(ctx, op, m.gitExec("ls-remote", "--", remote, "HEAD"))
+	res, err := m.run(ctx, op, m.gitExecKeyed(keyPath, "ls-remote", "--", remote, "HEAD"))
 	if err != nil {
-		return err
+		return false, err
 	}
-	if res.ExitCode != 0 {
-		return &Error{Op: op, Kind: KindAuth, Err: errors.New("the guest cannot read the remote noninteractively; provision access for the hermes user out of band")}
+	return res.ExitCode == 0, nil
+}
+
+// unreadableRemoteError says what the operator has to do next, and says it
+// differently per transport because the two have different answers.
+//
+// An SSH remote is one authorization away: the key named here is on the guest
+// already and the rerun is the same command. An HTTPS remote is not, because
+// reading a private one takes a credential, and holding one is what Torio does
+// not do.
+func unreadableRemoteError(op string, key *DeployKey) error {
+	if key == nil {
+		return &Error{Op: op, Kind: KindAuth, Err: errors.New(
+			"the guest cannot read the remote noninteractively; for a private repository use the SSH remote, which Torio can provision a read-only deploy key for")}
 	}
-	return nil
+	return &Error{Op: op, Kind: KindAuth, Err: fmt.Errorf(
+		"the guest cannot read the remote yet; authorize the read-only deploy key above on %s, then run the same command again", key.Host)}
+}
+
+// ensureRemoteReadable proves the guest can read the remote, provisioning a
+// deploy key for an SSH remote it cannot.
+//
+// The key is offered on the run that generates it, so a key an operator
+// authorized ahead of time attaches in one command. When the forge has not been
+// told about the key yet the run still fails closed, carrying the public half
+// that makes the next run succeed.
+func (m *Manager) ensureRemoteReadable(ctx context.Context, op, id, remote string) (string, *DeployKey, error) {
+	keyPath := m.deployKeyPath(id)
+	held, err := m.testAsUser(ctx, op, "-f", keyPath)
+	if err != nil {
+		return "", nil, err
+	}
+	offered := ""
+	if held {
+		offered = keyPath
+	}
+	readable, err := m.preflightRemote(ctx, op, remote, offered)
+	if err != nil {
+		return "", nil, err
+	}
+
+	access := classifyRemote(remote)
+	switch {
+	case readable:
+		// A key that is on the guest is offered from here on, whether or not it
+		// is what opened the remote: it is this project's key, and using it keeps
+		// the checkout reading the same way on every later fetch.
+		return offered, nil, nil
+	case access.Transport != TransportSSH || access.Host == "":
+		// Reading a private HTTPS remote takes a credential, and holding one is
+		// the thing Torio does not do.
+		return "", nil, unreadableRemoteError(op, nil)
+	}
+
+	// Reading back an existing key rather than generating a second one: when the
+	// key is already there, the act still missing is on the forge.
+	pub := ""
+	if held {
+		pub, err = m.readPublicKey(ctx, op, keyPath)
+	} else {
+		pub, err = m.ensureDeployKey(ctx, op, id)
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	key := &DeployKey{PublicKey: pub, Host: access.Host, KeyPath: keyPath, Generated: !held}
+	if held {
+		return "", key, unreadableRemoteError(op, key)
+	}
+
+	// The key was generated during this run, so it has not been offered yet.
+	readable, err = m.preflightRemote(ctx, op, remote, keyPath)
+	if err != nil {
+		return "", nil, err
+	}
+	if !readable {
+		return "", key, unreadableRemoteError(op, key)
+	}
+	return keyPath, key, nil
 }
 
 // inspectCheckout derives the state of the guest checkout. It never follows a
@@ -1188,9 +1296,129 @@ func (m *Manager) testRoot(ctx context.Context, op, flag, path string) (bool, er
 // gitExec builds a Git argv that runs as `hermes` under the noninteractive
 // environment. It is the only way this package reaches a remote.
 func (m *Manager) gitExec(args ...string) []string {
-	argv := append([]string(nil), gitNoninteractiveEnv...)
+	return m.gitExecKeyed("", args...)
+}
+
+// gitExecKeyed is gitExec with a deploy key offered to SSH. An empty keyPath
+// gives back the plain noninteractive environment, so the keyless and keyed
+// paths cannot drift apart.
+//
+// IdentitiesOnly=yes is not optional here. Without it ssh also offers whatever
+// else it can find, GitHub authenticates the first key that is valid for the
+// account rather than for this repository, and the run fails as "repository not
+// found" against a repository that plainly exists.
+func (m *Manager) gitExecKeyed(keyPath string, args ...string) []string {
+	argv := make([]string, 0, len(gitNoninteractiveEnv)+len(args)+1)
+	for _, token := range gitNoninteractiveEnv {
+		if keyPath != "" && strings.HasPrefix(token, gitSSHCommandVar) {
+			token += " -o IdentitiesOnly=yes -i " + keyPath
+		}
+		argv = append(argv, token)
+	}
 	argv = append(argv, "git")
 	return guestexec.UserExecAs(m.identity().GuestUser, append(argv, args...)...)
+}
+
+// deployKeyPath is the guest path of the project's deploy key. It is derived
+// from the identity home and the already-validated project ID, the same way the
+// workspace path is derived, so no operator input reaches it.
+func (m *Manager) deployKeyPath(id string) string {
+	return m.identity().Home + "/.ssh/torio/" + id
+}
+
+// testAsUser runs `test <flag> <path>` as the owning identity and maps its two
+// documented exits. It is the identity's own view of its home, which is the
+// only view that answers whether that identity holds a key.
+func (m *Manager) testAsUser(ctx context.Context, op, flag, path string) (bool, error) {
+	res, err := m.run(ctx, op, guestexec.UserExecAs(m.identity().GuestUser, "test", flag, path))
+	if err != nil {
+		return false, err
+	}
+	switch res.ExitCode {
+	case 0:
+		return true, nil
+	case 1:
+		return false, nil
+	default:
+		return false, commandError(op, KindGuestCommand, "inspect the deploy key path", res.ExitCode)
+	}
+}
+
+// ensureDeployKey generates the project's deploy key as the owning identity and
+// returns its public half.
+//
+// The private half never leaves the guest: it is written by ssh-keygen into a
+// file the identity owns, and the only file this reads back is the `.pub`. An
+// empty passphrase is what makes the key usable noninteractively, which is the
+// same reason the rest of this package refuses prompts.
+func (m *Manager) ensureDeployKey(ctx context.Context, op, id string) (string, error) {
+	keyPath := m.deployKeyPath(id)
+	home := m.identity().Home
+	if err := m.mustRun(ctx, op, KindGuestCommand, "create the key directory",
+		guestexec.UserExecAs(m.identity().GuestUser, "mkdir", "-p", "-m", "0700", home+"/.ssh", home+"/.ssh/torio")); err != nil {
+		return "", err
+	}
+	if err := m.mustRun(ctx, op, KindGuestCommand, "generate the deploy key",
+		guestexec.UserExecAs(m.identity().GuestUser, "ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", deployKeyComment(id), "-f", keyPath)); err != nil {
+		return "", err
+	}
+	return m.readPublicKey(ctx, op, keyPath)
+}
+
+// readPublicKey reads the published half of a deploy key.
+//
+// It refuses anything that is not one plausible public key line. The file is
+// guest state, and a caller is about to print it, so "whatever the guest said"
+// is not good enough: an unreadable or unrecognisable file yields an error, not
+// a report field carrying arbitrary guest output.
+func (m *Manager) readPublicKey(ctx context.Context, op, keyPath string) (string, error) {
+	res, err := m.run(ctx, op, guestexec.UserExecAs(m.identity().GuestUser, "cat", keyPath+".pub"))
+	if err != nil {
+		return "", err
+	}
+	if res.ExitCode != 0 {
+		return "", commandError(op, KindGuestCommand, "read the deploy key public half", res.ExitCode)
+	}
+	line := strings.TrimSpace(string(res.Stdout))
+	if !publicKeyPattern.MatchString(line) {
+		return "", &Error{Op: op, Kind: KindVerification, Err: errors.New("the generated deploy key did not read back as a public key")}
+	}
+	return line, nil
+}
+
+// provisionGuestGitAccess makes the identity able to fetch this checkout on its
+// own, without the environment Torio wraps its own Git calls in.
+//
+// The include is scoped to the one workspace and the setting lives outside the
+// checkout on purpose. Repository-local config would apply to the operator's
+// session too, and an operator pushes through the agent forwarded by
+// `project shell` (ADR-0003). Pinning the read-only key there would authenticate
+// that push as the deploy key and fail after a successful login.
+//
+// The gitdir pattern keeps its trailing slash: Git appends `**` to a
+// slash-terminated pattern, and without it the condition matches nothing a
+// worktree checkout ever has.
+func (m *Manager) provisionGuestGitAccess(ctx context.Context, op, id, workspace string) error {
+	keyPath := m.deployKeyPath(id)
+	include := keyPath + ".gitconfig"
+	user := m.identity().GuestUser
+	if err := m.mustRun(ctx, op, KindGuestCommand, "record the checkout SSH command",
+		guestexec.UserExecAs(user, "git", "config", "-f", include, "core.sshCommand", deployKeySSHCommand(keyPath))); err != nil {
+		return err
+	}
+	return m.mustRun(ctx, op, KindGuestCommand, "include the checkout Git config",
+		guestexec.UserExecAs(user, "git", "config", "--global", "includeIf.gitdir:"+workspace+"/.path", include))
+}
+
+// deployKeyComment labels the key on the forge. It is one token by design: an
+// argv token carrying spaces survives this package fine, but the value is read
+// back by humans in a list of authorized keys.
+func deployKeyComment(id string) string { return "torio-deploy-" + id }
+
+// deployKeySSHCommand mirrors gitNoninteractiveEnv for the identity's own later
+// fetches, so a fetch Torio did not run behaves the way one it ran does.
+func deployKeySSHCommand(keyPath string) string {
+	return "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes -i " + keyPath
 }
 
 // sharedModeOK reports whether a directory mode carries the setgid bit and full

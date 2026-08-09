@@ -17,8 +17,18 @@ const (
 	testID     = "demo"
 	testName   = "Demo"
 	testRemote = "git@github.com:owner/demo.git"
+	testHost   = "github.com"
 	testPath   = lima.HermesWorkspacePath + "/" + testID
 	testOwner  = "operator"
+	// testKeyPath and testKeyConfig are the deploy key and the Git include file
+	// derived from the identity home and the project ID. They are spelled out
+	// rather than built from the production helpers so a drifting path fails
+	// here instead of passing against itself.
+	testKeyPath   = lima.HermesHome + "/.ssh/torio/" + testID
+	testKeyConfig = testKeyPath + ".gitconfig"
+	// testPublicKey is the public half the guest double reports. A public key is
+	// not a credential: it is the half an operator is meant to publish.
+	testPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeFakeFakeFakeFakeFakeFakeFakeFakeFake torio-deploy-" + testID
 	// testSecret is not a credential. It is a marker the guest doubles put into
 	// the output a real Git failure would carry, so a test can prove no error,
 	// report or note ever repeats it.
@@ -106,6 +116,13 @@ type fakeGuest struct {
 	// whether the noninteractive preflight can read it.
 	remote         string
 	remoteReadable bool
+
+	// deployKeyExists is the guest-side deploy key at testKeyPath, and
+	// keyAuthorized is whether the forge accepts it. They are separate because
+	// the interesting case is exactly the gap between them: a key Torio has
+	// generated but nobody has authorized yet reads no better than none.
+	deployKeyExists bool
+	keyAuthorized   bool
 
 	// Hermes project registry.
 	hermesPresent bool
@@ -219,14 +236,32 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 		}
 		return okResult(f.owner + ":" + f.group + " " + f.mode + "\n"), nil
 
+	// --- guest-held deploy key ---
+	case strings.Contains(joined, "test -f "+testKeyPath):
+		return boolResult(f.deployKeyExists), nil
+	case strings.Contains(joined, "mkdir -p -m 0700 "):
+		return okResult(""), nil
+	case strings.Contains(joined, "ssh-keygen -q -t ed25519"):
+		f.deployKeyExists = true
+		return okResult(""), nil
+	case strings.Contains(joined, "cat "+testKeyPath+".pub"):
+		if !f.deployKeyExists {
+			return exitResult(1, "", "cat: No such file or directory"), nil
+		}
+		return okResult(testPublicKey + "\n"), nil
+	case strings.Contains(joined, "git config -f "+testKeyConfig+" core.sshCommand"):
+		return okResult(""), nil
+	case strings.Contains(joined, "git config --global includeIf.gitdir:"+testPath+"/.path"):
+		return okResult(""), nil
+
 	// --- remote preflight and clone ---
 	case strings.Contains(joined, "git ls-remote -- "+f.remote+" HEAD"):
-		if !f.remoteReadable {
+		if !f.canReadRemote(joined) {
 			return exitResult(128, "", remoteFailureStderr), nil
 		}
 		return okResult("0123456789abcdef\tHEAD\n"), nil
 	case strings.Contains(joined, "git clone --quiet -- "+f.remote+" "+testPath):
-		if !f.remoteReadable {
+		if !f.canReadRemote(joined) {
 			return exitResult(128, "", remoteFailureStderr), nil
 		}
 		f.pathExists = true
@@ -372,6 +407,18 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 		return okResult("Active project: " + testID + "\n"), nil
 	}
 	return execx.Result{}, fmt.Errorf("unrouted fake guest command: %s", joined)
+}
+
+// canReadRemote decides whether a remote operation succeeds. A guest reaches a
+// remote either because it can already read it, or because this argv offers the
+// deploy key and the forge has been told to accept it. Offering a key nobody
+// authorized reads no better than offering none, which is the state a first run
+// leaves behind.
+func (f *fakeGuest) canReadRemote(joined string) bool {
+	if f.remoteReadable {
+		return true
+	}
+	return f.keyAuthorized && strings.Contains(joined, "-i "+testKeyPath)
 }
 
 // userOf extracts the identity a `sudo -n -u <user> --` argv runs as.
