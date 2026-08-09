@@ -51,9 +51,9 @@ command.
 ## Tests
 
 Every pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on
-pinned Go **1.26.5**: `make validate`, `go test ./...`, `go vet ./...`, the
-host-free end-to-end suite through `make e2e`, and a separate `go test -race
-./...` job.
+pinned Go **1.26.5**: `make validate`, `go test ./...`, `go vet ./...`,
+`golangci-lint` on the committed `.golangci.yml`, the host-free end-to-end
+suite through `make e2e`, and a separate `go test -race ./...` job.
 
 Locally:
 
@@ -63,6 +63,7 @@ make e2e                  # compiled binary against an in-process limactl fake
 go test ./...
 go test -race ./...       # before reviewing concurrency or state changes
 go vet ./...
+make lint                 # the same linter set CI runs
 ```
 
 Every new behaviour goes RED → GREEN → REFACTOR. A spike is the only exception:
@@ -133,6 +134,31 @@ PLATFORM_E2E_LABEL_FILTER='!guest' make platform-e2e  # the host stage alone
 It refuses to run without a release-shaped binary, on an unsupported host, and
 when the instance already exists. If it creates one, it removes it with `limactl delete`
 even on failure. Do not point it at a machine whose state you want to keep.
+
+## Cutting a release
+
+The version exists only as a git tag: the binary's `main.version` is injected
+at build time, the workflow derives it from the tag, and prose never carries a
+version label (`make validate` enforces that). Releasing is therefore a
+CHANGELOG edit and a tag push, in this order:
+
+1. On a branch, rename `## Unreleased` in [`CHANGELOG.md`](CHANGELOG.md) to
+   `## X.Y.Z - <date>` and open a fresh, empty `## Unreleased` above it.
+2. Sweep the prose the release makes stale — `README.md`, `docs/content/` —
+   then `make docs` to regenerate the site and runbooks.
+3. Run the full local gate (the block above, plus `make docs-check`).
+4. Merge to `main` as `docs(release): prepare vX.Y.Z`.
+5. `git tag vX.Y.Z && git push origin vX.Y.Z`.
+
+The tag push runs [`.github/workflows/release.yml`](.github/workflows/release.yml):
+the real-VM journey on Linux, the host stage on macOS, the full gate again, a
+cross-build for every supported host, and a GitHub release with generated notes,
+both tarballs and `SHA256SUMS`. To rehearse without releasing, run the same
+workflow by `workflow_dispatch` with the tag as input — it uploads a 7-day
+dry-run artifact and creates nothing.
+
+A release that ships an operator-visible break leads its CHANGELOG section with
+the migration, not the feature.
 
 ## Review checklist
 
