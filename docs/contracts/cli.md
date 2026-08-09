@@ -349,7 +349,7 @@ torio project list
 torio project show <id>
 torio project use <id>
 torio project remove <id>
-torio project agent <id>
+torio project agent <id> [--push-grant]
 torio project enter <id>
 torio project shell <id>
 ```
@@ -412,10 +412,28 @@ torio project shell <id>
   forwarding and SSH multiplexing disabled. That session can edit and commit
   locally but receives no write capability toward the remote. It is preflighted
   like `shell`, except for the local SSH agent, which it neither checks nor reads.
-- `shell` opens an ephemeral operator session in the checkout with the SSH agent
-  forwarded. **This is the only way write capability toward a Git remote reaches
-  the guest**, and it lives exactly until the session exits; the persistent Hermes
-  has read-only access to an origin. Write capability arriving through an MCP
+- `--push-grant` opens the agent session with the mediated agent reachable, so
+  the session may **ask** to push. Every signature it asks for waits for a
+  confirmation on the host and is recorded before it is made; an unanswered
+  dialog denies. It requires `operator_key`: without a pinned key there is
+  nothing to mediate, and a socket handed over with nothing in front of it is the
+  design that was rejected
+  ([ADR-0016](../adr/0016-session-scoped-push-grant.md)). The grant is per
+  invocation — no config field turns it on, and nothing remembers the last time
+  it was used.
+
+  It also refuses a remote the grant could not be used against: an origin that
+  pushes over HTTPS never consults an SSH agent, and a host whose key is not in
+  the **agent identity's** `known_hosts` stops a push before it reaches the key
+  at all. Both are reported before the session opens, with the remedy, rather
+  than at the end of one.
+- `shell` opens an ephemeral operator session in the checkout with an SSH agent
+  forwarded. It lives exactly until the session exits; the persistent Hermes has
+  read-only access to an origin. **What is forwarded is Torio's own agent when
+  `operator_key` is set**: one pinned key, a confirmation on the host before
+  every signature, and a decision log beside the config document
+  ([ADR-0015](../adr/0015-mediated-agent-forwarding.md)). With no key pinned the
+  operator's agent is forwarded whole, as it always was. Write capability arriving through an MCP
   server does not travel this path and does not end with the session — it is a
   separate, explicitly granted channel
   ([ADR-0004](../adr/0004-mcp-credential-custody-and-egress.md)). The session is
@@ -423,7 +441,12 @@ torio project shell <id>
   registered origin and shared permissions, local agent holding an identity to
   forward), but Torio **never performs a test push** to prove anything. The
   session is not bounded by `--timeout`: the operator ends it. Afterwards Torio
-  makes no claim about what was pushed — check the remote yourself.
+  makes no claim about what was pushed — check the remote yourself. The decision
+  log says what a mediated session was allowed to sign, which is a different and
+  smaller statement.
+  On opening, both `shell` and a granted `agent` session print what the checkout
+  held at that moment — the branch and how far ahead of its upstream it was. It
+  is a snapshot, not a claim about what follows.
 - `agent`, `enter` and `shell` are interactive and **do not support `--json`**:
   there is no document to emit, so `--json` is a usage error (exit 2) rather than
   a silently ignored flag.

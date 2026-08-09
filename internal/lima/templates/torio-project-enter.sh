@@ -7,7 +7,7 @@
 # multiplexing before invoking this fixed helper.
 set -euo pipefail
 
-workspace='/home/hermes/projects'
+workspace='__TORIO_WORKSPACE_ROOT__'
 group='torio-projects'
 project_id_pattern='^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
 

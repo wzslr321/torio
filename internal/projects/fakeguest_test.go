@@ -86,10 +86,21 @@ type fakeGuest struct {
 	origin      string
 	shallow     bool
 	dirty       bool
-	credHelper  bool
-	owner       string
-	group       string
-	mode        string
+	// branch is what `symbolic-ref --short HEAD` prints; empty models a
+	// detached HEAD. ahead is what `rev-list --count @{u}..HEAD` prints; empty
+	// models a branch with no upstream configured.
+	branch string
+	ahead  string
+	// pushURL is what `git remote get-url --push origin` prints, and knownHosts
+	// is the set of hosts each guest identity trusts. They are separate because
+	// the two session shapes read different home directories, which is the bug
+	// RemoteAccess exists to catch.
+	pushURL    string
+	knownHosts map[string][]string
+	credHelper bool
+	owner      string
+	group      string
+	mode       string
 
 	// remote is the URL the guest holds and serves; remoteReadable decides
 	// whether the noninteractive preflight can read it.
@@ -159,6 +170,10 @@ func attachedFake() *fakeGuest {
 	f.hermesPrimary = testPath
 	f.safeDirs[lima.HermesUser] = []string{testPath}
 	f.safeDirs[testOwner] = []string{testPath}
+	f.branch = "main"
+	f.ahead = "3"
+	f.pushURL = f.remote
+	f.knownHosts = map[string][]string{}
 	return f
 }
 
@@ -246,6 +261,30 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 			return okResult(" M src/main.go\n"), nil
 		}
 		return okResult(""), nil
+	case strings.Contains(joined, "git -C "+testPath+" remote get-url --push origin"):
+		if f.pushURL == "" {
+			return exitResult(1, "", ""), nil
+		}
+		return okResult(f.pushURL + "\n"), nil
+	case strings.Contains(joined, "ssh-keygen -F "):
+		user := userOf(joined)
+		host := joined[strings.LastIndex(joined, " ")+1:]
+		for _, known := range f.knownHosts[user] {
+			if known == host {
+				return okResult("# Host " + host + " found: line 1\n"), nil
+			}
+		}
+		return exitResult(1, "", ""), nil
+	case strings.Contains(joined, "git -C "+testPath+" symbolic-ref --short HEAD"):
+		if f.branch == "" {
+			return exitResult(128, "", "fatal: ref HEAD is not a symbolic ref"), nil
+		}
+		return okResult(f.branch + "\n"), nil
+	case strings.Contains(joined, "git -C "+testPath+" rev-list --count @{u}..HEAD"):
+		if f.ahead == "" {
+			return exitResult(128, "", "fatal: no upstream configured for branch"), nil
+		}
+		return okResult(f.ahead + "\n"), nil
 	case strings.Contains(joined, "git -C "+testPath+" config --local --get-regexp"):
 		if f.credHelper {
 			return okResult("credential.helper store\n"), nil

@@ -235,6 +235,9 @@ var enterPreconditions = []string{
 type EnterSession struct {
 	EnterSpec
 	Verified []string
+	// Review is what the checkout looked like at this moment, on the same terms
+	// as ShellSession.Review: description, never verification.
+	Review ReviewContext
 }
 
 // ShellSpec is the data an interactive operator shell needs, and nothing more.
@@ -285,6 +288,28 @@ type ShellSession struct {
 	// Verified names the preconditions this preflight proved, in the order it
 	// proved them. It is drawn from shellPreconditions and nothing else.
 	Verified []string
+	// Review is what the checkout looked like at this moment. It is description,
+	// not verification: it is deliberately absent from Verified and from
+	// shellPreconditions, and nothing refuses a session because of it.
+	Review ReviewContext
+}
+
+// ReviewContext is the state of a checkout when a session was opened: the two
+// facts an operator would otherwise open the session and type `git status` and
+// `git diff` to learn.
+//
+// It is a snapshot and says so everywhere it is shown. Torio does not watch the
+// checkout during the session and makes no claim about what is pushed out of it,
+// which is the same refusal `reportShellEnd` already prints.
+type ReviewContext struct {
+	// Branch is the checked-out branch, empty on a detached HEAD.
+	Branch string
+	// Ahead is how many commits Branch leads its upstream by. AheadKnown
+	// reports whether there was an upstream to count against at all: zero
+	// commits ahead and no upstream configured are different facts, and only one
+	// of them means there is nothing to push.
+	Ahead      int
+	AheadKnown bool
 }
 
 // ServiceEnvCheck is the read-only look at the persistent Hermes backend

@@ -50,8 +50,14 @@ func TestRenderTemplateInstallsTheOperatorShellHelper(t *testing.T) {
 	if !ok {
 		t.Fatalf("rendered template has no content block for the helper")
 	}
-	if block != string(embeddedProjectShell) {
-		t.Errorf("provisioned helper differs from the embedded helper:\n--- provisioned ---\n%s\n--- embedded ---\n%s", block, embeddedProjectShell)
+	// The provisioned bytes are the shipped script with one value filled in.
+	// Comparing against the raw embed would only prove the placeholder survived.
+	want, err := projectHelper(embeddedProjectShell, HermesWorkspacePath, "operator shell")
+	if err != nil {
+		t.Fatalf("resolving the helper: %v", err)
+	}
+	if block != string(want) {
+		t.Errorf("provisioned helper differs from the resolved helper:\n--- provisioned ---\n%s\n--- resolved ---\n%s", block, want)
 	}
 }
 
@@ -75,8 +81,12 @@ func TestRenderTemplateInstallsTheProjectEnterHelper(t *testing.T) {
 	if !ok {
 		t.Fatal("project enter helper has no content block")
 	}
-	if block != string(embeddedProjectEnter) {
-		t.Errorf("provisioned enter helper differs from the tested helper")
+	want, err := projectHelper(embeddedProjectEnter, HermesWorkspacePath, "project enter")
+	if err != nil {
+		t.Fatalf("resolving the helper: %v", err)
+	}
+	if block != string(want) {
+		t.Errorf("provisioned enter helper differs from the resolved helper")
 	}
 }
 

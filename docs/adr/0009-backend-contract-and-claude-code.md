@@ -7,7 +7,10 @@
   "MCP is a chosen, named hole" decision with the delivered custody path for
   every backend, and
   [ADR-0013](0013-mcp-managed-client-config-and-activation.md), which makes the
-  Claude client route root-managed and removes native MCP declarations.
+  Claude client route root-managed and removes native MCP declarations, and
+  [ADR-0016](0016-session-scoped-push-grant.md), which accepts the
+  session-scoped push grant deferred under "Push stays human", on top of
+  [ADR-0015](0015-mediated-agent-forwarding.md).
 - Applies to: `internal/backend`, `internal/lima`, `internal/serve`,
   `internal/projects`, `internal/brain`, `internal/config`, `internal/cli`
 

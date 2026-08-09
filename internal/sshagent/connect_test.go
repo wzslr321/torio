@@ -1,0 +1,180 @@
+package sshagent
+
+import (
+	"errors"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func agentHolding(ids ...Identity) func() (net.Conn, error) {
+	return (&fakeAgent{identities: ids}).dial
+}
+
+// TestPinIdentityRefusesAnEmptyPin proves Torio never picks which key a guest
+// may use — not even when the agent holds exactly one, which is the
+// mediation-by-default design ADR-0015 rejects. The refusal happens before the
+// agent is queried, so no dial function is needed to observe it.
+func TestPinIdentityRefusesAnEmptyPin(t *testing.T) {
+	_, err := PinIdentity(nil, "")
+	if err == nil {
+		t.Fatal("PinIdentity() chose a key on the operator's behalf")
+	}
+	if !strings.Contains(err.Error(), "operator_key") {
+		t.Errorf("PinIdentity() error = %v, want the operator_key remedy", err)
+	}
+}
+
+func TestPinIdentityMatchesAFingerprintOrAComment(t *testing.T) {
+	pinned := goldenIdentity(t)
+	other := Identity{Blob: []byte("second"), Comment: "personal"}
+
+	for name, want := range map[string]string{
+		"fingerprint": goldenFingerprint,
+		"comment":     "torio-test-key",
+	} {
+		got, err := PinIdentity(agentHolding(pinned, other), want)
+		if err != nil {
+			t.Fatalf("%s: PinIdentity() error = %v", name, err)
+		}
+		if got.Fingerprint() != goldenFingerprint {
+			t.Errorf("%s: PinIdentity() = %s, want %s", name, got.Fingerprint(), goldenFingerprint)
+		}
+	}
+}
+
+// TestPinIdentityRefusesAnAmbiguousComment: a comment that names two keys names
+// neither, and the error says so by asking for the notation that cannot repeat.
+func TestPinIdentityRefusesAnAmbiguousComment(t *testing.T) {
+	first := Identity{Blob: []byte("first"), Comment: "work"}
+	second := Identity{Blob: []byte("second"), Comment: "work"}
+
+	_, err := PinIdentity(agentHolding(first, second), "work")
+	if err == nil {
+		t.Fatal("PinIdentity() accepted a comment naming two keys")
+	}
+	if !strings.Contains(err.Error(), "pin a fingerprint instead") {
+		t.Errorf("PinIdentity() error = %v, want the fingerprint remedy", err)
+	}
+}
+
+func TestPinIdentityReportsAnUnmatchedPin(t *testing.T) {
+	_, err := PinIdentity(agentHolding(goldenIdentity(t)), "SHA256:not-a-key-this-agent-holds")
+	if err == nil {
+		t.Fatal("PinIdentity() accepted a pin no identity matches")
+	}
+	if !strings.Contains(err.Error(), goldenFingerprint) {
+		t.Errorf("PinIdentity() error = %v, want the identities it does hold", err)
+	}
+}
+
+func TestPinIdentityReportsAnEmptyAgent(t *testing.T) {
+	_, err := PinIdentity(agentHolding(), goldenFingerprint)
+	if err == nil || !strings.Contains(err.Error(), "ssh-add") {
+		t.Errorf("PinIdentity() error = %v, want the empty-agent remedy", err)
+	}
+}
+
+// TestPinIdentityDropsTheDialCause keeps the projects preflight's rule: this is
+// the one diagnostic derived from talking to an agent, and agent traffic is
+// where key material would be if it were anywhere.
+func TestPinIdentityDropsTheDialCause(t *testing.T) {
+	dial := func() (net.Conn, error) {
+		return nil, errors.New("dial unix /private/tmp/com.apple.launchd.XXXX/Listeners: connect: no such file")
+	}
+	_, err := PinIdentity(dial, goldenFingerprint)
+	if err == nil {
+		t.Fatal("PinIdentity() succeeded against an agent it could not reach")
+	}
+	if strings.Contains(err.Error(), "launchd") {
+		t.Errorf("PinIdentity() error = %v, want the cause dropped", err)
+	}
+	if !strings.Contains(err.Error(), "could not be queried") {
+		t.Errorf("PinIdentity() error = %v, want the unqueryable-agent message", err)
+	}
+}
+
+// TestListenIsPrivateAndTemporary proves the directory mode is the access
+// control. Socket modes are not honoured uniformly across platforms; a
+// directory's are.
+func TestListenIsPrivateAndTemporary(t *testing.T) {
+	root := shortTempRoot(t)
+	socket, err := Listen(root)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+
+	dir := socket.Path[:strings.LastIndex(socket.Path, "/")]
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat the socket directory: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Errorf("socket directory mode = %04o, want 0700", perm)
+	}
+	if _, err := os.Stat(socket.Path); err != nil {
+		t.Errorf("socket was not created: %v", err)
+	}
+
+	if err := socket.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("the socket directory outlived the session: %v", err)
+	}
+}
+
+// TestListenGivesEachSessionItsOwnPath proves a path never names two
+// capabilities, so a stale socket from a crashed session is not rebound.
+func TestListenGivesEachSessionItsOwnPath(t *testing.T) {
+	root := shortTempRoot(t)
+	first, err := Listen(root)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	defer first.Close()
+	second, err := Listen(root)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	defer second.Close()
+
+	if first.Path == second.Path {
+		t.Errorf("two sessions share the socket path %s", first.Path)
+	}
+}
+
+func TestUpstreamFromEnvRefusesAnUnsetAgent(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "")
+	if _, err := UpstreamFromEnv(); err == nil || !strings.Contains(err.Error(), "SSH_AUTH_SOCK") {
+		t.Errorf("UpstreamFromEnv() error = %v, want the unset-agent refusal", err)
+	}
+}
+
+// shortTempRoot is t.TempDir() without the length.
+//
+// A Unix socket path is capped near 104 bytes, and on macOS t.TempDir() spends
+// about 91 of them on the per-test directory alone — the test name is in the
+// path. Production binds under os.TempDir() with no such prefix, so a test that
+// failed on length would be reporting the harness, not the code. This keeps the
+// length limit itself testable by not tripping over it everywhere else.
+func shortTempRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "t")
+	if err != nil {
+		t.Fatalf("create a short temp root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
+// TestListenRefusesAnOverlongPath keeps the bound honest now that the other
+// tests deliberately stay under it.
+func TestListenRefusesAnOverlongPath(t *testing.T) {
+	root := filepath.Join(shortTempRoot(t), strings.Repeat("d", 120))
+	if _, err := Listen(root); err == nil || !strings.Contains(err.Error(), "byte limit") {
+		t.Errorf("Listen() error = %v, want the socket path length refusal", err)
+	}
+}

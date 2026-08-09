@@ -508,8 +508,12 @@ func TestBootstrapInstallsAMissingProjectEnterHelperForExistingVMs(t *testing.T)
 	if got := fr.callArgs(31); !equalArgs(got, want) {
 		t.Fatalf("install argv = %v, want %v", got, want)
 	}
-	if got := fr.callStdin(31); string(got) != string(embeddedProjectEnter) {
-		t.Fatal("install stdin does not match the embedded project enter helper")
+	wantHelper, err := projectHelper(embeddedProjectEnter, HermesWorkspacePath, "project enter")
+	if err != nil {
+		t.Fatalf("resolving the helper: %v", err)
+	}
+	if got := fr.callStdin(31); string(got) != string(wantHelper) {
+		t.Fatal("install stdin is not the helper resolved for this backend's workspace")
 	}
 }
 
@@ -525,7 +529,6 @@ func TestBootstrapOperatorShellHelperDriftFailsClosed(t *testing.T) {
 		ownership  execx.Result // stat -c '%U:%G %a'
 		wantDetail string
 	}{
-		{"missing", exitResult(1, "", "stat: cannot statx: No such file or directory\n"), stdoutResult("root:root 755\n"), "no operator shell helper"},
 		{"symlink", stdoutResult("symbolic link\n"), stdoutResult("root:root 777\n"), "want a regular file"},
 		{"directory", stdoutResult("directory\n"), stdoutResult("root:root 755\n"), "want a regular file"},
 		{"owned by the operator", stdoutResult("regular file\n"), stdoutResult("operator:operator 755\n"), "want root:root"},
@@ -794,5 +797,73 @@ func TestBootstrapRequiredPathsOptInToStrictnessDeliberately(t *testing.T) {
 		if spec.AllowStricter != expected {
 			t.Errorf("%s allowStricter = %v, want %v", spec.Path, spec.AllowStricter, expected)
 		}
+	}
+}
+
+// TestBootstrapInstallsAMissingOperatorShellHelperForExistingVMs is the delivery
+// path for a corrected helper.
+//
+// The Lima template is rendered once, at `vm init`, so before this the only way
+// to change the push-capable helper on a box that already existed was to
+// recreate the box. The three responses inserted below are the calls that branch
+// adds — prove absent, install, re-probe — and the ownership response already in
+// the script is what verifies the result.
+func TestBootstrapInstallsAMissingOperatorShellHelperForExistingVMs(t *testing.T) {
+	script := bootstrapHappyScript()
+	script[27] = scriptedResponse{result: exitResult(1, "", "stat: cannot statx: No such file or directory\n")}
+	inserted := []scriptedResponse{
+		{result: exitResult(0, "", "")},               // test ! -e: absent
+		{result: exitResult(0, "", "")},               // the atomic root install
+		{result: exitResult(0, "regular file\n", "")}, // stat -c %F, again
+	}
+	script = append(script[:28], append(inserted, script[28:]...)...)
+	fr := &fakeRunner{script: script}
+	a := New(fr)
+
+	rep, err := a.Bootstrap(context.Background(), bootstrapOpts())
+	if err != nil {
+		t.Fatalf("Bootstrap: unexpected error: %v", err)
+	}
+	if !checkOK(rep, "operator_shell_helper_installed") || !checkOK(rep, "operator_shell_helper") {
+		t.Fatalf("bootstrap did not install and verify the helper: %+v", rep.Checks)
+	}
+	wantArgs := []string{"shell", "--tty=false", "--workdir", "/", InstanceName, "--", "sudo", "-n", "/bin/bash", "-ceu", operatorShellInstallScript}
+	if got := fr.callArgs(29); !equalArgs(got, wantArgs) {
+		t.Fatalf("install argv = %v, want %v", got, wantArgs)
+	}
+	// The bytes that reach the guest are the shipped script resolved for this
+	// backend's workspace. Installing the raw embed would put an unsubstituted
+	// placeholder on the guest, which refuses every project rather than the
+	// wrong ones.
+	wantHelper, err := projectHelper(embeddedProjectShell, HermesWorkspacePath, "operator shell")
+	if err != nil {
+		t.Fatalf("resolving the helper: %v", err)
+	}
+	if got := fr.callStdin(29); string(got) != string(wantHelper) {
+		t.Fatal("install stdin is not the helper resolved for this backend's workspace")
+	}
+}
+
+// TestBootstrapVerifyOnlyRefusesAMissingOperatorShellHelper keeps the half of
+// the old behaviour that still holds. Installing an absent helper is reconcile
+// work; a run that may repair nothing must report the absence instead, because
+// `torio backend status` walks this same path and must not quietly provision a
+// guest while answering a question about it.
+func TestBootstrapVerifyOnlyRefusesAMissingOperatorShellHelper(t *testing.T) {
+	script := bootstrapHappyScript()
+	script[27] = scriptedResponse{result: exitResult(1, "", "stat: cannot statx: No such file or directory\n")}
+	script = append(script[:28], append([]scriptedResponse{{result: exitResult(0, "", "")}}, script[28:]...)...)
+	fr := &fakeRunner{script: script}
+	a := New(fr)
+
+	opts := bootstrapOpts()
+	opts.VerifyOnly = true
+	rep, err := a.Bootstrap(context.Background(), opts)
+	assertKind(t, err, KindVerificationFailed)
+	if !strings.Contains(err.Error(), "no operator shell helper") {
+		t.Errorf("error = %q, want it to name the missing helper", err.Error())
+	}
+	if checkOK(rep, "operator_shell_helper") {
+		t.Errorf("an absent helper was recorded as a passing check: %+v", rep.Checks)
 	}
 }

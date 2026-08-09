@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -24,6 +25,7 @@ type projectService interface {
 	Remove(context.Context, string) (projects.RemoveReport, error)
 	EnterPreflight(context.Context, string) (projects.EnterSession, error)
 	ShellPreflight(context.Context, string) (projects.ShellSession, error)
+	RemoteAccess(context.Context, string, projects.SessionIdentity) (projects.RemoteAccess, error)
 	CheckServiceEnv(context.Context) (projects.ServiceEnvCheck, error)
 }
 
@@ -245,7 +247,8 @@ func newProjectRemoveCmd(a *app) *cobra.Command {
 // It carries no machine output for the same reason `enter` does not: it hands
 // the operator's terminal to a remote process, so there is no document to emit.
 func newProjectAgentCmd(a *app) *cobra.Command {
-	return &cobra.Command{
+	var pushGrant bool
+	cmd := &cobra.Command{
 		Use:   "agent <id>",
 		Short: "Open the backend's own session in a project checkout",
 		Long: "Start the configured backend inside the project checkout, running as the " +
@@ -289,18 +292,74 @@ func newProjectAgentCmd(a *app) *cobra.Command {
 			if err != nil {
 				return mapProjectError("project.agent", err)
 			}
-			agentCmd, err := a.newAgentSpec(session.Project.Path)
+			if !pushGrant {
+				agentCmd, err := a.newAgentSpec(session.Project.Path)
+				if err != nil {
+					return mapLimaError("project.agent", err)
+				}
+				if _, err := fmt.Fprintf(a.stdout,
+					"%s: starting %s in %s as the backend identity\n"+
+						"  No SSH agent is forwarded. The agent can commit here; pushing is yours, from `torio project shell %s`\n",
+					session.Project.ID, a.backend.Identity().Name, session.Project.Path, session.Project.ID); err != nil {
+					return err
+				}
+				runErr := a.newInteractive().RunInteractive(cmd.Context(), agentCmd)
+				if _, err := fmt.Fprintf(a.stdout, "%s: agent session ended. Review what it did before you push.\n", session.Project.ID); err != nil {
+					return err
+				}
+				if runErr != nil {
+					return mapInteractiveSessionError("project.agent", "agent session", runErr)
+				}
+				return nil
+			}
+
+			// A grant with no pinned key would be the old rejected design: a
+			// socket handed to the agent with nothing in front of it. The whole
+			// reason this is offerable is the dialog, so no pin is a refusal
+			// rather than a weaker grant.
+			if a.runtime.File.OperatorKey == "" {
+				return &CLIError{
+					Exit:    ExitPrecondition,
+					Code:    "PRECONDITION_FAILED",
+					Command: "project.agent",
+					Message: "--push-grant needs `operator_key` set in the config document: the grant is the mediated agent, and without a pinned key there is nothing to mediate",
+				}
+			}
+			access, err := a.requireReachableRemote(cmd, service, args[0])
+			if err != nil {
+				return err
+			}
+			mediated, err := a.startMediation("project.agent", mediatedContext(session.Project, session.Review, access))
+			if err != nil {
+				return err
+			}
+			defer mediated.stop()
+
+			guestSocket, err := lima.NewGuestPushSocketPath()
+			if err != nil {
+				return mapLimaError("project.agent", err)
+			}
+			agentCmd, err := a.newAgentPushSpec(session.Project.Path, mediated.SocketPath(), guestSocket)
 			if err != nil {
 				return mapLimaError("project.agent", err)
 			}
 			if _, err := fmt.Fprintf(a.stdout,
 				"%s: starting %s in %s as the backend identity\n"+
-					"  No SSH agent is forwarded. The agent can commit here; pushing is yours, from `torio project shell %s`\n",
-				session.Project.ID, a.backend.Identity().Name, session.Project.Path, session.Project.ID); err != nil {
+					"  This session may ask to push. One pinned key is reachable through Torio; every signature\n"+
+					"  stops at a dialog on this Mac and is recorded in %s\n",
+				session.Project.ID, a.backend.Identity().Name, session.Project.Path,
+				filepath.Join(a.runtime.Paths.ConfigDir, agentAuditFileName)); err != nil {
 				return err
 			}
+			if line := reviewLine(session.Review); line != "" {
+				if _, err := fmt.Fprintf(a.stdout, "  %s\n", line); err != nil {
+					return err
+				}
+			}
 			runErr := a.newInteractive().RunInteractive(cmd.Context(), agentCmd)
-			if _, err := fmt.Fprintf(a.stdout, "%s: agent session ended. Review what it did before you push.\n", session.Project.ID); err != nil {
+			if _, err := fmt.Fprintf(a.stdout,
+				"%s: agent session ended. Torio makes no claim about what was pushed; the decision log says what it allowed.\n",
+				session.Project.ID); err != nil {
 				return err
 			}
 			if runErr != nil {
@@ -309,6 +368,9 @@ func newProjectAgentCmd(a *app) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&pushGrant, "push-grant", false,
+		"Let this session ask to push, through the mediated agent. Every signature waits for your confirmation on this Mac and is recorded. Requires operator_key.")
+	return cmd
 }
 
 func newProjectEnterCmd(a *app) *cobra.Command {
@@ -396,11 +458,35 @@ func newProjectShellCmd(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			shellCmd, err := a.newShellSpec(session.Project.Path)
+			// The proxy is started before the argv is built, because the argv
+			// names its socket. It is stopped on every exit path below, so the
+			// capability cannot outlive the session that carried it.
+			// Resolved before the proxy, because the dialog names the host it
+			// finds. Naming the registered remote instead would put an HTTPS URL
+			// in front of an operator approving an SSH signature.
+			access, err := a.remoteAccess(cmd, service, "project.shell", args[0], projects.OperatorIdentity)
+			if err != nil {
+				return err
+			}
+			mediated, err := a.startMediation("project.shell", mediatedContext(session.Project, session.Review, access))
+			if err != nil {
+				return err
+			}
+			defer mediated.stop()
+
+			var shellCmd execx.InteractiveCommand
+			if socket := mediated.SocketPath(); socket != "" {
+				shellCmd, err = a.newMediatedShellSpec(session.Project.Path, socket)
+			} else {
+				shellCmd, err = a.newShellSpec(session.Project.Path)
+			}
 			if err != nil {
 				return mapLimaError("project.shell", err)
 			}
-			if err := a.announceShell(session); err != nil {
+			if err := a.announceShell(session, mediated != nil); err != nil {
+				return err
+			}
+			if err := a.noteRemoteAccess(access); err != nil {
 				return err
 			}
 			// Deliberately the command context, not a.opContext: an operator session
@@ -428,12 +514,50 @@ func (a *app) preflightShell(cmd *cobra.Command, service projectService, id stri
 // announceShell states what the operator is about to hold and for how long,
 // from the host side. The guest helper prints its own line once the session is
 // up; this one is printed even when the transport never gets there.
-func (a *app) announceShell(session projects.ShellSession) error {
-	_, err := fmt.Fprintf(a.stdout,
-		"%s: opening an operator session in %s\n"+
-			"  your SSH agent is forwarded for this session only; the write capability ends at exit\n",
-		session.Project.ID, session.Project.Path)
-	return err
+//
+// The two forwarding shapes are named differently on purpose. They look
+// identical from inside the session and only one of them can reach every key the
+// operator has loaded, so the line that says which is the operator's only
+// warning that a config change did not take.
+func (a *app) announceShell(session projects.ShellSession, mediated bool) error {
+	carrier := "  your SSH agent is forwarded for this session only; the write capability ends at exit\n"
+	if mediated {
+		carrier = "  one pinned key is forwarded through Torio for this session; every signature asks you first\n"
+	}
+	if _, err := fmt.Fprintf(a.stdout,
+		"%s: opening an operator session in %s\n%s",
+		session.Project.ID, session.Project.Path, carrier); err != nil {
+		return err
+	}
+	if line := reviewLine(session.Review); line != "" {
+		if _, err := fmt.Fprintf(a.stdout, "  %s\n", line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// reviewLine describes the checkout as the preflight found it, so the first two
+// commands of every session do not have to be `git status` and `git diff`.
+//
+// It is a snapshot and is worded as one. An empty result is the honest answer
+// for a detached HEAD or a branch with no upstream: there is no count to give,
+// and inventing a zero would read as "nothing to push".
+func reviewLine(review projects.ReviewContext) string {
+	if review.Branch == "" {
+		return ""
+	}
+	if !review.AheadKnown {
+		return fmt.Sprintf("on %s, with no upstream configured to compare against", review.Branch)
+	}
+	switch review.Ahead {
+	case 0:
+		return fmt.Sprintf("on %s, level with its upstream right now", review.Branch)
+	case 1:
+		return fmt.Sprintf("on %s, 1 commit ahead of its upstream right now", review.Branch)
+	default:
+		return fmt.Sprintf("on %s, %d commits ahead of its upstream right now", review.Branch, review.Ahead)
+	}
 }
 
 // reportShellEnd closes the session out. It reports one fact — the session
@@ -920,4 +1044,70 @@ func mapProjectError(command string, err error) *CLIError {
 		out.Command = command
 		return out
 	}
+}
+
+// remoteAccess resolves how a session would reach the origin, under the bounded
+// operation context. It is two ordinary read-only guest commands and must not
+// hang the way the session it precedes is allowed to.
+func (a *app) remoteAccess(cmd *cobra.Command, service projectService, command, id string, who projects.SessionIdentity) (projects.RemoteAccess, error) {
+	ctx, cancel := a.opContext(cmd)
+	defer cancel()
+	access, err := service.RemoteAccess(ctx, id, who)
+	if err != nil {
+		return projects.RemoteAccess{}, mapProjectError(command, err)
+	}
+	return access, nil
+}
+
+// noteRemoteAccess tells the operator what the session they just opened will not
+// be able to do.
+//
+// It is a note rather than a refusal: an operator opens a shell to read, commit
+// and fix things, and only sometimes to push. Refusing the session because the
+// push at the end of it would fail would be answering a question nobody asked.
+func (a *app) noteRemoteAccess(access projects.RemoteAccess) error {
+	var err error
+	switch {
+	case access.Transport != projects.TransportSSH:
+		_, err = fmt.Fprintf(a.stdout,
+			"  note: origin pushes over %s, which never uses an SSH agent; nothing here will ask you to approve a signature\n",
+			access.Transport)
+	case access.Host == "":
+		_, err = fmt.Fprintf(a.stdout,
+			"  note: origin's push host could not be read as a plain hostname, so Torio cannot say whether its key is trusted\n")
+	case !access.HostKnown:
+		_, err = fmt.Fprintf(a.stdout,
+			"  note: %s is not in this identity's known_hosts; a push will stop at host key verification, not at anything to do with your key\n",
+			access.Host)
+	}
+	return err
+}
+
+// requireReachableRemote refuses a grant the session could not use.
+//
+// The grant exists for one purpose. A session opened to push, against a remote
+// no push can reach, is a session whose whole point fails at the end — after the
+// agent has done the work, and with an error about host keys that reads like a
+// problem with the key the operator just pinned.
+func (a *app) requireReachableRemote(cmd *cobra.Command, service projectService, id string) (projects.RemoteAccess, error) {
+	access, err := a.remoteAccess(cmd, service, "project.agent", id, projects.AgentIdentity)
+	if err != nil {
+		return projects.RemoteAccess{}, err
+	}
+	refuse := func(msg string) (projects.RemoteAccess, error) {
+		return projects.RemoteAccess{}, &CLIError{Exit: ExitPrecondition, Code: "PRECONDITION_FAILED", Command: "project.agent", Message: msg}
+	}
+	switch {
+	case access.Transport != projects.TransportSSH:
+		return refuse(fmt.Sprintf(
+			"origin pushes over %s, which never uses an SSH agent: the grant would hand this session a key nothing can use. Point origin's push URL at SSH, or push it yourself.",
+			access.Transport))
+	case access.Host == "":
+		return refuse("origin's push host could not be read as a plain hostname, so Torio cannot prove its key is trusted before granting a session that would use it")
+	case !access.HostKnown:
+		return refuse(fmt.Sprintf(
+			"%s is not in the agent identity's known_hosts, so a push would stop before reaching your key. Add the host key from a source you trust rather than from whatever answers on port 22.",
+			access.Host))
+	}
+	return access, nil
 }

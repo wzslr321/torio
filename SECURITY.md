@@ -95,5 +95,8 @@ These need a different class of tooling than a VM and a control plane:
 - host Git write credentials placed on the guest;
 - a persistent forwarded SSH agent, or `SSH_AUTH_SOCK` shared with the `hermes`
   process;
-- automatic merge, push or release;
+- automatic merge, push or release — a granted session may *ask* to push, and
+  every signature waits for a person at the host, so an unattended one denies;
+- a push grant without a pinned key, which would be a socket handed over with
+  nothing in front of it;
 - policy read from a file the agent can write.

@@ -1,6 +1,8 @@
 package lima
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -132,6 +134,92 @@ func OperatorShellSpec(workspaceRoot, projectPath string) (execx.InteractiveComm
 			projectPath,
 		},
 	}, nil
+}
+
+// MediatedShellSpec is OperatorShellSpec with Torio's own agent in front of the
+// operator's.
+//
+// The argv is deliberately identical, down to the flags and their order. `-A`
+// forwards whatever SSH_AUTH_SOCK names in this process, so pointing that one
+// variable at the proxy socket changes what crosses into the guest without
+// changing how it crosses: same auth-agent channel, same root-owned helper,
+// same guest-side SSH_AUTH_SOCK written by sshd. The guest cannot tell the
+// difference, which is the point — nothing on that side had to be trusted to
+// make this narrower.
+//
+// This is the one session spec with a non-nil Env. OperatorShellSpec leaves it
+// nil so the session inherits the operator's SSH_AUTH_SOCK, TERM and locale
+// untouched; here exactly one of those is replaced and the rest are passed
+// through, because a session that composed a fresh environment would lose the
+// operator's terminal along with their keyring.
+func MediatedShellSpec(workspaceRoot, projectPath, agentSocket string) (execx.InteractiveCommand, error) {
+	if err := validateProjectPath(workspaceRoot, projectPath); err != nil {
+		return execx.InteractiveCommand{}, &Error{Op: operatorShellOp, Kind: KindVerificationFailed, Err: err}
+	}
+	if !filepath.IsAbs(agentSocket) {
+		return execx.InteractiveCommand{}, &Error{
+			Op:   operatorShellOp,
+			Kind: KindVerificationFailed,
+			Err:  errors.New("the mediated agent socket must be an absolute path"),
+		}
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return execx.InteractiveCommand{}, &Error{Op: operatorShellOp, Kind: KindNotFound, Err: err}
+	}
+	sshConfig := filepath.Join(home, ".lima", InstanceName, "ssh.config")
+	if _, statErr := os.Stat(sshConfig); statErr != nil {
+		return execx.InteractiveCommand{}, &Error{
+			Op:   operatorShellOp,
+			Kind: KindNotFound,
+			Err:  fmt.Errorf("no lima ssh config at %s; run `torio vm start` first", sshConfig),
+		}
+	}
+	// Fail closed on the socket for the same reason OperatorShellSpec fails
+	// closed on the agent: -A pointed at nothing opens a session that looks
+	// working and refuses at the push.
+	if _, statErr := os.Stat(agentSocket); statErr != nil {
+		return execx.InteractiveCommand{}, &Error{
+			Op:   operatorShellOp,
+			Kind: KindNotFound,
+			Err:  errors.New("the mediated agent socket is not there to forward"),
+		}
+	}
+
+	return execx.InteractiveCommand{
+		Name: "ssh",
+		Args: []string{
+			"-F", sshConfig,
+			"-o", "ControlMaster=no",
+			"-o", "ControlPath=none",
+			"-o", "ForwardAgent=yes",
+			"-A",
+			"-t",
+			sshHostAlias(),
+			OperatorShellHelper,
+			projectPath,
+		},
+		Env: withAgentSocket(os.Environ(), agentSocket),
+	}, nil
+}
+
+// withAgentSocket replaces every SSH_AUTH_SOCK in env with one naming socket.
+//
+// Every existing assignment is dropped rather than the last one being appended
+// after them: which of two assignments an exec resolves to is not a thing to
+// rely on when the answer decides whether a guest reaches one key or all of
+// them.
+func withAgentSocket(env []string, socket string) []string {
+	const prefix = "SSH_AUTH_SOCK="
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, prefix+socket)
 }
 
 // ProjectEnterSpec builds an interactive SSH command for ordinary project work
@@ -303,6 +391,96 @@ func ProjectAgentSpec(helper, workspaceRoot, projectPath string) (execx.Interact
 			sshHostAlias(),
 			helper,
 			projectPath,
+		},
+	}, nil
+}
+
+// guestPushSocketPattern is the shape of the forwarded socket path on the guest,
+// and the guest helper enforces the identical pattern. The random component is
+// what makes the path unguessable, so nothing can be sitting at it: sshd refuses
+// to bind over an existing file and ExitOnForwardFailure turns that refusal into
+// a session that does not open.
+var guestPushSocketPattern = regexp.MustCompile(`^/tmp/torio-push-[0-9a-f]{32}\.sock$`)
+
+// NewGuestPushSocketPath mints the guest-side path for one granted session.
+//
+// /tmp rather than a provisioned directory: it exists on every guest, both
+// identities can traverse it, and its sticky bit means only the owner can remove
+// what they put there. The socket lands owned by the operator and unreadable by
+// anyone else; the helper hands it to the shared group and no wider.
+func NewGuestPushSocketPath() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("generate the guest agent socket path: %w", err)
+	}
+	return "/tmp/torio-push-" + hex.EncodeToString(raw[:]) + ".sock", nil
+}
+
+// ProjectAgentPushSpec opens an agent session that may ask to push.
+//
+// The transport still forwards no SSH agent: ForwardAgent stays off and -a stays
+// on, so nothing about the operator's own keyring reaches this session, and it
+// still cannot inherit a multiplexed connection that could. What it gains is one
+// remote-forwarded Unix socket whose far end is Torio's own agent — a single
+// pinned key that answers nothing without a dialog on the operator's Mac
+// (ADR-0015). The agent gets the ability to ask, never the ability to answer.
+//
+// ExitOnForwardFailure is what makes that honest: a session whose forward failed
+// would otherwise open, run the agent, and fail at the push with no explanation.
+func ProjectAgentPushSpec(helper, workspaceRoot, projectPath, hostSocket, guestSocket string) (execx.InteractiveCommand, error) {
+	if helper == "" {
+		return execx.InteractiveCommand{}, &Error{
+			Op:   projectAgentOp,
+			Kind: KindVerificationFailed,
+			Err:  fmt.Errorf("the backend declares no push-capable agent session helper"),
+		}
+	}
+	if err := validateProjectPath(workspaceRoot, projectPath); err != nil {
+		return execx.InteractiveCommand{}, &Error{Op: projectAgentOp, Kind: KindVerificationFailed, Err: err}
+	}
+	if !guestPushSocketPattern.MatchString(guestSocket) {
+		return execx.InteractiveCommand{}, &Error{
+			Op:   projectAgentOp,
+			Kind: KindVerificationFailed,
+			Err:  errors.New("the guest agent socket path is not the shape the guest helper accepts"),
+		}
+	}
+	if !filepath.IsAbs(hostSocket) {
+		return execx.InteractiveCommand{}, &Error{
+			Op:   projectAgentOp,
+			Kind: KindVerificationFailed,
+			Err:  errors.New("the host agent socket must be an absolute path"),
+		}
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return execx.InteractiveCommand{}, &Error{Op: projectAgentOp, Kind: KindNotFound, Err: err}
+	}
+	sshConfig := filepath.Join(home, ".lima", InstanceName, "ssh.config")
+	if _, statErr := os.Stat(sshConfig); statErr != nil {
+		return execx.InteractiveCommand{}, &Error{
+			Op:   projectAgentOp,
+			Kind: KindNotFound,
+			Err:  fmt.Errorf("no lima ssh config at %s; run `torio vm start` first", sshConfig),
+		}
+	}
+
+	return execx.InteractiveCommand{
+		Name: "ssh",
+		Args: []string{
+			"-F", sshConfig,
+			"-o", "ControlMaster=no",
+			"-o", "ControlPath=none",
+			"-o", "ForwardAgent=no",
+			"-o", "ExitOnForwardFailure=yes",
+			"-a",
+			"-R", guestSocket + ":" + hostSocket,
+			"-t",
+			sshHostAlias(),
+			helper,
+			projectPath,
+			guestSocket,
 		},
 	}, nil
 }

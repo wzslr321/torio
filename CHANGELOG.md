@@ -1,5 +1,101 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Mediated agent forwarding: a shell that can push forwards one key, and
+  every signature stops at a person**
+  ([ADR-0015](docs/adr/0015-mediated-agent-forwarding.md)). Config schema `"4"`
+  adds `operator_key` — a fingerprint or comment naming the one identity a
+  session may use. With it set, `project shell` points the guest's
+  `SSH_AUTH_SOCK` at an agent Torio serves in front of the operator's own: it
+  lists the pinned key alone, asks the operator on the host before each
+  signature — a dialog naming the project, where origin actually pushes, the
+  branch and how far ahead it is, with Deny as the default, the cancel and the
+  timeout — and refuses every other request in the protocol without writing it
+  to the real agent. Each decision is recorded to `agent-audit.jsonl` beside
+  the config document *before* it takes effect; a decision that cannot be
+  recorded is not taken. With no pin the session forwards the operator's agent
+  whole, exactly as before — a document with no `operator_key` was written by
+  an operator who has not chosen a key, and choosing one for them is choosing
+  which key a guest may use.
+- **`torio project agent <id> --push-grant`: a granted session that may ask to
+  push, one signature at a time**
+  ([ADR-0016](docs/adr/0016-session-scoped-push-grant.md)). Refused outright
+  without a pinned key. The mediated socket is remote-forwarded into the guest
+  on a single-use random path that lives exactly as long as the session, and
+  reaches the backend identity through a helper that validates the socket
+  before widening it to the shared group — the ordinary session helper remains
+  provably free of `SSH_AUTH_SOCK`. A preflight refuses an origin the grant
+  cannot serve, each with its remedy: an HTTPS push URL never consults an SSH
+  agent, and a host key absent from the agent identity's `known_hosts` stops a
+  push before it reaches the key — as `Host key verification failed`, which
+  reads like a problem with the key just pinned and is not one. An operator
+  shell is told the same things and opens anyway: a shell is opened to read and
+  commit as often as to push.
+
+### Fixed
+
+- **`project shell` and `project enter` were unusable on any backend but the
+  first.** Both guest helpers named `/home/hermes/projects` outright, so on a
+  Claude Code box the host derived the right path and the guest refused it —
+  `project path is not a project directly under /home/hermes/projects`, exit 64,
+  on the one command that carries write capability. The two shared helpers now
+  take the declared backend's workspace, substituted on both install paths, and
+  a test refuses a workspace written into either of them so the third backend
+  does not rediscover this.
+- **A corrected session helper could not reach a box that already existed.** The
+  Lima template is rendered once, at `vm init`, and bootstrap verified the
+  push-capable helper without ever installing it, so the only route to a new
+  version was recreating the VM. Bootstrap now installs it when the path is
+  absent, as it already did for the other session helpers. Drift is still
+  reported and never repaired: a helper that is present and wrong is left alone.
+
+### Changed
+
+- **The vault standard stopped forbidding what vault owners actually ask for.**
+  `STANDARD.md` §6.7 said "Do not commit… an agent writes files and stops",
+  which read as an absolute and was one: an owner who had explicitly asked for a
+  commit per meaningful change got an agent citing the standard back at them.
+  The rule now states the fact it was built on — the history belongs to whoever
+  set the vault up — makes committing the owner's call, and puts the hard line
+  where it belongs. Push, pull requests, issues and anything else that sends the
+  vault outward are refused regardless of what anyone asked for, because a commit
+  is local and reversible and nothing past it is. `brain-search` and the
+  `brain-librarian` subagent are aligned; the librarian still commits nothing,
+  now for its own stated reason rather than a blanket ban — it runs a bulk pass
+  whose result nobody has read yet.
+- **The session-start map's budget is written down where an index author will
+  meet it.** The hook carries the first 25 lines of the root `index.md` below
+  its frontmatter and drops the rest in silence, and nothing said so — not
+  `STANDARD.md`, not `/brain-kit:init`, not the kit's README. An index long
+  enough to lose its tail therefore lost it invisibly, and the tail is where a
+  `## Now` section tends to sit. §2.7 now tells index authors that the opening
+  lines are what gets carried; §9 requires a rendering to bound the map **and**
+  to state its bound somewhere the author will find it; the README and the
+  `init` command name the 25 lines outright.
+- The Brain Kit is `0.2.0`, and the bump is a breaking one in the `0.x` sense.
+  §9 gained a requirement renderings must meet, so a rendering that documents no
+  bound stops conforming, and §2.7 drops frontmatter from directory indexes, so
+  a `0.1.0` vault whose `projects/index.md` carries `type: index` no longer
+  conforms either. Removing those four lines is the whole migration, and OKF's
+  permissive conformance means nothing rejects such a vault meanwhile.
+- **The vault standard adopts `log.md` and stops overclaiming OKF conformance**
+  ([ADR-0014](docs/adr/0014-okf-profile-divergence-and-log-files.md)). OKF
+  reserves two filenames and we had adopted one: `log.md` — change history
+  scoped to a directory — was missing entirely, which is why ageing content had
+  no answer in the format we chose precisely for having one. Meanwhile every
+  `index.md` carried a `type`, where the base format permits frontmatter in the
+  root index alone. Directory indexes lose their frontmatter and `index` stops
+  being a note type; the root keeps `type: vault`, because it is what stops this
+  kit writing into a directory that merely happens to be called `brain`, and it
+  now declares `okf_version` so a future major bump cannot rename a reserved
+  filename underneath us. §1 names that one divergence instead of claiming there
+  is none.
+- `docs/adr/README.md` lists ADR-0012 and ADR-0013, which shipped in 0.3.2
+  without reaching the index.
+
 ## 0.3.2 - 2026-08-09
 
 ### Added
