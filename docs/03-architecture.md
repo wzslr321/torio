@@ -111,16 +111,22 @@ Write capability exists only for the duration of one interactive session:
 
 ```text
 torio project shell <id>
-  → ssh -A -t lima-torio /usr/local/bin/torio-project-shell /home/hermes/projects/<id>
+  → ssh -A -t lima-torio /usr/local/bin/torio-project-shell <workspace>/<id>
   → ordinary Git commands under the operator's identity, in group torio-projects
   → exit — the forwarded agent goes with the session
 ```
 
-The guest-side helper is `root:root 0755` and is materialized by the Lima
-template on every start. Bootstrap only proves its state and reports drift rather
-than repairing it. The reason is direct: the operator's forwarded agent passes
-through this path, so nothing `hermes` or the operator can overwrite may sit on
-it.
+The guest-side helper is `root:root 0755`. It is materialized by the Lima
+template on every start, and bootstrap installs it when the path is **absent** —
+the template is rendered once, at `vm init`, so without that a corrected helper
+could reach an existing box only by recreating the VM. A helper that is present
+and wrong is still reported and left alone: drift is never repaired. The reason
+is direct: the operator's forwarded agent passes through this path, so nothing
+the agent identity or the operator can overwrite may sit on it.
+
+The helper takes the declared backend's workspace rather than naming one. It
+serves every backend, and a directory written into it refused every project on
+the others while the host derived the path correctly.
 
 Torio stores no Git write credential, automates no push, merge or release, and
 runs no test push to prove anything. A remote carrying an embedded password,

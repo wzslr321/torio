@@ -116,7 +116,7 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 	if err := a.verifyNoHostMounts(ctx, &rep); err != nil {
 		return rep, err
 	}
-	if err := a.verifyOperatorShellHelper(ctx, &rep); err != nil {
+	if err := a.verifyOperatorShellHelper(ctx, &rep, b.Identity().WorkspacePath, r.reconcile); err != nil {
 		return rep, err
 	}
 	if err := a.verifyProjectEnterHelper(ctx, &rep, b.Identity().WorkspacePath, r.reconcile); err != nil {
@@ -294,6 +294,15 @@ func validateRootHelperPath(dest string) error {
 // projectEnterInstallScript is the install for the ordinary workspace-session
 // helper.
 var projectEnterInstallScript = rootHelperInstallScript(ProjectEnterHelper)
+
+// operatorShellInstallScript is the install for the push-capable session helper.
+//
+// It exists because the template is written once, at `vm init`, and never
+// re-rendered: without this the helper could only ever change by recreating the
+// VM, which made a corrected helper undeliverable to a box that already existed.
+// Installing an *absent* file is not repairing drift — invariant 10 stands, and
+// a helper that is present and wrong is still reported and left alone.
+var operatorShellInstallScript = rootHelperInstallScript(OperatorShellHelper)
 
 // hostShareFSTypes is the findmnt -t filter for macOS host-share filesystems. A
 // broad host mount over the guest is an ADR-0002 violation and fails closed.
@@ -555,11 +564,41 @@ func (a *Adapter) verifyNoHostMounts(ctx context.Context, rep *BootstrapReport) 
 // borrow that agent. It must therefore be a regular file (a symlink would move
 // the real content somewhere unowned), owned root:root, and writable by nobody
 // else. `stat` does not dereference by default, so this reads the path itself.
-func (a *Adapter) verifyOperatorShellHelper(ctx context.Context, rep *BootstrapReport) error {
+func (a *Adapter) verifyOperatorShellHelper(ctx context.Context, rep *BootstrapReport, workspaceRoot string, reconcile bool) error {
 	const name = "operator_shell_helper"
 	st, err := a.guestProbe(ctx, rep, name, "stat", "-c", "%F", operatorShellHelperSpec.Path)
 	if err != nil {
 		return err
+	}
+	kind := strings.TrimSpace(string(st.Stdout))
+	if st.ExitCode == 1 && kind == "" {
+		absent, err := a.guestProbe(ctx, rep, name, "test", "!", "-e", operatorShellHelperSpec.Path)
+		if err != nil {
+			return err
+		}
+		if absent.ExitCode != 0 {
+			return a.verifyFailed(rep, name, "could not prove the helper path is absent", operatorShellHelperRemediation)
+		}
+		if !reconcile {
+			return a.verifyFailed(rep, name, "no operator shell helper at "+operatorShellHelperSpec.Path, operatorShellHelperRemediation)
+		}
+		content, err := projectHelper(embeddedProjectShell, workspaceRoot, "operator shell")
+		if err != nil {
+			return a.verifyFailed(rep, name, err.Error(), operatorShellHelperRemediation)
+		}
+		installed, err := a.SSHInput(ctx, content,
+			[]string{"sudo", "-n", "/bin/bash", "-ceu", operatorShellInstallScript})
+		if err != nil {
+			return err
+		}
+		if installed.ExitCode != 0 || installed.StdoutTruncated || installed.StderrTruncated {
+			return a.verifyFailed(rep, name, "could not install the missing operator shell helper", "confirm passwordless root provisioning is intact and re-run bootstrap")
+		}
+		rep.record(name+"_installed", true, "installed embedded helper atomically")
+		st, err = a.guestProbe(ctx, rep, name, "stat", "-c", "%F", operatorShellHelperSpec.Path)
+		if err != nil {
+			return err
+		}
 	}
 	return a.verifyRootHelperFile(ctx, rep, name, "operator shell helper", operatorShellHelperSpec, st,
 		"a writable helper is a privilege-escalation path into a session that carries the operator's forwarded agent",

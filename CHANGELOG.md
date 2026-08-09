@@ -12,6 +12,12 @@
   take the declared backend's workspace, substituted on both install paths, and
   a test refuses a workspace written into either of them so the third backend
   does not rediscover this.
+- **A corrected session helper could not reach a box that already existed.** The
+  Lima template is rendered once, at `vm init`, and bootstrap verified the
+  push-capable helper without ever installing it, so the only route to a new
+  version was recreating the VM. Bootstrap now installs it when the path is
+  absent, as it already did for the other session helpers. Drift is still
+  reported and never repaired: a helper that is present and wrong is left alone.
 
 ### Changed
 
