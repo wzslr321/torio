@@ -6,7 +6,10 @@
 # `torio project shell` invokes it as the fixed remote argv of an ssh session
 # that forwards the operator's host agent:
 #
-#   ssh … lima-torio /usr/local/bin/torio-project-shell /home/hermes/projects/<id>
+#   ssh … lima-torio /usr/local/bin/torio-project-shell <workspace>/<id>
+#
+# The workspace is substituted at provisioning time from the declared backend;
+# this file names no backend's directory, because it serves all of them.
 #
 # The host validates the project path before it builds that argv
 # (internal/lima.validateProjectPath). This script validates it again, because
