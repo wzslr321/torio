@@ -245,6 +245,19 @@ func TestStatusVerboseDiagnosesAnUnresolvedBackend(t *testing.T) {
 	}
 }
 
+func TestCustomInstanceWithNoBackendDeclarationDefaultsToHermes(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	got := (&app{}).resolveBoxBackend("scratch-box")
+
+	if got.Err != nil {
+		t.Fatalf("resolveBoxBackend: %v", got.Err)
+	}
+	if got.Name != backend.DefaultName || got.Backend == nil {
+		t.Fatalf("resolution = %+v, want the ADR-0009 default backend", got)
+	}
+}
+
 func TestCompactAge(t *testing.T) {
 	for _, tc := range []struct {
 		seconds int64

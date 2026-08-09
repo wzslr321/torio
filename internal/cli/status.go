@@ -145,6 +145,12 @@ func (a *app) resolveBoxBackend(instance string) status.Resolution {
 	name := rt.File.Backend
 	if name == "" {
 		name = backendForDerivedInstance(instance)
+		if name == "" {
+			// ADR-0009 defines an absent declaration as Hermes for every
+			// instance, including one TORIO_INSTANCE named directly. The
+			// derived name is only a stronger hint where one exists.
+			name = backend.DefaultName
+		}
 	}
 	b, err := backend.Lookup(name)
 	if err != nil {
