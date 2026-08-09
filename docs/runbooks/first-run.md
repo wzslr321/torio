@@ -395,20 +395,34 @@ derived from the project id — never taken from you, never stored in config.
 Without `--id`, the id is the name you gave, which must be a lowercase slug;
 pass `--id` to pick a different one.
 
-**Read access is your job.** Torio stores no Git credentials, prompts for none,
-and passes none to the model. A remote the guest cannot already read without
-prompting fails closed:
+**A private repository takes the same command.** Torio stores no Git
+credentials, prompts for none, and passes none to the model. A remote the guest
+cannot read still fails closed, at exit `7`. For an SSH remote that failure
+comes with the way through: the guest generates its own read-only deploy key
+and prints the public half.
 
 ```text
-torio: project add: auth: the guest cannot read the remote noninteractively; provision access for the hermes user out of band
+The guest generated a read-only deploy key for this project. Torio holds no copy of its private half.
+
+ssh-ed25519 AAAA…
+
+Authorize that key for read access on github.com, then run the same command again.
+Private half, on the guest, owned by the backend identity: /home/hermes/.ssh/torio/my-service
 ```
 
-That is exit `7`.
+Add that key to the repository as a read-only deploy key, then run the same
+`add` again. The second run clones. A key you authorized before the first run
+attaches in one command, and a rerun before you authorize it reports the same
+key rather than making another.
 
-The fix is to grant the guest read access yourself, on the guest, outside Torio
-— not to re-run the command. Do not work around it by copying a checkout from
-your host: a recursive copy drags host Git config, hooks, and keys across the VM
-boundary, which is exactly the thing this path exists to prevent.
+The private half is generated on the guest, stays there, and is never read,
+copied, or stored by Torio. Push is unaffected: it still travels through the
+agent you forward with `project shell`, so the deploy key stays read-only.
+
+A private HTTPS remote has no such path, because reading one takes a stored
+credential. Use the SSH remote. Do not work around any of this by copying a
+checkout from your host: a recursive copy drags host Git config, hooks, and keys
+across the VM boundary, which is exactly the thing this path exists to prevent.
 
 Nothing on the guest is reset, cleaned, or deleted, so if `add` fails partway a
 rerun finishes the work instead of starting over.
@@ -435,7 +449,7 @@ These are guarantees `torio project` enforces, not rules you have to remember.
 Each one fails closed: when Torio cannot prove the condition, it stops and says
 so rather than proceeding.
 
-- **The control plane is credential- and config-neutral.** It never copies or materializes host Git state in the VM — no host `.git/`, `.git/config`, hooks, SSH keys, tokens, `.env`, or host Git configuration — and never causes a credential prompt. It runs credential-neutral `git`; read access is yours to provision on the guest.
+- **The control plane is credential- and config-neutral.** It never copies or materializes host Git state in the VM — no host `.git/`, `.git/config`, hooks, SSH keys, tokens, `.env`, or host Git configuration — and never causes a credential prompt. It runs credential-neutral `git`. Read access to a private SSH remote is provisioned by a key the guest generates and keeps; the host holds no copy, and authorizing that key is yours.
 - **A workspace is never seeded from the host.** A recursive copy would drag the host `.git/` — config, hooks, host-only keys — across the VM boundary. If read access cannot be provisioned, the correct outcome is to stop at that prerequisite, not to weaken the boundary.
 - **Attaching is non-destructive.** `add` clones only into a path that is absent. A checkout already there with the registered origin is verified and adopted as-is. Anything else — not a repository, a different origin, unreadable — is a hard stop. Nothing is overwritten, reset, cleaned, deleted, or recloned over.
 - **No substitution.** If the exact remote is unreadable, Torio does not swap in another repository and does not attempt an auth workaround.

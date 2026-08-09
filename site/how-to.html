@@ -138,10 +138,16 @@ hermes auth add &lt;provider&gt;</code></pre></div>
 torio project list</code></pre></div>
 <p><code>add</code> clones the exact remote into the derived workspace path, gives you and <code>hermes</code> shared access to it, and registers the project with Hermes before it records anything in config. <code>--use</code> makes it the active project. If a valid checkout of that remote is already at the path, <code>add</code> verifies and adopts it rather than touching it.</p>
 <p><strong>You do not choose the path.</strong> It is always <code>/home/hermes/projects/&lt;id&gt;</code>, derived from the project id — never taken from you, never stored in config. Without <code>--id</code>, the id is the name you gave, which must be a lowercase slug; pass <code>--id</code> to pick a different one.</p>
-<p><strong>Read access is your job.</strong> Torio stores no Git credentials, prompts for none, and passes none to the model. A remote the guest cannot already read without prompting fails closed:</p>
-<div class="code-block"><pre data-lang="text"><code>torio: project add: auth: the guest cannot read the remote noninteractively; provision access for the hermes user out of band</code></pre></div>
-<p>That is exit <code>7</code>.</p>
-<p>The fix is to grant the guest read access yourself, on the guest, outside Torio — not to re-run the command. Do not work around it by copying a checkout from your host: a recursive copy drags host Git config, hooks, and keys across the VM boundary, which is exactly the thing this path exists to prevent.</p>
+<p><strong>A private repository takes the same command.</strong> Torio stores no Git credentials, prompts for none, and passes none to the model. A remote the guest cannot read still fails closed, at exit <code>7</code>. For an SSH remote that failure comes with the way through: the guest generates its own read-only deploy key and prints the public half.</p>
+<div class="code-block"><pre data-lang="text"><code>The guest generated a read-only deploy key for this project. Torio holds no copy of its private half.
+
+ssh-ed25519 AAAA…
+
+Authorize that key for read access on github.com, then run the same command again.
+Private half, on the guest, owned by the backend identity: /home/hermes/.ssh/torio/my-service</code></pre></div>
+<p>Add that key to the repository as a read-only deploy key, then run the same <code>add</code> again. The second run clones. A key you authorized before the first run attaches in one command, and a rerun before you authorize it reports the same key rather than making another.</p>
+<p>The private half is generated on the guest, stays there, and is never read, copied, or stored by Torio. Push is unaffected: it still travels through the agent you forward with <code>project shell</code>, so the deploy key stays read-only.</p>
+<p>A private HTTPS remote has no such path, because reading one takes a stored credential. Use the SSH remote. Do not work around any of this by copying a checkout from your host: a recursive copy drags host Git config, hooks, and keys across the VM boundary, which is exactly the thing this path exists to prevent.</p>
 <p>Nothing on the guest is reset, cleaned, or deleted, so if <code>add</code> fails partway a rerun finishes the work instead of starting over.</p>
 <h3 id="project-inspect">Inspect and forget</h3>
 <div class="code-block"><pre data-lang="bash"><code>torio project show my-service     <span class="tok-comment"># registry entry, checkout state, Hermes registration</span>

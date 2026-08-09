@@ -36,16 +36,21 @@ and distributing credentials on your behalf.
 
 ## Credentials are a human-only prerequisite {#credentials}
 
-Torio never sets up, configures, stores, or reads credentials, and never causes
-a credential prompt. Read access to a repository must already work from the
-guest before you attach it; a remote the guest cannot read without prompting
-fails closed with a specific exit code.
+Torio holds no credential on the host, reads none, and never causes a credential
+prompt. A remote the guest cannot read without prompting fails closed with a
+specific exit code.
 
-That failure is the boundary doing its job. The remedy is a human granting
-access on the guest, outside Torio — not a retry, and not a workaround. The
-secret and the method by which it is provisioned never enter this repository,
-its evidence, or any pull request. The control plane stays free of secret
-material by construction rather than by discipline.
+Read access to a private SSH remote is the one thing it helps with, and it helps
+without holding anything. The guest generates its own read-only deploy key,
+keeps the private half in a file the backend identity owns, and reports the
+public half. Authorizing that key on the forge is a human act with a human's
+account behind it; until it happens, the attach keeps failing closed. The
+private half never reaches the host, this repository, its evidence, or any pull
+request, and the key can read one repository and write nothing.
+
+That division is the point. The control plane stays free of secret material by
+construction rather than by discipline, and the capability it does help
+provision is the weakest one that makes the tool usable.
 
 Model and provider credentials work the same way. `torio vm ssh` deliberately
 forwards no stdin or TTY, so the interactive provider picker cannot be driven

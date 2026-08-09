@@ -85,8 +85,10 @@ torio serve restart --timeout 2m       # pick up the Brain's retrieval skill
 torio project add my-service https://github.com/you/my-service --use
 ```
 
-For a private repository, grant the guest read access yourself before
-`project add`. A remote the guest cannot already read fails closed.
+A private repository takes the same command. For an SSH remote, `add` generates
+a read-only deploy key on the guest and prints the public half; authorize it on
+the forge and run the same command again. Torio keeps no copy of the private
+half, and a remote the guest cannot read still fails closed.
 
 The backend binds `127.0.0.1:9119` inside the VM. Torio adds no tunnel
 feature; you open the forward yourself:
