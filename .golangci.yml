@@ -1,0 +1,26 @@
+version: "2"
+
+# The standard set: errcheck, govet, ineffassign, staticcheck, unused.
+linters:
+  default: standard
+  settings:
+    errcheck:
+      exclude-functions:
+        # Writes to a bytes.Buffer/strings.Builder or an already-failed stream;
+        # a failed report line has no better channel to report itself on.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        # Read-only descriptor teardown in the trusted-stat paths.
+        - syscall.Close
+        # The deferred LOCK_UN before the descriptor closes; closing releases
+        # the advisory lock regardless.
+        - syscall.Flock
+  exclusions:
+    rules:
+      # A deferred Close is teardown: the descriptor is read-only or already
+      # past its last meaningful byte. Where a failed close loses data — the
+      # config write path — Close is checked explicitly before rename, and a
+      # non-deferred Close stays enforced.
+      - linters: [errcheck]
+        source: 'defer\s+\S+\.Close\(\)'

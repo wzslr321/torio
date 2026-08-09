@@ -168,7 +168,7 @@ func writeRegistry(path string, projects []Project, checkParent bool) (err error
 
 	wire := registryJSON{SchemaVersion: RegistrySchemaVersion, Projects: []projectJSON{}}
 	for _, p := range out {
-		wire.Projects = append(wire.Projects, projectJSON{ID: p.ID, DisplayName: p.DisplayName, Remote: p.Remote})
+		wire.Projects = append(wire.Projects, projectJSON(p))
 	}
 	data, err := json.MarshalIndent(wire, "", "  ")
 	if err != nil {
@@ -237,7 +237,7 @@ func parseRegistry(data []byte) (_ []Project, err error) {
 	}
 	projects := make([]Project, 0, len(raw.Projects))
 	for _, rp := range raw.Projects {
-		projects = append(projects, Project{ID: rp.ID, DisplayName: rp.DisplayName, Remote: rp.Remote})
+		projects = append(projects, Project(rp))
 	}
 	if err := validateProjects(projects); err != nil {
 		return nil, err

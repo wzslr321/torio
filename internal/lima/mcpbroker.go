@@ -434,10 +434,6 @@ func (a *Adapter) verifyBrokerClientsGroup(ctx context.Context, rep *MCPBrokerRe
 	return nil
 }
 
-func (a *Adapter) verifyHermesIsBrokerClient(ctx context.Context, rep *MCPBrokerReport) error {
-	return a.verifyAgentIsBrokerClient(ctx, rep, HermesUser)
-}
-
 func (a *Adapter) verifyAgentIsBrokerClient(ctx context.Context, rep *MCPBrokerReport, agentUser string) error {
 	name := agentUser + "_broker_client"
 	res, err := a.brokerProbe(ctx, rep, name, "id", "-nG", agentUser)

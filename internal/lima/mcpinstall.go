@@ -288,14 +288,10 @@ func (a *Adapter) ensureBrokerHome(ctx context.Context, rep *MCPBrokerInstallRep
 	return false, nil
 }
 
-// ensureHermesIsClient grants the agent identity the one privilege it gets: the
+// ensureAgentIsClient grants the agent identity the one privilege it gets: the
 // right to open the broker socket. -aG appends, so no existing membership is
-// disturbed; passing -G here would silently strip hermes out of
+// disturbed; passing -G here would silently strip the agent out of
 // TorioProjectsGroup and break the workspace.
-func (a *Adapter) ensureHermesIsClient(ctx context.Context, rep *MCPBrokerInstallReport) (bool, error) {
-	return a.ensureAgentIsClient(ctx, rep, HermesUser)
-}
-
 func (a *Adapter) ensureAgentIsClient(ctx context.Context, rep *MCPBrokerInstallReport, agentUser string) (bool, error) {
 	name := "install:" + agentUser + "_client"
 	res, err := a.installProbe(ctx, "id", "-nG", agentUser)

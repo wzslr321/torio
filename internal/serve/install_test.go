@@ -66,7 +66,7 @@ func TestInstallValidatesBeforeActivation(t *testing.T) {
 		t.Fatalf("missing a step: verify=%d mv=%d reload=%d enable=%d", verify, mv, reload, enable)
 	}
 	// verify must precede placing the unit and any activation.
-	if !(verify < mv && verify < reload && verify < enable) {
+	if verify >= mv || verify >= reload || verify >= enable {
 		t.Errorf("validation did not precede activation: verify=%d mv=%d reload=%d enable=%d", verify, mv, reload, enable)
 	}
 }

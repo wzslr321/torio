@@ -1,4 +1,4 @@
-.PHONY: validate nvim-smoke e2e platform-e2e brain-evals fmt fmt-check vet docs docs-check package-release
+.PHONY: validate nvim-smoke e2e platform-e2e brain-evals fmt fmt-check vet lint docs docs-check package-release
 
 docs:
 	python3 scripts/build_docs.py
@@ -41,6 +41,12 @@ vet:
 	@if command -v go >/dev/null 2>&1; then go vet ./...; fi
 	@if command -v go >/dev/null 2>&1; then go vet -C e2e -tags=e2e ./...; fi
 	@if command -v go >/dev/null 2>&1; then go vet -C e2e -tags=platform_e2e ./...; fi
+
+# The linter set and its exceptions live in .golangci.yml; CI runs the same
+# config, so a clean `make lint` locally is a clean lint gate.
+lint:
+	@command -v golangci-lint >/dev/null 2>&1 || (echo "golangci-lint is required: https://golangci-lint.run/welcome/install/" >&2; exit 2)
+	golangci-lint run ./...
 
 # One journey, run once per backend. PLATFORM_E2E_BACKEND selects which
 # (default: hermes); the shared steps are asserted identically on both, which is

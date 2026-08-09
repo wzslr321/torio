@@ -3,21 +3,24 @@ output: site/index.html
 nav: Home
 order: 1
 title: Torio — your AI second brain on a Linux VM you control
-description: Torio is a thin control plane that runs an AI second brain and your coding projects on a Linux VM on your workstation. It creates the VM, keeps the backend healthy, and leaves credentials, the tunnel, and every Git write to you.
+description: Torio is a thin control plane that runs an AI second brain and your coding projects on a Linux VM on your workstation. It creates a VM per agent backend, keeps each backend healthy, reports which box needs you, and leaves credentials, the tunnel, and every Git write to you.
 ---
 
 <section class="hero">
 <p class="hero-eyebrow">Thin control plane · macOS and Linux</p>
 <h1 class="hero-title">Your AI second brain, on a Linux VM you actually control.</h1>
-<p class="hero-lede">Torio creates the Linux VM, runs a Hermes backend on the VM's own loopback, tells you in one command whether the whole stack is healthy, and gives the model access to exactly the repositories you listed. You open the connection, you hold the credentials, you decide what gets committed.</p>
+<p class="hero-lede">Torio creates the Linux VM, runs the agent backend you choose inside it (Hermes on the VM's own loopback by default, Claude Code as a per-session process), tells you in one command which of your boxes needs you, and gives the model access to exactly the repositories you listed. You open the connection, you hold the credentials, you decide what gets pushed.</p>
 <p class="hero-actions"><a class="btn btn-primary" href="tutorials.html#get-started">Get started</a><a class="btn btn-quiet" href="#pieces">See how it fits together</a></p>
 </section>
 
 ## The pieces, and who owns them {#pieces}
 
 Torio is not the AI, not the VM, and not the chat window. It is the layer that
-brings those three into a known-good state and then gets out of the way. Six
-moving parts, split across the two machines:
+brings those three into a known-good state and then gets out of the way. One VM
+runs one agent identity: `--backend` names the agent and Torio finds its box, so
+a second backend means a second VM rather than two identities contending over
+the same checkouts. Here is the default, Hermes-shaped stack, six moving parts
+split across the two machines:
 
 <div class="stack" aria-label="How the pieces fit together">
 <section class="stack-zone">
@@ -33,7 +36,7 @@ moving parts, split across the two machines:
 <p class="stack-where">Inside the Linux VM</p>
 <div class="stack-items">
 <div class="stack-item"><b>Hermes backend</b><span>A <code>hermes serve</code> process, run as a user systemd service so it survives logout and restarts on its own. It binds <code>127.0.0.1</code> <em>of the guest</em>: nothing on your network, and nothing on your host, can reach it except through your tunnel.</span></div>
-<div class="stack-item"><b>Your Second Brain</b><span>A private Markdown vault, versioned by its own Git repository and registered with Hermes so any session can search it. Torio can import an existing vault into it; there is no export, because getting data back out is a copy you run yourself.</span></div>
+<div class="stack-item"><b>Your Second Brain</b><span>A private Markdown vault, versioned by its own Git repository and registered with Hermes so any session can search it. Torio can import an existing vault into it; there is no export, because getting data back out is a copy you run yourself. The vault's format is a written standard, and it also ships as the <a href="https://github.com/wzslr321/torio/tree/main/brainkit">Brain Kit plugin</a> for Claude Code, usable against a directory of notes with no VM under it at all.</span></div>
 <div class="stack-item"><b>Your projects</b><span>Repository clones on the VM's own Linux filesystem — not on a host share reaching back into your home directory. The model sees the ones you registered, and no others.</span></div>
 </div>
 </section>
@@ -45,10 +48,10 @@ touching your data — the same run twice changes nothing the second time.
 
 ## What a session looks like {#session}
 
-First run is a short, ordered sequence. After that, `torio serve status` is the
-one to remember: it reports the systemd unit, the loopback endpoint and the
-Hermes version, so a backend that stopped answering names itself instead of
-leaving you to guess.
+First run is a short, ordered sequence, and `torio serve status` proves the
+backend genuinely answers: it reports the systemd unit, the loopback endpoint
+and the Hermes version, so a service that stopped answering names itself
+instead of leaving you to guess.
 
 <div class="terminal" aria-label="Example session">
 <div class="terminal-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="terminal-title">first run</span></div>
@@ -73,6 +76,13 @@ writes, read `git diff` — and when you decide something should leave the VM,
 `torio project shell` gives you a session that can push and takes the capability
 back when you exit.
 
+Once you run more than one box, `torio status` is the command to remember. It
+polls every box Torio owns and reports one row each: whether it is running,
+what its agent has going, whether anything there is waiting on you, and when it
+last provably did work. It exits `0` whatever it finds, so
+[your status bar or prompt can call it on a timer](how-to.html#watch-several-agents)
+and only the box that wants you is loud.
+
 ## Projects are a list you keep {#projects}
 
 The model can only see repositories you have registered. That list is a plain
@@ -89,7 +99,9 @@ the model — a workspace it prepared has no push credentials in it at all.
 
 The narrowness is the point. Torio never holds your Git or model-provider
 credential — the one it forwards is your SSH agent, into a session you opened,
-for as long as you keep it open. MCP OAuth is stored only under the separate
+for as long as you keep it open; [pin one key](how-to.html#operator-key) and
+every signature additionally waits for your approval on the host, recorded
+before it is made. MCP OAuth is stored only under the separate
 broker uid after an explicit login. Torio never exposes a port beyond the
 guest's loopback; MCP login opens only its fixed loopback callback forward. It never commits, pushes, merges,
 or tags — those are yours, always. It never deletes or re-images a VM, and it

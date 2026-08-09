@@ -87,7 +87,7 @@ func (m *Manager) Import(ctx context.Context, opts ImportOptions) (report Transf
 		if err != nil {
 			return report, &Error{Op: op, Kind: KindPrecondition, Err: fmt.Errorf("private host staging could not be created")}
 		}
-		defer os.RemoveAll(hostRoot)
+		defer func() { _ = os.RemoveAll(hostRoot) }()
 		hostPayload = filepath.Join(hostRoot, "payload")
 		if err := os.Mkdir(hostPayload, 0o700); err != nil {
 			return report, &Error{Op: op, Kind: KindPrecondition, Err: fmt.Errorf("private host staging could not be created")}

@@ -231,7 +231,7 @@ func listenService(dir, service string) (*net.UnixListener, error) {
 	}
 	listener.SetUnlinkOnClose(true)
 	if err := os.Chmod(path, 0o660); err != nil {
-		listener.Close()
+		_ = listener.Close()
 		return nil, errors.New("set broker socket mode")
 	}
 	return listener, nil
@@ -251,7 +251,7 @@ func openAuditFile(path string) (*os.File, error) {
 	}
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
-		file.Close()
+		_ = file.Close()
 		return nil, errors.New("audit file postcondition failed")
 	}
 	return file, nil

@@ -49,14 +49,7 @@ type versionData struct {
 }
 
 func (b BuildInfo) data() versionData {
-	return versionData{
-		Version:   b.Version,
-		Commit:    b.Commit,
-		BuildDate: b.BuildDate,
-		GoVersion: b.GoVersion,
-		OS:        b.OS,
-		Arch:      b.Arch,
-	}
+	return versionData(b)
 }
 
 // runVersion writes version information. In JSON mode it emits exactly one
