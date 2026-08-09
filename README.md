@@ -16,10 +16,6 @@ host, your tokens, or your remotes.
 
 ![An agent commits inside the VM, its push is refused for want of a credential, and the operator pushes the same commit from a session of their own](docs/demo/torio-demo.gif)
 
-The recording is generated from [`docs/demo/demo.tape`](docs/demo/demo.tape)
-against a real remote. Nothing in it is staged: the refusal is GitHub
-answering a read-only key.
-
 Documentation lives at **[torio.dev](https://torio.dev)**.
 
 ## The boundary
@@ -28,39 +24,11 @@ A permission prompt is a control inside the agent's own process. It can be
 ignored, and in practice it is clicked through. Torio replaces it with
 controls the agent cannot reach: an unprivileged identity with no `sudo`, a
 closed group set, a binary it cannot rewrite, no credential that reaches a Git
-remote, and the edge of a VM. Inside the box the agent runs without
-permission prompts, because the box makes them unnecessary. The agent commits;
-you push, after reading what it did.
+remote, and the edge of a VM. The agent commits; you push, after reading what
+it did.
 
-```mermaid
-flowchart LR
-    subgraph host["Your machine"]
-        desktop["Hermes Desktop"]
-        cli["torio CLI"]
-        agent["Your SSH agent"]
-    end
-
-    subgraph vm["The Lima VM: the trust boundary"]
-        backend["hermes serve on 127.0.0.1:9119"]
-        brain["Second Brain"]
-        work["Checkouts"]
-    end
-
-    origin[("Git origin")]
-
-    desktop -->|"the ssh -L tunnel you open"| backend
-    cli ==>|"create, verify, reconcile"| vm
-    agent -.->|"forwarded only in torio project shell"| work
-    backend --> brain
-    backend -->|"read only"| work
-    origin -->|"clone and fetch"| work
-    work -.->|"commit and push, by you"| origin
-```
-
-The dashed edges are the whole design. The persistent backend has read access
-to your checkouts and nothing more, and no credential of yours is stored
-anywhere it could reach. Write capability against a remote exists only inside
-a session you open, and it leaves with you:
+Write capability against a remote exists only inside a session you open, and
+it leaves with you:
 
 ```mermaid
 sequenceDiagram
@@ -87,12 +55,10 @@ time, for exactly one invocation.
 ## Quick start
 
 You need macOS on Apple Silicon or Linux on x86_64, with
-[`limactl`](https://lima-vm.io) on your `PATH`. Torio refuses anything else
-rather than creating a VM it could never verify.
+[`limactl`](https://lima-vm.io) on your `PATH`. Torio refuses anything else.
 
-Install a release. The installer resolves the latest stable version, verifies
-`SHA256SUMS` before the binary is copied anywhere, and authenticates to
-nothing:
+Install a release. The installer verifies `SHA256SUMS` before the binary is
+copied anywhere, and authenticates to nothing:
 
 ```bash
 scripts/install.sh                     # into ~/.local/bin
@@ -100,8 +66,7 @@ scripts/install.sh                     # into ~/.local/bin
 
 or build from source: `go build -o torio ./cmd/torio`.
 
-Then bring the stack up. Every step is idempotent: rerunning a finished setup
-changes nothing and exits `0`.
+Then bring the stack up. Every step is idempotent.
 
 ```bash
 torio vm init                          # pinned Lima template; no --force exists
@@ -118,12 +83,10 @@ torio project add my-service https://github.com/you/my-service --use
 ```
 
 For a private repository, grant the guest read access yourself before
-`project add`. Torio never stores or prompts for a credential, so a remote the
-guest cannot already read fails closed.
+`project add`. A remote the guest cannot already read fails closed.
 
 The backend binds `127.0.0.1:9119` inside the VM. Torio adds no tunnel
-feature, so network exposure is never a side effect of running a command. You
-open the forward yourself:
+feature; you open the forward yourself:
 
 ```bash
 ssh -F ~/.lima/torio/ssh.config -L 19119:127.0.0.1:9119 -N -f \
@@ -131,22 +94,19 @@ ssh -F ~/.lima/torio/ssh.config -L 19119:127.0.0.1:9119 -N -f \
 ```
 
 Point Hermes Desktop at `http://127.0.0.1:19119`, set the session token, pick
-a provider, and work. The token and provider steps, and the full verification
-story behind every command above, are in
+a provider, and work. The token and provider steps are in
 [`docs/runbooks/first-run.md`](docs/runbooks/first-run.md).
 
 ## The daily loop
 
 `torio serve status` is the one command to remember: it reports the systemd
-unit, the loopback endpoint and the Hermes version, so a backend that stopped
-answering names itself instead of leaving you to guess.
+unit, the loopback endpoint and the Hermes version.
 
 Once you run more than one box, `torio status` is the other one. It polls every
 box Torio owns and gives you a row each: whether it is running, what its agent
 has going, whether anything there is waiting on you, and when it last did work.
 Fields it cannot prove say so, with `?` for a question it could not answer and
-`—` for one that backend does not answer at all, because a status line that
-guesses is one you stop reading.
+`—` for one that backend does not answer at all.
 
 ```console
 $ torio status
@@ -155,10 +115,9 @@ torio              running  hermes       —        ?                 24s
 torio-claude-code  running  claude-code  1        yes 3m pid 11673  —
 ```
 
-It exits 0 whatever it finds, so something can call it on a timer and put the
-answer where you already look. `torio status setup tmux` prints the block that
-does that; `torio status setup zsh` prints the prompt equivalent. The same
-report collapses to one chip per box, and only the box that wants you is loud.
+It exits 0 whatever it finds, so a status bar can call it on a timer.
+`torio status setup tmux` prints the block that does that; `torio status setup
+zsh` prints the prompt equivalent, collapsed to one chip per box.
 
 Work happens in the checkouts: from Desktop, from your own editor, or from
 `torio project enter <id>`. Edit, run checks that read rather than write,
@@ -203,8 +162,8 @@ stdout; flags, exit codes and each command's contract are in the
 ## Which agent runs inside
 
 One VM runs one agent identity, and a second backend means a second VM, never
-a second agent inside one, because two identities sharing a workspace would
-contend over the same checkouts and make every custody statement ambiguous.
+a second agent inside one: two identities would contend over the same
+checkouts.
 
 You do not track which VM that is. `--backend` names the agent and Torio finds
 its box: the default one is `torio`, the rest are `torio-<backend>`.
@@ -264,20 +223,18 @@ at all:
 /brain-kit:init
 ```
 
-That gives you the vault, its format, and the rituals that keep it worth
-having: capture, inbox triage, daily notes, meetings, people, retrieval. It
-works against a directory of notes you already have; a note without
-frontmatter stays valid to read, so nothing is rewritten on arrival.
+That gives you the vault, its format, and its rituals: capture, inbox triage,
+daily notes, meetings, people, retrieval. It works against a directory of notes
+you already have; a note without frontmatter stays valid to read, so nothing is
+rewritten on arrival.
 
-How much of that is real rather than well written is measured, not claimed:
 [`brainkit/evals/`](brainkit/evals/README.md) hands an agent a fixture vault and
 checks what it actually did, including whether it leaves the vault alone when
 the task has nothing to do with it.
 
-What the plugin alone does not give you is a boundary. Those are instructions
-to a model running on your workstation with your permissions, which is the gap
-the VM closes and the reason the rest of this README exists. Same standard,
-same vault shape, either way: [`brainkit/README.md`](brainkit/README.md) and
+The plugin gives you no boundary: those are instructions to a model running on
+your workstation with your permissions. Same standard, same vault shape, either
+way: [`brainkit/README.md`](brainkit/README.md) and
 [`brainkit/STANDARD.md`](brainkit/STANDARD.md).
 
 ## Supported hosts
@@ -288,13 +245,13 @@ same vault shape, either way: [`brainkit/README.md`](brainkit/README.md) and
 | Linux / x86_64 | `qemu` | `x86_64` |
 
 Both pin the same Ubuntu build by digest, so the two hosts do not run
-measurably different guests. An unsupported host is refused once, up front,
-not deep inside the first command that needs a pin. This table is read as a
-guarantee, so a row lands only after something has actually booted it.
+measurably different guests. An unsupported host is refused up front, not deep
+inside the first command that needs a pin. A row lands only after something has
+booted it.
 
 ## Roadmap
 
-Torio does less than it will. Where it is going, roughly in order:
+Where it is going, roughly in order:
 
 - **More hosts.** arm64 Linux is one table row plus an image digest away; it
   waits on someone booting and verifying it, not on design.
@@ -326,9 +283,7 @@ If one of these is yours, [`CONTRIBUTING.md`](CONTRIBUTING.md) has the how and
   [`CHANGELOG.md`](CHANGELOG.md).
 
 The site and the runbooks are generated from [`docs/content/`](docs/content/)
-by [`scripts/build_docs.py`](scripts/build_docs.py); generated files are
-committed, and the site deploys to torio.dev straight from `site/` with no
-build step. Edit sources, never outputs: `make docs && make validate`. This
-README is not generated; edit it directly.
+by [`scripts/build_docs.py`](scripts/build_docs.py). Edit sources, never
+outputs: `make docs && make validate`.
 
 MIT. See [LICENSE](LICENSE).
