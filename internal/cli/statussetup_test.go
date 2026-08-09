@@ -105,8 +105,10 @@ func TestZshSetupRendersWithoutPromptSubst(t *testing.T) {
 	}
 	script := "unsetopt BG_NICE\n" + snippet + `
 torio_status_refresh
-for attempt in {1..100}; do
-  [[ -s "$TORIO_STATUS_CACHE" ]] && break
+for attempt in {1..400}; do
+  cached=''
+  IFS= read -r cached <"$TORIO_STATUS_CACHE" 2>/dev/null || true
+  [[ "$cached" == visible ]] && break
   sleep 0.01
 done
 (( $+functions[torio_status_prompt] )) && torio_status_prompt

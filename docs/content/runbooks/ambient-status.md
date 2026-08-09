@@ -177,7 +177,8 @@ the notifier you already use.
 ## Writing your own
 
 The two shipped lines are opinions, not the interface. The interface is the
-document, specified in [`../contracts/status.md`](../contracts/status.md), and
+document, specified in the
+[status contract](https://github.com/wzslr321/torio/blob/main/docs/contracts/status.md), and
 anything that can read JSON can render its own:
 
 ```jq
@@ -203,7 +204,7 @@ indistinguishable from a recipe reporting a quiet host.
 Nothing an agent wrote reaches any of this. Every value in the document is an
 instance name, a backend name, an enumerated kind or a number, which is a
 property of the schema rather than of any one recipe — see
-[`../contracts/status.md`](../contracts/status.md).
+[status contract](https://github.com/wzslr321/torio/blob/main/docs/contracts/status.md).
 
 ## When everything says `?`
 
