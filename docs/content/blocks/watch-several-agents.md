@@ -32,7 +32,8 @@ inverts, so it is found without reading. A live agent gets a dot and its count,
 a backend that keeps no session process gets how long ago it last did work, and
 a stopped box is barely there.
 
-The bar says *that* something wants you; `torio status` says *which* — `WAITING`
-names the session's pid, and matching it against `SESSION` tells you which
-window by how long it has been open. Both surfaces and a notifier recipe are in
+The bar says *that* something wants you and counts simultaneous waits;
+`torio status` names the first session's pid and `--json` carries every waiting
+session. Matching those pids against `SESSION` tells you which windows by how
+long they have been open. Both surfaces and a notifier recipe are in
 [the ambient status runbook](https://github.com/wzslr321/torio/blob/main/docs/runbooks/ambient-status.md).

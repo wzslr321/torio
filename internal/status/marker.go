@@ -27,7 +27,12 @@ const (
 	// MarkerSchemaVersion is the version a marker must declare. A marker
 	// written by a hook this binary does not understand is unknown, not a
 	// guess.
-	MarkerSchemaVersion = "1"
+	MarkerSchemaVersion = "2"
+	// legacyMarkerSchemaVersion is the single-session shape written by the
+	// unmerged first implementation. Reading it gives an existing development
+	// box an honest transition while bootstrap reports and replaces the old
+	// helper; new code never writes it.
+	legacyMarkerSchemaVersion = "1"
 	// MarkerTTL is how long a marker is trusted, measured from its modification
 	// time.
 	//
@@ -54,10 +59,18 @@ const (
 // field: there is nothing an agent could write here that a renderer would print.
 type markerDoc struct {
 	SchemaVersion string `json:"schema_version"`
-	Kind          string `json:"kind"`
+	Kind          string `json:"kind,omitempty"`
 	// PID is the process that is waiting, zero when the hook did not record
 	// one. It is what ranks the marker below liveness.
-	PID int `json:"pid,omitempty"`
+	PID   int          `json:"pid,omitempty"`
+	Waits []markerWait `json:"waits,omitempty"`
+}
+
+type markerWait struct {
+	SessionID string `json:"session_id"`
+	Kind      string `json:"kind"`
+	PID       int    `json:"pid"`
+	SinceUnix int64  `json:"since_unix"`
 }
 
 // decodeMarker decodes one marker document, rejecting unknown fields and
@@ -79,25 +92,59 @@ func decodeMarker(data []byte) (markerDoc, error) {
 	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
 		return markerDoc{}, errors.New("unexpected trailing data after JSON document")
 	}
-	if doc.SchemaVersion != MarkerSchemaVersion {
-		return markerDoc{}, fmt.Errorf("unsupported marker schema version %q", doc.SchemaVersion)
-	}
-	switch doc.Kind {
-	case KindPermission, KindNotification:
+	switch doc.SchemaVersion {
+	case legacyMarkerSchemaVersion:
+		if doc.Waits != nil || !knownMarkerKind(doc.Kind) || doc.PID < 0 {
+			return markerDoc{}, errors.New("invalid legacy marker shape")
+		}
+	case MarkerSchemaVersion:
+		if doc.Kind != "" || doc.PID != 0 || doc.Waits == nil {
+			return markerDoc{}, errors.New("invalid aggregate marker shape")
+		}
+		seen := make(map[string]struct{}, len(doc.Waits))
+		for _, wait := range doc.Waits {
+			if !validSessionID(wait.SessionID) {
+				return markerDoc{}, errors.New("invalid marker session id")
+			}
+			if _, exists := seen[wait.SessionID]; exists {
+				return markerDoc{}, errors.New("duplicate marker session id")
+			}
+			seen[wait.SessionID] = struct{}{}
+			if !knownMarkerKind(wait.Kind) || wait.PID <= 0 || wait.SinceUnix <= 0 {
+				return markerDoc{}, errors.New("invalid marker wait")
+			}
+		}
 	default:
-		return markerDoc{}, errors.New("unrecognized marker kind")
+		return markerDoc{}, fmt.Errorf("unsupported marker schema version %q", doc.SchemaVersion)
 	}
 	return doc, nil
 }
 
+func knownMarkerKind(kind string) bool {
+	return kind == KindPermission || kind == KindNotification
+}
+
+func validSessionID(id string) bool {
+	if len(id) == 0 || len(id) > 128 {
+		return false
+	}
+	for _, r := range id {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // markerTrusted reports whether the marker file itself may be read.
 //
-// It is the same gate the Brain init lock uses before it trusts a token it
-// finds: ownership and mode are checked from the guest's own stat output before
-// the content is fetched, so a marker some other identity could have written is
-// never parsed at all. A marker that fails the gate is unknown rather than
-// absent, because "someone tampered with this" and "nobody is waiting" are not
-// the same answer.
+// This is an operational drift detector, not a boundary: the backend identity
+// owns its home and can forge or remove its own marker. Ownership and mode are
+// still checked before content is fetched so a different guest identity cannot
+// speak for it. A marker that fails the gate is unknown rather than absent,
+// because "someone else could have written this" and "nobody is waiting" are
+// not the same answer.
 func markerTrusted(e statEntry, owner string, guestNow time.Time) bool {
 	if e.owner != owner || writableBeyondOwner(e.mode) {
 		return false
@@ -115,6 +162,9 @@ func markerTrusted(e statEntry, owner string, guestNow time.Time) bool {
 // pid is read against the box as a whole, so it survives only while something
 // is still running there.
 func waitingFromMarker(doc markerDoc, e statEntry, sessions []Session, guestNow time.Time) WaitingField {
+	if doc.SchemaVersion == MarkerSchemaVersion {
+		return waitingFromAggregateMarker(doc, sessions, guestNow)
+	}
 	alive := false
 	if doc.PID == 0 {
 		alive = len(sessions) > 0
@@ -127,13 +177,59 @@ func waitingFromMarker(doc markerDoc, e statEntry, sessions []Session, guestNow 
 		}
 	}
 	if !alive {
-		return WaitingField{State: Known, Waiting: false}
+		return WaitingField{State: Known, Waiting: false, Waits: []Wait{}}
+	}
+	wait := Wait{
+		Kind:       doc.Kind,
+		PID:        doc.PID,
+		AgeSeconds: int64(guestNow.Sub(e.mtime) / time.Second),
 	}
 	return WaitingField{
 		State:      Known,
 		Waiting:    true,
+		Waits:      []Wait{wait},
 		Kind:       doc.Kind,
 		PID:        doc.PID,
-		AgeSeconds: int64(guestNow.Sub(e.mtime) / time.Second),
+		AgeSeconds: wait.AgeSeconds,
+	}
+}
+
+func waitingFromAggregateMarker(doc markerDoc, sessions []Session, guestNow time.Time) WaitingField {
+	live := make(map[int]struct{}, len(sessions))
+	for _, session := range sessions {
+		live[session.PID] = struct{}{}
+	}
+	waits := make([]Wait, 0, len(doc.Waits))
+	expired := false
+	for _, marker := range doc.Waits {
+		if _, ok := live[marker.PID]; !ok {
+			continue
+		}
+		age := guestNow.Unix() - marker.SinceUnix
+		if age < 0 || age > int64(MarkerTTL/time.Second) {
+			expired = true
+			continue
+		}
+		waits = append(waits, Wait{
+			SessionID:  marker.SessionID,
+			Kind:       marker.Kind,
+			PID:        marker.PID,
+			AgeSeconds: age,
+		})
+	}
+	if len(waits) == 0 {
+		if expired {
+			return unknownWaiting()
+		}
+		return WaitingField{State: Known, Waiting: false, Waits: []Wait{}}
+	}
+	first := waits[0]
+	return WaitingField{
+		State:      Known,
+		Waiting:    true,
+		Waits:      waits,
+		Kind:       first.Kind,
+		PID:        first.PID,
+		AgeSeconds: first.AgeSeconds,
 	}
 }

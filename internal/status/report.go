@@ -56,8 +56,7 @@ type Instance struct {
 	// Backend is which agent this box was provisioned for, read from the
 	// document the box owns.
 	Backend BackendField `json:"backend"`
-	// Session is what the backend's own record of its sessions claims, kept
-	// only where a live process agrees with it.
+	// Session is the backend's live processes from the guest process table.
 	Session SessionField `json:"session"`
 	// Waiting is whether an agent here is blocked on a human.
 	Waiting WaitingField `json:"waiting"`
@@ -112,6 +111,12 @@ type Session struct {
 type WaitingField struct {
 	State   FieldState `json:"state"`
 	Waiting bool       `json:"waiting"`
+	// Waits identifies every live session currently asking for attention. It is
+	// always an array so a renderer can count it without interpreting the
+	// compatibility summary fields below.
+	Waits []Wait `json:"waits"`
+	// Kind, PID and AgeSeconds summarize the first wait for bounded human
+	// renderers. Waits is the complete machine answer.
 	// Kind is why, and is one of a fixed set. An unrecognized value makes the
 	// whole field unknown rather than reaching a renderer.
 	Kind string `json:"kind,omitempty"`
@@ -126,6 +131,16 @@ type WaitingField struct {
 	// AgeSeconds is how long the wait has been outstanding, from the marker's
 	// modification time against the guest's clock.
 	AgeSeconds int64 `json:"age_seconds,omitempty"`
+}
+
+// Wait is one live session represented by the fixed waiting document. Every
+// field is an identifier, enum or number; hook payload prose has no place in
+// the status schema.
+type Wait struct {
+	SessionID  string `json:"session_id,omitempty"`
+	Kind       string `json:"kind"`
+	PID        int    `json:"pid,omitempty"`
+	AgeSeconds int64  `json:"age_seconds"`
 }
 
 // ProgressField is the newest modification time among the files a backend
@@ -146,5 +161,5 @@ type ProgressField struct {
 // gives when it could not prove one. They are constructors rather than values
 // because Sessions must be an empty array and not a shared slice.
 func unknownSession() SessionField   { return SessionField{State: Unknown, Sessions: []Session{}} }
-func unknownWaiting() WaitingField   { return WaitingField{State: Unknown} }
+func unknownWaiting() WaitingField   { return WaitingField{State: Unknown, Waits: []Wait{}} }
 func unknownProgress() ProgressField { return ProgressField{State: Unknown} }

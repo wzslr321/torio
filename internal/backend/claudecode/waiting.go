@@ -13,8 +13,9 @@ import (
 
 // WaitingMarkerHelper is the fixed guest path the managed settings run as a
 // hook. It is root-owned for the same reason the settings that name it are: the
-// agent runs it, and an agent that could rewrite it could decide for itself
-// whether the operator is ever told it is waiting.
+// agent cannot silently retune the integration between sessions. The marker it
+// writes is agent-owned and remains only an operational signal, never a
+// boundary or proof against that same agent.
 const WaitingMarkerHelper = "/usr/local/bin/torio-waiting-marker"
 
 //go:embed templates/torio-waiting-marker.sh
@@ -37,6 +38,9 @@ func WaitingMarkerScript() []byte { return embeddedWaitingMarker }
 func reconcileWaitingMarkerHelper(ctx context.Context, r backend.StepRunner) error {
 	const name = "claude_waiting_marker_helper"
 	remediation := "run `torio vm bootstrap`, which installs " + WaitingMarkerHelper + " root-owned 0755"
+	if err := verifyWaitingMarkerDependencies(ctx, r); err != nil {
+		return err
+	}
 
 	kind, err := r.Probe(ctx, name, "stat", "-c", "%F", WaitingMarkerHelper)
 	if err != nil {
@@ -99,6 +103,30 @@ func reconcileWaitingMarkerHelper(ctx context.Context, r backend.StepRunner) err
 			"inspect "+WaitingMarkerHelper+"; drift is reported, never repaired in place")
 	}
 	r.Record(name, true, "root:root "+mode+" sha256="+wantHex[:12])
+	return nil
+}
+
+// verifyWaitingMarkerDependencies proves the parser the helper invokes as the
+// backend identity. A missing parser would make every hook fail before writing
+// the fixed marker while an absent file otherwise reads as known not-waiting.
+// The exact version is the one measured on the promoted Claude Code 2.1.220
+// guest; compatibility with another jq is not guessed here.
+func verifyWaitingMarkerDependencies(ctx context.Context, r backend.StepRunner) error {
+	const (
+		name        = "claude_waiting_marker_dependencies"
+		wantVersion = "jq-1.7"
+	)
+	res, err := r.Probe(ctx, name,
+		"sudo", "-n", "-u", User, "-H", "--", "/usr/bin/jq", "--version")
+	if err != nil {
+		return err
+	}
+	got := trimmed(res.Stdout)
+	if res.ExitCode != 0 || got != wantVersion {
+		return r.Fail(name, fmt.Sprintf("jq version %q, want %q", got, wantVersion),
+			"install the jq 1.7 runtime dependency on this guest, then re-run `torio vm bootstrap`")
+	}
+	r.Record(name, true, wantVersion)
 	return nil
 }
 

@@ -89,7 +89,7 @@ func (p *Poller) instance(ctx context.Context, box Box) Instance {
 		// stopped box runs no process and waits on nobody even when its config
 		// cannot be read; progress remains inside the box and stays unknown.
 		inst.Session = SessionField{State: Known, Sessions: []Session{}}
-		inst.Waiting = WaitingField{State: Known, Waiting: false}
+		inst.Waiting = WaitingField{State: Known, Waiting: false, Waits: []Wait{}}
 	}
 
 	res := p.Resolve(box.Name)
@@ -113,7 +113,7 @@ func (p *Poller) instance(ctx context.Context, box Box) Instance {
 		// already given, and reporting a quiet agent would be inventing the
 		// answer itself.
 		inst.Session = SessionField{State: NotApplicable, Sessions: []Session{}}
-		inst.Waiting = WaitingField{State: NotApplicable}
+		inst.Waiting = WaitingField{State: NotApplicable, Waits: []Wait{}}
 		inst.Progress = ProgressField{State: NotApplicable}
 		return inst
 	}
@@ -225,7 +225,7 @@ func (p *Poller) waiting(ctx context.Context, instance string, t backend.Transpo
 		// No marker and a readable box: nobody asked, or somebody asked and was
 		// answered. A lost marker costs a missed notification, which is the
 		// failure this design chose to accept.
-		return WaitingField{State: Known, Waiting: false}
+		return WaitingField{State: Known, Waiting: false, Waits: []Wait{}}
 	}
 	if !markerTrusted(*marker, user, guestNow) {
 		p.diagnose(instance, "waiting", errUntrustedMarker)

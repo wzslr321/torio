@@ -1,10 +1,12 @@
 package claudecode
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/status"
 )
 
@@ -76,9 +78,10 @@ func TestWaitingMarkerHelperWritesTheConventionTheReaderEnforces(t *testing.T) {
 		t.Error("the helper tightens the marker after publishing it; it must be created private")
 	}
 	// Claude Code feeds a hook a JSON document carrying the session's own text.
-	// Reading it here is how agent-written prose would reach a rendered line.
+	// The only permitted read is jq selecting the validated session_id; a raw
+	// shell read or cat would let prose enter the marker path unchecked.
 	if strings.Contains(script, "read ") || strings.Contains(script, "cat -") || strings.Contains(script, "$(cat)") {
-		t.Error("the helper reads its standard input; the hook payload carries agent-written text")
+		t.Error("the helper reads its standard input without the bounded jq selector")
 	}
 }
 
@@ -112,11 +115,56 @@ func TestWaitingMarkerHelperWalksForTheDeclaredSessionProcess(t *testing.T) {
 	if !strings.Contains(script, "session_process='"+spec.SessionProcess+"'") {
 		t.Errorf("helper does not walk for %q, the process name the probe declares", spec.SessionProcess)
 	}
-	// Best effort by design: an agent that ever runs a hook detached leaves no
-	// matching ancestor, and the marker must still be written — without a pid,
-	// which is what it carried before and what the reader already ranks against
-	// the box as a whole.
-	if !strings.Contains(script, `"schema_version":"1","kind":"%s"}`) {
-		t.Error("helper has no pid-less fallback; a hook with no agent ancestor would write nothing")
+	// A per-session entry without a process cannot be ranked below liveness. It
+	// must fail closed instead of becoming a box-wide flag that another session
+	// could accidentally keep alive.
+	if !strings.Contains(script, "die 'could not identify the waiting session process'") {
+		t.Error("helper does not fail closed when the hook has no agent ancestor")
 	}
+}
+
+// Claude's hook contract carries a stable session_id on stdin. The helper must
+// key updates and clears by that identifier so one session cannot erase a wait
+// another live session still owns.
+func TestWaitingMarkerHelperKeepsIndependentSessionEntries(t *testing.T) {
+	script := string(WaitingMarkerScript())
+	for _, want := range []string{
+		`/usr/bin/jq -er`,
+		`.session_id`,
+		`"schema_version":"2"`,
+		`"waits"`,
+		`select(.session_id != $session_id)`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("waiting-marker helper is missing %q", want)
+		}
+	}
+	if strings.Contains(script, `clear)
+    rm -f -- "$marker"`) {
+		t.Error("clear removes the box-wide marker instead of only its session entry")
+	}
+}
+
+// Bootstrap must prove the parser the root-owned helper invokes. Otherwise a
+// box can pass verification while every hook fails before writing a marker and
+// status confidently reports not-waiting.
+func TestWaitingMarkerParserIsAVerifiedDependency(t *testing.T) {
+	const probe = "sudo -n -u " + User + " -H -- /usr/bin/jq --version"
+
+	t.Run("the pinned guest answer passes", func(t *testing.T) {
+		r := newFakeRunner(map[string]execx.Result{probe: out("jq-1.7\n")})
+		if err := verifyWaitingMarkerDependencies(context.Background(), r); err != nil {
+			t.Fatalf("verifyWaitingMarkerDependencies: %v", err)
+		}
+		if r.records["claude_waiting_marker_dependencies"] == "" {
+			t.Error("passing dependency check recorded nothing")
+		}
+	})
+
+	t.Run("a missing parser fails closed", func(t *testing.T) {
+		r := newFakeRunner(map[string]execx.Result{probe: exit(127)})
+		if err := verifyWaitingMarkerDependencies(context.Background(), r); err == nil {
+			t.Fatal("missing jq passed the hook dependency check")
+		}
+	})
 }

@@ -1,7 +1,9 @@
 package status
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -16,9 +18,9 @@ func markerEnv(owner, mode string, mtime int64, body string) guestEnv {
 
 func markerDocJSON(kind string, pid int) string {
 	if pid == 0 {
-		return fmt.Sprintf(`{"schema_version":%q,"kind":%q}`, MarkerSchemaVersion, kind)
+		return fmt.Sprintf(`{"schema_version":%q,"kind":%q}`, legacyMarkerSchemaVersion, kind)
 	}
-	return fmt.Sprintf(`{"schema_version":%q,"kind":%q,"pid":%d}`, MarkerSchemaVersion, kind, pid)
+	return fmt.Sprintf(`{"schema_version":%q,"kind":%q,"pid":%d}`, legacyMarkerSchemaVersion, kind, pid)
 }
 
 func pollWithMarker(t *testing.T, env guestEnv) WaitingField {
@@ -110,6 +112,8 @@ func TestWaitingIsUnknownForAMarkerThatCannotBeVouchedFor(t *testing.T) {
 		{"unknown field", `{"schema_version":"1","kind":"permission","detail":"rm -rf /"}`},
 		{"trailing document", markerDocJSON(KindPermission, 1234) + markerDocJSON(KindPermission, 1234)},
 		{"unsupported schema version", `{"schema_version":"99","kind":"permission"}`},
+		{"legacy fields in aggregate schema", `{"schema_version":"2","kind":"permission","waits":[]}`},
+		{"aggregate fields in legacy schema", `{"schema_version":"1","kind":"permission","waits":[]}`},
 		{"unrecognized kind", `{"schema_version":"1","kind":"[31mred"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -142,6 +146,21 @@ func TestWaitingIsUnknownWhenTheBackendDeclaresNoMarker(t *testing.T) {
 	}
 }
 
+// Like session.sessions, waiting.waits is always an array. A renderer can count
+// it after reading state without adding a null special case for quiet boxes.
+func TestWaitingWaitsIsNeverNull(t *testing.T) {
+	g := &fakeGuest{env: defaultEnv()}
+	got := pollOne(g, testBackend{spec: specWith(testProcess, true)}).Waiting
+
+	body, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) == "" || !strings.Contains(string(body), `"waits":[]`) {
+		t.Fatalf("waiting JSON = %s, want an empty waits array", body)
+	}
+}
+
 // A marker that names its session makes the answer actionable: on a box running
 // two agents, "something here wants you" is only half an answer.
 func TestWaitingCarriesTheSessionTheMarkerNamed(t *testing.T) {
@@ -154,6 +173,29 @@ func TestWaitingCarriesTheSessionTheMarkerNamed(t *testing.T) {
 	}
 	if got.PID != 1234 {
 		t.Errorf("pid = %d, want the session the marker named", got.PID)
+	}
+}
+
+// One fixed document may carry several sessions. Updating or clearing one hook
+// entry must not erase another session that is still waiting on the same box.
+func TestWaitingReportsEveryLiveSessionInTheMarker(t *testing.T) {
+	env := markerEnv(testUser, "600", testGuestNow-30, fmt.Sprintf(
+		`{"schema_version":"`+MarkerSchemaVersion+`","waits":[`+
+			`{"session_id":"session-a","kind":"notification","pid":1234,"since_unix":%d},`+
+			`{"session_id":"session-b","kind":"permission","pid":1235,"since_unix":%d}]}`,
+		testGuestNow-30, testGuestNow-10))
+	env.ps = " 1234 600 " + testProcess + "\n 1235 300 " + testProcess + "\n"
+
+	got := pollWithMarker(t, env)
+
+	if got.State != Known || !got.Waiting {
+		t.Fatalf("waiting = %+v, want a proven wait", got)
+	}
+	if len(got.Waits) != 2 {
+		t.Fatalf("waits = %+v, want both live sessions", got.Waits)
+	}
+	if got.Waits[0].SessionID != "session-a" || got.Waits[1].SessionID != "session-b" {
+		t.Errorf("waits = %+v, want stable marker order", got.Waits)
 	}
 }
 

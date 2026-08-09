@@ -78,9 +78,15 @@ hermes —  │  claude-code NEEDS YOU
 
 The catch that block solves is that a prompt is rendered synchronously: a
 command in it stalls the shell for as long as it runs, and this one enters VMs.
-So it does not run in the prompt. It runs after each command, detached, into a
-file the prompt reads — the prompt shows the state as of your last command and
-never waits for anything.
+So it does not run in the prompt. A `preexec` hook starts one detached refresh
+before each foreground command, while `precmd` only reads the last completed
+result from a private per-shell cache. An initial refresh starts when the block
+is loaded. The prompt therefore never waits for a VM; after a very fast command
+it may show the preceding completed refresh for one more prompt.
+
+The block assigns `RPROMPT` directly and does not enable `PROMPT_SUBST`. A
+status value containing `%` is escaped before assignment, so neither the cache
+path nor the bounded status text becomes prompt syntax.
 
 The line carries no colour of its own. A prompt counts the characters it is
 given to decide where the cursor goes, so the `%F{...}` in the snippet is where
@@ -94,7 +100,7 @@ The bar is the glance. `torio status` is the same answer at full width:
 $ torio status
 INSTANCE           BOX      BACKEND      SESSION  WAITING                    PROGRESS
 torio              running  hermes       —        ?                          14s
-torio-claude-code  running  claude-code  2        notification 7m pid 11673  —
+torio-claude-code  running  claude-code  2        notification 7m pid 11673 +1  —
 ```
 
 | Column | `—` means | `?` means |
@@ -110,33 +116,34 @@ quiet.
 
 A stopped box reports `0` sessions and `no` waiting — proven, without entering
 it, because nothing runs in a VM that is not running — and `?` for progress,
-because that evidence is inside it.
+because that evidence is inside it. `broken` and unrecognized VM states do not
+prove the box is stopped, so their session and waiting fields remain `?`.
 
 A line that says `torio: ?` is not a box. It is Torio saying the poll itself
 failed, on a surface that would otherwise render the failure as an empty bar.
 
-## Which session is it
+## Which sessions are they
 
-The bar says *that* something wants you. `SESSION` counts every agent process on
-the box, and `WAITING` names the one that spoke:
+The bar says *that* something wants you and adds a count when several sessions
+do. `SESSION` counts every agent process on the box, the table names one wait
+and adds `+N`, and the JSON carries every live waiting session:
 
 ```console
 $ torio status --json | jq -r '.data.instances[]
     | select(.waiting.state=="known" and .waiting.waiting)
-    | .waiting.pid as $p
-    | .session.sessions[] | select(.pid == $p)
-    | "waiting session: pid \(.pid), open for \(.age_seconds)s"'
-waiting session: pid 11673, open for 683s
+    | .session.sessions as $sessions
+    | .waiting.waits[] as $wait
+    | $sessions[] | select(.pid == $wait.pid)
+    | "waiting session: \($wait.session_id), pid \(.pid), open for \(.age_seconds)s"'
+waiting session: 3c0122, pid 11673, open for 683s
+waiting session: bd98af, pid 11802, open for 97s
 ```
 
-Matching the pid against the sessions finds it by how long it has been open,
-which is usually how you remember which window it is.
-
-One caveat, and it is the reason to read the count and the flag together. There
-is one marker per box: two sessions waiting at once are one marker, the second
-to speak overwrites the first, and answering in either clears it for both. So a
-box with one session waiting and one being answered reports not-waiting until
-the waiting one next speaks.
+Matching each pid against the sessions adds how long that process has been open,
+which is usually how you remember which window it is. Torio still reads one
+fixed marker path per box, but that document has an entry keyed by Claude's
+validated session id. Answering one session clears only its entry; another
+session waiting on the same box stays visible.
 
 `torio status` says nothing about whether one box is healthy. For that, ask the
 box: `torio backend status` walks its bootstrap checks, and `torio serve status`

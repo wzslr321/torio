@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/wzslr321/torio/internal/execx"
+	"github.com/wzslr321/torio/internal/status"
 )
 
 // statusListJSON is one `limactl list --json` record, in the NDJSON shape real
@@ -184,6 +185,23 @@ func TestCompactAge(t *testing.T) {
 		if got := compactAge(tc.seconds); got != tc.want {
 			t.Errorf("compactAge(%d) = %q, want %q", tc.seconds, got, tc.want)
 		}
+	}
+}
+
+func TestWaitingCellNamesOneSessionAndCountsTheRest(t *testing.T) {
+	f := status.WaitingField{
+		State:      status.Known,
+		Waiting:    true,
+		Kind:       "notification",
+		PID:        1234,
+		AgeSeconds: 420,
+		Waits: []status.Wait{
+			{SessionID: "a", Kind: "notification", PID: 1234, AgeSeconds: 420},
+			{SessionID: "b", Kind: "permission", PID: 1235, AgeSeconds: 30},
+		},
+	}
+	if got, want := waitingCell(f), "notification 7m pid 1234 +1"; got != want {
+		t.Fatalf("waiting cell = %q, want %q", got, want)
 	}
 }
 

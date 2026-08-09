@@ -137,6 +137,10 @@ func tmuxCell(in status.Instance) string {
 	n := shortName(in)
 	switch {
 	case in.Waiting.State == status.Known && in.Waiting.Waiting:
+		if len(in.Waiting.Waits) > 1 {
+			return fmt.Sprintf("#[fg=%s,bg=%s,bold] %s needs you %d · %s #[default]",
+				barWaitingFG, barWaitingBG, n, len(in.Waiting.Waits), compactAge(in.Waiting.AgeSeconds))
+		}
 		return fmt.Sprintf("#[fg=%s,bg=%s,bold] %s needs you %s #[default]",
 			barWaitingFG, barWaitingBG, n, compactAge(in.Waiting.AgeSeconds))
 	case in.Box != string(lima.StateRunning):

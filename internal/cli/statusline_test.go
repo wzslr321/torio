@@ -74,6 +74,28 @@ func TestTmuxChipPerState(t *testing.T) {
 	}
 }
 
+// The bar stays compact but must not collapse two independent waits back into
+// the single box-wide flag the aggregate marker replaced.
+func TestTmuxChipCountsSeveralWaitingSessions(t *testing.T) {
+	in := runningBox("torio-claude-code", "claude-code")
+	in.Waiting = status.WaitingField{
+		State:      status.Known,
+		Waiting:    true,
+		Kind:       "notification",
+		AgeSeconds: 420,
+		Waits: []status.Wait{
+			{SessionID: "a", Kind: "notification", PID: 1, AgeSeconds: 420},
+			{SessionID: "b", Kind: "permission", PID: 2, AgeSeconds: 30},
+		},
+	}
+
+	got := tmuxCell(in)
+	want := "#[fg=" + barWaitingFG + ",bg=" + barWaitingBG + ",bold] claude-code needs you 2 · 7m #[default]"
+	if got != want {
+		t.Fatalf("tmux chip = %q, want %q", got, want)
+	}
+}
+
 // The unstyled line carries no escape sequences at all: a prompt counts the
 // characters it is given to place the cursor, and a colour Torio chose would be
 // counted along with them.

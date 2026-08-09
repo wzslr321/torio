@@ -226,7 +226,11 @@ func waitingCell(f status.WaitingField) string {
 	case !f.Waiting:
 		return "no"
 	case f.PID != 0:
-		return f.Kind + " " + compactAge(f.AgeSeconds) + " pid " + strconv.Itoa(f.PID)
+		cell := f.Kind + " " + compactAge(f.AgeSeconds) + " pid " + strconv.Itoa(f.PID)
+		if len(f.Waits) > 1 {
+			cell += " +" + strconv.Itoa(len(f.Waits)-1)
+		}
+		return cell
 	default:
 		return f.Kind + " " + compactAge(f.AgeSeconds)
 	}

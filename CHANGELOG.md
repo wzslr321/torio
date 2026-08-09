@@ -32,10 +32,14 @@
   question it cannot answer from disk.
 - **Waiting-marker hooks on a Claude Code box.** `torio vm bootstrap` installs a
   root-owned helper and names it in the managed settings, so the agent cannot
-  decide between sessions whether you are told it is waiting. **A box
+  silently retune the hook integration between sessions. **A box
   bootstrapped before this reports settings drift and refuses**: drift is
   reported, never repaired in place, so remove
   `/etc/claude-code/managed-settings.json` and run bootstrap again.
+  The helper keys an atomically rewritten fixed document by Claude's validated
+  `session_id`, so clearing one session no longer clears another session still
+  waiting on the same box. The marker remains agent-owned operational evidence,
+  not a security boundary.
 
 - **What the brain does on its own is measured, not asserted.** The kit's claim
   was always behavioural — that an agent reaches for the vault when a task turns
