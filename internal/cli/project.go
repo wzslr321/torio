@@ -25,6 +25,7 @@ type projectService interface {
 	Remove(context.Context, string) (projects.RemoveReport, error)
 	EnterPreflight(context.Context, string) (projects.EnterSession, error)
 	ShellPreflight(context.Context, string) (projects.ShellSession, error)
+	RemoteAccess(context.Context, string, projects.SessionIdentity) (projects.RemoteAccess, error)
 	CheckServiceEnv(context.Context) (projects.ServiceEnvCheck, error)
 }
 
@@ -324,6 +325,9 @@ func newProjectAgentCmd(a *app) *cobra.Command {
 					Message: "--push-grant needs `operator_key` set in the config document: the grant is the mediated agent, and without a pinned key there is nothing to mediate",
 				}
 			}
+			if err := a.requireReachableRemote(cmd, service, args[0]); err != nil {
+				return err
+			}
 			mediated, err := a.startMediation("project.agent", mediatedContext(session.Project, session.Review))
 			if err != nil {
 				return err
@@ -472,6 +476,9 @@ func newProjectShellCmd(a *app) *cobra.Command {
 				return mapLimaError("project.shell", err)
 			}
 			if err := a.announceShell(session, mediated != nil); err != nil {
+				return err
+			}
+			if err := a.noteRemoteAccess(cmd, service, "project.shell", args[0], projects.OperatorIdentity); err != nil {
 				return err
 			}
 			// Deliberately the command context, not a.opContext: an operator session
@@ -1029,4 +1036,73 @@ func mapProjectError(command string, err error) *CLIError {
 		out.Command = command
 		return out
 	}
+}
+
+// remoteAccess resolves how a session would reach the origin, under the bounded
+// operation context. It is two ordinary read-only guest commands and must not
+// hang the way the session it precedes is allowed to.
+func (a *app) remoteAccess(cmd *cobra.Command, service projectService, command, id string, who projects.SessionIdentity) (projects.RemoteAccess, error) {
+	ctx, cancel := a.opContext(cmd)
+	defer cancel()
+	access, err := service.RemoteAccess(ctx, id, who)
+	if err != nil {
+		return projects.RemoteAccess{}, mapProjectError(command, err)
+	}
+	return access, nil
+}
+
+// noteRemoteAccess tells the operator what the session they just opened will not
+// be able to do.
+//
+// It is a note rather than a refusal: an operator opens a shell to read, commit
+// and fix things, and only sometimes to push. Refusing the session because the
+// push at the end of it would fail would be answering a question nobody asked.
+func (a *app) noteRemoteAccess(cmd *cobra.Command, service projectService, command, id string, who projects.SessionIdentity) error {
+	access, err := a.remoteAccess(cmd, service, command, id, who)
+	if err != nil {
+		return err
+	}
+	switch {
+	case access.Transport != projects.TransportSSH:
+		_, err = fmt.Fprintf(a.stdout,
+			"  note: origin pushes over %s, which never uses an SSH agent; nothing here will ask you to approve a signature\n",
+			access.Transport)
+	case access.Host == "":
+		_, err = fmt.Fprintf(a.stdout,
+			"  note: origin's push host could not be read as a plain hostname, so Torio cannot say whether its key is trusted\n")
+	case !access.HostKnown:
+		_, err = fmt.Fprintf(a.stdout,
+			"  note: %s is not in this identity's known_hosts; a push will stop at host key verification, not at anything to do with your key\n",
+			access.Host)
+	}
+	return err
+}
+
+// requireReachableRemote refuses a grant the session could not use.
+//
+// The grant exists for one purpose. A session opened to push, against a remote
+// no push can reach, is a session whose whole point fails at the end — after the
+// agent has done the work, and with an error about host keys that reads like a
+// problem with the key the operator just pinned.
+func (a *app) requireReachableRemote(cmd *cobra.Command, service projectService, id string) error {
+	access, err := a.remoteAccess(cmd, service, "project.agent", id, projects.AgentIdentity)
+	if err != nil {
+		return err
+	}
+	refuse := func(msg string) error {
+		return &CLIError{Exit: ExitPrecondition, Code: "PRECONDITION_FAILED", Command: "project.agent", Message: msg}
+	}
+	switch {
+	case access.Transport != projects.TransportSSH:
+		return refuse(fmt.Sprintf(
+			"origin pushes over %s, which never uses an SSH agent: the grant would hand this session a key nothing can use. Point origin's push URL at SSH, or push it yourself.",
+			access.Transport))
+	case access.Host == "":
+		return refuse("origin's push host could not be read as a plain hostname, so Torio cannot prove its key is trusted before granting a session that would use it")
+	case !access.HostKnown:
+		return refuse(fmt.Sprintf(
+			"%s is not in the agent identity's known_hosts, so a push would stop before reaching your key. Add the host key from a source you trust rather than from whatever answers on port 22.",
+			access.Host))
+	}
+	return nil
 }

@@ -20,6 +20,12 @@ import (
 // replays a canned report. The project commands own argument shape, output and
 // exit-code mapping only; the manager's own behavior is tested in its package.
 type fakeProjectService struct {
+	remoteAccess      projects.RemoteAccess
+	remoteAccessErr   error
+	remoteAccessID    string
+	remoteAccessWho   projects.SessionIdentity
+	remoteAccessCalls int
+
 	addReq    projects.AddRequest
 	addReport projects.AddReport
 	addErr    error
@@ -82,6 +88,22 @@ func (f *fakeProjectService) EnterPreflight(_ context.Context, id string) (proje
 func (f *fakeProjectService) ShellPreflight(_ context.Context, id string) (projects.ShellSession, error) {
 	f.shellID = id
 	return f.shellSession, f.shellErr
+}
+
+// remoteAccess defaults to the shape that says nothing: an unset fake reports an
+// SSH origin whose host is trusted, so tests about other things are not made to
+// care about a probe they did not set up.
+func (f *fakeProjectService) RemoteAccess(_ context.Context, id string, who projects.SessionIdentity) (projects.RemoteAccess, error) {
+	f.remoteAccessID = id
+	f.remoteAccessWho = who
+	f.remoteAccessCalls++
+	if f.remoteAccessErr != nil {
+		return projects.RemoteAccess{}, f.remoteAccessErr
+	}
+	if f.remoteAccess == (projects.RemoteAccess{}) {
+		return projects.RemoteAccess{Transport: projects.TransportSSH, Host: "github.com", HostKnown: true}, nil
+	}
+	return f.remoteAccess, nil
 }
 
 func (f *fakeProjectService) CheckServiceEnv(context.Context) (projects.ServiceEnvCheck, error) {

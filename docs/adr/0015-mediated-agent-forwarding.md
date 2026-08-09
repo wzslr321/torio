@@ -141,6 +141,21 @@ next one does not have to re-derive why it became answerable.
 - The proxy runs as the operator, on the operator's host, with their real agent
   one dial away. It is a control against a compromised **guest**, not a
   compromised host, and it is called that everywhere it appears.
+- **An SSH agent is used by the SSH transport and by nothing else.** A checkout
+  whose origin pushes over HTTPS gets no pinned key, no dialog and no decision
+  log, and none of this record applies to it. That is not a gap to be closed —
+  there is nothing for an agent to sign — so a session says it plainly at the
+  moment it opens rather than leaving an operator waiting for a prompt that is
+  never coming. A granted session refuses outright: it exists to push, and a key
+  that transport never consults is not a capability.
+- **A host key must already be trusted by the identity that will use it.** Torio
+  provisions no `~/.ssh` for anyone, and the operator and the backend identity
+  have different home directories, so a key one of them trusts says nothing
+  about the other. Without this the failure arrives mid-session, as
+  `Host key verification failed`, which reads like a problem with the key the
+  operator has just pinned and is not one. A granted session refuses when the
+  key is absent; an operator shell says so and opens anyway, because a shell is
+  opened to read and commit as often as to push.
 
 ## Rejected alternatives
 

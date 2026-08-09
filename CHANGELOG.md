@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- **A granted session no longer opens against a remote it cannot push to.** An
+  origin that pushes over HTTPS never consults an SSH agent, and a host key
+  absent from the agent identity's `known_hosts` stops a push before it reaches
+  the key — as `Host key verification failed`, which reads like a problem with
+  the key just pinned and is not one. Both are now checked before the session
+  opens, against the identity that will actually use them, and reported with the
+  remedy. An operator shell says the same things and opens anyway: a shell is
+  opened to read and commit as often as to push.
+
 - **`project shell` and `project enter` were unusable on any backend but the
   first.** Both guest helpers named `/home/hermes/projects` outright, so on a
   Claude Code box the host derived the right path and the guest refused it —

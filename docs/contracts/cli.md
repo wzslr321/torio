@@ -421,6 +421,12 @@ torio project shell <id>
   ([ADR-0016](../adr/0016-session-scoped-push-grant.md)). The grant is per
   invocation — no config field turns it on, and nothing remembers the last time
   it was used.
+
+  It also refuses a remote the grant could not be used against: an origin that
+  pushes over HTTPS never consults an SSH agent, and a host whose key is not in
+  the **agent identity's** `known_hosts` stops a push before it reaches the key
+  at all. Both are reported before the session opens, with the remedy, rather
+  than at the end of one.
 - `shell` opens an ephemeral operator session in the checkout with an SSH agent
   forwarded. It lives exactly until the session exits; the persistent Hermes has
   read-only access to an origin. **What is forwarded is Torio's own agent when
