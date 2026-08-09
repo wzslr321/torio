@@ -110,6 +110,16 @@ func newProjectAddCmd(a *app) *cobra.Command {
 			if err != nil {
 				cliErr := mapProjectError("project.add", err)
 				cliErr.Details = projectNotesDetails(report.Notes)
+				// The public key is the reason this particular failure is
+				// actionable, so it is printed rather than described. In JSON mode
+				// it travels in the error details instead, because a human block on
+				// stdout would corrupt the envelope.
+				if key := report.DeployKey; key != nil {
+					cliErr.Details = withDeployKeyDetails(cliErr.Details, key)
+					if !a.jsonOut {
+						a.printDeployKey(key)
+					}
+				}
 				return cliErr
 			}
 			return a.emitProjectAdd(report)
@@ -959,6 +969,42 @@ func projectNotesDetails(in []string) map[string]any {
 		return nil
 	}
 	return map[string]any{"notes": strings.Join(in, ",")}
+}
+
+// withDeployKeyDetails adds the guest-held deploy key to a failure's details.
+// Every field is publishable: the public half, the host it has to be authorized
+// on, and the guest path of the private half, which is reported so an operator
+// can find it and never read by Torio.
+func withDeployKeyDetails(in map[string]any, key *projects.DeployKey) map[string]any {
+	out := in
+	if out == nil {
+		out = map[string]any{}
+	}
+	out["deploy_key"] = map[string]any{
+		"public_key": key.PublicKey,
+		"host":       key.Host,
+		"key_path":   key.KeyPath,
+		"generated":  key.Generated,
+	}
+	return out
+}
+
+// printDeployKey writes the operator's one remaining step.
+//
+// It goes to stderr with the diagnostic it belongs to, because this is a failing
+// command and stdout stays free of mixed content. The key is printed on its own
+// line so it can be selected or piped without picking up prose.
+func (a *app) printDeployKey(key *projects.DeployKey) {
+	state := "The guest already held a read-only deploy key for this project"
+	if key.Generated {
+		state = "The guest generated a read-only deploy key for this project"
+	}
+	fmt.Fprintf(a.stderr,
+		"%s. Torio holds no copy of its private half.\n\n"+
+			"%s\n\n"+
+			"Authorize that key for read access on %s, then run the same command again.\n"+
+			"Private half, on the guest, owned by the backend identity: %s\n\n",
+		state, key.PublicKey, key.Host, key.KeyPath)
 }
 
 // serviceEnvState names the three outcomes of the post-session check. A guest

@@ -104,8 +104,12 @@ func New(guest Guest, registry Registry, opts lima.BootstrapOptions) *Manager {
 // postcondition holds, and nothing on the guest is deleted when a later step
 // fails — a half-finished add leaves a verified checkout and an archived (or
 // unregistered) Hermes project, which is exactly the state a rerun finishes
-// from. Torio never provisions credentials: a remote the guest cannot already
-// read noninteractively fails closed as an auth error.
+// from.
+//
+// A remote the guest cannot read still fails closed as an auth error. For an
+// SSH remote that failure carries the public half of a read-only deploy key the
+// guest now holds, so the rerun that finishes the attach is the same command
+// again, once the key is authorized on the forge.
 func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 	const op = "add"
 	var report AddReport
@@ -182,7 +186,7 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 		// runaway child cannot exhaust memory, and no bound covers every
 		// repository.
 		if err := m.mustRun(ctx, op, KindGit, "clone the remote",
-			m.gitExecKeyed(keyPath, "clone", "--quiet", "--", entry.Remote, workspace)); err != nil {
+			m.gitExec(keyPath, "clone", "--quiet", "--", entry.Remote, workspace)); err != nil {
 			return report, err
 		}
 		report.Cloned = true
@@ -694,7 +698,7 @@ func (m *Manager) preflightRemote(ctx context.Context, op, remote, keyPath strin
 	// --exit-code would report that as unreadable when the guest can read it
 	// fine. Readability is already carried by the exit status below — an
 	// unreadable remote exits 128.
-	res, err := m.run(ctx, op, m.gitExecKeyed(keyPath, "ls-remote", "--", remote, "HEAD"))
+	res, err := m.run(ctx, op, m.gitExec(keyPath, "ls-remote", "--", remote, "HEAD"))
 	if err != nil {
 		return false, err
 	}
@@ -1295,19 +1299,13 @@ func (m *Manager) testRoot(ctx context.Context, op, flag, path string) (bool, er
 
 // gitExec builds a Git argv that runs as `hermes` under the noninteractive
 // environment. It is the only way this package reaches a remote.
-func (m *Manager) gitExec(args ...string) []string {
-	return m.gitExecKeyed("", args...)
-}
-
-// gitExecKeyed is gitExec with a deploy key offered to SSH. An empty keyPath
-// gives back the plain noninteractive environment, so the keyless and keyed
-// paths cannot drift apart.
 //
-// IdentitiesOnly=yes is not optional here. Without it ssh also offers whatever
-// else it can find, GitHub authenticates the first key that is valid for the
-// account rather than for this repository, and the run fails as "repository not
-// found" against a repository that plainly exists.
-func (m *Manager) gitExecKeyed(keyPath string, args ...string) []string {
+// A non-empty keyPath offers that deploy key to SSH and nothing else.
+// IdentitiesOnly=yes is not optional there: without it ssh also offers whatever
+// else it can find, GitHub authenticates the first key valid for the account
+// rather than for this repository, and the run fails as "repository not found"
+// against a repository that plainly exists.
+func (m *Manager) gitExec(keyPath string, args ...string) []string {
 	argv := make([]string, 0, len(gitNoninteractiveEnv)+len(args)+1)
 	for _, token := range gitNoninteractiveEnv {
 		if keyPath != "" && strings.HasPrefix(token, gitSSHCommandVar) {
