@@ -16,30 +16,48 @@ func TestParseGuestNow(t *testing.T) {
 	if _, err := parseGuestNow([]byte("Tue Aug  8 12:00:00 UTC 2026")); err == nil {
 		t.Error("parseGuestNow accepted a formatted date; every age is measured against this")
 	}
+	for _, out := range []string{"-1", "253402300800"} {
+		if _, err := parseGuestNow([]byte(out)); err == nil {
+			t.Errorf("parseGuestNow accepted out-of-range timestamp %q", out)
+		}
+	}
 }
 
-// A line the process list reader cannot follow is skipped rather than failing
-// the whole reading: one unreadable line cannot make a pid that is there
-// absent, and failing closed on it would report every session on the box as
-// unknown because of a process that has nothing to do with any of them.
-func TestParseProcessesSkipsWhatItCannotRead(t *testing.T) {
-	got := parseProcesses([]byte("  1234 600 claude\nnonsense\n  -1 5 claude\n  1400 notanumber bash\n  1500 12 claude\n"))
+func TestParseProcessesRefusesAnUnreadableLine(t *testing.T) {
+	for _, out := range []string{
+		"  1234 600 claude\nnonsense\n",
+		"  -1 5 claude\n",
+		"  1400 notanumber bash\n",
+	} {
+		if _, err := parseProcesses([]byte(out)); err == nil {
+			t.Errorf("parseProcesses accepted %q", out)
+		}
+	}
+}
 
+func TestParseProcessesReadsEveryCompleteLine(t *testing.T) {
+	got, err := parseProcesses([]byte("  1234 600 claude\n  1500 12 claude\n"))
+	if err != nil {
+		t.Fatalf("parseProcesses: %v", err)
+	}
 	if len(got) != 2 {
-		t.Fatalf("processes = %+v, want the two readable lines", got)
+		t.Fatalf("processes = %+v, want both lines", got)
 	}
 	if got[0].pid != 1234 || got[0].elapsed != 600*time.Second || got[0].name != "claude" {
 		t.Errorf("process = %+v, want pid 1234 running 600s as claude", got[0])
 	}
 	if got[1].pid != 1500 {
-		t.Error("a readable line after an unreadable one was dropped")
+		t.Errorf("second process = %+v, want pid 1500", got[1])
 	}
 }
 
 // The kernel allows a space in a process name, and comm is the last column, so
 // everything after the two numeric columns belongs to the name.
 func TestParseProcessesKeepsANameWithASpace(t *testing.T) {
-	got := parseProcesses([]byte("  42 7 my agent\n"))
+	got, err := parseProcesses([]byte("  42 7 my agent\n"))
+	if err != nil {
+		t.Fatalf("parseProcesses: %v", err)
+	}
 
 	if len(got) != 1 || got[0].name != "my agent" {
 		t.Fatalf("processes = %+v, want the whole name kept", got)
@@ -84,6 +102,9 @@ func TestParsePathFact(t *testing.T) {
 		"garbage\n",
 		"/home/agent/other|agent|600|1754600000\n",
 		"/home/agent/a|agent|600|1754600000\n/home/agent/a|agent|600|1754600001\n",
+		"/home/agent/a|agent|600|NaN\n",
+		"/home/agent/a|agent|600|+Inf\n",
+		"/home/agent/a|agent|600|253402300800\n",
 	} {
 		if _, err := parsePathFact([]byte(out), "/home/agent/a"); err == nil {
 			t.Errorf("parsePathFact accepted %q", out)

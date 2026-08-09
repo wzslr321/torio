@@ -178,7 +178,12 @@ func (p *Poller) sessions(ctx context.Context, instance string, t backend.Transp
 	if err != nil {
 		return unknownSession()
 	}
-	return sessionsNamed(spec.SessionProcess, parseProcesses(out), guestNow)
+	live, err := parseProcesses(out)
+	if err != nil {
+		p.diagnose(instance, "processes", err)
+		return unknownSession()
+	}
+	return sessionsNamed(spec.SessionProcess, live, guestNow)
 }
 
 // paths reads the progress evidence a backend declared and the marker file's

@@ -2,11 +2,16 @@ package status
 
 import (
 	"errors"
+	"math"
 	"path"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// maxUnixRFC3339 is the last second representable with RFC 3339's four-digit
+// year, which is the format this package promises for timestamps.
+const maxUnixRFC3339 = int64(253402300799)
 
 // parseGuestNow reads `date +%s` from the guest.
 //
@@ -17,7 +22,7 @@ import (
 func parseGuestNow(out []byte) (time.Time, error) {
 	s := strings.TrimSpace(string(out))
 	secs, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
+	if err != nil || secs < 0 || secs > maxUnixRFC3339 {
 		return time.Time{}, errors.New("guest clock is not a unix timestamp")
 	}
 	return time.Unix(secs, 0).UTC(), nil
@@ -42,32 +47,34 @@ func processArgv(user string) []string {
 // parseProcesses reads `ps -o pid=,etimes=,comm= -u <user>` output: one line
 // per process, the pid, how many seconds it has been running, and the name.
 //
-// A line it cannot read is skipped rather than failing the whole reading. The
-// output is a list of processes and the question asked of it is which of them
-// are the agent; one unreadable line cannot make a process that is there
-// absent, and failing closed on it would report the box as unknown because of a
-// process that has nothing to do with the agent.
-func parseProcesses(out []byte) []process {
+// Every non-empty line must be readable. Skipping one could discard the very
+// agent process this fact is meant to prove and turn an incomplete answer into
+// a known-empty session list.
+func parseProcesses(out []byte) ([]process, error) {
 	var live []process
 	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
 		fields := strings.Fields(line)
 		if len(fields) < 3 {
-			continue
+			return nil, errUnreadableRecord
 		}
 		pid, err := strconv.Atoi(fields[0])
 		if err != nil || pid <= 0 {
-			continue
+			return nil, errUnreadableRecord
 		}
 		secs, err := strconv.ParseInt(fields[1], 10, 64)
-		if err != nil || secs < 0 {
-			continue
+		const maxElapsedSeconds = int64((1<<63 - 1) / int64(time.Second))
+		if err != nil || secs < 0 || secs > maxElapsedSeconds {
+			return nil, errUnreadableRecord
 		}
 		// comm is the last column and the kernel allows a space in it, so it is
 		// everything after the two numeric columns rather than a third field.
 		name := strings.TrimSpace(strings.Join(fields[2:], " "))
 		live = append(live, process{pid: pid, elapsed: time.Duration(secs) * time.Second, name: name})
 	}
-	return live
+	return live, nil
 }
 
 // pathFactFormat is printed by GNU find for one exact, fixed filename. Unlike
@@ -100,7 +107,8 @@ func parsePathFact(out []byte, wantPath string) (*statEntry, error) {
 		return nil, errUnreadableRecord
 	}
 	seconds, err := strconv.ParseFloat(fields[3], 64)
-	if err != nil || seconds < 0 {
+	if err != nil || math.IsNaN(seconds) || math.IsInf(seconds, 0) ||
+		seconds < 0 || seconds > float64(maxUnixRFC3339) {
 		return nil, errUnreadableRecord
 	}
 	entry := &statEntry{

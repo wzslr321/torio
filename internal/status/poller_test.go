@@ -62,6 +62,18 @@ func TestPollReportsAnEmptyProcessTableAsProvenQuiet(t *testing.T) {
 	}
 }
 
+func TestPollDoesNotTreatAnUnreadableProcessLineAsQuiet(t *testing.T) {
+	env := defaultEnv()
+	env.ps = "incomplete process record\n"
+	g := &fakeGuest{env: env}
+
+	got := pollOne(g, testBackend{spec: specWith(testProcess, false)})
+
+	if got.Session.State != Unknown {
+		t.Fatalf("session state = %q, want %q", got.Session.State, Unknown)
+	}
+}
+
 // A backend that runs no process a session corresponds to has declared that,
 // and the field says so rather than reporting an agent that is not running.
 func TestPollReportsNotApplicableForABackendWithNoSessionProcess(t *testing.T) {
