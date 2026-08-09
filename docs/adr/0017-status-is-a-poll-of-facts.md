@@ -1,10 +1,7 @@
-# ADR-0014: Status is a poll of facts; events only ring the bell
+# ADR-0017: Status is a poll of facts; events only ring the bell
 
 - Status: Accepted
 - Date: 2026-08-08
-- Superseded in part by: [ADR-0015](0015-status-projections-are-maintained-by-torio.md),
-  for the decision that tmux and prompt projections ship only as recipes rather
-  than as maintained Torio renderers
 - Applies to: `internal/backend`, `internal/status`, `internal/lima`,
   `internal/backend/claudecode`, `internal/config`, `internal/cli`
 
@@ -118,6 +115,20 @@ than its TTL renders as unknown, never as a stale plea. The failure cost is
 bounded and asymmetric on purpose: a lost marker is a missed ping, a stale
 marker expires by itself.
 
+### Torio maintains bounded projections, not their surfaces
+
+The JSON document is the interface. Torio also maintains two pure, bounded
+one-line projections of it: `torio status --format=tmux` and
+`torio status --format=prompt`. Keeping the precedence and three-state
+semantics in tested Go code avoids duplicating the schema in `jq` recipes.
+
+A projection performs no additional probe, persists no state and accepts no
+agent-authored prose. The tmux projection may contain tmux style sequences; the
+prompt projection contains none. `torio status setup tmux|zsh` prints a tested
+integration snippet, but writes no dotfile, owns no watcher or cache, does not
+replace unrelated theme or status settings, and keeps guest polling out of a
+synchronous prompt.
+
 ### Events ring the bell; they never set the state
 
 Push signals — Claude Code hooks today, a Hermes gateway change when it
@@ -148,11 +159,9 @@ for the same reason guest filenames never reach Torio's output today.
 
 ## Consequences
 
-- A new command, `torio status`, with `--json`, one object per instance,
-  absent capabilities explicit. It is the only piece of this design that is
-  Torio code: the tmux line, the prompt segment, and the notification hook
-  are configuration for tools the operator already runs, and ship as a
-  documented recipe, not as a feature.
+- A new command, `torio status`, with `--json`, one object per instance and
+  absent capabilities explicit. Torio also owns the tmux and prompt renderers,
+  but not the configuration or processes that display them.
 - Claude Code is the first backend with a probe: it declares the process name
   its sessions run under, and the marker its hooks write. It declares no
   progress reading, because the evidence it cannot help producing is a
@@ -182,4 +191,6 @@ lie in poll costume); querying Hermes over HTTP through the operator's
 tunnel (works for one backend, only while a hand-run tunnel lives — generic
 on no day); Torio parsing each backend's native status format (a parser per
 product, schema ownership inverted); a `failed` state in v1 (unprovable by
-every current backend); and `--watch` (deferred, not refused).
+every current backend); `jq` projection recipes (they duplicate the schema and
+precedence outside tested code); writing operator dotfiles (the operator owns
+them); and `--watch` or a Torio cache (deferred, not refused).

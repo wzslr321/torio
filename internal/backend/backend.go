@@ -367,7 +367,7 @@ type SessionSpec struct {
 }
 
 // StatusSpec is how a backend answers whether an agent is alive on its box and
-// what it is doing (ADR-0014). A nil spec is a declaration: `torio status`
+// what it is doing (ADR-0017). A nil spec is a declaration: `torio status`
 // reports that the backend answers no such question and runs no guest command
 // to discover what it was already told.
 //

@@ -2,7 +2,7 @@
 
 What `torio status --json` emits, what a backend declares to appear in it, and
 the waiting-marker convention a backend's hooks write. The decision behind all
-of it is [ADR-0014](../adr/0014-status-is-a-poll-of-facts.md); this document is
+of it is [ADR-0017](../adr/0017-status-is-a-poll-of-facts.md); this document is
 the shape.
 
 One sentence carries the rest: the poll reads facts a backend cannot help

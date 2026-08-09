@@ -12,7 +12,7 @@
   that backend does not answer at all — never a zero standing in for a silence.
   It exits 0 whenever the poll completes, so a status bar can call it on a
   timer; only failing to list the boxes at all is an error
-  ([ADR-0014](docs/adr/0014-status-is-a-poll-of-facts.md),
+  ([ADR-0017](docs/adr/0017-status-is-a-poll-of-facts.md),
   [contract](docs/contracts/status.md)).
 - **The status line, and the one command that installs it.**
   `torio status --format tmux|prompt` collapses the report onto one line for a
