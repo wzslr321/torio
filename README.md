@@ -146,10 +146,13 @@ stdout; flags, exit codes and each command's contract are in the
 
 ## What Torio will not do
 
-- **Hold credentials.** It never stores, prompts for, or reads one. The one it
-  forwards is your SSH agent, into a session you opened.
-- **Open a tunnel.** The backend is loopback-only inside the VM; the forward
-  is yours to open and close.
+- **Hold your Git or model-provider credentials.** Git write arrives only as
+  your forwarded SSH agent in a session you opened. MCP OAuth is the deliberate
+  exception: an interactive login stores it under the separate `torio-mcp`
+  guest identity, never under the agent uid or on the host.
+- **Expose the backend.** It remains loopback-only inside the VM; its working
+  tunnel is yours to open and close. MCP login opens only its fixed loopback
+  OAuth callback forward and closes it with the command.
 - **Write history.** No commit, push, merge, tag, or release. The persistent
   backend reads only.
 - **Take data out.** Import brings a vault in; there is no export. Copying the
@@ -157,10 +160,10 @@ stdout; flags, exit codes and each command's contract are in the
 - **Delete anything.** It never re-images or removes a VM, and removing a
   project leaves its checkout on disk.
 - **Run agents for you.** No task queue, no dispatcher, no autonomous workers.
-- **Broker MCP traffic yet.** `torio mcp install` provisions a credential
-  custody boundary (a dedicated guest identity, a private credential home, a
-  root-owned policy directory) and `torio mcp status` verifies it without
-  repairing it. Nothing carries traffic yet; see the roadmap.
+- **Grant MCP tools implicitly.** `torio mcp install` ships the broker and relay,
+  but policy is a root-owned, exact list written by the operator. OAuth begins
+  only with `torio mcp login <service>`, and the broker refuses tools outside
+  the verified grant.
 - **Stop an agent leaking what it has read.** The trust boundary is the edge
   of the VM; the threat model covers prompt injection and a confused agent,
   not an adversarial one. Data exfiltration is unsolved and DNS is an accepted
@@ -209,11 +212,21 @@ no `sudo`, a closed group set, a binary it cannot rewrite, no credential that
 reaches a Git remote, and the edge of a VM. The agent commits; you push, after
 reading what it did.
 
-What the box does **not** solve for a Claude Code backend is MCP. It is a native
-MCP client, your tokens end up under the agent's own identity, and no policy or
-audit constrains them. Torio reports which servers are configured, by name, and
-that is legibility rather than a control. See
-[ADR-0009](docs/adr/0009-backend-contract-and-claude-code.md).
+MCP uses the same custody boundary on both backends. Write one strict policy
+document per service as `root:root 0644`, then install, authorize, and verify:
+
+```bash
+torio mcp install --backend claude-code
+torio mcp login atlassian --backend claude-code
+torio mcp status --backend claude-code
+```
+
+The backend launches a credential-free stdio relay. OAuth state belongs to the
+separate `torio-mcp` uid, and the broker exposes only tools present in both the
+root-owned grant and upstream discovery. Claude Code's route is root-managed;
+Hermes' agent-owned config remains a drift detector, while the socket and policy
+are the enforcement boundary. See
+[ADR-0013](docs/adr/0013-mcp-managed-client-config-and-activation.md).
 
 ## The brain, without the VM
 
@@ -258,10 +271,6 @@ guarantee, so a row lands only after something has actually booted it.
 
 Torio does less than it will. Where it is going, roughly in order:
 
-- **A real MCP broker.** `torio mcp` provisions custody today; the daemon that
-  would carry traffic is unbuilt, blocked on decisions worth making well:
-  upstream transport and OAuth lifecycle, recorded in
-  [ADR-0004](docs/adr/0004-mcp-credential-custody-and-egress.md).
 - **More hosts.** arm64 Linux is one table row plus an image digest away; it
   waits on someone booting and verifying it, not on design.
 - **Editor integration.** A Neovim panel already ships in

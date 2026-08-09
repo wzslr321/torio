@@ -55,7 +55,7 @@ func TestTheAgentIdentityIsNeverTheOperator(t *testing.T) {
 // where an added group has to be argued for rather than noticed later.
 func TestAllowedGroupsAreExactlyTheOnesNeeded(t *testing.T) {
 	got := allowedGroups()
-	want := []string{User, lima.TorioProjectsGroup}
+	want := []string{User, lima.TorioProjectsGroup, lima.TorioMCPClientsGroup}
 	if len(got) != len(want) {
 		t.Fatalf("allowedGroups() = %v, want exactly %v", got, want)
 	}
@@ -127,6 +127,7 @@ func TestManagedSettingsMatchGolden(t *testing.T) {
 	got := string(ManagedSettings())
 	for _, want := range []string{
 		`"defaultMode": "bypassPermissions"`,
+		`"allowManagedMcpServersOnly": true`,
 		`"DISABLE_AUTOUPDATER": "1"`,
 	} {
 		if !strings.Contains(got, want) {

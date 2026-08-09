@@ -1,8 +1,8 @@
-# ADR-0012: Status is a poll of facts; events only ring the bell
+# ADR-0014: Status is a poll of facts; events only ring the bell
 
 - Status: Accepted
 - Date: 2026-08-08
-- Superseded in part by: [ADR-0013](0013-status-projections-are-maintained-by-torio.md),
+- Superseded in part by: [ADR-0015](0015-status-projections-are-maintained-by-torio.md),
   for the decision that tmux and prompt projections ship only as recipes rather
   than as maintained Torio renderers
 - Applies to: `internal/backend`, `internal/status`, `internal/lima`,

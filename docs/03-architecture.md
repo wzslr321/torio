@@ -129,17 +129,26 @@ token, query or fragment is rejected.
 ## MCP custody boundary
 
 MCP credentials belong to a separate unprivileged identity `torio-mcp`, whose
-home `/home/torio-mcp` is `0700`. `hermes` is not in the owning group and cannot
-read that directory; it gets only membership of `torio-mcp-clients`, which is what
-a future connection to the broker's unix socket will require. The explicit tool
-grant lives outside the agent's profile, in root-owned `/etc/torio-mcp/policy.d`.
+home `/home/torio-mcp` is `0700`. The selected agent (`hermes` or `claude`) is
+not in the owning group and cannot read that directory; it gets only membership
+of `torio-mcp-clients`, which permits connection to policy-specific Unix
+sockets. The explicit tool grant lives outside the agent's profile, in
+root-owned `/etc/torio-mcp/policy.d`.
 
-The released CLI provisions and verifies that boundary but neither publishes nor
-activates a daemon. Streamable HTTP transport, the OAuth login callback, refresh
-ownership and the credential store format all need their own accepted decision.
-An absent broker runtime is therefore a correct state for a provisioned boundary,
-not evidence that a service is ready
-([ADR-0004](adr/0004-mcp-credential-custody-and-egress.md)).
+The backend launches a credential-free stdio relay. The broker terminates that
+local MCP session, identifies the caller uid through peer credentials, verifies
+the policy tool set against upstream discovery, and carries allowed calls over
+Streamable HTTP using OAuth state owned only by `torio-mcp`. Calls are audited
+without content. Claude Code's MCP declaration is root-managed; Hermes' own
+configuration is agent-writable and therefore checked only as drift.
+
+Installation is dormant while any policy service lacks an operator-authorized
+OAuth session. The last `torio mcp login <service>` enables and starts the unit;
+from then on successful status requires the exact unit, live policy socket set
+and running policy digest
+([ADR-0004](adr/0004-mcp-credential-custody-and-egress.md),
+[ADR-0012](adr/0012-mcp-broker-transport-and-oauth.md),
+[ADR-0013](adr/0013-mcp-managed-client-config-and-activation.md)).
 
 ## The Second Brain inside projects
 

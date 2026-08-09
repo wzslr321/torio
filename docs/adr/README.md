@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-Twelve records cover the decisions that govern the delivered binary, the vault
+Fourteen records cover the decisions that govern the delivered binary, the vault
 standard it writes against, how both are published, and how the behaviour that
 standard asks for is measured.
 
@@ -16,8 +16,10 @@ standard asks for is measured.
 | [0009](0009-backend-contract-and-claude-code.md) | An instance runs one backend, declared by a contract; a backend declares what it has, and verification checks exactly that; Claude Code is the second one |
 | [0010](0010-okf-vault-standard-and-brain-kit.md) | The vault format is written down as a profile of OKF, and it ships as a kit installable without the VM; the kit is content, Torio is mechanics |
 | [0011](0011-measured-brain-behaviour.md) | What the brain does autonomously is measured against a committed benchmark; scenarios are backend-neutral, the vault diff is the evidence, and no CI gate exists until its cost is known |
-| [0012](0012-status-is-a-poll-of-facts.md) | Cross-instance status is a poll of provable facts through a declared probe; events may ring a bell but never set the state |
-| [0013](0013-status-projections-are-maintained-by-torio.md) | Torio maintains bounded tmux and prompt projections of its status document without owning operator configuration, a watcher or a cache |
+| [0012](0012-mcp-broker-transport-and-oauth.md) | The MCP broker carries Streamable HTTP through operator-authorized OAuth while credentials remain under the broker identity |
+| [0013](0013-mcp-managed-client-config-and-activation.md) | Backend MCP clients use managed relay configuration, and the broker activates only after explicit login |
+| [0014](0014-status-is-a-poll-of-facts.md) | Cross-instance status is a poll of provable facts through a declared probe; events may ring a bell but never set the state |
+| [0015](0015-status-projections-are-maintained-by-torio.md) | Torio maintains bounded tmux and prompt projections of its status document without owning operator configuration, a watcher or a cache |
 
 ## Rules
 

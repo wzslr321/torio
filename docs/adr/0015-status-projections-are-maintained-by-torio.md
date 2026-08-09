@@ -1,8 +1,8 @@
-# ADR-0013: Torio maintains bounded projections of its status document
+# ADR-0015: Torio maintains bounded projections of its status document
 
 - Status: Accepted
 - Date: 2026-08-09
-- Supersedes in part: [ADR-0012](0012-status-is-a-poll-of-facts.md), only
+- Supersedes in part: [ADR-0014](0014-status-is-a-poll-of-facts.md), only
   the decision that tmux and prompt projections ship as recipes rather than as
   maintained Torio renderers
 - Applies to: `internal/cli`, `docs/contracts/cli.md`,
@@ -10,7 +10,7 @@
 
 ## Context
 
-ADR-0012 made the schema emitted by `torio status --json` the interface and
+ADR-0014 made the schema emitted by `torio status --json` the interface and
 treated every ambient surface as configuration outside Torio. The first tmux and
 prompt recipes then duplicated the schema in `jq`: field names, the precedence
 of waiting over liveness, the distinction between unknown and not applicable,
@@ -20,7 +20,7 @@ recipes rendering a false quiet state without any test failing.
 The renderer and the surface still have different owners. Torio can maintain a
 pure projection of its own document without owning `~/.tmux.conf`, `~/.zshrc`,
 the process that refreshes either one, or a cache of status. That is narrower
-than a watcher and does not change ADR-0012's decision that status is always
+than a watcher and does not change ADR-0014's decision that status is always
 derived from a fresh poll of facts.
 
 ## Decision
@@ -62,11 +62,11 @@ against the document.
 ## Rejected alternatives
 
 - **Keep the renderers as `jq` recipes.** This restores the ownership wording
-  from ADR-0012 but duplicates schema and precedence in files no Go test reads.
+  from ADR-0014 but duplicates schema and precedence in files no Go test reads.
 - **Write directly to tmux or shell configuration.** The operator owns those
   files; printing a snippet is sufficient and keeps installation reviewable.
 - **Add `--watch` or a Torio cache.** Neither is required to render one report,
-  and both would introduce long-lived state that ADR-0012 deliberately deferred.
+  and both would introduce long-lived state that ADR-0014 deliberately deferred.
 - **Put backend-native details in the cross-instance line.** Model, context,
   cost and session prose are neither shared facts nor safe additions to the
   terminal-facing document.

@@ -1,10 +1,14 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
+	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/lima"
 )
 
@@ -15,10 +19,10 @@ func newMCPCmd(a *app) *cobra.Command {
 	m := &cobra.Command{
 		Use:   "mcp",
 		Short: "Provision and inspect the MCP credential boundary",
-		Long: "Provision the dedicated " + lima.TorioMCPUser + " identity, client group, private " +
-			"credential store, and root-owned policy boundary. The broker daemon is not installed or " +
-			"activated until its OAuth and upstream transport have an accepted contract. Torio accepts " +
-			"no MCP credentials through this CLI (ADR-0004).",
+		Long: "Install and inspect the dedicated " + lima.TorioMCPUser + " credential broker. " +
+			"`install` deploys the broker and relay and wires the selected backend; `login` performs " +
+			"interactive OAuth as the broker identity; `status` proves custody, policy, unit, and sockets. " +
+			"Torio accepts no MCP credential as an argument or host file (ADR-0004).",
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return usageError("no subcommand given; run 'torio mcp --help'")
@@ -27,6 +31,7 @@ func newMCPCmd(a *app) *cobra.Command {
 		},
 	}
 	m.AddCommand(newMCPInstallCmd(a))
+	m.AddCommand(newMCPLoginCmd(a))
 	m.AddCommand(newMCPStatusCmd(a))
 	return m
 }
@@ -36,15 +41,15 @@ func newMCPStatusCmd(a *app) *cobra.Command {
 		Use:   "status",
 		Short: "Prove the broker's custody boundary on the guest",
 		Long: "Verify that the broker identity exists, that its credential store is readable by " +
-			"nobody else, that hermes may reach the broker socket but is not a member of the " +
-			"broker's own group, and that no MCP credential has reappeared under the Hermes " +
-			"profile. Proves and reports; repairs nothing. A guest that was never provisioned is " +
+			"nobody else, that the selected backend may reach the broker socket but is not a member of the " +
+			"broker's own group, that its MCP declaration matches policy, and—when OAuth is complete—that " +
+			"the unit and exact policy sockets are live. Proves and reports; repairs nothing. A guest that was never provisioned is " +
 			"an unmet precondition (exit 3); a boundary that no longer holds is drift (exit 6).",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := a.opContext(cmd)
 			defer cancel()
-			rep, err := a.newLima().VerifyMCPBroker(ctx)
+			rep, err := a.verifyMCP(ctx, a.newLima(), a.backend.Identity())
 			if err != nil {
 				ce := mapLimaError("mcp.status", err)
 				// Surface the checks recorded up to the failure (already bounded and
@@ -110,6 +115,10 @@ func mcpPolicyPayload(g lima.PolicyGrant) mcpPolicyData {
 }
 
 func mcpStatusPayload(rep lima.MCPBrokerReport) mcpStatusData {
+	agentUser := rep.AgentUser
+	if agentUser == "" {
+		agentUser = lima.HermesUser
+	}
 	return mcpStatusData{
 		Instance:     rep.Instance,
 		Checks:       checkPayload(rep.Checks),
@@ -117,7 +126,7 @@ func mcpStatusPayload(rep lima.MCPBrokerReport) mcpStatusData {
 		BrokerUser:   lima.TorioMCPUser,
 		BrokerHome:   lima.TorioMCPHome,
 		ClientsGroup: lima.TorioMCPClientsGroup,
-		AgentUser:    lima.HermesUser,
+		AgentUser:    agentUser,
 	}
 }
 
@@ -136,6 +145,10 @@ func mcpReportDetails(rep lima.MCPBrokerReport) map[string]any {
 // the checks establish, because "ok" on its own does not tell an operator what
 // was actually guaranteed.
 func (a *app) emitMCPStatus(rep lima.MCPBrokerReport) error {
+	agentUser := rep.AgentUser
+	if agentUser == "" {
+		agentUser = lima.HermesUser
+	}
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("mcp.status", mcpStatusPayload(rep)))
 	}
@@ -147,7 +160,7 @@ func (a *app) emitMCPStatus(rep lima.MCPBrokerReport) error {
 			"Credential owner:   %s (home %s, readable by nobody else)\n"+
 			"Agent identity:     %s — may open the broker socket, cannot read its credentials\n"+
 			"Client group:       %s\n",
-		rep.Instance, lima.TorioMCPUser, lima.TorioMCPHome, lima.HermesUser, lima.TorioMCPClientsGroup); err != nil {
+		rep.Instance, lima.TorioMCPUser, lima.TorioMCPHome, agentUser, lima.TorioMCPClientsGroup); err != nil {
 		return err
 	}
 	return a.writeMCPPolicy(rep.Policy)
@@ -187,20 +200,22 @@ func newMCPInstallCmd(a *app) *cobra.Command {
 		Use:   "install",
 		Short: "Provision and verify the MCP credential boundary",
 		Long: "Create the unprivileged " + lima.TorioMCPUser + " identity, its 0700 credential store, " +
-			"the " + lima.TorioMCPClientsGroup + " group, and the root-owned policy directory, then prove " +
-			"the identity and policy boundaries. The daemon is not installed or activated until its OAuth " +
-			"and upstream transport have an accepted contract. Idempotent: a re-run that changes nothing " +
+			"the " + lima.TorioMCPClientsGroup + " group, and the root-owned policy directory; install the " +
+			"broker, relay, and systemd unit shipped with this release; then configure the selected backend " +
+			"to use only the relay. The unit remains stopped until `torio mcp login <service>` completes OAuth. " +
+			"Idempotent: a re-run that changes nothing " +
 			"reports changed:false. Accepts no secrets.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := a.opContext(cmd)
 			defer cancel()
-			rep, err := a.newLima().ProvisionMCPBroker(ctx)
+			adapter := a.newLima()
+			rep, err := a.installMCP(ctx, adapter, a.backend.Identity())
 			if err != nil {
 				ce := mapLimaError("mcp.install", err)
 				ce.Details = mcpInstallDetails(rep)
 				if rep.Changed {
-					ce.Message += "; guest was partially changed; the MCP daemon was not installed or activated"
+					ce.Message += "; guest was partially changed; re-run `torio mcp install` after fixing the reported precondition"
 				}
 				if rep.RestartRequired {
 					ce.Message += "; run `torio serve restart` before expecting the backend to use its new client-group membership"
@@ -208,6 +223,54 @@ func newMCPInstallCmd(a *app) *cobra.Command {
 				return ce
 			}
 			return a.emitMCPInstall(rep)
+		},
+	}
+}
+
+func defaultInstallMCP(ctx context.Context, adapter *lima.Adapter, identity backend.Identity) (lima.MCPBrokerInstallReport, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return lima.MCPBrokerInstallReport{}, fmt.Errorf("resolve the torio release directory: %w", err)
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(executable); resolveErr == nil {
+		executable = resolved
+	}
+	return adapter.ProvisionMCPBrokerFor(ctx, identity, filepath.Dir(executable))
+}
+
+func newMCPLoginCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "login <service>",
+		Short: "Authorize one policy service as the broker identity",
+		Long: "Open a loopback-only OAuth callback tunnel and run the broker's login flow as " +
+			lima.TorioMCPUser + ". Torio does not receive or print the token. No SSH agent is forwarded. " +
+			"When every policy service has a private OAuth session, the broker unit is enabled and started.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if a.jsonOut {
+				return usageError("mcp login is interactive; --json is not supported")
+			}
+			service := args[0]
+			spec, err := a.newMCPLoginSpec(service)
+			if err != nil {
+				return mapLimaError("mcp.login", err)
+			}
+			if err := a.newInteractive().RunInteractive(cmd.Context(), spec); err != nil {
+				return mapInteractiveSessionError("mcp.login", "MCP login session", err)
+			}
+			ctx, cancel := a.opContext(cmd)
+			defer cancel()
+			activation, err := a.activateMCP(ctx, a.newLima(), a.backend.Identity())
+			if err != nil {
+				return mapLimaError("mcp.login", err)
+			}
+			if activation.Activated {
+				_, err = fmt.Fprintf(a.stdout, "%s: OAuth session stored by %s; broker is active.\n", service, lima.TorioMCPUser)
+				return err
+			}
+			_, err = fmt.Fprintf(a.stdout, "%s: OAuth session stored by %s; %d policy service(s) still require login before the broker starts.\n",
+				service, lima.TorioMCPUser, activation.Pending)
+			return err
 		},
 	}
 }
@@ -223,9 +286,14 @@ type mcpInstallData struct {
 	BrokerHome      string        `json:"broker_home"`
 	ClientsGroup    string        `json:"clients_group"`
 	PolicyDir       string        `json:"policy_dir"`
+	AgentUser       string        `json:"agent_user"`
 }
 
 func mcpInstallPayload(rep lima.MCPBrokerInstallReport) mcpInstallData {
+	agentUser := rep.AgentUser
+	if agentUser == "" {
+		agentUser = lima.HermesUser
+	}
 	return mcpInstallData{
 		Instance:        rep.Instance,
 		Changed:         rep.Changed,
@@ -236,6 +304,7 @@ func mcpInstallPayload(rep lima.MCPBrokerInstallReport) mcpInstallData {
 		BrokerHome:      lima.TorioMCPHome,
 		ClientsGroup:    lima.TorioMCPClientsGroup,
 		PolicyDir:       lima.TorioMCPPolicyDir,
+		AgentUser:       agentUser,
 	}
 }
 
@@ -275,10 +344,18 @@ func (a *app) emitMCPInstall(rep lima.MCPBrokerInstallReport) error {
 		return err
 	}
 	if rep.RestartRequired {
+		agentUser := rep.AgentUser
+		if agentUser == "" {
+			agentUser = lima.HermesUser
+		}
+		next := "end the current agent session and open a new one"
+		if a.backend.Service() != nil {
+			next = "restart it:  torio serve restart"
+		}
 		if _, err := fmt.Fprintf(a.stdout,
 			"\n%s only just joined %s. The running backend keeps the groups it started with,\n"+
-				"so restart it before expecting the agent to reach the broker:  torio serve restart\n",
-			lima.HermesUser, lima.TorioMCPClientsGroup); err != nil {
+				"so %s before expecting the agent to reach the broker.\n",
+			agentUser, lima.TorioMCPClientsGroup, next); err != nil {
 			return err
 		}
 	}

@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"bytes"
+	"context"
 	"strings"
 	"testing"
 
+	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
 )
@@ -39,6 +42,46 @@ var cliTestPolicyDocs = map[string]string{
 	"atlassian.json": `{"schema_version":"1","service":"atlassian","upstream_endpoint":"https://api.atlassian.com/v1/mcp","tools":[{"name":"getJiraIssue","writes":false}]}`,
 	"linear.json":    `{"schema_version":"1","service":"linear","upstream_endpoint":"https://mcp.linear.app/sse","tools":[{"name":"list_issues","writes":false}]}`,
 	"slack.json":     `{"schema_version":"1","service":"slack","upstream_endpoint":"https://slack.com/api/mcp","tools":[{"name":"slack_read_channel","writes":false},{"name":"slack_search_public","writes":false}]}`,
+}
+
+func TestMCPLoginRunsTheFixedSessionThenActivatesTheBroker(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var stdout, stderr bytes.Buffer
+	runner := &fakeInteractiveRunner{}
+	want := execx.InteractiveCommand{Name: "ssh", Args: []string{"fixed-login"}}
+	a := &app{
+		stdout: &stdout, stderr: &stderr, build: testBuild(),
+		newLima: func() *lima.Adapter { return lima.New(&fakeLimaRunner{}) },
+		newMCPLoginSpec: func(service string) (execx.InteractiveCommand, error) {
+			if service != "atlassian" {
+				t.Fatalf("service = %q", service)
+			}
+			return want, nil
+		},
+		newInteractive: func() execx.InteractiveRunner { return runner },
+		activateMCP: func(_ context.Context, _ *lima.Adapter, identity backend.Identity) (lima.MCPBrokerActivationReport, error) {
+			if identity.Name != "hermes" {
+				t.Fatalf("backend = %q, want hermes", identity.Name)
+			}
+			return lima.MCPBrokerActivationReport{Pending: 1}, nil
+		},
+	}
+	if code := runWithApp(context.Background(), a, []string{"mcp", "login", "atlassian"}); code != int(ExitOK) {
+		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+	}
+	if len(runner.cmds) != 1 || runner.cmds[0].Name != want.Name || strings.Join(runner.cmds[0].Args, " ") != strings.Join(want.Args, " ") {
+		t.Fatalf("interactive commands = %+v, want %+v", runner.cmds, want)
+	}
+	if !strings.Contains(stdout.String(), "1 policy service(s) still require login") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestMCPLoginRejectsJSONBeforeOpeningASession(t *testing.T) {
+	code, _, _ := runVMWithFake(t, []string{"mcp", "login", "atlassian", "--json"}, &fakeLimaRunner{})
+	if code != int(ExitUsage) {
+		t.Fatalf("exit = %d, want usage", code)
+	}
 }
 
 func cliTestPolicyDigest(files ...string) string {
@@ -454,50 +497,33 @@ func TestMCPInstallHumanErrorReportsPartialChangeAndRestart(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("stdout = %q, want empty human error output", stdout)
 	}
-	for _, want := range []string{"guest was partially changed", "torio serve restart", "daemon was not installed or activated"} {
+	for _, want := range []string{"guest was partially changed", "torio serve restart", "re-run `torio mcp install`"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr does not contain %q: %q", want, stderr)
 		}
 	}
 }
 
-func TestMCPInstallHelpDoesNotPromiseUnreleasedDaemonDeployment(t *testing.T) {
+func TestMCPInstallHelpDescribesReleasedDaemonDeployment(t *testing.T) {
 	code, stdout, stderr := runVMWithFake(t, []string{"mcp", "install", "--help"}, &fakeLimaRunner{})
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
 	}
-	for _, unavailable := range []string{"Linux arm64", "systemd-analyze verify", "listening sockets"} {
-		if strings.Contains(stdout, unavailable) {
-			t.Errorf("help promises unreleased behavior %q: %q", unavailable, stdout)
+	for _, want := range []string{"broker, relay, and systemd unit", "torio mcp login <service>", "selected backend"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("help does not describe released behavior %q: %q", want, stdout)
 		}
-	}
-	if !strings.Contains(stdout, "not installed or activated") {
-		t.Errorf("help does not state the daemon boundary: %q", stdout)
 	}
 }
 
-func TestMCPParentHelpDoesNotClaimTheUnreleasedBrokerIsServing(t *testing.T) {
+func TestMCPParentHelpNamesTheReleasedBrokerFlow(t *testing.T) {
 	code, stdout, stderr := runVMWithFake(t, []string{"mcp", "--help"}, &fakeLimaRunner{})
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
 	}
-	for _, falseClaim := range []string{"MCP servers are reached through a broker", "no upstream credential exists"} {
-		if strings.Contains(stdout, falseClaim) {
-			t.Errorf("parent help advertises unreleased behavior %q: %q", falseClaim, stdout)
-		}
-	}
-}
-
-func TestMCPInstallDoesNotDeployTheUnreleasedDaemon(t *testing.T) {
-	fake := &fakeLimaRunner{script: freshMCPInstallScript()}
-	code, _, stderr := runVMWithFake(t, []string{"mcp", "install"}, fake)
-	if code != int(ExitOK) {
-		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
-	}
-	for _, argv := range fake.calls {
-		joined := strings.Join(argv, " ")
-		if strings.Contains(joined, "systemctl") || strings.Contains(joined, lima.TorioMCPBrokerPath) || strings.Contains(joined, lima.TorioMCPRelayPath) {
-			t.Fatalf("unreleased daemon deployment reached the guest: %s", joined)
+	for _, want := range []string{"install", "login", "status"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("parent help does not list %q: %q", want, stdout)
 		}
 	}
 }

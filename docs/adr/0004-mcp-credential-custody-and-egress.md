@@ -1,8 +1,8 @@
 # ADR-0004: MCP credential custody, and what the box still leaks
 
-- Status: Accepted for the custody boundary; the broker daemon, the write window,
-  inference-credential custody and egress control are **not delivered** and are
-  marked per section below.
+- Status: Accepted for the custody boundary; the broker daemon is delivered by
+  ADR-0012; the write window, inference-credential custody and egress control
+  are **not delivered** and are marked per section below.
 - Date: 2026-08-05
 - Superseded in part by: [ADR-0006](0006-destination-egress-allowlist-rejected.md),
   which replaces the **Keyed by destination** paragraph under "Blocked — egress
@@ -16,7 +16,9 @@
   is superseded — in particular the custody boundary, `torio mcp
   install`/`status`, the uid-keyed half of egress control, and the remaining
   "not delivered" items (the write window and inference-credential custody)
-  all stand exactly as recorded.
+  all stand exactly as recorded. [ADR-0012](0012-mcp-broker-transport-and-oauth.md)
+  now supersedes ADR-0008 and the not-delivered upstream transport and OAuth
+  lifecycle; it ships the broker described by the custody decision.
 - Consolidates: the MCP credential broker, inference credential custody, guest
   egress control, the MCP write window, the destination allowlist, and the
   delivery boundary that separated custody from the daemon. The superseded

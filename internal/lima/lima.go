@@ -31,7 +31,7 @@ import (
 // else may write it. Read it freely — by the time any command executes it is
 // fixed for the life of the process.
 //
-// A status poll reads several instances (ADR-0012) and is the one caller that
+// A status poll reads several instances (ADR-0014) and is the one caller that
 // addresses a box this name does not name. It does so through ForInstance,
 // which returns an adapter carrying its own target, and never by assigning
 // here: a global that a loop writes and restores is how guest commands once
@@ -68,7 +68,7 @@ type Adapter struct {
 // ForInstance returns a copy of a addressed at the named instance.
 //
 // It exists for the status poll, which asks several boxes the same question in
-// one invocation (ADR-0012). The alternative — assigning InstanceName around
+// one invocation (ADR-0014). The alternative — assigning InstanceName around
 // each iteration — is the shape that already produced a wrong-VM bug once, and
 // it would leave the global holding the last polled instance for whatever ran
 // next. A copy carries its target in the value the caller is holding, so there

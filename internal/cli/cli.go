@@ -77,10 +77,14 @@ type app struct {
 	// for a project path; newInteractive executes either command. They are seams
 	// because the production spec reads host state (the Lima ssh config, the
 	// SSH agent) that a test must not depend on.
-	newEnterSpec   func(projectPath string) (execx.InteractiveCommand, error)
-	newShellSpec   func(projectPath string) (execx.InteractiveCommand, error)
-	newAgentSpec   func(projectPath string) (execx.InteractiveCommand, error)
-	newInteractive func() execx.InteractiveRunner
+	newEnterSpec    func(projectPath string) (execx.InteractiveCommand, error)
+	newShellSpec    func(projectPath string) (execx.InteractiveCommand, error)
+	newAgentSpec    func(projectPath string) (execx.InteractiveCommand, error)
+	newInteractive  func() execx.InteractiveRunner
+	newMCPLoginSpec func(service string) (execx.InteractiveCommand, error)
+	installMCP      func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerInstallReport, error)
+	verifyMCP       func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerReport, error)
+	activateMCP     func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerActivationReport, error)
 
 	// lookupOperatorUser resolves the Lima login identity for `vm init`.
 	// Production uses the current OS user; tests inject a fixed name.
@@ -158,6 +162,22 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 	}
 	if a.newInteractive == nil {
 		a.newInteractive = func() execx.InteractiveRunner { return &execx.InteractiveExecRunner{} }
+	}
+	if a.newMCPLoginSpec == nil {
+		a.newMCPLoginSpec = lima.MCPLoginSpec
+	}
+	if a.installMCP == nil {
+		a.installMCP = defaultInstallMCP
+	}
+	if a.verifyMCP == nil {
+		a.verifyMCP = func(ctx context.Context, adapter *lima.Adapter, identity backend.Identity) (lima.MCPBrokerReport, error) {
+			return adapter.VerifyMCPBrokerFor(ctx, identity)
+		}
+	}
+	if a.activateMCP == nil {
+		a.activateMCP = func(ctx context.Context, adapter *lima.Adapter, identity backend.Identity) (lima.MCPBrokerActivationReport, error) {
+			return adapter.ActivateMCPBroker(ctx, identity)
+		}
 	}
 	if a.lookupOperatorUser == nil {
 		a.lookupOperatorUser = defaultLookupOperatorUser

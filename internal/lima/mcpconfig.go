@@ -2,6 +2,7 @@ package lima
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -115,6 +116,12 @@ func hermesMCPServersFinding(scan mcpServersScan, err error) hermesMCPFinding {
 type mcpServersScan struct {
 	Services int
 	Foreign  int
+	Entries  map[string]mcpServerEntry
+}
+
+type mcpServerEntry struct {
+	Command string
+	Args    []string
 }
 
 // Refusals. Each is a fixed sentence, so a caller can render one without ever
@@ -212,13 +219,16 @@ func blockLines(rest []string) ([]string, error) {
 
 // scanServiceEntries walks the service mappings inside the block.
 func scanServiceEntries(block []string) (mcpServersScan, error) {
-	var scan mcpServersScan
+	scan := mcpServersScan{Entries: map[string]mcpServerEntry{}}
 	if len(block) == 0 {
 		return scan, nil
 	}
 	serviceIndent := indentOf(block[0])
 
 	command := ""
+	service := ""
+	var args []string
+	inArgs := false
 	closeService := func() error {
 		if scan.Services == 0 {
 			return nil
@@ -229,6 +239,10 @@ func scanServiceEntries(block []string) (mcpServersScan, error) {
 		if command != TorioMCPRelayPath {
 			scan.Foreign++
 		}
+		if _, duplicate := scan.Entries[service]; duplicate {
+			return errConfigShape
+		}
+		scan.Entries[service] = mcpServerEntry{Command: command, Args: append([]string(nil), args...)}
 		return nil
 	}
 
@@ -236,6 +250,18 @@ func scanServiceEntries(block []string) (mcpServersScan, error) {
 		indent := indentOf(raw)
 		if indent < serviceIndent {
 			return mcpServersScan{}, errConfigShape
+		}
+		trimmed := strings.TrimSpace(raw)
+		if strings.HasPrefix(trimmed, "-") {
+			if !inArgs || indent <= serviceIndent {
+				return mcpServersScan{}, errConfigShape
+			}
+			scalar, ok := scalarValue(strings.TrimSpace(strings.TrimPrefix(trimmed, "-")))
+			if !ok || scalar == "" {
+				return mcpServersScan{}, errConfigShape
+			}
+			args = append(args, scalar)
+			continue
 		}
 		key, value, ok := splitYAMLEntry(raw)
 		if !ok {
@@ -258,7 +284,22 @@ func scanServiceEntries(block []string) (mcpServersScan, error) {
 				return mcpServersScan{}, errConfigInline
 			}
 			scan.Services++
+			service, ok = scalarValue(key)
+			if !ok || ValidateServiceName(service) != nil {
+				return mcpServersScan{}, errConfigShape
+			}
 			command = ""
+			args = nil
+			inArgs = false
+			continue
+		}
+		inArgs = key == "args" && value == ""
+		if key == "args" && value != "" {
+			var inline []string
+			if json.Unmarshal([]byte(value), &inline) != nil {
+				return mcpServersScan{}, errConfigInline
+			}
+			args = append(args, inline...)
 			continue
 		}
 		if key != "command" {

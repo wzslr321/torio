@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-08-06
+- Superseded by: [ADR-0012](0012-mcp-broker-transport-and-oauth.md), which
+  defines the upstream transport and OAuth lifecycle and delivers a new broker.
 - Supersedes: the sentence "The unfinished daemon code stays in the repository
   and stays tested. It is not a delivered product surface." under "Not
   delivered — the broker daemon" in

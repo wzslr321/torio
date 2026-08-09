@@ -174,6 +174,41 @@ func ProjectEnterSpec(workspaceRoot, projectPath string) (execx.InteractiveComma
 // backendLoginOp names the login-session operation in errors.
 const backendLoginOp = "backend_login"
 
+const mcpLoginOp = "mcp_login"
+
+// MCPLoginSpec opens the one callback tunnel the broker's OAuth client needs
+// and runs its fixed login command as the credential-owning guest identity.
+// The operator's SSH agent is explicitly disabled and multiplexing is disabled,
+// so this session cannot inherit Git write capability from an operator shell.
+func MCPLoginSpec(service string) (execx.InteractiveCommand, error) {
+	if err := ValidateServiceName(service); err != nil {
+		return execx.InteractiveCommand{}, &Error{Op: mcpLoginOp, Kind: KindVerificationFailed, Err: err}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return execx.InteractiveCommand{}, &Error{Op: mcpLoginOp, Kind: KindNotFound, Err: err}
+	}
+	sshConfig := filepath.Join(home, ".lima", InstanceName, "ssh.config")
+	if _, statErr := os.Stat(sshConfig); statErr != nil {
+		return execx.InteractiveCommand{}, &Error{
+			Op: mcpLoginOp, Kind: KindNotFound,
+			Err: fmt.Errorf("no lima ssh config at %s; run `torio vm start` first", sshConfig),
+		}
+	}
+	return execx.InteractiveCommand{Name: "ssh", Args: []string{
+		"-F", sshConfig,
+		"-o", "ControlMaster=no",
+		"-o", "ControlPath=none",
+		"-o", "ForwardAgent=no",
+		"-o", "ExitOnForwardFailure=yes",
+		"-a",
+		"-L", "127.0.0.1:43119:127.0.0.1:43119",
+		sshHostAlias(),
+		"sudo", "-n", "-u", TorioMCPUser, "--",
+		TorioMCPBrokerPath, "login", service,
+	}}, nil
+}
+
 // BackendLoginSpec builds an interactive SSH command that runs a backend's own
 // fixed login argv on the guest.
 //
