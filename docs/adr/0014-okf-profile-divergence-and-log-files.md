@@ -42,8 +42,10 @@ ADR-0010 justified profiling OKF on the promise that a conforming vault is
   in the tree, and it is written down rather than discovered.
 - `okf_version` pins which spec we profile. OKF's major bumps may rename
   reserved filenames, so an unversioned profile was exposed to that.
-- No existing vault changes. Nothing has a directory `index.md` yet; only the
-  `init` create path emitted them.
+- Breaking for any vault whose directory `index.md` carries frontmatter, which
+  is what the `init` create path emitted. Migration is deleting those lines, and
+  OKF's permissive conformance means nothing rejects the vault meanwhile. The
+  kit goes to `0.2.0`, the breaking slot in `0.x`.
 - The eval fixtures still carry `type: index`, deliberately: they are the
   instrument's inputs, and the committed 2026-08-08 reports were measured
   against them. Changing them is a separate decision about the baseline.

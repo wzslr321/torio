@@ -25,9 +25,12 @@
   lines are what gets carried; §9 requires a rendering to bound the map **and**
   to state its bound somewhere the author will find it; the README and the
   `init` command name the 25 lines outright.
-- The Brain Kit is `0.2.0`. §9 gained a requirement renderings must meet, so a
-  rendering that documents no bound stops conforming; every vault that conformed
-  to `0.1.0` still conforms.
+- The Brain Kit is `0.2.0`, and the bump is a breaking one in the `0.x` sense.
+  §9 gained a requirement renderings must meet, so a rendering that documents no
+  bound stops conforming, and §2.7 drops frontmatter from directory indexes, so
+  a `0.1.0` vault whose `projects/index.md` carries `type: index` no longer
+  conforms either. Removing those four lines is the whole migration, and OKF's
+  permissive conformance means nothing rejects such a vault meanwhile.
 - **The vault standard adopts `log.md` and stops overclaiming OKF conformance**
   ([ADR-0014](docs/adr/0014-okf-profile-divergence-and-log-files.md)). OKF
   reserves two filenames and we had adopted one: `log.md` — change history
