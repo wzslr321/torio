@@ -189,6 +189,9 @@ func TestBootstrapInitializesPersistentWaitingStateCrashSafely(t *testing.T) {
 	if r.records["claude_waiting_marker_state_initialized"] == "" {
 		t.Error("initializing the marker recorded no evidence")
 	}
+	if r.records["claude_waiting_marker_state"] == "" {
+		t.Error("the successful initialization left the readiness check absent")
+	}
 
 	script := installProbe
 	for _, want := range []string{

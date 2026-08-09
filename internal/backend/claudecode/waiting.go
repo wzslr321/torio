@@ -194,6 +194,7 @@ func reconcileWaitingMarkerState(ctx context.Context, r backend.StepRunner) erro
 			return r.Fail(name, "could not initialize waiting marker state", remediation)
 		}
 		r.Record(name+"_initialized", true, "installed empty agent-owned marker atomically")
+		r.Record(name, true, User+":"+User+" 600 (agent-owned drift detector)")
 		return nil
 	}
 	if kind.ExitCode != 0 || trimmed(kind.Stdout) != "regular file" {
