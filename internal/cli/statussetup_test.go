@@ -54,6 +54,16 @@ func TestSetupNamesTheBinaryThatPrintedIt(t *testing.T) {
 	}
 }
 
+func TestSetupDoesNotLoadRuntimeConfiguration(t *testing.T) {
+	code, stdout, stderr := runSetup(t, []string{"status", "setup", "tmux", "--config", "/dev/null"})
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "status --format=tmux") {
+		t.Errorf("stdout = %q, want the requested snippet", stdout)
+	}
+}
+
 // The snippets and the flag are one feature in two places. A format renamed on
 // one side would print a configuration that renders an empty surface, which is
 // the exact failure mode nothing reports.

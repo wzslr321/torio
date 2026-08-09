@@ -233,6 +233,12 @@ func newRootCmd(a *app) *cobra.Command {
 		},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			a.logger = newLogger(a.stderr, a.verbose)
+			commandPath := cmd.CommandPath()
+			if commandPath == "torio status setup" {
+				// Setup is a pure printer. A selected box, its config and even Lima
+				// are irrelevant to the snippet and must not gate it.
+				return nil
+			}
 
 			// The managed instance is fixed here, once, before any command can
 			// touch a VM or a config path (ADR-0001). --backend names the agent
@@ -246,6 +252,19 @@ func newRootCmd(a *app) *cobra.Command {
 				return usageError(err.Error())
 			}
 			lima.InstanceName = a.instance
+			if commandPath == "torio status" {
+				// Cross-box status reads each box's own document inside the poll.
+				// Loading the invocation's selected document here would let one bad
+				// config abort every row and would make --config contradict the
+				// status contract. Only the explicit/default operation timeout is
+				// global to this poll.
+				if err := (config.Settings{Timeout: a.timeout}).Validate(); err != nil {
+					return usageError(err.Error())
+				}
+				a.logger.Debug("dispatching command", "command", cmd.Name(), "json", a.jsonOut)
+				a.logger.Debug("operation bounded", "timeout", a.timeout)
+				return nil
+			}
 
 			// Resolve the configuration: the XDG config path plus --config,
 			// loading and strictly validating the on-disk config document. A

@@ -1,12 +1,18 @@
 package cli
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/execx"
+	"github.com/wzslr321/torio/internal/lima"
 	"github.com/wzslr321/torio/internal/status"
 )
 
@@ -75,6 +81,58 @@ func TestStatusOnAHostWithNoBoxes(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "no instances") || !strings.Contains(stdout, "next: torio vm init") {
 		t.Errorf("stdout = %q, want an empty answer with a next step", stdout)
+	}
+}
+
+func TestStatusIgnoresTheInvocationConfigAndDegradesPerBox(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		configPath string
+		writeRoot  bool
+	}{
+		{name: "explicit config is not the document for every box", configPath: "/dev/null"},
+		{name: "a malformed box document costs only that row", writeRoot: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("XDG_CONFIG_HOME", home)
+			if tc.writeRoot {
+				dir := filepath.Join(home, "torio")
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{broken"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fake := &fakeLimaRunner{script: []scriptedResp{{
+				res: execx.Result{ExitCode: 0, Stdout: []byte(statusListJSON("torio", "Stopped") + "\n")},
+			}}}
+			var stdout, stderr bytes.Buffer
+			a := &app{
+				stdout: &stdout,
+				stderr: &stderr,
+				build:  testBuild(),
+				newLima: func() *lima.Adapter {
+					return lima.New(fake)
+				},
+				lookupOperatorUser: func() (string, error) { return "testop", nil },
+			}
+			args := []string{"status"}
+			if tc.configPath != "" {
+				args = append(args, "--config", tc.configPath)
+			}
+			code := runWithApp(context.Background(), a, args)
+			if code != int(ExitOK) {
+				t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
+			}
+			if tc.writeRoot && !strings.Contains(stdout.String(), "torio\tstopped\t"+glyphUnknown) {
+				t.Errorf("stdout = %q, want one degraded row", stdout.String())
+			}
+			if !tc.writeRoot && !strings.Contains(stdout.String(), "torio\tstopped\t"+backend.DefaultName) {
+				t.Errorf("stdout = %q, want the box-owned default document", stdout.String())
+			}
+		})
 	}
 }
 
