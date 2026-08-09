@@ -66,6 +66,7 @@ func TestAddClonesAbsentPathAndRegistersProject(t *testing.T) {
 var allowedGuestPrograms = map[string]bool{
 	"true": true, "test": true, "stat": true, "find": true,
 	"chown": true, "chmod": true, "git": true, "hermes": true, "env": true,
+	"mkdir": true, "ssh-keygen": true, "cat": true,
 }
 
 // Nothing this package runs may reach the guest through a shell, and nothing it
@@ -146,6 +147,235 @@ func TestAddPreflightsRemoteBeforeCloning(t *testing.T) {
 	}
 	if len(r.saved) != 0 {
 		t.Fatalf("config was written after a failed preflight: %#v", r.saved)
+	}
+}
+
+// An unreadable SSH remote is the first run of an ordinary private repository,
+// not a dead end. Torio generates the guest-held half of the access itself and
+// reports the public half, so the operator has one act left: authorize it.
+func TestAddProvisionsDeployKeyWhenSSHRemoteUnreadable(t *testing.T) {
+	g := readyFake()
+	g.remoteReadable = false
+	r := emptyRegistry()
+
+	report, err := newTestManager(g, r).Add(context.Background(), addRequest())
+	assertKind(t, err, KindAuth)
+	for _, fragment := range []string{
+		"mkdir -p -m 0700 " + lima.HermesHome + "/.ssh " + lima.HermesHome + "/.ssh/torio",
+		"ssh-keygen -q -t ed25519",
+		"-f " + testKeyPath,
+		"cat " + testKeyPath + ".pub",
+		"-i " + testKeyPath,
+	} {
+		if !g.saw(fragment) {
+			t.Errorf("missing typed guest argv containing %q", fragment)
+		}
+	}
+	if report.DeployKey == nil {
+		t.Fatal("report.DeployKey = nil, want the public half and where to authorize it")
+	}
+	if report.DeployKey.PublicKey != testPublicKey {
+		t.Errorf("public key = %q, want %q", report.DeployKey.PublicKey, testPublicKey)
+	}
+	if report.DeployKey.Host != testHost {
+		t.Errorf("host = %q, want %q", report.DeployKey.Host, testHost)
+	}
+	if report.DeployKey.KeyPath != testKeyPath {
+		t.Errorf("key path = %q, want %q", report.DeployKey.KeyPath, testKeyPath)
+	}
+	if !slices.Contains(report.Notes, "deploy_key_generated") {
+		t.Errorf("notes = %v, want deploy_key_generated", report.Notes)
+	}
+	if g.saw("git clone") {
+		t.Fatalf("clone ran while the remote was still unreadable: %v", g.calls)
+	}
+	if len(r.saved) != 0 {
+		t.Fatalf("config was written before the remote could be read: %#v", r.saved)
+	}
+}
+
+// The generated key is offered on the same run it was created. A key authorized
+// out of band beforehand therefore attaches in one command, with no second run.
+func TestAddClonesWithAFreshKeyTheForgeAlreadyAccepts(t *testing.T) {
+	g := readyFake()
+	g.remoteReadable = false
+	g.keyAuthorized = true
+	r := emptyRegistry()
+
+	report, err := newTestManager(g, r).Add(context.Background(), addRequest())
+	if err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+	if !report.Cloned {
+		t.Fatalf("report = %#v, want a fresh clone", report)
+	}
+	if !g.saw("ssh-keygen -q -t ed25519") {
+		t.Errorf("no key was generated: %v", g.calls)
+	}
+	if !g.saw("git clone --quiet -- " + testRemote + " " + testPath) {
+		t.Errorf("clone did not run: %v", g.calls)
+	}
+}
+
+// The rerun after the operator authorizes the key is the same command again. It
+// reuses the key, clones with it, and leaves the identity able to fetch on its
+// own afterwards without Torio's environment.
+func TestAddReusesAnExistingKeyAndProvisionsGuestGitConfig(t *testing.T) {
+	g := readyFake()
+	g.remoteReadable = false
+	g.deployKeyExists = true
+	g.keyAuthorized = true
+	r := emptyRegistry()
+
+	report, err := newTestManager(g, r).Add(context.Background(), addRequest())
+	if err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+	if !report.Cloned || !report.Registered {
+		t.Fatalf("report = %#v, want a cloned, registered project", report)
+	}
+	if g.saw("ssh-keygen -q -t ed25519") {
+		t.Errorf("an existing key was regenerated: %v", g.calls)
+	}
+	for _, fragment := range []string{
+		"git ls-remote -- " + testRemote + " HEAD",
+		"-i " + testKeyPath,
+		// The recorded command, in full. A fetch the identity runs on its own has
+		// to select this key the way Torio's run did, and IdentitiesOnly is what
+		// makes selecting it mean using it: without the option ssh offers every
+		// identity it holds and the forge authenticates the wrong one.
+		"git config -f " + testKeyConfig + " core.sshCommand " +
+			"ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes -i " + testKeyPath,
+		"git config --global includeIf.gitdir:" + testPath + "/.path " + testKeyConfig,
+	} {
+		if !g.saw(fragment) {
+			t.Errorf("missing typed guest argv containing %q", fragment)
+		}
+	}
+	// The include is written for the identity that owns the checkout. Writing it
+	// for the operator would hand the operator a key it is not meant to use.
+	if !g.saw("sudo -n -u " + lima.HermesUser + " -- git config --global includeIf.gitdir:") {
+		t.Errorf("the Git include was not written as the owning identity: %v", g.calls)
+	}
+	if !slices.Contains(report.Notes, "deploy_key_used") {
+		t.Errorf("notes = %v, want deploy_key_used", report.Notes)
+	}
+}
+
+// An attach that reached the checkout and stopped before the registry write is
+// finished by a rerun that adopts rather than clones. The identity's own fetch
+// path is provisioned on that path too: it hangs on the key having been used,
+// not on this run having been the one that cloned.
+func TestAddProvisionsGuestGitConfigWhenAdoptingWithADeployKey(t *testing.T) {
+	g := attachedFake()
+	g.remoteReadable = false
+	g.deployKeyExists = true
+	g.keyAuthorized = true
+	r := emptyRegistry()
+
+	report, err := newTestManager(g, r).Add(context.Background(), addRequest())
+	if err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+	if report.Cloned || !report.Adopted {
+		t.Fatalf("report = %#v, want an adopted checkout", report)
+	}
+	for _, fragment := range []string{
+		"git config -f " + testKeyConfig + " core.sshCommand",
+		"git config --global includeIf.gitdir:" + testPath + "/.path " + testKeyConfig,
+	} {
+		if !g.saw(fragment) {
+			t.Errorf("adopting with a key left the identity unable to fetch: missing %q", fragment)
+		}
+	}
+	if !slices.Contains(report.Notes, "deploy_key_used") {
+		t.Errorf("notes = %v, want deploy_key_used", report.Notes)
+	}
+}
+
+// Rerunning before authorizing the key must not mint a second one. The key is
+// reported again, unchanged, because the act still missing is on the forge.
+func TestAddDoesNotRegenerateAnUnauthorizedDeployKey(t *testing.T) {
+	g := readyFake()
+	g.remoteReadable = false
+	g.deployKeyExists = true
+
+	report, err := newTestManager(g, emptyRegistry()).Add(context.Background(), addRequest())
+	assertKind(t, err, KindAuth)
+	if g.saw("ssh-keygen -q -t ed25519") {
+		t.Fatalf("a second key was generated: %v", g.calls)
+	}
+	if report.DeployKey == nil || report.DeployKey.PublicKey != testPublicKey {
+		t.Fatalf("report.DeployKey = %#v, want the existing key reported again", report.DeployKey)
+	}
+	if report.DeployKey.Generated {
+		t.Error("report claims it generated a key that was already there")
+	}
+	if !slices.Contains(report.Notes, "deploy_key_pending_authorization") {
+		t.Errorf("notes = %v, want deploy_key_pending_authorization", report.Notes)
+	}
+	if !strings.Contains(err.Error(), testHost) {
+		t.Errorf("error = %q, want it to name where to authorize the key", err)
+	}
+}
+
+// A repository the guest can already read is untouched by any of this: no key
+// is generated, offered or configured.
+func TestAddRunsNoKeyMachineryForAReadableRemote(t *testing.T) {
+	g := readyFake()
+
+	report, err := newTestManager(g, emptyRegistry()).Add(context.Background(), addRequest())
+	if err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+	if report.DeployKey != nil {
+		t.Errorf("report.DeployKey = %#v, want nil for a readable remote", report.DeployKey)
+	}
+	for _, fragment := range []string{"ssh-keygen -q", "-i " + testKeyPath, "core.sshCommand", "includeIf"} {
+		if g.saw(fragment) {
+			t.Errorf("a readable remote reached key machinery containing %q: %v", fragment, g.calls)
+		}
+	}
+}
+
+// Only the SSH transport can be provisioned this way. An unreadable HTTPS
+// remote needs a credential, which is the thing Torio does not hold, so it
+// keeps failing closed with nothing generated.
+func TestAddDoesNotProvisionAKeyForAnUnreadableHTTPSRemote(t *testing.T) {
+	const httpsRemote = "https://github.com/owner/demo.git"
+	g := readyFake()
+	g.remote = httpsRemote
+	g.remoteReadable = false
+	req := addRequest()
+	req.Remote = httpsRemote
+
+	report, err := newTestManager(g, emptyRegistry()).Add(context.Background(), req)
+	assertKind(t, err, KindAuth)
+	if report.DeployKey != nil {
+		t.Errorf("report.DeployKey = %#v, want nil for an HTTPS remote", report.DeployKey)
+	}
+	if g.saw("ssh-keygen -q") || g.saw("mkdir -p -m 0700") {
+		t.Errorf("an HTTPS remote reached key generation: %v", g.calls)
+	}
+}
+
+// The deploy key report is built beside the guest output a failing Git command
+// carries, which is where a credential shows up. None of it may reach it.
+func TestAddDeployKeyReportCarriesNoGuestOutput(t *testing.T) {
+	g := readyFake()
+	g.remoteReadable = false
+
+	report, err := newTestManager(g, emptyRegistry()).Add(context.Background(), addRequest())
+	if err == nil {
+		t.Fatal("Add() error = nil, want an auth failure")
+	}
+	if report.DeployKey == nil {
+		t.Fatal("report.DeployKey = nil, want a provisioned key")
+	}
+	for _, field := range []string{report.DeployKey.PublicKey, report.DeployKey.Host, report.DeployKey.KeyPath} {
+		if strings.Contains(field, testSecret) {
+			t.Fatalf("deploy key report echoed guest output carrying a secret: %q", field)
+		}
 	}
 }
 
@@ -639,6 +869,36 @@ func TestRemoveArchivesFirstAndKeepsTheCheckout(t *testing.T) {
 	}
 	if len(r.saved) != 1 || len(r.saved[0].Projects) != 0 {
 		t.Fatalf("persisted registry = %#v, want the entry gone", r.saved)
+	}
+}
+
+// Removal forgets a project, it does not revoke anything. A deploy key the
+// guest holds outlives the entry, so the report names it: the operator decides
+// whether to withdraw the authorization on the forge.
+func TestRemoveReportsARetainedDeployKey(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		hasKey   bool
+		wantNote bool
+	}{
+		{"key present", true, true},
+		{"no key", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := attachedFake()
+			g.deployKeyExists = tc.hasKey
+
+			report, err := newTestManager(g, registryWith(testProject())).Remove(context.Background(), testID)
+			if err != nil {
+				t.Fatalf("Remove() error = %v", err)
+			}
+			if got := slices.Contains(report.Notes, "deploy_key_retained"); got != tc.wantNote {
+				t.Fatalf("deploy_key_retained note = %v, want %v (notes %v)", got, tc.wantNote, report.Notes)
+			}
+			if g.saw("rm ") || g.saw("ssh-keygen -q") {
+				t.Fatalf("remove touched the key material: %v", g.calls)
+			}
+		})
 	}
 }
 

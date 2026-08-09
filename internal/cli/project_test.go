@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -843,6 +844,134 @@ func TestProjectNonProjectErrorIsInternal(t *testing.T) {
 	code, _, _ := runProjectCLI(t, []string{"project", "list"}, service)
 	if code != int(ExitInternal) {
 		t.Fatalf("exit = %d, want %d", code, ExitInternal)
+	}
+}
+
+// decodeProjectEnvelope parses the single envelope a --json run writes.
+func decodeProjectEnvelope(t *testing.T, stdout string) Envelope {
+	t.Helper()
+	var env Envelope
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("stdout is not one envelope (%v): %q", err, stdout)
+	}
+	return env
+}
+
+// testDeployKey is the report a manager returns when it has provisioned a key
+// the forge has not been told about yet.
+func testDeployKey() *projects.DeployKey {
+	return &projects.DeployKey{
+		PublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeFakeFakeFakeFakeFakeFakeFakeFakeFake torio-deploy-demo",
+		Host:      "github.com",
+		KeyPath:   "/home/hermes/.ssh/torio/demo",
+		Generated: true,
+	}
+}
+
+// The public key is the reason an unreadable private remote is actionable, so a
+// human run has to be able to see it and copy it. It belongs on stderr with the
+// diagnostic, because stdout stays free of mixed content on a failing command.
+func TestProjectAddPrintsTheDeployKeyOnStderr(t *testing.T) {
+	key := testDeployKey()
+	service := &fakeProjectService{
+		addReport: projects.AddReport{DeployKey: key, Notes: []string{"deploy_key_generated"}},
+		addErr: &projects.Error{
+			Op:   "add",
+			Kind: projects.KindAuth,
+			Err:  errors.New("the guest cannot read the remote yet; add its public key to the repository on github.com as a deploy key with write access off, not as an account key, then run the same command again"),
+		},
+	}
+	code, stdout, stderr := runProjectCLI(t, []string{"project", "add", "demo", "git@github.com:owner/demo.git"}, service)
+
+	if code != int(ExitPermission) {
+		t.Fatalf("exit = %d, want %d", code, ExitPermission)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want it empty on a failing command", stdout)
+	}
+	for _, want := range []string{key.PublicKey, key.Host, key.KeyPath, "run the same command again"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr = %q, want it to contain %q", stderr, want)
+		}
+	}
+	// The key has to survive as one selectable line; prose wrapped around it
+	// would make copying it a manual edit.
+	if !strings.Contains(stderr, "\n"+key.PublicKey+"\n") {
+		t.Errorf("stderr = %q, want the public key alone on its line", stderr)
+	}
+}
+
+// JSON mode carries the same facts in the error envelope. Nothing may be
+// printed beside the envelope, because that is the whole contract of --json.
+func TestProjectAddCarriesTheDeployKeyInTheErrorEnvelope(t *testing.T) {
+	key := testDeployKey()
+	service := &fakeProjectService{
+		addReport: projects.AddReport{DeployKey: key, Notes: []string{"deploy_key_generated"}},
+		addErr: &projects.Error{
+			Op:   "add",
+			Kind: projects.KindAuth,
+			Err:  errors.New("the guest cannot read the remote yet"),
+		},
+	}
+	code, stdout, stderr := runProjectCLI(t, []string{"project", "add", "demo", "git@github.com:owner/demo.git", "--json"}, service)
+
+	if code != int(ExitPermission) {
+		t.Fatalf("exit = %d, want %d", code, ExitPermission)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want --json to write nothing beside the envelope", stderr)
+	}
+	env := decodeProjectEnvelope(t, stdout)
+	if env.OK {
+		t.Fatalf("envelope ok = true, want a failure: %s", stdout)
+	}
+	// The machine-readable half of the exit-7 contract. A caller branches on the
+	// code, so it is pinned beside the exit status rather than derived from it.
+	if env.Error.Code != "AUTH" {
+		t.Errorf("error code = %q, want AUTH", env.Error.Code)
+	}
+	details, _ := env.Error.Details["deploy_key"].(map[string]any)
+	if details == nil {
+		t.Fatalf("error details = %#v, want a deploy_key object", env.Error.Details)
+	}
+	for field, want := range map[string]any{
+		"public_key": key.PublicKey,
+		"host":       key.Host,
+		"key_path":   key.KeyPath,
+		"generated":  true,
+	} {
+		if details[field] != want {
+			t.Errorf("deploy_key.%s = %#v, want %#v", field, details[field], want)
+		}
+	}
+	if notes, _ := env.Error.Details["notes"].(string); !strings.Contains(notes, "deploy_key_generated") {
+		t.Errorf("notes = %q, want deploy_key_generated", notes)
+	}
+}
+
+// Redaction is the last thing to touch an error path, and a public key looks
+// enough like opaque material to be worth pinning: it must survive intact while
+// a real secret shape beside it does not.
+func TestProjectAddDeployKeySurvivesRedaction(t *testing.T) {
+	key := testDeployKey()
+	service := &fakeProjectService{
+		addReport: projects.AddReport{DeployKey: key},
+		addErr: &projects.Error{
+			Op:   "add",
+			Kind: projects.KindAuth,
+			Err:  errors.New("the guest cannot read the remote yet, and " + knownShapeCanary + " must not survive this"),
+		},
+	}
+	code, stdout, stderr := runProjectCLI(t, []string{"project", "add", "demo", "git@github.com:owner/demo.git"}, service)
+
+	if code != int(ExitPermission) {
+		t.Fatalf("exit = %d, want %d", code, ExitPermission)
+	}
+	if !strings.Contains(stderr, key.PublicKey) {
+		t.Errorf("redaction ate the public key: %q", stderr)
+	}
+	if strings.Contains(stdout+stderr, knownShapeCanary) {
+		t.Errorf("output leaked a credential shape: %q %q", stdout, stderr)
 	}
 }
 

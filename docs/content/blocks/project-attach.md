@@ -19,20 +19,45 @@ derived from the project id — never taken from you, never stored in config.
 Without `--id`, the id is the name you gave, which must be a lowercase slug;
 pass `--id` to pick a different one.
 
-**Read access is your job.** Torio stores no Git credentials, prompts for none,
-and passes none to the model. A remote the guest cannot already read without
-prompting fails closed:
+**A private repository takes the same command.** Torio stores no Git
+credentials, prompts for none, and passes none to the model. A remote the guest
+cannot read still fails closed, at exit `7`. For an SSH remote that failure
+comes with the way through: the guest generates its own deploy key and prints
+the public half.
 
 ```text
-torio: project add: auth: the guest cannot read the remote noninteractively; provision access for the hermes user out of band
+The guest generated a deploy key for this project. Torio holds no copy of its private half.
+
+ssh-ed25519 AAAA…
+
+Add that key to the repository on github.com as a deploy key, with write access off,
+then run the same command again. Adding it to your account instead would give
+the guest write access to every repository that account can reach.
+Private half, on the guest, owned by the backend identity: /home/hermes/.ssh/torio/my-service
 ```
 
-That is exit `7`.
+On GitHub that is the repository's own **Settings → Deploy keys → Add deploy
+key**, with **Allow write access** left unchecked. Then run the same `add`
+again and the second run clones. A key you authorized before the first run
+attaches in one command, and a rerun before you authorize it reports the same
+key rather than making another.
 
-The fix is to grant the guest read access yourself, on the guest, outside Torio
-— not to re-run the command. Do not work around it by copying a checkout from
-your host: a recursive copy drags host Git config, hooks, and keys across the VM
-boundary, which is exactly the thing this path exists to prevent.
+Where you paste the key is the whole of what keeps it read-only. Torio cannot
+check which you did, because proving a key cannot write would take a push and
+Torio runs none. A key added to your account rather than to the repository
+attaches the project equally well and leaves the guest able to write everywhere,
+which is the one way this path can widen what the VM can do.
+
+The private half is generated on the guest, stays there, and is never read,
+copied, or stored by Torio. It is readable by the backend identity, which is the
+identity the model runs as, so treat it as a credential that lives where the
+agent lives. Push is unaffected: it still travels through the agent you forward
+with `project shell`.
+
+A private HTTPS remote has no such path, because reading one takes a stored
+credential. Use the SSH remote. Do not work around any of this by copying a
+checkout from your host: a recursive copy drags host Git config, hooks, and keys
+across the VM boundary, which is exactly the thing this path exists to prevent.
 
 Nothing on the guest is reset, cleaned, or deleted, so if `add` fails partway a
 rerun finishes the work instead of starting over.
@@ -52,3 +77,11 @@ on the guest, so it works with the VM stopped.
 `remove` archives the Hermes project and drops the config entry. **The checkout
 is never deleted** — the output tells you where it still is. There is no
 `--delete`.
+
+**A deploy key is never deleted either**, and unlike a checkout it is not inert.
+`remove` reports it as retained and touches nothing: the key stays on the guest
+and stays authorized on the forge until you withdraw it there. If you removed the
+project because the guest should no longer read that repository, deleting the
+deploy key on the forge is the step that makes it true. Deleting the guest file
+the output names is what makes the next `add` generate a fresh key, which is also
+how you rotate one.

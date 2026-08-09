@@ -110,6 +110,16 @@ func newProjectAddCmd(a *app) *cobra.Command {
 			if err != nil {
 				cliErr := mapProjectError("project.add", err)
 				cliErr.Details = projectNotesDetails(report.Notes)
+				// The public key is the reason this particular failure is
+				// actionable, so it is printed rather than described. In JSON mode
+				// it travels in the error details instead, because a human block on
+				// stdout would corrupt the envelope.
+				if key := report.DeployKey; key != nil {
+					cliErr.Details = withDeployKeyDetails(cliErr.Details, key)
+					if !a.jsonOut {
+						a.printDeployKey(key)
+					}
+				}
 				return cliErr
 			}
 			return a.emitProjectAdd(report)
@@ -961,6 +971,51 @@ func projectNotesDetails(in []string) map[string]any {
 	return map[string]any{"notes": strings.Join(in, ",")}
 }
 
+// withDeployKeyDetails adds the guest-held deploy key to a failure's details.
+// Every field is publishable: the public half, the host it has to be authorized
+// on, and the guest path of the private half, which is reported so an operator
+// can find it and never read by Torio.
+func withDeployKeyDetails(in map[string]any, key *projects.DeployKey) map[string]any {
+	out := in
+	if out == nil {
+		out = map[string]any{}
+	}
+	out["deploy_key"] = map[string]any{
+		"public_key": key.PublicKey,
+		"host":       key.Host,
+		"key_path":   key.KeyPath,
+		"generated":  key.Generated,
+	}
+	return out
+}
+
+// printDeployKey writes the operator's one remaining step.
+//
+// It goes to stderr with the diagnostic it belongs to, because this is a failing
+// command and stdout stays free of mixed content. The key is printed on its own
+// line so it can be selected or piped without picking up prose.
+//
+// It names where the key goes and what to leave off, because that is the only
+// place the read-only property is decided. Torio cannot check the choice
+// afterwards: proving the key cannot write would take a push, and Torio runs
+// none. The same key added to the account rather than to the repository
+// attaches the project identically and grants the guest write capability
+// everywhere, so the warning belongs next to the key and not in a document.
+func (a *app) printDeployKey(key *projects.DeployKey) {
+	state := "The guest already held a deploy key for this project"
+	if key.Generated {
+		state = "The guest generated a deploy key for this project"
+	}
+	fmt.Fprintf(a.stderr,
+		"%s. Torio holds no copy of its private half.\n\n"+
+			"%s\n\n"+
+			"Add that key to the repository on %s as a deploy key, with write access off,\n"+
+			"then run the same command again. Adding it to your account instead would give\n"+
+			"the guest write access to every repository that account can reach.\n"+
+			"Private half, on the guest, owned by the backend identity: %s\n\n",
+		state, key.PublicKey, key.Host, key.KeyPath)
+}
+
 // serviceEnvState names the three outcomes of the post-session check. A guest
 // with no backend installed reports "not checked" rather than "clean": there
 // was nothing to leak into, which is not the same as having looked and found
@@ -1007,9 +1062,12 @@ func mapInteractiveSessionError(command, label string, err error) *CLIError {
 // ErrorKind (never string matching).
 //
 // Two kinds are worth naming. KindAuth is a permission denial (exit 7), not an
-// external outage: the guest reached the remote and was refused, and the remedy
-// is a human provisioning access out of band — Torio stores no credentials and
-// retrying changes nothing. KindConfigWrite is reconciliation required (exit 9):
+// external outage: the guest reached the remote and was refused. For an SSH
+// remote the remedy is the deploy key the error carries, authorized on the
+// forge, after which the same command succeeds; for anything else it is access
+// provisioned out of band, because Torio stores no credential of its own.
+// Either way the retry follows a human act, never the retry alone.
+// KindConfigWrite is reconciliation required (exit 9):
 // the guest work succeeded and only the registry write did not, so the guest and
 // config now disagree and a rerun finishes the operation.
 func mapProjectError(command string, err error) *CLIError {

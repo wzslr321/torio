@@ -132,6 +132,16 @@ Torio stores no Git write credential, automates no push, merge or release, and
 runs no test push to prove anything. A remote carrying an embedded password,
 token, query or fragment is rejected.
 
+Read access to a private SSH remote is provisioned in the guest and stays there.
+`project add` generates an ed25519 key owned by the backend identity under
+`<home>/.ssh/torio/<id>`, offers it to that one remote with `IdentitiesOnly`,
+and reports the public half for a human to authorize on the forge. The host
+holds no copy and the private half is never read back. The key is read-only if
+you add it to the repository as a deploy key with write access off; added to
+your account instead it grants the guest write access account-wide, and Torio
+cannot tell the two apart, because checking would take a push it does not run
+([ADR-0018](adr/0018-guest-held-deploy-key-for-read-access.md)).
+
 ## MCP custody boundary
 
 MCP credentials belong to a separate unprivileged identity `torio-mcp`, whose

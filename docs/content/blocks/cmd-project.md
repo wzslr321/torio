@@ -29,9 +29,10 @@ guest from the remote already on record — a separate step rather than somethin
 checkouts are independent working trees; what passes between them is what you
 push.
 
-**Torio stores no Git credentials.** A remote the guest cannot already read
-without prompting fails closed; the fix is a human granting access on the guest,
-outside Torio, not a retry.
+**Torio stores no Git credentials.** A remote the guest cannot read without
+prompting fails closed. For an SSH remote, `add` generates a read-only deploy
+key on the guest and prints the public half; authorizing it on the forge is a
+human act, and the same command run again finishes the attach.
 
 `add` resets, cleans, and deletes nothing on the guest, so a rerun after a
 failure finishes the work rather than starting over.

@@ -436,9 +436,25 @@ torio project shell <id>
   closed with `NO_REGISTRY` (exit 3) naming the backend, since there is no
   active project to select
   ([ADR-0009](../adr/0009-backend-contract-and-claude-code.md)).
-- **Torio stores no Git credentials.** A remote the guest cannot already read
-  non-interactively is fail-closed (exit 7) — the remedy is a human granting
-  access outside Torio, not a retry.
+- **Torio holds no Git credential on the host.** A remote the guest cannot read
+  non-interactively is fail-closed (exit 7). For an SSH remote, `add` generates a
+  deploy key owned by the backend identity and offers it to that remote alone;
+  the exit-7 error then carries `deploy_key` details (`public_key`, `host`,
+  `key_path`, `generated`) and the human path prints the public key on stderr.
+  Authorizing it on the forge is a human act, after which the same command
+  succeeds. A rerun before authorization reports the same key and does not
+  generate another. The private half is never read, transported or stored by
+  Torio. The key is read-only only if it is added to the repository as a deploy
+  key without write access; Torio asserts no more than that, because verifying
+  it would take a push it does not run
+  ([ADR-0018](../adr/0018-guest-held-deploy-key-for-read-access.md)).
+- **Deploy key state is reported in `notes`**, never in prose parsed from output:
+  `deploy_key_generated` (this run created it), `deploy_key_pending_authorization`
+  (one was already held and the remote still does not read),
+  `deploy_key_used` (the attach reached the remote through it), and
+  `deploy_key_retained` on `remove`. Removal forgets a project and deletes no
+  key: the file stays on the guest and the authorization stays on the forge
+  until an operator withdraws it there.
 - `add` clones exactly the given remote into the derived path **or** verifies and
   adopts a checkout already there, gives the operator and the backend identity
   shared access, and registers the project where the backend keeps a registry
