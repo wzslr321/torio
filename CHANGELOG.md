@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.3.3 - 2026-08-09
+
+**Migration first: a Claude Code box bootstrapped before this release reports
+settings drift and refuses.** Bootstrap now installs the waiting-marker hooks
+into the managed settings, and drift is reported, never repaired in place.
+Remove `/etc/claude-code/managed-settings.json` on the guest and run
+`torio vm bootstrap --backend claude-code` again; a Hermes box needs nothing.
+
 ### Added
 
 - **`torio status`, one row per box.** Running several agents, there was no way
@@ -130,6 +138,20 @@
   is none.
 - `docs/adr/README.md` lists ADR-0012 and ADR-0013, which shipped in 0.3.2
   without reaching the index.
+- **The tree is linted, and the gate is committed.** `golangci-lint` runs the
+  standard set on a committed `.golangci.yml`, locally as `make lint` and in
+  CI; every exception the config makes is written down where it is made. The
+  first run's findings are fixed: the hermes-specific spellings the backend
+  generalisation left behind are deleted along with the serve adapter's
+  caller-less accessors, error-path closes discard their results explicitly,
+  and duplicated struct copies became conversions.
+- The site caught up with the product: the home page states the
+  one-VM-per-agent rule and hands the several-boxes question to `torio status`,
+  and mediated forwarding with the push grant reached the push how-to, the
+  explanation page and the README. The per-release notes directory is gone;
+  the CHANGELOG and generated release notes are the record, and CONTRIBUTING
+  now states the release procedure that previously existed only as workflow
+  YAML.
 
 ## 0.3.2 - 2026-08-09
 
