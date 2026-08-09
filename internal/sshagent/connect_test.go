@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -111,7 +112,7 @@ func TestPinIdentityDropsTheDialCause(t *testing.T) {
 // control. Socket modes are not honoured uniformly across platforms; a
 // directory's are.
 func TestListenIsPrivateAndTemporary(t *testing.T) {
-	root := t.TempDir()
+	root := shortTempRoot(t)
 	socket, err := Listen(root)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -140,7 +141,7 @@ func TestListenIsPrivateAndTemporary(t *testing.T) {
 // TestListenGivesEachSessionItsOwnPath proves a path never names two
 // capabilities, so a stale socket from a crashed session is not rebound.
 func TestListenGivesEachSessionItsOwnPath(t *testing.T) {
-	root := t.TempDir()
+	root := shortTempRoot(t)
 	first, err := Listen(root)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -161,5 +162,31 @@ func TestUpstreamFromEnvRefusesAnUnsetAgent(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
 	if _, err := UpstreamFromEnv(); err == nil || !strings.Contains(err.Error(), "SSH_AUTH_SOCK") {
 		t.Errorf("UpstreamFromEnv() error = %v, want the unset-agent refusal", err)
+	}
+}
+
+// shortTempRoot is t.TempDir() without the length.
+//
+// A Unix socket path is capped near 104 bytes, and on macOS t.TempDir() spends
+// about 91 of them on the per-test directory alone — the test name is in the
+// path. Production binds under os.TempDir() with no such prefix, so a test that
+// failed on length would be reporting the harness, not the code. This keeps the
+// length limit itself testable by not tripping over it everywhere else.
+func shortTempRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "t")
+	if err != nil {
+		t.Fatalf("create a short temp root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
+// TestListenRefusesAnOverlongPath keeps the bound honest now that the other
+// tests deliberately stay under it.
+func TestListenRefusesAnOverlongPath(t *testing.T) {
+	root := filepath.Join(shortTempRoot(t), strings.Repeat("d", 120))
+	if _, err := Listen(root); err == nil || !strings.Contains(err.Error(), "byte limit") {
+		t.Errorf("Listen() error = %v, want the socket path length refusal", err)
 	}
 }

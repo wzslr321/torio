@@ -38,7 +38,7 @@ func askOperator(ctx context.Context, runner execx.Runner, timeout time.Duration
 	result, err := runner.Run(ctx, execx.Command{
 		Name:    "osascript",
 		Args:    []string{"-e", osascriptProgram},
-		Env:     append(os.Environ(), promptEnvVar+"="+message),
+		Env:     withPromptMessage(os.Environ(), message),
 		Timeout: timeout,
 	})
 	if err != nil {

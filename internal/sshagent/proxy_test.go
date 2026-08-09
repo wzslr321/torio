@@ -449,7 +449,7 @@ func TestServeOverARealSocket(t *testing.T) {
 
 func unixListener(t *testing.T) net.Listener {
 	t.Helper()
-	socket, err := Listen(t.TempDir())
+	socket, err := Listen(shortTempRoot(t))
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
 	}

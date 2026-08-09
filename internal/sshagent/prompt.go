@@ -94,6 +94,27 @@ func describeKey(id Identity) string {
 	return id.Fingerprint() + " (" + id.Comment + ")"
 }
 
+// withPromptMessage returns env carrying exactly one assignment of
+// promptEnvVar.
+//
+// Every existing assignment is dropped rather than a new one being appended
+// after them. Which of two assignments a program resolves to is not a thing to
+// rely on, and here the answer decides what the operator reads before approving
+// a signature: a variable of this name already exported in the operator's shell
+// — left over from testing the dialog, say — must not be able to write the text
+// of a security prompt.
+func withPromptMessage(env []string, message string) []string {
+	prefix := promptEnvVar + "="
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, prefix+message)
+}
+
 // errDenied is the outcome for every answer that is not approval, including a
 // closed dialog, an expired one and a platform with no way to ask. They are one
 // outcome on purpose: the proxy acts on approval, and everything else is its

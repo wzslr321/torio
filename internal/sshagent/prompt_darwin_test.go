@@ -80,16 +80,19 @@ func TestAskOperatorBoundsTheDialogWithTheCommand(t *testing.T) {
 	if runner.seen.Name != "osascript" {
 		t.Errorf("dialog command = %q, want osascript", runner.seen.Name)
 	}
-	var carried bool
+	// Collect every assignment, not the first: an inherited one would otherwise
+	// satisfy this test while the operator read somebody else's text.
+	var assignments []string
 	for _, kv := range runner.seen.Env {
 		if strings.HasPrefix(kv, promptEnvVar+"=") {
-			carried = true
-			if !strings.Contains(kv, "message") {
-				t.Errorf("dialog message did not reach the environment: %q", kv)
-			}
+			assignments = append(assignments, kv)
 		}
 	}
-	if !carried {
-		t.Errorf("dialog command does not carry %s", promptEnvVar)
+	if len(assignments) != 1 {
+		t.Fatalf("dialog command carries %d assignments of %s, want exactly one: %v",
+			len(assignments), promptEnvVar, assignments)
+	}
+	if assignments[0] != promptEnvVar+"=message" {
+		t.Errorf("dialog message = %q, want the one this call passed", assignments[0])
 	}
 }
