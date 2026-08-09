@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-Ten records cover the decisions that govern the delivered binary, the vault
+Thirteen records cover the decisions that govern the delivered binary, the vault
 standard it writes against, how both are published, and how the behaviour that
 standard asks for is measured.
 
@@ -16,6 +16,9 @@ standard asks for is measured.
 | [0009](0009-backend-contract-and-claude-code.md) | An instance runs one backend, declared by a contract; a backend declares what it has, and verification checks exactly that; Claude Code is the second one |
 | [0010](0010-okf-vault-standard-and-brain-kit.md) | The vault format is written down as a profile of OKF, and it ships as a kit installable without the VM; the kit is content, Torio is mechanics |
 | [0011](0011-measured-brain-behaviour.md) | What the brain does autonomously is measured against a committed benchmark; scenarios are backend-neutral, the vault diff is the evidence, and no CI gate exists until its cost is known |
+| [0012](0012-mcp-broker-transport-and-oauth.md) | The broker carries Streamable HTTP through operator-authorized OAuth; policy is intersected with upstream discovery and the daemon ships as a release payload |
+| [0013](0013-mcp-managed-client-config-and-activation.md) | Claude's MCP route is root-managed configuration, and the broker unit activates only after the last required login |
+| [0014](0014-okf-profile-divergence-and-log-files.md) | The OKF profile adopts `log.md`, drops frontmatter from directory indexes, and names its one remaining divergence |
 
 ## Rules
 

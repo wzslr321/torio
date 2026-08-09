@@ -37,11 +37,17 @@ From the base format, unchanged:
 
 - Relative Markdown links between notes are the graph. There is no separate
   link table and no link syntax outside Markdown's own.
-- A directory MAY carry an `index.md` that curates its contents for a reader.
+- Two filenames are reserved and are not notes: `index.md`, which curates a
+  directory's contents, and `log.md`, which records the history of changes at
+  its level. Neither carries frontmatter.
 
 A profile narrows a base format; it does not extend it. Everything below is a
-constraint on how those fields are used in a Torio vault, and a note that
-satisfies the Torio profile is by construction a valid OKF document.
+constraint on how those fields are used in a Torio vault, with **one deliberate
+divergence**: the root `index.md` carries `type: vault`, where the base format
+permits only `okf_version` there. That marker is how a directory is known to be
+a vault (§7), and without it this kit would be guessing about whose files it is
+writing into. Every other file in a conforming Torio vault is a conforming OKF
+document.
 
 **Wikilinks (`[[note]]`) MUST NOT be used.** They resolve against one
 application's private index, so a plain Markdown reader cannot follow them and
@@ -50,12 +56,11 @@ does not get to depend on one tool's resolution rules.
 
 ## 2. Note types
 
-Eight types. A vault MAY define more; the skills in this kit understand these.
+Seven types. A vault MAY define more; the skills in this kit understand these.
 
 | `type` | Lives in | One per |
 | --- | --- | --- |
 | `vault` | `index.md` at the root | vault |
-| `index` | `<dir>/index.md` | directory |
 | `capture` | `inbox/` | captured thought |
 | `daily` | `daily/` | calendar day |
 | `meeting` | `meetings/` | meeting |
@@ -192,7 +197,7 @@ link is not a `resource` note.
 
 Example: [`examples/vault/resources/open-knowledge-format.md`](examples/vault/resources/open-knowledge-format.md).
 
-### 2.7 `index` and `vault`
+### 2.7 `index.md` and the root `vault`
 
 An `index.md` is a curated entry point — a map of what is in a directory and why
 a reader would want it. It is written by hand or by the librarian, never
@@ -204,32 +209,48 @@ of it it carries (§9), so an index that runs long does not get a smaller share 
 attention — it loses its tail outright, and the tail is where an unwary author
 puts the section that changes most often.
 
-```yaml
----
-type: index
-title: Projects
-description: What is being worked on, and what is parked.
----
-```
+An `index.md` below the root carries **no frontmatter**. It is a body of one or
+more sections, each grouping notes under a heading with a link and a line saying
+why a reader would open it.
 
-The vault's root `index.md` is the same idea with `type: vault`, and it is what
-identifies a directory as a Torio vault (§7).
+The root `index.md` is the one exception, and the only file in the vault that
+diverges from the base format (§1). It declares the vault and the spec version
+it targets:
 
 ```yaml
 ---
 type: vault
 title: Second Brain
 description: A private Markdown vault, written to the Torio Vault standard.
+okf_version: "0.2"
 ---
 ```
 
 Examples: [`examples/vault/index.md`](examples/vault/index.md) and
 [`examples/vault/projects/index.md`](examples/vault/projects/index.md).
 
+### 2.8 `log.md`
+
+A `log.md` MAY appear in any directory, and records the history of changes **at
+that scope** — the vault's own `log.md` carries structural changes, a
+directory's carries what happened to that directory. What happened to one
+project belongs in that project's `## Log` (§4), not here.
+
+It carries no frontmatter. Date headings are ISO 8601 `YYYY-MM-DD`, newest
+first. Entries are prose; a leading bold word (`**Update**`, `**Creation**`,
+`**Deprecation**`) is a convention, not a requirement.
+
+```markdown
+## 2026-08-09
+
+**Update** `initiatives/` merged into `projects/`; both held `type: project`.
+```
+
 ## 3. Layout and naming
 
 ```
 index.md          type: vault — the root map
+log.md            structural change history; no frontmatter (optional)
 todo.md           open actions, plain Markdown, no frontmatter
 inbox/            type: capture — unrouted
 daily/            type: daily
@@ -253,10 +274,10 @@ Filenames:
 - `people/<given>-<family>.md`, `projects/<slug>.md`, `resources/<slug>.md`.
 - One topic per file. A note about two things is two notes and a link.
 
-`todo.md` and `attachments/` are the two things in a vault that are not notes.
-`todo.md` is a working list an agent appends to and a human prunes; giving it
-frontmatter and a type would invite treating it as a queue, which is a different
-product.
+Four things in a vault are not notes: the reserved `index.md` and `log.md`,
+plus `todo.md` and `attachments/`. `todo.md` is a working list an agent appends
+to and a human prunes; giving it frontmatter and a type would invite treating it
+as a queue, which is a different product.
 
 ## 4. Sections
 

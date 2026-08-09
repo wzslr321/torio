@@ -2,6 +2,7 @@
 type: vault
 title: Second Brain
 description: A private Markdown vault, written to the Torio Vault standard.
+okf_version: "0.2"
 ---
 
 # Second Brain

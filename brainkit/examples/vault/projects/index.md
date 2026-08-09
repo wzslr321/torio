@@ -1,9 +1,3 @@
----
-type: index
-title: Projects
-description: What is being worked on, and what is parked.
----
-
 # Projects
 
 ## Active

@@ -28,6 +28,20 @@
 - The Brain Kit is `0.2.0`. §9 gained a requirement renderings must meet, so a
   rendering that documents no bound stops conforming; every vault that conformed
   to `0.1.0` still conforms.
+- **The vault standard adopts `log.md` and stops overclaiming OKF conformance**
+  ([ADR-0014](docs/adr/0014-okf-profile-divergence-and-log-files.md)). OKF
+  reserves two filenames and we had adopted one: `log.md` — change history
+  scoped to a directory — was missing entirely, which is why ageing content had
+  no answer in the format we chose precisely for having one. Meanwhile every
+  `index.md` carried a `type`, where the base format permits frontmatter in the
+  root index alone. Directory indexes lose their frontmatter and `index` stops
+  being a note type; the root keeps `type: vault`, because it is what stops this
+  kit writing into a directory that merely happens to be called `brain`, and it
+  now declares `okf_version` so a future major bump cannot rename a reserved
+  filename underneath us. §1 names that one divergence instead of claiming there
+  is none.
+- `docs/adr/README.md` lists ADR-0012 and ADR-0013, which shipped in 0.3.2
+  without reaching the index.
 
 ## 0.3.2 - 2026-08-09
 

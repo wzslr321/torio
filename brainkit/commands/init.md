@@ -24,14 +24,15 @@ Look at the target directory before writing anything.
 
 Write, under the vault root:
 
-- `index.md` with `type: vault` frontmatter and a short map of the directories,
+- `index.md` with `type: vault` and `okf_version: "0.2"` frontmatter — the only
+  `index.md` that carries any — and a short map of the directories,
   modelled on `${CLAUDE_PLUGIN_ROOT}/examples/vault/index.md`. Keep the body
   within 25 lines: that is what the session-start hook carries, and anything
   past it is dropped silently.
 - The directories from §3: `inbox/`, `daily/`, `projects/`, `people/`,
   `meetings/`, `resources/`, `attachments/`.
-- `projects/index.md` and `people/index.md`, each `type: index`, each honest
-  about being empty.
+- `projects/index.md` and `people/index.md`, each honest about being empty.
+  An `index.md` below the root carries **no frontmatter** (§2.7).
 - `todo.md` with `## Now`, `## Waiting`, `## Someday` and nothing under them.
 
 Do not copy the sample notes in. An example vault with Jane Doe in it is not a

@@ -2,6 +2,9 @@
 
 - Status: Accepted
 - Date: 2026-08-08
+- Superseded in part by:
+  [ADR-0014](0014-okf-profile-divergence-and-log-files.md), for the claim that a
+  vault written to this standard is readable by anything that reads OKF.
 - Applies to: `brainkit/`, `.claude-plugin/`, `README.md`
 
 ## Context
