@@ -32,8 +32,8 @@ const (
 	// MaxMarkerWaits bounds both the document and the work needed to rank it.
 	// Session ids are bounded separately, so the complete marker stays small.
 	MaxMarkerWaits = 64
-	// MarkerTTL is how long a marker is trusted, measured from its modification
-	// time.
+	// MarkerTTL is how long an individual wait is trusted, measured from the
+	// timestamp the managed hook recorded for it.
 	//
 	// The failure it bounds is asymmetric on purpose. A marker nobody cleared —
 	// because the process died between asking and being answered — would

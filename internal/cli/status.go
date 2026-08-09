@@ -160,8 +160,8 @@ func (a *app) resolveBoxBackend(instance string) status.Resolution {
 }
 
 // backendForDerivedInstance reverses the name derivation. It answers only for
-// names Torio itself would have produced; anything else is empty, which
-// Lookup then refuses rather than resolving to the default.
+// names Torio itself would have produced; anything else is empty and the
+// caller applies ADR-0009's default backend.
 func backendForDerivedInstance(instance string) string {
 	if instance == config.DefaultInstance {
 		return backend.DefaultName

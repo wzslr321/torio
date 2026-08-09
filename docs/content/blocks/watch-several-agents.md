@@ -8,7 +8,7 @@ box:
 $ torio status
 INSTANCE           BOX      BACKEND      SESSION  WAITING                    PROGRESS
 torio              running  hermes       —        ?                          14s
-torio-claude-code  running  claude-code  2        notification 7m pid 11673  —
+torio-claude-code  running  claude-code  2        yes 7m pid 11673 +1  —
 ```
 
 Asking is still asking, though, and the answer is worth having without asking.

@@ -1,4 +1,4 @@
-# ADR-0017: Status is a poll of facts; events only ring the bell
+# ADR-0017: Status is a poll of facts
 
 - Status: Accepted
 - Date: 2026-08-08
@@ -11,10 +11,9 @@ ADR-0009 made instances plural: one operator, several boxes, each running a
 different agent. That creates a question no command answers today — across all
 of them, which agents exist, which are working, which are waiting on a human,
 which are dead. The operator wants that answer ambiently, in the terminal they
-already sit in: a tmux status line, a prompt segment, a notification when an
-agent blocks on a permission. Rendering any of those is trivial and none of it
-is Torio's business. What is Torio's business is that there is currently no
-truthful state to render, and a status surface that renders an untruthful one
+already sit in: a tmux status line or a prompt segment. What is Torio's business
+is that there is currently no truthful state to render, and a status surface
+that renders an untruthful one
 is worse than none: a bar that says "working" over a dead agent teaches the
 operator to stop looking at it.
 
@@ -60,17 +59,15 @@ all.
 
 `torio status` emits one document describing every instance. Torio never
 learns a backend's native status format: a backend integrates by declaring a
-probe whose output conforms to Torio's schema, and a future backend — Codex,
-whatever follows — is added by writing that probe, touching no reader, no
-schema, no renderer.
+probe whose output conforms to Torio's schema.
 
 The schema is the intersection of what every backend can prove, not the
-union of what each one knows. Every field carries four-valued semantics, the
+union of what each one knows. Every field carries three-valued semantics, the
 same set `credentialState` already uses: not applicable (the capability is
 undeclared), unknown (declared, but unprovable right now), or a value. A
-renderer must show absence as absence — `—`, never `0`, never a green light —
-because on a multi-backend host most of the surface is "not knowable here"
-and that must be distinguishable from "all quiet".
+renderer must show an undeclared capability as `—` and an unproven answer as
+`?`, never either as `0` or a green light, because both must remain
+distinguishable from "all quiet".
 
 The v1 vocabulary, chosen because each entry is provable today:
 
@@ -125,22 +122,10 @@ semantics in tested Go code avoids duplicating the schema in `jq` recipes.
 A projection performs no additional probe, persists no state and accepts no
 agent-authored prose. The tmux projection may contain tmux style sequences; the
 prompt projection contains none. `torio status setup tmux|zsh` prints a tested
-integration snippet, but writes no dotfile, owns no watcher or cache, does not
-replace unrelated theme or status settings, and keeps guest polling out of a
-synchronous prompt.
-
-### Events ring the bell; they never set the state
-
-Push signals — Claude Code hooks today, a Hermes gateway change when it
-lands — may trigger a notification: a terminal bell, a tab title, an OS
-notification. That is a latency optimization over the poll, worth having
-because the "an agent needs you now" moment deserves seconds, not a poll
-interval. It is never a source of state, and no Torio process subscribes to
-anything: whatever listens — tmux's status interval, a shell prompt, a hook
-emitting an escape sequence — is owned by a process the operator already
-runs. `--watch` is deferred with it: a foreground watcher is the first
-long-lived Torio process outside an interactive session, and it adds
-freshness, not correctness.
+integration snippet, but writes no dotfile, owns no watcher, does not replace
+unrelated theme or status settings, and keeps guest polling out of a synchronous
+prompt. The zsh snippet maintains one private transient cache file so the prompt
+only reads a completed poll.
 
 ### The probe is a declared capability, and its output is untrusted
 
@@ -152,10 +137,10 @@ guest command to discover what it was already told.
 Probe output crosses the ADR-0002 boundary and is handled like every other
 guest answer: size-capped, decoded strictly with unknown fields refused and
 a second decode required to find EOF, and refused entirely when truncated.
-Its values are render-only — no path, command, or control flow is ever
-derived from them. Only identifiers and enum values may reach a terminal
-escape sequence; agent-authored prose (session titles above all) never does,
-for the same reason guest filenames never reach Torio's output today.
+No path or command is derived from its values. Only identifiers and enum values
+may reach a terminal escape sequence; agent-authored prose (session titles
+above all) never does, for the same reason guest filenames never reach Torio's
+output today.
 
 ## Consequences
 

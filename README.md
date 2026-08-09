@@ -121,7 +121,7 @@ one you stop reading.
 $ torio status
 INSTANCE            BOX      BACKEND      SESSION  WAITING          PROGRESS
 torio               running  hermes       —        ?                24s
-torio-claude-code   running  claude-code  1        notification 3m  —
+torio-claude-code   running  claude-code  1        yes 3m pid 11673  —
 ```
 
 It exits 0 whatever it finds, so something can call it on a timer and put the

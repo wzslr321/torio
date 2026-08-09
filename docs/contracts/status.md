@@ -46,8 +46,8 @@ until the state has been read:
 The distinction is the point. On a host running several backends most of any row
 is "not knowable here", and an operator who cannot tell that from "all quiet"
 stops looking at the surface — which is the failure a status surface exists to
-prevent. A renderer must show both silences as absence, never as a zero and
-never as a green light.
+prevent. A renderer shows `unknown` as `?`, `not-applicable` as `—`, and neither
+as a zero or a green light.
 
 Payload fields carry their zero value when the state is not `known`. Read
 `.state` first; `.waiting.waiting` is `false` under `"state": "unknown"` and
@@ -154,8 +154,8 @@ bound what a lost or stale event can claim.
 as the backend's identity. It stays one fixed path: the poll never enumerates
 agent-controlled filenames or derives a path from guest output.
 
-**Content** — strictly decoded: unknown fields refused, a second document after
-it refused, an unrecognized `kind` refused.
+**Content** — strictly decoded: unknown fields and a second document after it
+are refused.
 
 ```json
 {
