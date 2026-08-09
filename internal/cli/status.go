@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -144,7 +145,12 @@ func (a *app) resolveBoxBackend(instance string) status.Resolution {
 	}
 	name := rt.File.Backend
 	if name == "" {
-		name = backendForDerivedInstance(instance)
+		// TORIO_INSTANCE names a box directly. Its spelling carries no backend
+		// declaration even when it happens to begin with Torio's derived prefix.
+		// An absent declaration therefore keeps ADR-0009's Hermes default.
+		if strings.TrimSpace(os.Getenv(config.InstanceEnvKey)) != instance {
+			name = backendForDerivedInstance(instance)
+		}
 		if name == "" {
 			// ADR-0009 defines an absent declaration as Hermes for every
 			// instance, including one TORIO_INSTANCE named directly. The

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/wzslr321/torio/internal/backend"
+	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
 	"github.com/wzslr321/torio/internal/status"
@@ -255,6 +256,21 @@ func TestCustomInstanceWithNoBackendDeclarationDefaultsToHermes(t *testing.T) {
 	}
 	if got.Name != backend.DefaultName || got.Backend == nil {
 		t.Fatalf("resolution = %+v, want the ADR-0009 default backend", got)
+	}
+}
+
+func TestDirectInstanceWithDerivedPrefixStillDefaultsToHermes(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	const instance = "torio-ci-hermes-123-1"
+	t.Setenv(config.InstanceEnvKey, instance)
+
+	got := (&app{instance: instance}).resolveBoxBackend(instance)
+
+	if got.Err != nil {
+		t.Fatalf("resolveBoxBackend: %v", got.Err)
+	}
+	if got.Name != backend.DefaultName || got.Backend == nil {
+		t.Fatalf("resolution = %+v, want the default backend for a directly selected box", got)
 	}
 }
 
