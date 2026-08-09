@@ -240,7 +240,12 @@ func TestAddReusesAnExistingKeyAndProvisionsGuestGitConfig(t *testing.T) {
 	for _, fragment := range []string{
 		"git ls-remote -- " + testRemote + " HEAD",
 		"-i " + testKeyPath,
-		"git config -f " + testKeyConfig + " core.sshCommand",
+		// The recorded command, in full. A fetch the identity runs on its own has
+		// to select this key the way Torio's run did, and IdentitiesOnly is what
+		// makes selecting it mean using it: without the option ssh offers every
+		// identity it holds and the forge authenticates the wrong one.
+		"git config -f " + testKeyConfig + " core.sshCommand " +
+			"ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes -i " + testKeyPath,
 		"git config --global includeIf.gitdir:" + testPath + "/.path " + testKeyConfig,
 	} {
 		if !g.saw(fragment) {
@@ -251,6 +256,37 @@ func TestAddReusesAnExistingKeyAndProvisionsGuestGitConfig(t *testing.T) {
 	// for the operator would hand the operator a key it is not meant to use.
 	if !g.saw("sudo -n -u " + lima.HermesUser + " -- git config --global includeIf.gitdir:") {
 		t.Errorf("the Git include was not written as the owning identity: %v", g.calls)
+	}
+	if !slices.Contains(report.Notes, "deploy_key_used") {
+		t.Errorf("notes = %v, want deploy_key_used", report.Notes)
+	}
+}
+
+// An attach that reached the checkout and stopped before the registry write is
+// finished by a rerun that adopts rather than clones. The identity's own fetch
+// path is provisioned on that path too: it hangs on the key having been used,
+// not on this run having been the one that cloned.
+func TestAddProvisionsGuestGitConfigWhenAdoptingWithADeployKey(t *testing.T) {
+	g := attachedFake()
+	g.remoteReadable = false
+	g.deployKeyExists = true
+	g.keyAuthorized = true
+	r := emptyRegistry()
+
+	report, err := newTestManager(g, r).Add(context.Background(), addRequest())
+	if err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+	if report.Cloned || !report.Adopted {
+		t.Fatalf("report = %#v, want an adopted checkout", report)
+	}
+	for _, fragment := range []string{
+		"git config -f " + testKeyConfig + " core.sshCommand",
+		"git config --global includeIf.gitdir:" + testPath + "/.path " + testKeyConfig,
+	} {
+		if !g.saw(fragment) {
+			t.Errorf("adopting with a key left the identity unable to fetch: missing %q", fragment)
+		}
 	}
 	if !slices.Contains(report.Notes, "deploy_key_used") {
 		t.Errorf("notes = %v, want deploy_key_used", report.Notes)

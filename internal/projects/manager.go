@@ -720,8 +720,14 @@ func unreadableRemoteError(op string, key *DeployKey) error {
 	// Without a position: the human path prints the key above this line, the JSON
 	// path carries it in the error details, and a message naming a place is wrong
 	// in one of them.
+	//
+	// It names the deploy key mechanism rather than saying "authorize", because
+	// the read-only property this decision rests on comes from where the key is
+	// added and nowhere else. Added to the account instead of to the repository,
+	// the same key attaches the project just as well and hands the guest write
+	// capability over every repository the account can reach.
 	return &Error{Op: op, Kind: KindAuth, Err: fmt.Errorf(
-		"the guest cannot read the remote yet; authorize its read-only deploy key for read access on %s, then run the same command again", key.Host)}
+		"the guest cannot read the remote yet; add its public key to the repository on %s as a deploy key with write access off, not as an account key, then run the same command again", key.Host)}
 }
 
 // ensureRemoteReadable proves the guest can read the remote, provisioning a

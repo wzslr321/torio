@@ -58,7 +58,13 @@ const gitSSHCommandVar = "GIT_SSH_COMMAND="
 // package will carry it into a report. It is deliberately narrow: the value
 // comes back from a guest file and ends up printed, so anything else is treated
 // as unverifiable rather than passed along.
-var publicKeyPattern = regexp.MustCompile(`^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp[0-9]+) [A-Za-z0-9+/=]+( [^\r\n]*)?$`)
+//
+// The comment field is restricted to printable ASCII rather than to anything
+// that is not a line break. The file is writable by the backend identity, which
+// is the identity the agent runs as, so a comment carrying terminal control
+// sequences would let guest-side content decide how the operator's terminal
+// renders the rest of the failure.
+var publicKeyPattern = regexp.MustCompile(`^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp[0-9]+) [A-Za-z0-9+/=]+( [ -~]*)?$`)
 
 // Project is one attached project as this package reports it: the non-secret
 // registry identity plus the path derived from the ID.

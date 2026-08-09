@@ -878,7 +878,7 @@ func TestProjectAddPrintsTheDeployKeyOnStderr(t *testing.T) {
 		addErr: &projects.Error{
 			Op:   "add",
 			Kind: projects.KindAuth,
-			Err:  errors.New("the guest cannot read the remote yet; authorize its read-only deploy key for read access on github.com, then run the same command again"),
+			Err:  errors.New("the guest cannot read the remote yet; add its public key to the repository on github.com as a deploy key with write access off, not as an account key, then run the same command again"),
 		},
 	}
 	code, stdout, stderr := runProjectCLI(t, []string{"project", "add", "demo", "git@github.com:owner/demo.git"}, service)
@@ -924,6 +924,11 @@ func TestProjectAddCarriesTheDeployKeyInTheErrorEnvelope(t *testing.T) {
 	env := decodeProjectEnvelope(t, stdout)
 	if env.OK {
 		t.Fatalf("envelope ok = true, want a failure: %s", stdout)
+	}
+	// The machine-readable half of the exit-7 contract. A caller branches on the
+	// code, so it is pinned beside the exit status rather than derived from it.
+	if env.Error.Code != "AUTH" {
+		t.Errorf("error code = %q, want AUTH", env.Error.Code)
 	}
 	details, _ := env.Error.Details["deploy_key"].(map[string]any)
 	if details == nil {

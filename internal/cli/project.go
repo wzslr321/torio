@@ -994,15 +994,24 @@ func withDeployKeyDetails(in map[string]any, key *projects.DeployKey) map[string
 // It goes to stderr with the diagnostic it belongs to, because this is a failing
 // command and stdout stays free of mixed content. The key is printed on its own
 // line so it can be selected or piped without picking up prose.
+//
+// It names where the key goes and what to leave off, because that is the only
+// place the read-only property is decided. Torio cannot check the choice
+// afterwards: proving the key cannot write would take a push, and Torio runs
+// none. The same key added to the account rather than to the repository
+// attaches the project identically and grants the guest write capability
+// everywhere, so the warning belongs next to the key and not in a document.
 func (a *app) printDeployKey(key *projects.DeployKey) {
-	state := "The guest already held a read-only deploy key for this project"
+	state := "The guest already held a deploy key for this project"
 	if key.Generated {
-		state = "The guest generated a read-only deploy key for this project"
+		state = "The guest generated a deploy key for this project"
 	}
 	fmt.Fprintf(a.stderr,
 		"%s. Torio holds no copy of its private half.\n\n"+
 			"%s\n\n"+
-			"Authorize that key for read access on %s, then run the same command again.\n"+
+			"Add that key to the repository on %s as a deploy key, with write access off,\n"+
+			"then run the same command again. Adding it to your account instead would give\n"+
+			"the guest write access to every repository that account can reach.\n"+
 			"Private half, on the guest, owned by the backend identity: %s\n\n",
 		state, key.PublicKey, key.Host, key.KeyPath)
 }
@@ -1053,9 +1062,12 @@ func mapInteractiveSessionError(command, label string, err error) *CLIError {
 // ErrorKind (never string matching).
 //
 // Two kinds are worth naming. KindAuth is a permission denial (exit 7), not an
-// external outage: the guest reached the remote and was refused, and the remedy
-// is a human provisioning access out of band — Torio stores no credentials and
-// retrying changes nothing. KindConfigWrite is reconciliation required (exit 9):
+// external outage: the guest reached the remote and was refused. For an SSH
+// remote the remedy is the deploy key the error carries, authorized on the
+// forge, after which the same command succeeds; for anything else it is access
+// provisioned out of band, because Torio stores no credential of its own.
+// Either way the retry follows a human act, never the retry alone.
+// KindConfigWrite is reconciliation required (exit 9):
 // the guest work succeeded and only the registry write did not, so the guest and
 // config now disagree and a rerun finishes the operation.
 func mapProjectError(command string, err error) *CLIError {

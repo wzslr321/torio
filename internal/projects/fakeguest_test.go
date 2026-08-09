@@ -414,11 +414,21 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 // deploy key and the forge has been told to accept it. Offering a key nobody
 // authorized reads no better than offering none, which is the state a first run
 // leaves behind.
+//
+// Offering the key without IdentitiesOnly does not read either, which is the
+// forge behaviour the real failure comes from: ssh presents every identity it
+// holds, the forge authenticates the first one valid for the account rather
+// than the one valid for this repository, and answers `Repository not found`
+// for a repository that exists. Modelling it here is what makes the option
+// load-bearing in the suite instead of only in a comment.
 func (f *fakeGuest) canReadRemote(joined string) bool {
 	if f.remoteReadable {
 		return true
 	}
-	return f.keyAuthorized && strings.Contains(joined, "-i "+testKeyPath)
+	if !f.keyAuthorized || !strings.Contains(joined, "-i "+testKeyPath) {
+		return false
+	}
+	return strings.Contains(joined, "-o IdentitiesOnly=yes")
 }
 
 // userOf extracts the identity a `sudo -n -u <user> --` argv runs as.
