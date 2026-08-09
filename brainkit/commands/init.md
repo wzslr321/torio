@@ -25,7 +25,9 @@ Look at the target directory before writing anything.
 Write, under the vault root:
 
 - `index.md` with `type: vault` frontmatter and a short map of the directories,
-  modelled on `${CLAUDE_PLUGIN_ROOT}/examples/vault/index.md`.
+  modelled on `${CLAUDE_PLUGIN_ROOT}/examples/vault/index.md`. Keep the body
+  within 25 lines: that is what the session-start hook carries, and anything
+  past it is dropped silently.
 - The directories from §3: `inbox/`, `daily/`, `projects/`, `people/`,
   `meetings/`, `resources/`, `attachments/`.
 - `projects/index.md` and `people/index.md`, each `type: index`, each honest

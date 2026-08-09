@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **The vault standard stopped forbidding what vault owners actually ask for.**
+  `STANDARD.md` §6.7 said "Do not commit… an agent writes files and stops",
+  which read as an absolute and was one: an owner who had explicitly asked for a
+  commit per meaningful change got an agent citing the standard back at them.
+  The rule now states the fact it was built on — the history belongs to whoever
+  set the vault up — makes committing the owner's call, and puts the hard line
+  where it belongs. Push, pull requests, issues and anything else that sends the
+  vault outward are refused regardless of what anyone asked for, because a commit
+  is local and reversible and nothing past it is. `brain-search` and the
+  `brain-librarian` subagent are aligned; the librarian still commits nothing,
+  now for its own stated reason rather than a blanket ban — it runs a bulk pass
+  whose result nobody has read yet.
+- **The session-start map's budget is written down where an index author will
+  meet it.** The hook carries the first 25 lines of the root `index.md` below
+  its frontmatter and drops the rest in silence, and nothing said so — not
+  `STANDARD.md`, not `/brain-kit:init`, not the kit's README. An index long
+  enough to lose its tail therefore lost it invisibly, and the tail is where a
+  `## Now` section tends to sit. §2.7 now tells index authors that the opening
+  lines are what gets carried; §9 requires a rendering to bound the map **and**
+  to state its bound somewhere the author will find it; the README and the
+  `init` command name the 25 lines outright.
+- The Brain Kit is `0.2.0`. §9 gained a requirement renderings must meet, so a
+  rendering that documents no bound stops conforming; every vault that conformed
+  to `0.1.0` still conforms.
+
 ## 0.3.2 - 2026-08-09
 
 ### Added

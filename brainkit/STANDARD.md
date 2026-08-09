@@ -198,6 +198,12 @@ An `index.md` is a curated entry point — a map of what is in a directory and w
 a reader would want it. It is written by hand or by the librarian, never
 generated as a bare file listing: a listing is what `ls` is for.
 
+Keep it short, and put what a reader needs first at the top. A rendering carries
+the root `index.md` into context at the start of a session and bounds how much
+of it it carries (§9), so an index that runs long does not get a smaller share of
+attention — it loses its tail outright, and the tail is where an unwary author
+puts the section that changes most often.
+
 ```yaml
 ---
 type: index
@@ -310,8 +316,12 @@ These rules bind every skill in this kit, and any agent working in a vault.
    vault, carry the fact, not the note.
 6. **Write about people carefully.** §2.4's limits are a rule, not advice, and
    they apply to meeting notes too.
-7. **Do not commit.** A vault may be a Git repository. Whoever set it up owns
-   its history; an agent writes files and stops.
+7. **The history belongs to whoever set the vault up.** A vault may be a Git
+   repository. Do not commit unless its owner has said to; where they have, a
+   commit per meaningful change is what they are owed, not a liberty taken.
+   Either way **never push**, and never open a pull request or an issue, or
+   send the vault anywhere. A commit is local and reversible and can be left
+   for its owner to read; nothing past it is either.
 8. **Ask before deleting anything that is not a routed capture.** Triage may
    remove a capture it has merged. Nothing else in the vault is an agent's to
    delete.
@@ -376,6 +386,14 @@ path does not resolve, or when the directory fails the `type: vault` test in §7
 A rendering runs in every session, including all the ones that have nothing to
 do with a vault, and one that guesses in those sessions is worse than one that
 does nothing.
+
+A rendering MUST bound the map — a vault's root index is a document its owner
+controls, and an unbounded one would let a single file decide how a session
+starts. It MUST also state the bound where the person writing an index will meet
+it, rather than only in the code that applies it. An index is written once and
+read at the start of every session afterwards; one that silently loses its most
+useful section teaches nobody anything, least of all the author, who has no way
+to see what arrived.
 
 The map is not retrieval and does not replace it. It is what makes retrieval
 targeted: an agent that knows a `resources/` directory exists and what it is for

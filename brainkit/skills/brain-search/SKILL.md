@@ -95,7 +95,7 @@ Read-only by default. The other skills in this kit write; this one does not,
 except when the user asks for an edit in this conversation.
 
 When you do write, §6 of the standard binds you — search before creating, add
-rather than rewrite, never write a secret, never commit.
+rather than rewrite, never write a secret, never push.
 
 ## Keeping the vault in the vault
 
