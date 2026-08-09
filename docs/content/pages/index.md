@@ -2,14 +2,14 @@
 output: site/index.html
 nav: Home
 order: 1
-title: Torio — your AI second brain on a Linux VM you control
-description: Torio is a thin control plane that runs an AI second brain and your coding projects on a Linux VM on your workstation. It creates a VM per agent backend, keeps each backend healthy, reports which box needs you, and leaves credentials, the tunnel, and every Git write to you.
+title: Torio — run AI coding agents on a Linux VM that holds no credentials
+description: Torio is a thin control plane that runs AI coding agents and your repositories on a Linux VM on your workstation. The VM is the trust boundary: an agent that gets confused or prompt-injected cannot reach your host, your tokens, or your remotes. It creates a VM per agent backend, keeps each backend healthy, reports which box needs you, and leaves credentials, the tunnel, and every Git write to you.
 ---
 
 <section class="hero">
 <p class="hero-eyebrow">Thin control plane · macOS and Linux</p>
-<h1 class="hero-title">Your AI second brain, on a Linux VM you actually control.</h1>
-<p class="hero-lede">Torio creates the Linux VM, runs the agent backend you choose inside it (Hermes on the VM's own loopback by default, Claude Code as a per-session process), tells you in one command which of your boxes needs you, and gives the model access to exactly the repositories you listed. You open the connection, you hold the credentials, you decide what gets pushed.</p>
+<h1 class="hero-title">Run AI coding agents on a Linux VM that holds none of your credentials.</h1>
+<p class="hero-lede">Torio creates the Linux VM, runs the agent backend you choose inside it (Hermes on the VM's own loopback by default, Claude Code as a per-session process), and gives the model access to exactly the repositories you listed. The VM is the trust boundary: an agent that gets confused or prompt-injected reaches no token of yours and no remote, because there is none to reach. It commits; you push, from a session you opened, after reading what it did.</p>
 <p class="hero-actions"><a class="btn btn-primary" href="tutorials.html#get-started">Get started</a><a class="btn btn-quiet" href="#pieces">See how it fits together</a></p>
 </section>
 
@@ -19,8 +19,15 @@ Torio is not the AI, not the VM, and not the chat window. It is the layer that
 brings those three into a known-good state and then gets out of the way. One VM
 runs one agent identity: `--backend` names the agent and Torio finds its box, so
 a second backend means a second VM rather than two identities contending over
-the same checkouts. Here is the default, Hermes-shaped stack, six moving parts
-split across the two machines:
+the same checkouts.
+
+Inside the box the agent runs without permission prompts, and that inversion is
+the point. A prompt is a control inside the agent's own process: it can be
+ignored, and in practice it is clicked through. The box replaces it with
+controls the agent cannot reach, an unprivileged identity with no `sudo`, a
+binary it cannot rewrite, no credential that reaches a Git remote, and the edge
+of a VM. Here is the default, Hermes-shaped stack, six moving parts split across
+the two machines:
 
 <div class="stack" aria-label="How the pieces fit together">
 <section class="stack-zone">
