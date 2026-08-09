@@ -4,22 +4,33 @@
 [![release](https://img.shields.io/github/v/release/wzslr321/torio)](https://github.com/wzslr321/torio/releases)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Your AI second brain, on a Linux VM you actually control.
+Run AI coding agents on a Linux VM that holds none of your credentials.
 
 Torio is a thin control plane over [Lima](https://lima-vm.io): one Go binary
-that creates a VM on your macOS or Linux workstation, runs the Hermes backend
-as a service on the guest's own loopback, keeps a private Markdown Second
-Brain, and attaches the repositories you name. It has no daemon, no state
-beyond one non-secret config file, and no credentials at all.
+that creates a VM on your macOS or Linux workstation, runs an agent backend
+inside it (Hermes as a guest service, or Claude Code per session), and
+attaches the repositories you name. It has no daemon, no state beyond one
+non-secret config file, and no credentials at all. The VM is the trust
+boundary: an agent that gets confused or prompt-injected cannot reach your
+host, your tokens, or your remotes.
 
-The narrowness is the point. Torio is not the AI, not the VM, and not the chat
-window. It is the layer that brings those three into a known-good state and
-then gets out of the way. Everything that writes stays in your hands: the
-commit, the push, the tunnel, the credential.
+![An agent commits inside the VM, its push is refused for want of a credential, and the operator pushes the same commit from a session of their own](docs/demo/torio-demo.gif)
+
+The recording is generated from [`docs/demo/demo.tape`](docs/demo/demo.tape)
+against a real remote. Nothing in it is staged: the refusal is GitHub
+answering a read-only key.
 
 Documentation lives at **[torio.dev](https://torio.dev)**.
 
-## How it fits together
+## The boundary
+
+A permission prompt is a control inside the agent's own process. It can be
+ignored, and in practice it is clicked through. Torio replaces it with
+controls the agent cannot reach: an unprivileged identity with no `sudo`, a
+closed group set, a binary it cannot rewrite, no credential that reaches a Git
+remote, and the edge of a VM. Inside the box the agent runs without
+permission prompts, because the box makes them unnecessary. The agent commits;
+you push, after reading what it did.
 
 ```mermaid
 flowchart LR
@@ -47,11 +58,31 @@ flowchart LR
 ```
 
 The dashed edges are the whole design. The persistent backend has read access
-to your checkouts and nothing more: it cannot push, and no credential of yours
-is stored anywhere it could reach. Write capability against a remote exists
-only inside a `torio project shell` session, which forwards your own SSH
-agent, lasts exactly as long as you keep it open, and takes the capability
-with it when you exit.
+to your checkouts and nothing more, and no credential of yours is stored
+anywhere it could reach. Write capability against a remote exists only inside
+a session you open, and it leaves with you:
+
+```mermaid
+sequenceDiagram
+    participant Agent as Agent, inside the VM
+    participant You as You, on the host
+    participant Origin as Git origin
+
+    Agent->>Agent: edit, run checks, commit
+    Note over Agent: no credential, so no push
+    You->>Agent: torio project shell (your SSH agent, forwarded)
+    You->>Origin: git push
+    You->>Agent: exit
+    Note over Agent: the capability leaves with you
+```
+
+By default that session forwards your agent whole. Pin one identity as
+`operator_key` in the config and it gets a mediated agent instead: the pinned
+key alone, a dialog on the host before every signature (Deny is the default
+and the cancel), and every decision recorded to `agent-audit.jsonl` before it
+takes effect. With the pin set, `torio project agent <id> --push-grant` opens
+an agent session that may *ask* to push: the same dialog, one signature at a
+time, for exactly one invocation.
 
 ## Quick start
 
@@ -113,15 +144,15 @@ answering names itself instead of leaving you to guess.
 Once you run more than one box, `torio status` is the other one. It polls every
 box Torio owns and gives you a row each: whether it is running, what its agent
 has going, whether anything there is waiting on you, and when it last did work.
-Fields it cannot prove say so — `?` for a question it could not answer, `—` for
-one that backend does not answer at all — because a status line that guesses is
-one you stop reading.
+Fields it cannot prove say so, with `?` for a question it could not answer and
+`—` for one that backend does not answer at all, because a status line that
+guesses is one you stop reading.
 
 ```console
 $ torio status
-INSTANCE            BOX      BACKEND      SESSION  WAITING          PROGRESS
-torio               running  hermes       —        ?                24s
-torio-claude-code   running  claude-code  1        yes 3m pid 11673  —
+INSTANCE           BOX      BACKEND      SESSION  WAITING           PROGRESS
+torio              running  hermes       —        ?                 24s
+torio-claude-code  running  claude-code  1        yes 3m pid 11673  —
 ```
 
 It exits 0 whatever it finds, so something can call it on a timer and put the
@@ -139,14 +170,6 @@ git commit && git push
 exit                                   # the capability leaves with you
 ```
 
-By default that forwards your agent whole. Pin one identity as `operator_key`
-in the config and the session gets a mediated agent instead: the pinned key
-alone, a dialog on the host before every signature (Deny is the default and
-the cancel), and every decision recorded to `agent-audit.jsonl` before it takes
-effect. With the pin set, `torio project agent <id> --push-grant` opens an
-agent session that may *ask* to push — the same dialog, one signature at a
-time, for exactly one invocation.
-
 Every command takes `--json` and emits a single machine-readable document on
 stdout; flags, exit codes and each command's contract are in the
 [reference](https://torio.dev/reference.html).
@@ -154,7 +177,7 @@ stdout; flags, exit codes and each command's contract are in the
 ## What Torio will not do
 
 - **Hold your Git or model-provider credentials.** Git write arrives only as
-  your forwarded SSH agent in a session you opened — mediated, when you pin an
+  your forwarded SSH agent in a session you opened: mediated, when you pin an
   `operator_key`, so no signature happens without you. MCP OAuth is the deliberate
   exception: an interactive login stores it under the separate `torio-mcp`
   guest identity, never under the agent uid or on the host.
@@ -179,7 +202,7 @@ stdout; flags, exit codes and each command's contract are in the
 
 ## Which agent runs inside
 
-One VM runs one agent identity, and a second backend means a second VM — never
+One VM runs one agent identity, and a second backend means a second VM, never
 a second agent inside one, because two identities sharing a workspace would
 contend over the same checkouts and make every custody statement ambiguous.
 
@@ -190,7 +213,7 @@ its box: the default one is `torio`, the rest are `torio-<backend>`.
 | --- | --- | --- |
 | Shape | a guest service on loopback | a per-session process |
 | Reached by | a client through a tunnel you open | `torio project agent <id>` |
-| Project registry | yes, driven by Torio | none — a project is a directory |
+| Project registry | yes, driven by Torio | none; a project is a directory |
 | Pinned by | an upstream commit | a version, checksum-verified |
 
 ```bash
@@ -205,20 +228,12 @@ torio project shell demo --backend claude-code  # you review, and push
 
 The project registry is shared, so `demo` is attached once and `project list`
 says the same thing whichever backend you select. The checkouts are not shared
-and cannot be — each is owned by one guest identity — so `project add <id>`
+and cannot be (each is owned by one guest identity), so `project add <id>`
 with no remote is the step that gives a backend its own working tree, from the
 remote already on record. What passes between the two trees is what you push.
 
 `TORIO_INSTANCE` still names a box directly, for a test VM or a second box
 running the same backend.
-
-Inside the box the agent runs without permission prompts, and that is the
-inversion worth understanding. A prompt is a control inside the agent's own
-process — it can be ignored, and in practice it is clicked through. The box
-replaces it with controls the agent cannot reach: an unprivileged identity with
-no `sudo`, a closed group set, a binary it cannot rewrite, no credential that
-reaches a Git remote, and the edge of a VM. The agent commits; you push, after
-reading what it did.
 
 MCP uses the same custody boundary on both backends. Write one strict policy
 document per service as `root:root 0644`, then install, authorize, and verify:
@@ -236,10 +251,12 @@ Hermes' agent-owned config remains a drift detector, while the socket and policy
 are the enforcement boundary. See
 [ADR-0013](docs/adr/0013-mcp-managed-client-config-and-activation.md).
 
-## The brain, without the VM
+## The Second Brain
 
-The vault has a written standard of its own, and it ships as a plugin you can
-install into Claude Code with no VM under it at all:
+The VM also keeps a private Markdown vault: versioned, searchable, and read by
+the backend's retrieval skill. The vault has a written standard of its own,
+and it ships as a plugin you can install into Claude Code with no VM under it
+at all:
 
 ```
 /plugin marketplace add wzslr321/torio
@@ -247,20 +264,20 @@ install into Claude Code with no VM under it at all:
 /brain-kit:init
 ```
 
-That gives you the vault, its format, and the rituals that keep it worth having
-— capture, inbox triage, daily notes, meetings, people, retrieval. It works
-against a directory of notes you already have: a note without frontmatter stays
-valid to read, so nothing is rewritten on arrival.
+That gives you the vault, its format, and the rituals that keep it worth
+having: capture, inbox triage, daily notes, meetings, people, retrieval. It
+works against a directory of notes you already have; a note without
+frontmatter stays valid to read, so nothing is rewritten on arrival.
 
 How much of that is real rather than well written is measured, not claimed:
 [`brainkit/evals/`](brainkit/evals/README.md) hands an agent a fixture vault and
-checks what it actually did — including whether it leaves the vault alone when
+checks what it actually did, including whether it leaves the vault alone when
 the task has nothing to do with it.
 
-What it does not give you is a boundary. Those are instructions to a model
-running on your workstation with your permissions, which is the gap the VM
-closes and the reason the rest of this README exists. Same standard, same vault
-shape, either way — [`brainkit/README.md`](brainkit/README.md) and
+What the plugin alone does not give you is a boundary. Those are instructions
+to a model running on your workstation with your permissions, which is the gap
+the VM closes and the reason the rest of this README exists. Same standard,
+same vault shape, either way: [`brainkit/README.md`](brainkit/README.md) and
 [`brainkit/STANDARD.md`](brainkit/STANDARD.md).
 
 ## Supported hosts
@@ -297,7 +314,7 @@ If one of these is yours, [`CONTRIBUTING.md`](CONTRIBUTING.md) has the how and
   [Diátaxis](https://diataxis.fr).
 - [`docs/runbooks/first-run.md`](docs/runbooks/first-run.md): the complete
   first run, every command in order.
-- [`brainkit/STANDARD.md`](brainkit/STANDARD.md): what a Torio vault is — the
+- [`brainkit/STANDARD.md`](brainkit/STANDARD.md): what a Torio vault is: the
   note types, the naming, the links, and what an agent may do to it.
 - [`brainkit/evals/`](brainkit/evals/README.md): the behavioural benchmark that
   measures whether an agent holding the kit actually behaves that way, and the
