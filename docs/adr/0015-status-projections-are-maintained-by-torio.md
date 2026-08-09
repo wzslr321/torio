@@ -5,8 +5,7 @@
 - Supersedes in part: [ADR-0014](0014-status-is-a-poll-of-facts.md), only
   the decision that tmux and prompt projections ship as recipes rather than as
   maintained Torio renderers
-- Applies to: `internal/cli`, `docs/contracts/cli.md`,
-  `docs/runbooks/ambient-status.md`
+- Applies to: `internal/cli`, `docs/contracts/cli.md`
 
 ## Context
 

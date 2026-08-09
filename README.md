@@ -126,9 +126,8 @@ torio-claude-code   running  claude-code  1        notification 3m  —
 
 It exits 0 whatever it finds, so something can call it on a timer and put the
 answer where you already look. `torio status setup tmux` prints the block that
-does that; the same report collapses to one chip per box, and only the box that
-wants you is loud. Details and the other surfaces are in
-[`docs/runbooks/ambient-status.md`](docs/runbooks/ambient-status.md).
+does that; `torio status setup zsh` prints the prompt equivalent. The same
+report collapses to one chip per box, and only the box that wants you is loud.
 
 Work happens in the checkouts: from Desktop, from your own editor, or from
 `torio project enter <id>`. Edit, run checks that read rather than write,

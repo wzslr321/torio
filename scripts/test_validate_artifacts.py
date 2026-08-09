@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Tests for the documentation-surface validator.
 
-Two rules are covered here. The pasteable-credential rule is the one written in
+The pasteable-credential rule is the one written in
 response to something that happened rather than something that was reasoned
 about, and the failure it prevents is silent, so it needs a test that pins both
 directions: the text that caused the incident must fail, and the corrected text
 must pass.
 
-The command-coverage rule is the other kind of silent failure: a subcommand can
+The command-coverage rule covers another kind of silent failure: a subcommand can
 ship without a line of documentation and every existing check still passes. Its
 derivation reads Go source with regular expressions, so the cases that would
 make a naive reader wrong — a `Use:` field on something that is not a cobra
@@ -221,6 +221,13 @@ class CommandSurface(unittest.TestCase):
 
     def test_command_coverage_includes_the_normative_contract(self) -> None:
         self.assertIn("docs/contracts/*.md", v.COMMAND_DOC_GLOBS)
+
+
+class OperatorSurface(unittest.TestCase):
+    def test_first_run_is_the_only_runbook(self) -> None:
+        for directory in ("docs/content/runbooks", "docs/runbooks"):
+            runbooks = sorted(path.name for path in (v.ROOT / directory).glob("*.md"))
+            self.assertEqual(["first-run.md"], runbooks, directory)
 
 
 if __name__ == "__main__":

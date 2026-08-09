@@ -13,8 +13,7 @@
   It exits 0 whenever the poll completes, so a status bar can call it on a
   timer; only failing to list the boxes at all is an error
   ([ADR-0014](docs/adr/0014-status-is-a-poll-of-facts.md),
-  [contract](docs/contracts/status.md),
-  [recipes](docs/runbooks/ambient-status.md)).
+  [contract](docs/contracts/status.md)).
 - **The status line, and the one command that installs it.**
   `torio status --format tmux|prompt` collapses the report onto one line for a
   status bar or a shell prompt, and `torio status setup tmux|zsh` prints the
