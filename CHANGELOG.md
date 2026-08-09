@@ -2,25 +2,40 @@
 
 ## Unreleased
 
+### Added
+
+- **Mediated agent forwarding: a shell that can push forwards one key, and
+  every signature stops at a person**
+  ([ADR-0015](docs/adr/0015-mediated-agent-forwarding.md)). Config schema `"4"`
+  adds `operator_key` — a fingerprint or comment naming the one identity a
+  session may use. With it set, `project shell` points the guest's
+  `SSH_AUTH_SOCK` at an agent Torio serves in front of the operator's own: it
+  lists the pinned key alone, asks the operator on the host before each
+  signature — a dialog naming the project, where origin actually pushes, the
+  branch and how far ahead it is, with Deny as the default, the cancel and the
+  timeout — and refuses every other request in the protocol without writing it
+  to the real agent. Each decision is recorded to `agent-audit.jsonl` beside
+  the config document *before* it takes effect; a decision that cannot be
+  recorded is not taken. With no pin the session forwards the operator's agent
+  whole, exactly as before — a document with no `operator_key` was written by
+  an operator who has not chosen a key, and choosing one for them is choosing
+  which key a guest may use.
+- **`torio project agent <id> --push-grant`: a granted session that may ask to
+  push, one signature at a time**
+  ([ADR-0016](docs/adr/0016-session-scoped-push-grant.md)). Refused outright
+  without a pinned key. The mediated socket is remote-forwarded into the guest
+  on a single-use random path that lives exactly as long as the session, and
+  reaches the backend identity through a helper that validates the socket
+  before widening it to the shared group — the ordinary session helper remains
+  provably free of `SSH_AUTH_SOCK`. A preflight refuses an origin the grant
+  cannot serve, each with its remedy: an HTTPS push URL never consults an SSH
+  agent, and a host key absent from the agent identity's `known_hosts` stops a
+  push before it reaches the key — as `Host key verification failed`, which
+  reads like a problem with the key just pinned and is not one. An operator
+  shell is told the same things and opens anyway: a shell is opened to read and
+  commit as often as to push.
+
 ### Fixed
-
-- **The signature dialog named the wrong host, and the decision log buried the
-  lines that matter.** The prompt showed the registered remote while the
-  connection went somewhere else entirely — an HTTPS URL in front of an operator
-  approving an SSH signature. It now names where origin actually pushes. And
-  OpenSSH probes a forwarded agent with `session-bind@openssh.com` on every
-  connection, which the log recorded as `unsupported`: two benign
-  `allowed:false` lines per push, next to the ones that mean a guest reached for
-  something. Extensions are now recorded as extensions, still refused.
-
-- **A granted session no longer opens against a remote it cannot push to.** An
-  origin that pushes over HTTPS never consults an SSH agent, and a host key
-  absent from the agent identity's `known_hosts` stops a push before it reaches
-  the key — as `Host key verification failed`, which reads like a problem with
-  the key just pinned and is not one. Both are now checked before the session
-  opens, against the identity that will actually use them, and reported with the
-  remedy. An operator shell says the same things and opens anyway: a shell is
-  opened to read and commit as often as to push.
 
 - **`project shell` and `project enter` were unusable on any backend but the
   first.** Both guest helpers named `/home/hermes/projects` outright, so on a
