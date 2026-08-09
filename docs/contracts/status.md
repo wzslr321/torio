@@ -128,6 +128,11 @@ A stopped box is asked nothing: nothing runs there, which proves both that no
 session exists and that nobody on it is waiting. When it last progressed stays
 `unknown` — that evidence is inside a VM that is not running.
 
+`broken` and Lima's own `unknown` state prove no such thing. They are not
+reachable, so they are asked nothing, but session, waiting and progress all stay
+`unknown`; only the explicit `stopped` state proves a quiet box. This host-side
+liveness answer does not depend on reading the box's backend document.
+
 Output crosses the ADR-0002 boundary and is treated as such: bounded, refused
 when truncated, and never used to derive a path, a command or a control-flow
 decision.

@@ -151,6 +151,65 @@ func TestPollAnswersAStoppedBoxWithoutEnteringIt(t *testing.T) {
 	}
 }
 
+// Host liveness is independent of the backend document. A stopped box cannot
+// run an agent even when its config is unreadable, so resolving the backend
+// must not turn that proven answer back into unknown.
+func TestPollAnswersAStoppedBoxBeforeResolvingItsBackend(t *testing.T) {
+	p := &Poller{
+		Instances: func(context.Context) ([]Box, error) {
+			return []Box{{Name: "torio", State: "stopped", Running: false}}, nil
+		},
+		Resolve: func(string) Resolution { return Resolution{} },
+	}
+
+	rep, err := p.Poll(context.Background())
+	if err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	got := rep.Instances[0]
+	if got.Backend.State != Unknown {
+		t.Errorf("backend state = %q, want %q", got.Backend.State, Unknown)
+	}
+	if got.Session.State != Known || len(got.Session.Sessions) != 0 {
+		t.Errorf("session = %+v, want a proven empty set", got.Session)
+	}
+	if got.Waiting.State != Known || got.Waiting.Waiting {
+		t.Errorf("waiting = %+v, want proven not-waiting", got.Waiting)
+	}
+	if got.Progress.State != Unknown {
+		t.Errorf("progress state = %q, want %q", got.Progress.State, Unknown)
+	}
+}
+
+// Only Lima's stopped state proves that no guest process exists. Broken and
+// unknown say that liveness itself is unproven, so they must not be collapsed
+// into the same quiet answer merely because neither is reachable.
+func TestPollDoesNotTreatUncertainBoxStateAsStopped(t *testing.T) {
+	for _, state := range []string{"broken", "unknown"} {
+		t.Run(state, func(t *testing.T) {
+			g := &fakeGuest{env: defaultEnv()}
+			got := pollBox(g, testBackend{spec: specWith(testProcess, true)},
+				Box{Name: "torio-test", State: state, Running: false})
+
+			if g.callCount() != 0 {
+				t.Fatalf("guest calls = %d, want none for an unreachable %s box", g.callCount(), state)
+			}
+			for _, field := range []struct {
+				name  string
+				state FieldState
+			}{
+				{"session", got.Session.State},
+				{"waiting", got.Waiting.State},
+				{"progress", got.Progress.State},
+			} {
+				if field.state != Unknown {
+					t.Errorf("%s state = %q, want %q", field.name, field.state, Unknown)
+				}
+			}
+		})
+	}
+}
+
 // A box whose own document could not be read is one unknown row, never a reason
 // to stop answering about the others.
 func TestPollReportsAnUnresolvedBackendAsUnknownAndKeepsGoing(t *testing.T) {

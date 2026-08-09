@@ -83,6 +83,14 @@ func (p *Poller) instance(ctx context.Context, box Box) Instance {
 		Waiting:  unknownWaiting(),
 		Progress: unknownProgress(),
 	}
+	stopped := box.State == "stopped"
+	if stopped {
+		// Host liveness does not depend on resolving the backend document. A
+		// stopped box runs no process and waits on nobody even when its config
+		// cannot be read; progress remains inside the box and stays unknown.
+		inst.Session = SessionField{State: Known, Sessions: []Session{}}
+		inst.Waiting = WaitingField{State: Known, Waiting: false}
+	}
 
 	res := p.Resolve(box.Name)
 	if res.Name == "" || res.Backend == nil {
@@ -94,6 +102,9 @@ func (p *Poller) instance(ctx context.Context, box Box) Instance {
 		return inst
 	}
 	inst.Backend = BackendField{State: Known, Name: res.Name}
+	if stopped {
+		return inst
+	}
 
 	spec := res.Backend.Status()
 	if spec == nil {
@@ -108,13 +119,9 @@ func (p *Poller) instance(ctx context.Context, box Box) Instance {
 	}
 
 	if !box.Running {
-		// A stopped box runs no processes, so there is no session, and nobody on
-		// it is waiting for a human. Both are proven by the box's own state and
-		// cost no guest command. When it last progressed is a different
-		// question: the evidence is inside a VM that is not running, so it stays
-		// unknown rather than being reported as never.
-		inst.Session = SessionField{State: Known, Sessions: []Session{}}
-		inst.Waiting = WaitingField{State: Known, Waiting: false}
+		// Reaching this branch means Lima reported broken or unknown rather than
+		// stopped. No guest command is safe to attempt, but neither state proves
+		// the absence of a process, so every agent fact stays unknown.
 		return inst
 	}
 
