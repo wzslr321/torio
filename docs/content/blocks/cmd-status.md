@@ -6,7 +6,8 @@ single instance the invocation selected; this one polls every box Torio owns.
 | Command | What it does |
 | --- | --- |
 | `torio status` | Report each box Torio owns: whether it is running, which backend it was provisioned for, what that backend has running, whether anything there is waiting on a human, and when it last provably did work. Accepts `--json` and `--format`. |
-| `torio status setup tmux\|zsh` | Print the configuration that puts the one-line form on a tmux status bar or a zsh prompt. It prints; it writes no file. |
+| `torio status setup tmux` | Print the configuration that puts the one-line form on a tmux status bar. It prints; it writes no file. |
+| `torio status setup zsh` | Print the configuration that puts the one-line form on a zsh prompt. It prints; it writes no file. |
 
 Every field is a proven value, `?` for a question that was asked and could not
 be answered, or `—` for one that backend does not answer at all. Absence is
