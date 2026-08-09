@@ -125,23 +125,24 @@ func TestZshSetupRendersWithoutPromptSubst(t *testing.T) {
 	}
 	tmp := t.TempDir()
 	fake := filepath.Join(tmp, "torio")
-	if err := os.WriteFile(fake, []byte("#!/bin/sh\nprintf 'visible\\n'\n"), 0o700); err != nil {
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nprintf 'visible%%value\\n'\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	snippet, err := statusSetupSnippet("zsh", shellQuote(fake))
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := "unsetopt BG_NICE\n" + snippet + `
+	script := "unsetopt BG_NICE\nRPROMPT='existing'\npsvar[99]='reserved'\n" + snippet + `
 torio_status_refresh
 for attempt in {1..400}; do
   cached=''
   IFS= read -r cached <"$TORIO_STATUS_CACHE" 2>/dev/null || true
-  [[ "$cached" == visible ]] && break
+  [[ "$cached" == 'visible%value' ]] && break
   sleep 0.01
 done
 (( $+functions[torio_status_prompt] )) && torio_status_prompt
 print -P -- "$RPROMPT"
+print -- "${psvar[99]}"
 `
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -152,8 +153,9 @@ print -P -- "$RPROMPT"
 		t.Fatalf("clean zsh rejected the snippet: %v", err)
 	}
 	got := strings.TrimSpace(string(out))
-	if !strings.Contains(got, "visible") || strings.Contains(got, "$(cat") {
-		t.Fatalf("rendered prompt = %q, want the cached value without a literal command substitution", got)
+	if !strings.Contains(got, "existing") || !strings.Contains(got, "visible%value") ||
+		!strings.Contains(got, "reserved") || strings.Contains(got, "$(cat") {
+		t.Fatalf("rendered prompt = %q, want existing prompt/psvar data and the literal cached value", got)
 	}
 }
 

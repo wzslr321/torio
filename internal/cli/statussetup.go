@@ -118,6 +118,12 @@ const zshSetup = `# Torio ambient status. Add to ~/.zshrc, then: exec zsh
 typeset -g TORIO_STATUS_CACHE
 TORIO_STATUS_CACHE=$(umask 077; command mktemp "${TMPDIR:-/tmp}/torio-status.XXXXXX") || return
 
+# psvar is zsh's native way to put changing data in a prompt without
+# PROMPT_SUBST. Allocate the next slot and keep the existing prompt and slots.
+typeset -gi TORIO_STATUS_PSVAR_INDEX
+TORIO_STATUS_PSVAR_INDEX=$(( ${#psvar} + 1 ))
+RPROMPT="${RPROMPT} %%F{244}%%${TORIO_STATUS_PSVAR_INDEX}v%%f"
+
 torio_status_refresh() {
   local lock="$TORIO_STATUS_CACHE.lock"
   command mkdir -- "$lock" 2>/dev/null || return 0
@@ -136,10 +142,9 @@ torio_status_refresh() {
 torio_status_prompt() {
   local line=''
   IFS= read -r line <"$TORIO_STATUS_CACHE" 2>/dev/null || true
-  # Prompt escapes belong to zsh, not to a status value. Doubling a percent
-  # keeps even a custom instance identifier literal without PROMPT_SUBST.
-  line=${line//\%%/%%%%}
-  RPROMPT="%%F{244}${line}%%f"
+  # A psvar value is not recursively expanded as prompt syntax, so even a
+  # percent in a custom instance identifier stays literal.
+  psvar[$TORIO_STATUS_PSVAR_INDEX]=$line
 }
 autoload -Uz add-zsh-hook
 add-zsh-hook preexec torio_status_refresh
