@@ -53,13 +53,6 @@ func Lookup(name string) (Backend, error) {
 	return b, nil
 }
 
-// Names returns the registered backend names, sorted.
-func Names() []string {
-	mu.RLock()
-	defer mu.RUnlock()
-	return namesLocked()
-}
-
 func namesLocked() []string {
 	out := make([]string, 0, len(registry))
 	for name := range registry {

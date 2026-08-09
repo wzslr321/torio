@@ -183,7 +183,7 @@ func TestServiceServerRefusesCallWhenAuditCannotBeWritten(t *testing.T) {
 	}
 
 	clientTransport, serverTransport := mcp.NewInMemoryTransports()
-	go server.Run(ctx, serverTransport)
+	go func() { _ = server.Run(ctx, serverTransport) }()
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1"}, nil)
 	session, err := client.Connect(ctx, clientTransport, nil)
 	if err != nil {
@@ -226,7 +226,7 @@ func TestServiceServerBoundsEveryUpstreamToolCall(t *testing.T) {
 		t.Fatalf("NewServiceServer: %v", err)
 	}
 	clientTransport, serverTransport := mcp.NewInMemoryTransports()
-	go server.Run(ctx, serverTransport)
+	go func() { _ = server.Run(ctx, serverTransport) }()
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1"}, nil)
 	session, err := client.Connect(ctx, clientTransport, nil)
 	if err != nil {

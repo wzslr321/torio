@@ -290,7 +290,7 @@ func WriteFile(path string, f File) (err error) {
 		wire.DefaultTimeout = out.Timeout.String()
 	}
 	for _, p := range out.Projects {
-		wire.Projects = append(wire.Projects, projectJSON{ID: p.ID, DisplayName: p.DisplayName, Remote: p.Remote})
+		wire.Projects = append(wire.Projects, projectJSON(p))
 	}
 	data, err := json.MarshalIndent(wire, "", "  ")
 	if err != nil {
@@ -431,7 +431,7 @@ func parseFile(data []byte) (f File, err error) {
 		return File{}, err
 	}
 	for _, rp := range raw.Projects {
-		f.Projects = append(f.Projects, Project{ID: rp.ID, DisplayName: rp.DisplayName, Remote: rp.Remote})
+		f.Projects = append(f.Projects, Project(rp))
 	}
 
 	if err := f.Validate(); err != nil {

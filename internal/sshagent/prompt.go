@@ -71,7 +71,7 @@ func writeField(b *strings.Builder, label, value string) {
 	if value == "" {
 		value = "unknown"
 	}
-	b.WriteString(fmt.Sprintf("%-8s %s\n", label, value))
+	fmt.Fprintf(b, "%-8s %s\n", label, value)
 }
 
 func describeBranch(session SessionContext) string {

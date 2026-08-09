@@ -963,7 +963,7 @@ func (m *Manager) recoverStaleInitLock(ctx context.Context, op, recoveryToken st
 	}
 	owner, group, mode := guestexec.ParseOwnershipMode(string(meta.Stdout))
 	if meta.ExitCode != 0 || owner != m.agentUser() || group != m.agentUser() || (mode != "700" && mode != "0700") {
-		return false, &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("Brain init lock has unexpected ownership or mode; refusing recovery")}
+		return false, &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("the Brain init lock has unexpected ownership or mode; refusing recovery")}
 	}
 	stale, err := m.run(ctx, op, guestexec.RootExec(
 		"find", m.lockPath(), "-maxdepth", "0", "-mmin", "+"+staleLockAge, "-print", "-quit",
@@ -986,7 +986,7 @@ func (m *Manager) recoverStaleInitLock(ctx context.Context, op, recoveryToken st
 		return false, err
 	}
 	if mv.ExitCode != 0 {
-		return false, &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("Brain init lock changed during stale recovery")}
+		return false, &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("the Brain init lock changed during stale recovery")}
 	}
 	if err := m.mustRun(ctx, op, KindGuestCommand, "remove quarantined stale Brain init lock",
 		guestexec.RootExec("rm", "-rf", "--", quarantine)); err != nil {
@@ -1002,14 +1002,14 @@ func (m *Manager) verifyInitLock(ctx context.Context, op, token string) error {
 	}
 	owner, group, mode := guestexec.ParseOwnershipMode(string(meta.Stdout))
 	if meta.ExitCode != 0 || owner != m.agentUser() || group != m.agentUser() || (mode != "700" && mode != "0700") {
-		return &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("Brain init lock ownership or mode changed")}
+		return &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("the Brain init lock ownership or mode changed")}
 	}
 	current, err := m.run(ctx, op, guestexec.UserExecAs(m.agentUser(), "cat", m.lockPath()+"/token"))
 	if err != nil {
 		return err
 	}
 	if current.ExitCode != 0 || strings.TrimSpace(string(current.Stdout)) != token {
-		return &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("Brain init lock ownership changed")}
+		return &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("the Brain init lock ownership changed")}
 	}
 	return nil
 }
@@ -1115,23 +1115,4 @@ func parseTotalBytes(res execx.Result) (int64, error) {
 		return 0, fmt.Errorf("could not parse bounded Brain byte count")
 	}
 	return n, nil
-}
-
-func singlePrimaryPathIs(output, path string) bool {
-	found := false
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimSpace(line)
-		primary, ok := strings.CutPrefix(line, "primary:")
-		if !ok {
-			continue
-		}
-		if found {
-			return false
-		}
-		found = true
-		if strings.TrimSpace(primary) != path {
-			return false
-		}
-	}
-	return found
 }

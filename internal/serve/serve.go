@@ -65,26 +65,11 @@ type Adapter struct {
 
 // New returns an Adapter driving b's declared service over guest. A backend
 // that declares no service still produces a usable Adapter: every operation
-// then answers Declared() == false rather than failing on a nil field, so the
-// CLI can report the truthful state instead of an invented failure.
+// then refuses with a typed no-service error rather than failing on a nil
+// field, so the CLI can report the truthful state instead of an invented
+// failure.
 func New(guest Guest, b backend.Backend) *Adapter {
 	return &Adapter{Guest: guest, identity: b.Identity(), spec: b.Service()}
-}
-
-// Declared reports whether the configured backend runs a guest service at all.
-func (a *Adapter) Declared() bool { return a.spec != nil }
-
-// Backend is the configured backend's identity name, for reports that have to
-// say which backend answered.
-func (a *Adapter) Backend() string { return a.identity.Name }
-
-// UnitName is the user unit Torio owns for the backend, empty when the backend
-// declares no service.
-func (a *Adapter) UnitName() string {
-	if a.spec == nil {
-		return ""
-	}
-	return a.spec.UnitName
 }
 
 func (a *Adapter) unitDir() string  { return a.spec.UnitDir }
