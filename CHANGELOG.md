@@ -414,8 +414,6 @@ two.
 
 ## 0.3.0 - 2026-08-06
 
-Detailed notes: [`docs/releases/v0.3.0.md`](docs/releases/v0.3.0.md).
-
 ### Added
 
 - Linux on x86_64 is a supported host. The matrix is `darwin/arm64` and
