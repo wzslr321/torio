@@ -18,7 +18,7 @@
 # files afterwards, which is what keeps `hermes` able to keep working in it.
 set -euo pipefail
 
-workspace='/home/hermes/projects'
+workspace='__TORIO_WORKSPACE_ROOT__'
 group='torio-projects'
 
 # Mirrors internal/lima.projectIDPattern: exactly one path segment below the

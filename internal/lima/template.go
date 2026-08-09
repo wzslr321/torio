@@ -63,6 +63,13 @@ const (
 	placeholderShellContent = "__TORIO_PROJECT_SHELL__"
 	placeholderEnterPath    = "__TORIO_PROJECT_ENTER_PATH__"
 	placeholderEnterContent = "__TORIO_PROJECT_ENTER__"
+	// placeholderWorkspaceRoot carries the declared backend's workspace into
+	// the two shared session helpers. They are the only guest scripts that
+	// serve every backend, and the workspace is the one thing about them that
+	// is not the same on all of them. A helper that named one backend's
+	// directory rejected every project on the other, with the host having
+	// derived the path correctly and the guest refusing it.
+	placeholderWorkspaceRoot = "__TORIO_WORKSPACE_ROOT__"
 	// The host-derived pins. They are substituted from the same Profile that
 	// verifyCompatibleConfig checks the created instance against.
 	// placeholderBackendProvision carries the declared backend's own guest
@@ -171,11 +178,12 @@ func renderTemplate(opts InitOptions, profile Profile) ([]byte, error) {
 	// The helper is injected after every other substitution, so the bytes that
 	// reach the guest are exactly the bytes of the tested script and never
 	// something the replacer rewrote.
-	text, err := injectProjectShell(text)
+	workspace := opts.Backend.Identity().WorkspacePath
+	text, err := injectProjectShell(text, workspace)
 	if err != nil {
 		return nil, err
 	}
-	text, err = injectProjectEnter(text)
+	text, err = injectProjectEnter(text, workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -223,12 +231,46 @@ func renderTemplate(opts InitOptions, profile Profile) ([]byte, error) {
 // be alone on its line: the indentation of that line is what makes the injected
 // block well-formed, and a placeholder sharing a line with anything else would
 // silently produce a template that no longer describes the helper.
-func injectProjectShell(text string) (string, error) {
-	return injectProjectHelper(text, placeholderShellContent, embeddedProjectShell, "operator shell")
+func injectProjectShell(text, workspaceRoot string) (string, error) {
+	content, err := projectHelper(embeddedProjectShell, workspaceRoot, "operator shell")
+	if err != nil {
+		return "", err
+	}
+	return injectProjectHelper(text, placeholderShellContent, content, "operator shell")
 }
 
-func injectProjectEnter(text string) (string, error) {
-	return injectProjectHelper(text, placeholderEnterContent, embeddedProjectEnter, "project enter")
+func injectProjectEnter(text, workspaceRoot string) (string, error) {
+	content, err := projectHelper(embeddedProjectEnter, workspaceRoot, "project enter")
+	if err != nil {
+		return "", err
+	}
+	return injectProjectHelper(text, placeholderEnterContent, content, "project enter")
+}
+
+// projectHelper resolves a shared session helper for the backend that will run
+// it, substituting nothing but the workspace root.
+//
+// It is a separate step from the template replacer, and deliberately so: the
+// replacer runs over the template, this runs over the script, and the script
+// that reaches the guest is the tested one with exactly one value filled in. A
+// helper whose text a general-purpose replacer had rewritten would no longer be
+// the file the helper tests execute.
+//
+// The root is a backend constant, not operator input, and is still checked. It
+// lands inside a single-quoted shell assignment, where a quote or a newline
+// would end the assignment and start something else.
+func projectHelper(content []byte, workspaceRoot, label string) ([]byte, error) {
+	if workspaceRoot == "" {
+		return nil, fmt.Errorf("the backend declares no workspace for the %s helper", label)
+	}
+	if !strings.HasPrefix(workspaceRoot, "/") || strings.ContainsAny(workspaceRoot, "'\"\n\r\\") {
+		return nil, fmt.Errorf("the backend declares a workspace the %s helper cannot carry", label)
+	}
+	text := string(content)
+	if !strings.Contains(text, placeholderWorkspaceRoot) {
+		return nil, fmt.Errorf("embedded %s helper invariant broken: %s missing", label, placeholderWorkspaceRoot)
+	}
+	return []byte(strings.ReplaceAll(text, placeholderWorkspaceRoot, workspaceRoot)), nil
 }
 
 func injectProjectHelper(text, placeholder string, content []byte, label string) (string, error) {

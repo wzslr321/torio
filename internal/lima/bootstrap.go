@@ -119,7 +119,7 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 	if err := a.verifyOperatorShellHelper(ctx, &rep); err != nil {
 		return rep, err
 	}
-	if err := a.verifyProjectEnterHelper(ctx, &rep, r.reconcile); err != nil {
+	if err := a.verifyProjectEnterHelper(ctx, &rep, b.Identity().WorkspacePath, r.reconcile); err != nil {
 		return rep, err
 	}
 	if err := a.verifyAgentSessionHelper(ctx, &rep, b.Session(), r.reconcile); err != nil {
@@ -618,7 +618,7 @@ func (a *Adapter) verifyRootHelperFile(ctx context.Context, rep *BootstrapReport
 // root-owned regular file provisioned by the Lima template. A helper absent
 // from a VM created by an older Torio is installed from the current embedded
 // bytes. Any existing but drifted path is reported and never overwritten.
-func (a *Adapter) verifyProjectEnterHelper(ctx context.Context, rep *BootstrapReport, reconcile bool) error {
+func (a *Adapter) verifyProjectEnterHelper(ctx context.Context, rep *BootstrapReport, workspaceRoot string, reconcile bool) error {
 	const name = "project_enter_helper"
 	spec := projectEnterHelperSpec
 
@@ -638,7 +638,15 @@ func (a *Adapter) verifyProjectEnterHelper(ctx context.Context, rep *BootstrapRe
 		if !reconcile {
 			return a.verifyFailed(rep, name, "no project enter helper at "+spec.Path, projectEnterHelperRemediation)
 		}
-		installed, err := a.SSHInput(ctx, embeddedProjectEnter,
+		// Resolved for the backend that will run it, exactly as the template
+		// does. Installing the raw embedded bytes here would put a helper on the
+		// guest carrying an unsubstituted placeholder, which refuses every
+		// project rather than the wrong ones.
+		content, err := projectHelper(embeddedProjectEnter, workspaceRoot, "project enter")
+		if err != nil {
+			return a.verifyFailed(rep, name, err.Error(), projectEnterHelperRemediation)
+		}
+		installed, err := a.SSHInput(ctx, content,
 			[]string{"sudo", "-n", "/bin/bash", "-ceu", projectEnterInstallScript})
 		if err != nil {
 			return err

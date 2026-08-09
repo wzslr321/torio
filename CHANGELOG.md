@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Fixed
+
+- **`project shell` and `project enter` were unusable on any backend but the
+  first.** Both guest helpers named `/home/hermes/projects` outright, so on a
+  Claude Code box the host derived the right path and the guest refused it —
+  `project path is not a project directly under /home/hermes/projects`, exit 64,
+  on the one command that carries write capability. The two shared helpers now
+  take the declared backend's workspace, substituted on both install paths, and
+  a test refuses a workspace written into either of them so the third backend
+  does not rediscover this.
+
 ### Changed
 
 - **The vault standard stopped forbidding what vault owners actually ask for.**

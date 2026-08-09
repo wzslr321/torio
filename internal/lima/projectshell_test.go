@@ -17,8 +17,15 @@ func helperScript(t *testing.T) string {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash is not available; the guest helper cannot be executed here")
 	}
+	// Resolved for a backend, because that is what ships. The raw embedded file
+	// carries a workspace placeholder and would reject every path it was given —
+	// which would leave the rejection tests below passing for the wrong reason.
+	content, err := projectHelper(embeddedProjectShell, HermesWorkspacePath, "operator shell")
+	if err != nil {
+		t.Fatalf("resolving the guest helper: %v", err)
+	}
 	path := filepath.Join(t.TempDir(), "torio-project-shell")
-	if err := os.WriteFile(path, embeddedProjectShell, 0o755); err != nil {
+	if err := os.WriteFile(path, content, 0o755); err != nil {
 		t.Fatalf("writing the guest helper: %v", err)
 	}
 	return path
