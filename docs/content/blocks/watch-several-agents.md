@@ -23,6 +23,9 @@ The command prints the configuration to stdout and writes nothing; the redirect
 above is your decision. On a terminal with no multiplexer, use
 `torio status setup zsh >> ~/.zshrc` instead — the prompt is then the surface,
 and the snippet keeps the poll out of it so your shell never waits on a VM.
+Each shell writes to its own private temporary file and the prompt reads only a
+completed refresh. A very short command can leave the previous refresh visible;
+the next one catches up without ever placing a guest poll in prompt expansion.
 
 One chip per box arrives, and exactly one state is loud: the box that wants you
 inverts, so it is found without reading. A live agent gets a dot and its count,

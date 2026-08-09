@@ -206,6 +206,11 @@ managed file it did not install — report, never repair in place.
 - The snippet calls the binary by the path of the executable that printed it,
   not by name, because an older `torio` earlier on `PATH` exits 2 into an empty
   surface with no error on any stream.
+- The zsh snippet works with the shell's default prompt options. Each shell gets
+  an unpredictable private cache file; a background refresh is coalesced while
+  one is running, and `precmd` reads only the last completed poll. The prompt
+  may therefore show the previous refresh after a very short command, but it
+  never waits for a VM and never renders a half-written line.
 - An unknown surface, or no surface, is a usage error (exit 2).
 - Under `--json` it is one envelope carrying `surface` and `configuration`, so
   machine mode stays machine mode.

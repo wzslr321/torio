@@ -124,18 +124,39 @@ const zshSetup = `# Torio ambient status. Add to ~/.zshrc, then: exec zsh
 # Nothing here writes to that file; this is text to place, not a change to apply.
 
 # A prompt is rendered synchronously and this poll enters VMs, so it must not run
-# in one. It runs after each command instead, detached, into a file the prompt
-# reads: the line is as of your last command and the shell never waits for it.
-TORIO_STATUS_CACHE=${TMPDIR:-/tmp}/torio-status.txt
+# in one. Each shell gets a private, unpredictable cache file; refreshes happen
+# while commands run, and the prompt only reads the last completed poll.
+typeset -g TORIO_STATUS_CACHE
+TORIO_STATUS_CACHE=$(umask 077; command mktemp "${TMPDIR:-/tmp}/torio-status.XXXXXX") || return
 
 torio_status_refresh() {
+  local lock="$TORIO_STATUS_CACHE.lock"
+  command mkdir -- "$lock" 2>/dev/null || return 0
+
   # The rename is unconditional. A poll that failed says so on the line it wrote,
   # and a prompt still showing the last good answer would be confidently wrong.
-  ( %s status --format=prompt >"$TORIO_STATUS_CACHE.tmp" 2>/dev/null
-    mv -f "$TORIO_STATUS_CACHE.tmp" "$TORIO_STATUS_CACHE" ) &!
+  ( local tmp=''
+    trap '[[ -z "$tmp" ]] || command rm -f -- "$tmp"; command rmdir -- "$lock"' EXIT
+    tmp=$(umask 077; command mktemp "$TORIO_STATUS_CACHE.XXXXXX") || exit
+    %s status --format=prompt >"$tmp" 2>/dev/null
+    command mv -f -- "$tmp" "$TORIO_STATUS_CACHE"
+    tmp=''
+  ) &!
+}
+
+torio_status_prompt() {
+  local line=''
+  IFS= read -r line <"$TORIO_STATUS_CACHE" 2>/dev/null || true
+  # Prompt escapes belong to zsh, not to a status value. Doubling a percent
+  # keeps even a custom instance identifier literal without PROMPT_SUBST.
+  line=${line//\%%/%%%%}
+  RPROMPT="%%F{244}${line}%%f"
 }
 autoload -Uz add-zsh-hook
-add-zsh-hook precmd torio_status_refresh
+add-zsh-hook preexec torio_status_refresh
+add-zsh-hook precmd torio_status_prompt
 
-RPROMPT='%%F{244}$(cat "$TORIO_STATUS_CACHE" 2>/dev/null)%%f'
+# Seed the first prompt without blocking it. Later polls normally run while the
+# foreground command is using the terminal.
+torio_status_refresh
 `

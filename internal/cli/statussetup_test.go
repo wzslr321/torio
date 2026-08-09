@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wzslr321/torio/internal/lima"
 )
@@ -79,6 +83,46 @@ func TestSetupSaysWhereItBelongsAndTouchesNothing(t *testing.T) {
 		if !strings.Contains(stdout, file) {
 			t.Errorf("%s: snippet does not name %s", surface, file)
 		}
+	}
+}
+
+// The generated prompt must work in zsh's default option set. PROMPT_SUBST is
+// off there; relying on it renders a literal `$(cat ...)` for a user whose
+// dotfiles did not happen to enable the option for another prompt framework.
+func TestZshSetupRendersWithoutPromptSubst(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh is not installed")
+	}
+	tmp := t.TempDir()
+	fake := filepath.Join(tmp, "torio")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nprintf 'visible\\n'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	snippet, err := statusSetupSnippet("zsh", shellQuote(fake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := "unsetopt BG_NICE\n" + snippet + `
+torio_status_refresh
+for attempt in {1..100}; do
+  [[ -s "$TORIO_STATUS_CACHE" ]] && break
+  sleep 0.01
+done
+(( $+functions[torio_status_prompt] )) && torio_status_prompt
+print -P -- "$RPROMPT"
+`
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, zsh, "-dfc", script)
+	cmd.Env = append(os.Environ(), "TMPDIR="+tmp)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("clean zsh rejected the snippet: %v", err)
+	}
+	got := strings.TrimSpace(string(out))
+	if !strings.Contains(got, "visible") || strings.Contains(got, "$(cat") {
+		t.Fatalf("rendered prompt = %q, want the cached value without a literal command substitution", got)
 	}
 }
 
