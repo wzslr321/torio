@@ -1286,3 +1286,61 @@ func TestRemoteCommandsCannotTruncateTheirOwnOutput(t *testing.T) {
 		t.Errorf("--quiet must precede git's -- separator, or it reads as a path:\n%s", gitPart)
 	}
 }
+
+// TestShellPreflightDescribesTheCheckout covers the convenience half: the two
+// facts an operator would otherwise open the session and type `git status` and
+// `git diff` to learn are handed to them before the session opens.
+func TestShellPreflightDescribesTheCheckout(t *testing.T) {
+	g := shellFake()
+	g.branch = "main"
+	g.ahead = "3"
+
+	session, err := newTestManager(g, registryWith(testProject())).ShellPreflight(context.Background(), testID)
+	if err != nil {
+		t.Fatalf("ShellPreflight() error = %v", err)
+	}
+	if session.Review.Branch != "main" {
+		t.Errorf("Review.Branch = %q, want %q", session.Review.Branch, "main")
+	}
+	if !session.Review.AheadKnown || session.Review.Ahead != 3 {
+		t.Errorf("Review = %+v, want 3 commits ahead", session.Review)
+	}
+}
+
+// TestShellPreflightDescriptionNeverBlocksASession is the rule that keeps the
+// description subordinate to the session: everything above it decides whether a
+// session may be opened, and a description that could not be assembled is left
+// unsaid rather than turned into a refusal.
+func TestShellPreflightDescriptionNeverBlocksASession(t *testing.T) {
+	for name, mutate := range map[string]func(*fakeGuest){
+		"detached HEAD": func(g *fakeGuest) { g.branch = "" },
+		"no upstream":   func(g *fakeGuest) { g.ahead = "" },
+		"unreadable":    func(g *fakeGuest) { g.ahead = "not-a-number" },
+	} {
+		g := shellFake()
+		mutate(g)
+
+		session, err := newTestManager(g, registryWith(testProject())).ShellPreflight(context.Background(), testID)
+		if err != nil {
+			t.Errorf("%s: ShellPreflight() error = %v, want a session anyway", name, err)
+			continue
+		}
+		if !slices.Equal(session.Verified, shellPreconditions) {
+			t.Errorf("%s: verified = %v, want the full checklist", name, session.Verified)
+		}
+		if session.Review.AheadKnown {
+			t.Errorf("%s: Review claims a commit count it could not read: %+v", name, session.Review)
+		}
+	}
+}
+
+// TestReviewContextIsNotAPrecondition keeps the closed vocabulary closed. The
+// description is deliberately absent from shellPreconditions, so a caller cannot
+// report it as something Torio proved.
+func TestReviewContextIsNotAPrecondition(t *testing.T) {
+	for _, marker := range shellPreconditions {
+		if strings.Contains(marker, "review") || strings.Contains(marker, "branch") || strings.Contains(marker, "ahead") {
+			t.Errorf("precondition %q describes the checkout; description is not verification", marker)
+		}
+	}
+}

@@ -493,7 +493,50 @@ func (m *Manager) ShellPreflight(ctx context.Context, id string) (ShellSession, 
 	}
 	session.Verified = append(session.Verified, "operator_ssh_agent")
 
+	session.Review = m.reviewContext(ctx, op, spec.Project.Path)
+
 	return session, nil
+}
+
+// reviewContext reads what the checkout looks like right now.
+//
+// It runs after every precondition has been proved, and it cannot fail the
+// preflight. Everything above decides whether a session may be opened; this only
+// decides what the operator is told when it opens, and refusing to open a
+// session because a description could not be assembled would be the tail wagging
+// the dog. Anything unreadable is left unsaid instead.
+//
+// Both commands are ordinary read-only Git. Neither pushes, fetches or contacts
+// a remote — TestShellPreflightNeverTestsThePush still holds over the whole
+// preflight argv, and this must never be the change that makes it stop holding.
+func (m *Manager) reviewContext(ctx context.Context, op, workspace string) ReviewContext {
+	var review ReviewContext
+
+	// A detached HEAD exits non-zero here, which is not an error: it is a
+	// checkout with no branch to name.
+	branch, err := m.run(ctx, op, guestexec.UserExecAs(m.identity().GuestUser, "git", "-C", workspace, "symbolic-ref", "--short", "HEAD"))
+	if err != nil || branch.ExitCode != 0 {
+		return review
+	}
+	review.Branch = strings.TrimSpace(string(branch.Stdout))
+	if review.Branch == "" {
+		return review
+	}
+
+	// `@{u}` resolves the configured upstream. With none configured this exits
+	// non-zero, and "no upstream" is left as the absence it is rather than
+	// reported as zero commits ahead.
+	ahead, err := m.run(ctx, op, guestexec.UserExecAs(m.identity().GuestUser, "git", "-C", workspace, "rev-list", "--count", "@{u}..HEAD"))
+	if err != nil || ahead.ExitCode != 0 {
+		return review
+	}
+	count, convErr := strconv.Atoi(strings.TrimSpace(string(ahead.Stdout)))
+	if convErr != nil || count < 0 {
+		return review
+	}
+	review.Ahead = count
+	review.AheadKnown = true
+	return review
 }
 
 // shellSpec resolves the registry entry into the data a session needs. It runs

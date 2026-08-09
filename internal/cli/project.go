@@ -396,11 +396,25 @@ func newProjectShellCmd(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			shellCmd, err := a.newShellSpec(session.Project.Path)
+			// The proxy is started before the argv is built, because the argv
+			// names its socket. It is stopped on every exit path below, so the
+			// capability cannot outlive the session that carried it.
+			mediated, err := a.startMediation(session)
+			if err != nil {
+				return err
+			}
+			defer mediated.stop()
+
+			var shellCmd execx.InteractiveCommand
+			if socket := mediated.SocketPath(); socket != "" {
+				shellCmd, err = a.newMediatedShellSpec(session.Project.Path, socket)
+			} else {
+				shellCmd, err = a.newShellSpec(session.Project.Path)
+			}
 			if err != nil {
 				return mapLimaError("project.shell", err)
 			}
-			if err := a.announceShell(session); err != nil {
+			if err := a.announceShell(session, mediated != nil); err != nil {
 				return err
 			}
 			// Deliberately the command context, not a.opContext: an operator session
@@ -428,12 +442,50 @@ func (a *app) preflightShell(cmd *cobra.Command, service projectService, id stri
 // announceShell states what the operator is about to hold and for how long,
 // from the host side. The guest helper prints its own line once the session is
 // up; this one is printed even when the transport never gets there.
-func (a *app) announceShell(session projects.ShellSession) error {
-	_, err := fmt.Fprintf(a.stdout,
-		"%s: opening an operator session in %s\n"+
-			"  your SSH agent is forwarded for this session only; the write capability ends at exit\n",
-		session.Project.ID, session.Project.Path)
-	return err
+//
+// The two forwarding shapes are named differently on purpose. They look
+// identical from inside the session and only one of them can reach every key the
+// operator has loaded, so the line that says which is the operator's only
+// warning that a config change did not take.
+func (a *app) announceShell(session projects.ShellSession, mediated bool) error {
+	carrier := "  your SSH agent is forwarded for this session only; the write capability ends at exit\n"
+	if mediated {
+		carrier = "  one pinned key is forwarded through Torio for this session; every signature asks you first\n"
+	}
+	if _, err := fmt.Fprintf(a.stdout,
+		"%s: opening an operator session in %s\n%s",
+		session.Project.ID, session.Project.Path, carrier); err != nil {
+		return err
+	}
+	if line := reviewLine(session.Review); line != "" {
+		if _, err := fmt.Fprintf(a.stdout, "  %s\n", line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// reviewLine describes the checkout as the preflight found it, so the first two
+// commands of every session do not have to be `git status` and `git diff`.
+//
+// It is a snapshot and is worded as one. An empty result is the honest answer
+// for a detached HEAD or a branch with no upstream: there is no count to give,
+// and inventing a zero would read as "nothing to push".
+func reviewLine(review projects.ReviewContext) string {
+	if review.Branch == "" {
+		return ""
+	}
+	if !review.AheadKnown {
+		return fmt.Sprintf("on %s, with no upstream configured to compare against", review.Branch)
+	}
+	switch review.Ahead {
+	case 0:
+		return fmt.Sprintf("on %s, level with its upstream right now", review.Branch)
+	case 1:
+		return fmt.Sprintf("on %s, 1 commit ahead of its upstream right now", review.Branch)
+	default:
+		return fmt.Sprintf("on %s, %d commits ahead of its upstream right now", review.Branch, review.Ahead)
+	}
 }
 
 // reportShellEnd closes the session out. It reports one fact — the session

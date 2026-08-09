@@ -77,14 +77,20 @@ type app struct {
 	// for a project path; newInteractive executes either command. They are seams
 	// because the production spec reads host state (the Lima ssh config, the
 	// SSH agent) that a test must not depend on.
-	newEnterSpec    func(projectPath string) (execx.InteractiveCommand, error)
-	newShellSpec    func(projectPath string) (execx.InteractiveCommand, error)
-	newAgentSpec    func(projectPath string) (execx.InteractiveCommand, error)
-	newInteractive  func() execx.InteractiveRunner
-	newMCPLoginSpec func(service string) (execx.InteractiveCommand, error)
-	installMCP      func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerInstallReport, error)
-	verifyMCP       func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerReport, error)
-	activateMCP     func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerActivationReport, error)
+	newEnterSpec func(projectPath string) (execx.InteractiveCommand, error)
+	newShellSpec func(projectPath string) (execx.InteractiveCommand, error)
+	// newMediatedShellSpec is newShellSpec with Torio's own agent in front of
+	// the operator's. It is a second seam rather than a parameter on the first
+	// so the unmediated argv keeps its own pinned test: the two shapes differ
+	// only in one environment variable, which is exactly the kind of difference
+	// a shared constructor loses.
+	newMediatedShellSpec func(projectPath, agentSocket string) (execx.InteractiveCommand, error)
+	newAgentSpec         func(projectPath string) (execx.InteractiveCommand, error)
+	newInteractive       func() execx.InteractiveRunner
+	newMCPLoginSpec      func(service string) (execx.InteractiveCommand, error)
+	installMCP           func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerInstallReport, error)
+	verifyMCP            func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerReport, error)
+	activateMCP          func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerActivationReport, error)
 
 	// lookupOperatorUser resolves the Lima login identity for `vm init`.
 	// Production uses the current OS user; tests inject a fixed name.
@@ -138,6 +144,11 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 	if a.newShellSpec == nil {
 		a.newShellSpec = func(p string) (execx.InteractiveCommand, error) {
 			return lima.OperatorShellSpec(a.backend.Identity().WorkspacePath, p)
+		}
+	}
+	if a.newMediatedShellSpec == nil {
+		a.newMediatedShellSpec = func(p, socket string) (execx.InteractiveCommand, error) {
+			return lima.MediatedShellSpec(a.backend.Identity().WorkspacePath, p, socket)
 		}
 	}
 	if a.newEnterSpec == nil {

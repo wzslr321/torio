@@ -1,6 +1,10 @@
 # ADR-0003: Ownership split — Brain, projects, and operator-carried write
 
 - Status: Accepted
+- Superseded in part by:
+  [ADR-0015](0015-mediated-agent-forwarding.md), for what `ssh -A` puts inside the
+  guest: the forwarded agent is Torio's, holds one pinned key, and asks before
+  every signature.
 - Date: 2026-08-05
 - Consolidates: the onboarding/Brain/multi-project scope decision and the removal
   of `brain export`. The superseded originals are recoverable at

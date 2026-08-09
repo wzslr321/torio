@@ -23,21 +23,25 @@ import (
 // predates the registry still refuses this document — by its own version gate
 // and by DisallowUnknownFields on "projects" — so it can never misread a
 // registry as settings-only.
-const ConfigSchemaVersion = "3"
+const ConfigSchemaVersion = "4"
 
 // readableSchemaVersions are the document versions this binary understands. "2"
 // is read but never written: it predates an instance declaring which agent
 // backend it runs, and a document that names none is an instance running the
 // default one. Reading it as anything else would re-point an existing box at a
 // different agent on upgrade, so the absence is given the only meaning it can
-// safely have and the document is rewritten as "3" the next time it changes.
+// safely have and the document is rewritten as the current version the next time
+// it changes. "3" is read on the same terms: it predates `operator_key`, and a
+// document that names no key is one whose sessions forward the operator's whole
+// agent, which is exactly what it meant when it was written.
 //
-// The converse is deliberate too. A binary that predates "3" refuses a "3"
-// document, by its own version gate and by DisallowUnknownFields on `backend`.
-// That is the desired failure: an older binary cannot know its Hermes-shaped
-// commands are pointed at a box running a different agent, so it must stop
-// rather than guess.
-var readableSchemaVersions = []string{"2", "3"}
+// The converse is deliberate too. A binary that predates a version refuses a
+// document declaring it, by its own version gate and by DisallowUnknownFields on
+// the field that version added. That is the desired failure: an older binary
+// cannot know that a session it is about to open was configured to forward one
+// mediated key rather than the operator's agent, so it must stop rather than
+// guess and hand over the keyring.
+var readableSchemaVersions = []string{"2", "3", "4"}
 
 // readableSchemaVersion reports whether v is a document version this binary
 // understands.
@@ -59,9 +63,43 @@ type File struct {
 	// valid is resolved by the backend registry, not here — this package
 	// validates the shape of the name, never its meaning.
 	Backend string
+	// OperatorKey pins the single SSH identity a session may use, by SHA256
+	// fingerprint or by key comment. Empty means no key is pinned, and a session
+	// forwards the operator's agent whole, as every session did before this
+	// field existed (ADR-0015).
+	OperatorKey string
 	// Projects is the attached project registry. It is empty for a document
 	// without projects.
 	Projects []Project
+}
+
+// maxOperatorKeyLen bounds the pinned key. A fingerprint is 50 bytes and a
+// comment is conventionally an email or a hostname; this is generous for both
+// and short of anything that could be a key itself pasted into the wrong field.
+const maxOperatorKeyLen = 256
+
+// validateOperatorKey checks the shape of the pin, never its meaning. Whether a
+// well-shaped pin matches an identity the agent actually holds is answered by
+// the agent, at the moment a session is opened, and is not a property of the
+// document.
+func validateOperatorKey(key string) error {
+	if key == "" {
+		return nil
+	}
+	if len(key) > maxOperatorKeyLen {
+		return fmt.Errorf("operator_key is longer than %d bytes", maxOperatorKeyLen)
+	}
+	if strings.TrimSpace(key) != key {
+		return errors.New("operator_key has leading or trailing whitespace")
+	}
+	for _, r := range key {
+		// A control character in a pin reaches an operator's terminal in a
+		// diagnostic and a dialog on their Mac. Neither is a place for one.
+		if r < 0x20 || r == 0x7f {
+			return errors.New("operator_key contains a control character")
+		}
+	}
+	return nil
 }
 
 // backendNamePattern is the shape a backend name may take. It is an identifier
@@ -77,13 +115,22 @@ type fileJSON struct {
 	SchemaVersion  string        `json:"schema_version"`
 	DefaultTimeout string        `json:"default_timeout,omitempty"`
 	Backend        string        `json:"backend,omitempty"`
+	OperatorKey    string        `json:"operator_key,omitempty"`
 	Projects       []projectJSON `json:"projects"`
 }
 
-// fileJSONV2 is the wire form of the version that predates the backend field.
-// It exists as its own type so a document declaring "2" while carrying
-// `backend` is rejected by the strict decoder rather than quietly accepted: a
+// fileJSONV3 is the wire form of the version that predates the operator_key
+// field, and fileJSONV2 the one that also predates backend. Each older version
+// keeps its own type so a document declaring it while carrying a field it does
+// not have is rejected by the strict decoder rather than quietly accepted: a
 // document must mean what its declared version says it means.
+type fileJSONV3 struct {
+	SchemaVersion  string        `json:"schema_version"`
+	DefaultTimeout string        `json:"default_timeout,omitempty"`
+	Backend        string        `json:"backend,omitempty"`
+	Projects       []projectJSON `json:"projects"`
+}
+
 type fileJSONV2 struct {
 	SchemaVersion  string        `json:"schema_version"`
 	DefaultTimeout string        `json:"default_timeout,omitempty"`
@@ -213,7 +260,12 @@ func WriteFile(path string, f File) (err error) {
 		return fmt.Errorf("config: %w", err)
 	}
 
-	wire := fileJSON{SchemaVersion: out.SchemaVersion, Backend: out.Backend, Projects: []projectJSON{}}
+	wire := fileJSON{
+		SchemaVersion: out.SchemaVersion,
+		Backend:       out.Backend,
+		OperatorKey:   out.OperatorKey,
+		Projects:      []projectJSON{},
+	}
 	if out.Timeout != 0 {
 		wire.DefaultTimeout = out.Timeout.String()
 	}
@@ -257,7 +309,8 @@ func verifyPersisted(path string, want File) error {
 		return fmt.Errorf("config: written config did not validate on read back: %w", err)
 	}
 	if got.SchemaVersion != want.SchemaVersion || got.Timeout != want.Timeout ||
-		got.Backend != want.Backend || !slices.Equal(got.Projects, want.Projects) {
+		got.Backend != want.Backend || got.OperatorKey != want.OperatorKey ||
+		!slices.Equal(got.Projects, want.Projects) {
 		// Neither document is echoed: both may carry operator-controlled text.
 		return errors.New("config: written config does not match the document that was persisted")
 	}
@@ -280,6 +333,9 @@ func (f File) Validate() (err error) {
 	}
 	if f.Backend != "" && !backendNamePattern.MatchString(f.Backend) {
 		return fmt.Errorf("backend %q is not a valid backend name", f.Backend)
+	}
+	if err := validateOperatorKey(f.OperatorKey); err != nil {
+		return err
 	}
 
 	if f.Timeout != 0 {
@@ -323,20 +379,34 @@ func parseFile(data []byte) (f File, err error) {
 	}
 
 	var raw fileJSON
-	if probe.SchemaVersion == "2" {
+	switch probe.SchemaVersion {
+	case "2":
 		var legacy fileJSONV2
 		if err := decodeStrict(data, &legacy); err != nil {
 			return File{}, err
 		}
 		raw = fileJSON{SchemaVersion: legacy.SchemaVersion, DefaultTimeout: legacy.DefaultTimeout, Projects: legacy.Projects}
-	} else if err := decodeStrict(data, &raw); err != nil {
-		return File{}, err
+	case "3":
+		var legacy fileJSONV3
+		if err := decodeStrict(data, &legacy); err != nil {
+			return File{}, err
+		}
+		raw = fileJSON{
+			SchemaVersion:  legacy.SchemaVersion,
+			DefaultTimeout: legacy.DefaultTimeout,
+			Backend:        legacy.Backend,
+			Projects:       legacy.Projects,
+		}
+	default:
+		if err := decodeStrict(data, &raw); err != nil {
+			return File{}, err
+		}
 	}
-	// The document is normalized to the current version on the way in, so a
-	// document read as "2" is written back as "3" the next time anything
+	// The document is normalized to the current version on the way in, so an
+	// older document is written back as the current one the next time anything
 	// changes. Nothing downstream has a reason to know which version was on
 	// disk; what matters is that reading an older one is lossless.
-	f = File{SchemaVersion: ConfigSchemaVersion, Backend: raw.Backend}
+	f = File{SchemaVersion: ConfigSchemaVersion, Backend: raw.Backend, OperatorKey: raw.OperatorKey}
 	if err := f.setTimeout(raw.DefaultTimeout); err != nil {
 		return File{}, err
 	}

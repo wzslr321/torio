@@ -86,10 +86,15 @@ type fakeGuest struct {
 	origin      string
 	shallow     bool
 	dirty       bool
-	credHelper  bool
-	owner       string
-	group       string
-	mode        string
+	// branch is what `symbolic-ref --short HEAD` prints; empty models a
+	// detached HEAD. ahead is what `rev-list --count @{u}..HEAD` prints; empty
+	// models a branch with no upstream configured.
+	branch     string
+	ahead      string
+	credHelper bool
+	owner      string
+	group      string
+	mode       string
 
 	// remote is the URL the guest holds and serves; remoteReadable decides
 	// whether the noninteractive preflight can read it.
@@ -159,6 +164,8 @@ func attachedFake() *fakeGuest {
 	f.hermesPrimary = testPath
 	f.safeDirs[lima.HermesUser] = []string{testPath}
 	f.safeDirs[testOwner] = []string{testPath}
+	f.branch = "main"
+	f.ahead = "3"
 	return f
 }
 
@@ -246,6 +253,16 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 			return okResult(" M src/main.go\n"), nil
 		}
 		return okResult(""), nil
+	case strings.Contains(joined, "git -C "+testPath+" symbolic-ref --short HEAD"):
+		if f.branch == "" {
+			return exitResult(128, "", "fatal: ref HEAD is not a symbolic ref"), nil
+		}
+		return okResult(f.branch + "\n"), nil
+	case strings.Contains(joined, "git -C "+testPath+" rev-list --count @{u}..HEAD"):
+		if f.ahead == "" {
+			return exitResult(128, "", "fatal: no upstream configured for branch"), nil
+		}
+		return okResult(f.ahead + "\n"), nil
 	case strings.Contains(joined, "git -C "+testPath+" config --local --get-regexp"):
 		if f.credHelper {
 			return okResult("credential.helper store\n"), nil

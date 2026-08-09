@@ -134,6 +134,92 @@ func OperatorShellSpec(workspaceRoot, projectPath string) (execx.InteractiveComm
 	}, nil
 }
 
+// MediatedShellSpec is OperatorShellSpec with Torio's own agent in front of the
+// operator's.
+//
+// The argv is deliberately identical, down to the flags and their order. `-A`
+// forwards whatever SSH_AUTH_SOCK names in this process, so pointing that one
+// variable at the proxy socket changes what crosses into the guest without
+// changing how it crosses: same auth-agent channel, same root-owned helper,
+// same guest-side SSH_AUTH_SOCK written by sshd. The guest cannot tell the
+// difference, which is the point — nothing on that side had to be trusted to
+// make this narrower.
+//
+// This is the one session spec with a non-nil Env. OperatorShellSpec leaves it
+// nil so the session inherits the operator's SSH_AUTH_SOCK, TERM and locale
+// untouched; here exactly one of those is replaced and the rest are passed
+// through, because a session that composed a fresh environment would lose the
+// operator's terminal along with their keyring.
+func MediatedShellSpec(workspaceRoot, projectPath, agentSocket string) (execx.InteractiveCommand, error) {
+	if err := validateProjectPath(workspaceRoot, projectPath); err != nil {
+		return execx.InteractiveCommand{}, &Error{Op: operatorShellOp, Kind: KindVerificationFailed, Err: err}
+	}
+	if !filepath.IsAbs(agentSocket) {
+		return execx.InteractiveCommand{}, &Error{
+			Op:   operatorShellOp,
+			Kind: KindVerificationFailed,
+			Err:  errors.New("the mediated agent socket must be an absolute path"),
+		}
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return execx.InteractiveCommand{}, &Error{Op: operatorShellOp, Kind: KindNotFound, Err: err}
+	}
+	sshConfig := filepath.Join(home, ".lima", InstanceName, "ssh.config")
+	if _, statErr := os.Stat(sshConfig); statErr != nil {
+		return execx.InteractiveCommand{}, &Error{
+			Op:   operatorShellOp,
+			Kind: KindNotFound,
+			Err:  fmt.Errorf("no lima ssh config at %s; run `torio vm start` first", sshConfig),
+		}
+	}
+	// Fail closed on the socket for the same reason OperatorShellSpec fails
+	// closed on the agent: -A pointed at nothing opens a session that looks
+	// working and refuses at the push.
+	if _, statErr := os.Stat(agentSocket); statErr != nil {
+		return execx.InteractiveCommand{}, &Error{
+			Op:   operatorShellOp,
+			Kind: KindNotFound,
+			Err:  errors.New("the mediated agent socket is not there to forward"),
+		}
+	}
+
+	return execx.InteractiveCommand{
+		Name: "ssh",
+		Args: []string{
+			"-F", sshConfig,
+			"-o", "ControlMaster=no",
+			"-o", "ControlPath=none",
+			"-o", "ForwardAgent=yes",
+			"-A",
+			"-t",
+			sshHostAlias(),
+			OperatorShellHelper,
+			projectPath,
+		},
+		Env: withAgentSocket(os.Environ(), agentSocket),
+	}, nil
+}
+
+// withAgentSocket replaces every SSH_AUTH_SOCK in env with one naming socket.
+//
+// Every existing assignment is dropped rather than the last one being appended
+// after them: which of two assignments an exec resolves to is not a thing to
+// rely on when the answer decides whether a guest reaches one key or all of
+// them.
+func withAgentSocket(env []string, socket string) []string {
+	const prefix = "SSH_AUTH_SOCK="
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, prefix+socket)
+}
+
 // ProjectEnterSpec builds an interactive SSH command for ordinary project work
 // without forwarding the operator's SSH agent. Multiplexing is disabled so the
 // session cannot reuse a push-capable operator-shell connection.

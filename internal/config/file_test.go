@@ -188,7 +188,7 @@ func TestLoadRejectsMalformedJSON(t *testing.T) {
 
 func TestLoadRejectsWrongSchemaVersion(t *testing.T) {
 	for _, body := range []string{
-		`{"schema_version":"4"}`,
+		`{"schema_version":"5"}`,
 		`{"schema_version":"0"}`,
 		`{"schema_version":"v2"}`,
 	} {
@@ -429,12 +429,12 @@ func TestWriteFileRejectsInvalidDocumentBeforeCreatingFile(t *testing.T) {
 
 // TestWriteFileRequiresCurrentSchemaVersion pins the write gate: only the
 // current version reaches disk, so no path can emit a document the next
-// invocation would refuse to read. "2" is in the list on purpose — it is
-// readable, and writing it back would silently drop the backend a newer
-// document declares.
+// invocation would refuse to read. "2" and "3" are in the list on purpose — both
+// are readable, and writing either back would silently drop a field a newer
+// document declares: the backend for "2", the pinned operator key for "3".
 func TestWriteFileRequiresCurrentSchemaVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), appDir, configFileName)
-	for _, version := range []string{"", "1", "2", "4"} {
+	for _, version := range []string{"", "1", "2", "3", "5"} {
 		if err := WriteFile(path, File{SchemaVersion: version}); err == nil {
 			t.Errorf("WriteFile with schema_version %q must be rejected", version)
 		}
@@ -540,5 +540,89 @@ func TestLoadRejectsInsecureConfigPermissions(t *testing.T) {
 	}
 	if _, err := loadWith(t, Options{}, cfgHome); err == nil {
 		t.Fatalf("group/world-readable config must be rejected on Unix")
+	}
+}
+
+// TestOperatorKeyRoundTrips proves the pin survives a write and a read back. It
+// is the field that decides whether a session forwards one mediated key or the
+// operator's whole agent, so losing it silently would widen the session rather
+// than narrow it.
+func TestOperatorKeyRoundTrips(t *testing.T) {
+	const pin = "SHA256:453QtO4nWnVBB8P7WEvUS9HGshG6/XJgoa3Y3IKs+B4"
+	path := filepath.Join(t.TempDir(), appDir, configFileName)
+	if err := WriteFile(path, File{SchemaVersion: ConfigSchemaVersion, OperatorKey: pin}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	got, err := parseFile(data)
+	if err != nil {
+		t.Fatalf("parseFile() error = %v", err)
+	}
+	if got.OperatorKey != pin {
+		t.Errorf("OperatorKey = %q, want %q", got.OperatorKey, pin)
+	}
+}
+
+// TestOperatorKeyIsRefusedByAnOlderDeclaredVersion holds the rule that a
+// document means what its declared version says it means. A "3" document
+// carrying operator_key would otherwise be read as pinning a key by a binary
+// that also happily writes it back as "4".
+func TestOperatorKeyIsRefusedByAnOlderDeclaredVersion(t *testing.T) {
+	for _, body := range []string{
+		`{"schema_version":"3","operator_key":"SHA256:abc"}`,
+		`{"schema_version":"2","operator_key":"SHA256:abc"}`,
+	} {
+		cfgHome := t.TempDir()
+		writeConfig(t, cfgHome, body)
+		if _, err := loadWith(t, Options{}, cfgHome); err == nil {
+			t.Errorf("operator_key in %q must be rejected", body)
+		}
+	}
+}
+
+// TestVersionThreeReadsAsCurrentWithNoPin: a document that predates the field is
+// one whose sessions forwarded the operator's whole agent, which is exactly what
+// an empty pin still means.
+func TestVersionThreeReadsAsCurrentWithNoPin(t *testing.T) {
+	cfgHome := t.TempDir()
+	writeConfig(t, cfgHome, `{"schema_version":"3","backend":"claude-code","default_timeout":"45s"}`)
+	rt, err := loadWith(t, Options{}, cfgHome)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if rt.File.SchemaVersion != ConfigSchemaVersion {
+		t.Errorf("SchemaVersion = %q, want normalized to %q", rt.File.SchemaVersion, ConfigSchemaVersion)
+	}
+	if rt.File.Backend != "claude-code" {
+		t.Errorf("Backend = %q, want the document's", rt.File.Backend)
+	}
+	if rt.File.OperatorKey != "" {
+		t.Errorf("OperatorKey = %q, want empty", rt.File.OperatorKey)
+	}
+}
+
+func TestOperatorKeyShapeIsChecked(t *testing.T) {
+	for name, pin := range map[string]string{
+		"control character": "SHA256:abc\x00def",
+		"escape sequence":   "SHA256:abc\x1b[31m",
+		"leading space":     " SHA256:abc",
+		"trailing newline":  "SHA256:abc\n",
+		"too long":          strings.Repeat("k", maxOperatorKeyLen+1),
+	} {
+		if err := (File{SchemaVersion: ConfigSchemaVersion, OperatorKey: pin}).Validate(); err == nil {
+			t.Errorf("%s: operator_key %q must be rejected", name, pin)
+		}
+	}
+	for name, pin := range map[string]string{
+		"fingerprint": "SHA256:453QtO4nWnVBB8P7WEvUS9HGshG6/XJgoa3Y3IKs+B4",
+		"comment":     "wiktor@mac",
+		"unset":       "",
+	} {
+		if err := (File{SchemaVersion: ConfigSchemaVersion, OperatorKey: pin}).Validate(); err != nil {
+			t.Errorf("%s: operator_key %q must be accepted, got %v", name, pin, err)
+		}
 	}
 }
