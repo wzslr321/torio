@@ -123,7 +123,7 @@ func testProxy(t *testing.T, confirm Confirmer) (*Proxy, *fakeAgent, *fakeRecord
 		Pinned:   pinned,
 		Confirm:  confirm,
 		Audit:    rec,
-		Session:  SessionContext{ProjectID: "torio-cc", Remote: "github.com/wzslr321/torio", Branch: "main", Ahead: 3},
+		Session:  SessionContext{ProjectID: "torio-cc", Host: "github.com", Branch: "main", Ahead: 3},
 	}, agent, rec
 }
 
@@ -306,8 +306,9 @@ func TestSignForAnotherKeyIsRefusedWithoutAsking(t *testing.T) {
 // be handling it.
 func TestUnsupportedRequestsNeverReachTheAgent(t *testing.T) {
 	// SSH_AGENTC_ADD_IDENTITY, REMOVE_IDENTITY, REMOVE_ALL_IDENTITIES,
-	// LOCK, UNLOCK, ADD_SMARTCARD_KEY, EXTENSION.
-	for _, typ := range []byte{17, 18, 19, 22, 23, 20, 27} {
+	// LOCK, UNLOCK, ADD_SMARTCARD_KEY. Not EXTENSION: a client sends that of its
+	// own accord, and it has its own test below.
+	for _, typ := range []byte{17, 18, 19, 22, 23, 20} {
 		confirm, asked := allowAll()
 		p, agent, rec := testProxy(t, confirm)
 		conn := guestConn(t, p)
@@ -460,9 +461,9 @@ func unixListener(t *testing.T) net.Listener {
 func TestPromptMessageNamesTheSessionAndItsLimits(t *testing.T) {
 	msg := promptMessage(SignRequest{
 		Identity: goldenIdentity(t),
-		Session:  SessionContext{ProjectID: "torio-cc", Remote: "github.com/wzslr321/torio", Branch: "main", Ahead: 3},
+		Session:  SessionContext{ProjectID: "torio-cc", Host: "github.com", Branch: "main", Ahead: 3},
 	})
-	for _, want := range []string{"torio-cc", "github.com/wzslr321/torio", "main", "3 commits ahead", goldenFingerprint} {
+	for _, want := range []string{"torio-cc", "github.com", "main", "3 commits ahead", goldenFingerprint} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("prompt does not mention %q:\n%s", want, msg)
 		}
@@ -472,5 +473,41 @@ func TestPromptMessageNamesTheSessionAndItsLimits(t *testing.T) {
 	// claim that Torio had seen the push.
 	if !strings.Contains(msg, "cannot see what the key will be used for") {
 		t.Errorf("prompt does not say what Torio cannot see:\n%s", msg)
+	}
+}
+
+// TestExtensionsAreRefusedAndNamedAsThemselves separates the one refusal a
+// client causes by itself from the ones a guest goes out of its way to ask for.
+//
+// OpenSSH 8.9 and later probe a forwarded agent with `session-bind@openssh.com`
+// on every connection. Recording that as "unsupported" put two benign
+// allowed:false lines in the log per ordinary push, which is how an operator
+// learns to skim past the line that matters.
+func TestExtensionsAreRefusedAndNamedAsThemselves(t *testing.T) {
+	confirm, asked := allowAll()
+	p, agent, rec := testProxy(t, confirm)
+	conn := guestConn(t, p)
+
+	body := appendString(nil, []byte("session-bind@openssh.com"))
+	resp := ask(t, conn, frame{typ: msgExtension, body: body})
+
+	if resp.typ != msgFailure {
+		t.Fatalf("response type = %d, want SSH_AGENT_FAILURE", resp.typ)
+	}
+	if len(agent.requests()) != 0 {
+		t.Error("an extension reached the operator's agent")
+	}
+	if *asked != 0 {
+		t.Error("an extension put a dialog in front of the operator")
+	}
+	got := rec.all()
+	if len(got) != 1 || got[0].Request != requestExtension || got[0].Allowed {
+		t.Fatalf("audit = %+v, want one refused extension decision", got)
+	}
+	if got[0].Request == requestOther {
+		t.Error("an extension is recorded as an unsupported request")
+	}
+	if got[0].Fingerprint != "" {
+		t.Errorf("audit named a key for a request that carries none: %q", got[0].Fingerprint)
 	}
 }

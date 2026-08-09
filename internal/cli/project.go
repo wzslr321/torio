@@ -325,10 +325,11 @@ func newProjectAgentCmd(a *app) *cobra.Command {
 					Message: "--push-grant needs `operator_key` set in the config document: the grant is the mediated agent, and without a pinned key there is nothing to mediate",
 				}
 			}
-			if err := a.requireReachableRemote(cmd, service, args[0]); err != nil {
+			access, err := a.requireReachableRemote(cmd, service, args[0])
+			if err != nil {
 				return err
 			}
-			mediated, err := a.startMediation("project.agent", mediatedContext(session.Project, session.Review))
+			mediated, err := a.startMediation("project.agent", mediatedContext(session.Project, session.Review, access))
 			if err != nil {
 				return err
 			}
@@ -460,7 +461,14 @@ func newProjectShellCmd(a *app) *cobra.Command {
 			// The proxy is started before the argv is built, because the argv
 			// names its socket. It is stopped on every exit path below, so the
 			// capability cannot outlive the session that carried it.
-			mediated, err := a.startMediation("project.shell", mediatedContext(session.Project, session.Review))
+			// Resolved before the proxy, because the dialog names the host it
+			// finds. Naming the registered remote instead would put an HTTPS URL
+			// in front of an operator approving an SSH signature.
+			access, err := a.remoteAccess(cmd, service, "project.shell", args[0], projects.OperatorIdentity)
+			if err != nil {
+				return err
+			}
+			mediated, err := a.startMediation("project.shell", mediatedContext(session.Project, session.Review, access))
 			if err != nil {
 				return err
 			}
@@ -478,7 +486,7 @@ func newProjectShellCmd(a *app) *cobra.Command {
 			if err := a.announceShell(session, mediated != nil); err != nil {
 				return err
 			}
-			if err := a.noteRemoteAccess(cmd, service, "project.shell", args[0], projects.OperatorIdentity); err != nil {
+			if err := a.noteRemoteAccess(access); err != nil {
 				return err
 			}
 			// Deliberately the command context, not a.opContext: an operator session
@@ -1057,11 +1065,8 @@ func (a *app) remoteAccess(cmd *cobra.Command, service projectService, command, 
 // It is a note rather than a refusal: an operator opens a shell to read, commit
 // and fix things, and only sometimes to push. Refusing the session because the
 // push at the end of it would fail would be answering a question nobody asked.
-func (a *app) noteRemoteAccess(cmd *cobra.Command, service projectService, command, id string, who projects.SessionIdentity) error {
-	access, err := a.remoteAccess(cmd, service, command, id, who)
-	if err != nil {
-		return err
-	}
+func (a *app) noteRemoteAccess(access projects.RemoteAccess) error {
+	var err error
 	switch {
 	case access.Transport != projects.TransportSSH:
 		_, err = fmt.Fprintf(a.stdout,
@@ -1084,13 +1089,13 @@ func (a *app) noteRemoteAccess(cmd *cobra.Command, service projectService, comma
 // no push can reach, is a session whose whole point fails at the end — after the
 // agent has done the work, and with an error about host keys that reads like a
 // problem with the key the operator just pinned.
-func (a *app) requireReachableRemote(cmd *cobra.Command, service projectService, id string) error {
+func (a *app) requireReachableRemote(cmd *cobra.Command, service projectService, id string) (projects.RemoteAccess, error) {
 	access, err := a.remoteAccess(cmd, service, "project.agent", id, projects.AgentIdentity)
 	if err != nil {
-		return err
+		return projects.RemoteAccess{}, err
 	}
-	refuse := func(msg string) error {
-		return &CLIError{Exit: ExitPrecondition, Code: "PRECONDITION_FAILED", Command: "project.agent", Message: msg}
+	refuse := func(msg string) (projects.RemoteAccess, error) {
+		return projects.RemoteAccess{}, &CLIError{Exit: ExitPrecondition, Code: "PRECONDITION_FAILED", Command: "project.agent", Message: msg}
 	}
 	switch {
 	case access.Transport != projects.TransportSSH:
@@ -1104,5 +1109,5 @@ func (a *app) requireReachableRemote(cmd *cobra.Command, service projectService,
 			"%s is not in the agent identity's known_hosts, so a push would stop before reaching your key. Add the host key from a source you trust rather than from whatever answers on port 22.",
 			access.Host))
 	}
-	return nil
+	return access, nil
 }

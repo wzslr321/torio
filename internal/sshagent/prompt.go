@@ -57,12 +57,13 @@ func promptMessage(req SignRequest) string {
 	var b strings.Builder
 	b.WriteString("A session is asking to use your SSH key.\n\n")
 	writeField(&b, "project", req.Session.ProjectID)
-	writeField(&b, "remote", req.Session.Remote)
+	writeField(&b, "origin", req.Session.Host)
 	writeField(&b, "branch", describeBranch(req.Session))
 	writeField(&b, "key", describeKey(req.Identity))
-	b.WriteString("\nTorio cannot see what the key will be used for, and the\n")
-	b.WriteString("commit count is what the checkout held when the session\n")
-	b.WriteString("opened. Allow only if you just asked for this.")
+	b.WriteString("\nTorio cannot see what the key will be used for. The host is\n")
+	b.WriteString("where origin pushes, and the commit count is what the checkout\n")
+	b.WriteString("held when the session opened. Allow only if you just asked\n")
+	b.WriteString("for this.")
 	return b.String()
 }
 

@@ -8,12 +8,18 @@ import (
 	"time"
 )
 
-// The request kinds a decision can be about. The vocabulary is closed: every
-// message the proxy does not handle is recorded as one kind, because which
-// unhandled number a guest sent is not a distinction the operator can act on.
+// The request kinds a decision can be about. The vocabulary is closed, and it
+// distinguishes exactly one refusal from the rest.
+//
+// An extension is what OpenSSH sends unprompted, on every connection, to see
+// whether the agent supports session binding. A request to add, remove or lock a
+// key is something a guest went out of its way to ask for. Recording both as
+// "unsupported" made the second invisible inside the noise of the first, which
+// is the opposite of what a decision log is for.
 const (
 	requestIdentities = "identities"
 	requestSign       = "sign"
+	requestExtension  = "extension"
 	requestOther      = "unsupported"
 )
 

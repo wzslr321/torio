@@ -58,6 +58,13 @@ It answers the four requests it has reasons for and refuses the rest:
 - Everything else — adding a key, removing one, locking the agent, any extension
   — fails without being written to the operator's agent at all. Forwarding an
   unknown request to see what happens would be handling it.
+- `SSH_AGENTC_EXTENSION` is refused and recorded as an extension rather than
+  lumped in with the rest. OpenSSH probes a forwarded agent with
+  `session-bind@openssh.com` on every connection, so a log that called that
+  "unsupported" put two benign refusals beside every real one. The binding
+  itself is not implemented: it would tell this proxy which session a request
+  belongs to, which is real hardening for a plain forwarded agent and redundant
+  here, where every signature already stops at a person.
 - Every decision is recorded before it takes effect, and a decision that cannot
   be recorded is a denial. That is the rule
   [ADR-0012](0012-mcp-broker-transport-and-oauth.md) set for the MCP broker, and

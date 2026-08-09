@@ -137,12 +137,25 @@ func (p *Proxy) handle(ctx context.Context, req frame, up net.Conn) (frame, erro
 		return p.identities(up)
 	case msgSignRequest:
 		return p.sign(ctx, req, up)
+	case msgExtension:
+		// Refused, and recorded as what it is. `session-bind@openssh.com` would
+		// tell this proxy which session a later request belongs to, which is
+		// real hardening for a plain forwarded agent — but it is hardening this
+		// does not need: every signature here already stops at a person, which
+		// is a stronger statement than any binding the client could assert.
+		// OpenSSH treats the refusal as "no support" and carries on.
+		if err := p.record(requestExtension, "", false); err != nil {
+			return frame{}, err
+		}
+		return frame{typ: msgFailure}, nil
 	default:
-		// Adding a key, removing one, locking the agent, any extension: refused
-		// here and never written to the operator's agent. The forwarded channel
-		// exists so one key can sign; nothing else it could ask for is part of
-		// that, and forwarding an unknown request to find out would be handling
-		// it.
+		// Adding a key, removing one, locking the agent: refused here and never
+		// written to the operator's agent. The forwarded channel exists so one
+		// key can sign; nothing else it could ask for is part of that, and
+		// forwarding an unknown request to find out would be handling it.
+		//
+		// Unlike an extension, none of these is something a client sends of its
+		// own accord. A line here means a guest asked for it.
 		if err := p.record(requestOther, "", false); err != nil {
 			return frame{}, err
 		}

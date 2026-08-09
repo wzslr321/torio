@@ -139,10 +139,10 @@ func openAuditFile(path string) (*os.File, error) {
 // mediatedContext is what the dialog says about the session asking to sign. It
 // is built from the preflight, which measured it once, before the session opened
 // — never from anything the session reports about itself later.
-func mediatedContext(p projects.Project, review projects.ReviewContext) sshagent.SessionContext {
+func mediatedContext(p projects.Project, review projects.ReviewContext, access projects.RemoteAccess) sshagent.SessionContext {
 	return sshagent.SessionContext{
 		ProjectID: p.ID,
-		Remote:    p.Remote,
+		Host:      access.Host,
 		Branch:    review.Branch,
 		Ahead:     review.Ahead,
 	}

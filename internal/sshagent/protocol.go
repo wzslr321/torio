@@ -7,14 +7,21 @@ import (
 )
 
 // Agent protocol message numbers (draft-miller-ssh-agent). Only the numbers this
-// package acts on are named. Every other number is refused as a number, so there
-// is deliberately no constant for it: a named constant for a message we refuse
-// would be the first step toward handling it.
+// package acts on are named — and refusing a message is acting on it, which is
+// why SSH_AGENTC_EXTENSION is here.
+//
+// It was left unnamed at first, on the argument that a constant for a message we
+// refuse is the first step toward handling it. Use disproved that. OpenSSH 8.9
+// and later probe a forwarded agent with `session-bind@openssh.com` on every
+// connection, so every ordinary `git push` put a refusal in the decision log
+// next to the ones that mean something. Two benign `allowed:false` lines per
+// connection is how an operator learns to skim past the line that matters.
 const (
 	msgFailure           = 5
 	msgRequestIdentities = 11
 	msgIdentitiesAnswer  = 12
 	msgSignRequest       = 13
+	msgExtension         = 27
 )
 
 // maxFrame bounds one protocol message. It is OpenSSH's own AGENT_MAX_LEN: a

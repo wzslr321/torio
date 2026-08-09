@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- **The signature dialog named the wrong host, and the decision log buried the
+  lines that matter.** The prompt showed the registered remote while the
+  connection went somewhere else entirely — an HTTPS URL in front of an operator
+  approving an SSH signature. It now names where origin actually pushes. And
+  OpenSSH probes a forwarded agent with `session-bind@openssh.com` on every
+  connection, which the log recorded as `unsupported`: two benign
+  `allowed:false` lines per push, next to the ones that mean a guest reached for
+  something. Extensions are now recorded as extensions, still refused.
+
 - **A granted session no longer opens against a remote it cannot push to.** An
   origin that pushes over HTTPS never consults an SSH agent, and a host key
   absent from the agent identity's `known_hosts` stops a push before it reaches

@@ -48,7 +48,15 @@ func (i Identity) Fingerprint() string {
 // pushed is unchanged by this package.
 type SessionContext struct {
 	ProjectID string
-	Remote    string
-	Branch    string
-	Ahead     int
+	// Host is where origin's push URL points. It is the host, not the
+	// registered remote: those differ whenever a checkout pushes somewhere it
+	// does not fetch from, and naming the wrong one in a security prompt is
+	// worse than naming neither.
+	//
+	// It is still a fact about the checkout and not about this signature. A sign
+	// request carries no destination at all, so the prompt says what origin
+	// points at, under the same disclaimer as the commit count.
+	Host   string
+	Branch string
+	Ahead  int
 }
