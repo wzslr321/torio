@@ -139,6 +139,14 @@ git commit && git push
 exit                                   # the capability leaves with you
 ```
 
+By default that forwards your agent whole. Pin one identity as `operator_key`
+in the config and the session gets a mediated agent instead: the pinned key
+alone, a dialog on the host before every signature (Deny is the default and
+the cancel), and every decision recorded to `agent-audit.jsonl` before it takes
+effect. With the pin set, `torio project agent <id> --push-grant` opens an
+agent session that may *ask* to push — the same dialog, one signature at a
+time, for exactly one invocation.
+
 Every command takes `--json` and emits a single machine-readable document on
 stdout; flags, exit codes and each command's contract are in the
 [reference](https://torio.dev/reference.html).
@@ -146,7 +154,8 @@ stdout; flags, exit codes and each command's contract are in the
 ## What Torio will not do
 
 - **Hold your Git or model-provider credentials.** Git write arrives only as
-  your forwarded SSH agent in a session you opened. MCP OAuth is the deliberate
+  your forwarded SSH agent in a session you opened — mediated, when you pin an
+  `operator_key`, so no signature happens without you. MCP OAuth is the deliberate
   exception: an interactive login stores it under the separate `torio-mcp`
   guest identity, never under the agent uid or on the host.
 - **Expose the backend.** It remains loopback-only inside the VM; its working

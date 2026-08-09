@@ -79,14 +79,28 @@ agent into an interactive session, and that capability ends when you exit. A
 credential that lives only inside a session you opened cannot be used by
 something running while you sleep.
 
+A whole agent is still more capability than a push needs: it answers for every
+identity it holds, silently. Pinning `operator_key` in the config narrows the
+session to one key and puts a person in front of every signature, with each
+decision recorded before it takes effect. The record says what a session was
+allowed to sign, which is deliberately a smaller claim than what was pushed:
+Torio cannot see what a signature was used for, and a log that pretended
+otherwise would be trusted exactly where it is wrong. The same reasoning gives
+an agent session `--push-grant`: not a standing permission, but the right to
+ask, one signature at a time, for one invocation. With no pin there is nothing
+to mediate, so the grant is refused rather than degraded into handing the
+socket over bare — and an absent pin changes nothing about `shell`, because a
+document with no pin was written by an operator who has not chosen a key, and
+choosing one for them is choosing which key a guest may use.
+
 ## No editor integration, and no host mount {#no-editor-integration}
 
 Torio integrates with no editor and mounts no host directory into the VM. Both
 are deliberate. A broad host mount would carry host Git configuration, hooks,
 and keys across the VM boundary — the same reason a workspace is never seeded
 from a host checkout. So checkouts exist only on the VM's native filesystem,
-owned by the `hermes` identity, and an editor reaches them as your own tool over
-SSH rather than through a shared folder.
+owned by the backend's guest identity, and an editor reaches them as your own
+tool over SSH rather than through a shared folder.
 
 The upside is that the boundary sits in one place regardless of tooling. Whether
 you edit in Neovim, VS Code, Cursor, or a CLI agent, the tool is yours to
