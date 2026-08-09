@@ -79,14 +79,43 @@ the printed key, run it again. Public and private repositories differ by one
 authorization rather than by a procedure.
 
 The guest holds key material Torio created. That is new, and it is the cost of
-this decision. Three properties bound it: the key is read-only, so it cannot
-carry a write ADR-0003 reserves for an operator session; it is scoped to one
-repository, so its blast radius is the repository already attached; and the host
-holds no copy, so compromising the control plane yields nothing.
+this decision. Two properties bound it without depending on anyone: the key is
+scoped to one repository, so its blast radius is the repository already
+attached, and the host holds no copy, so compromising the control plane yields
+nothing.
+
+The third property, that the key is read-only, is not one Torio constructs. An
+ed25519 keypair carries no capability of its own. The key is read-only if, and
+only if, the operator adds it to the repository as a deploy key with write
+access off. Added to the account instead, the same key attaches the project
+identically and hands the guest write capability over every repository that
+account can reach, which is the boundary ADR-0003 draws, crossed silently.
+Torio cannot check afterwards which was done: proving a key cannot write takes a
+push, and Torio runs none. What it can do is say so where the choice is made, so
+the failure to authorize correctly is stated rather than assumed away, and the
+printed instruction names the deploy key and names the mistake.
+
+The private half is owned and readable by the backend identity, which is the
+identity the agent process runs as. An agent that is prompt-injected can read
+that file, and ADR-0006 rejected an egress allowlist, so it can send it
+somewhere. The credential it would carry off is a read of one already-attached
+repository, and revoking it is one action on the forge, but the guest is no
+longer a place where a confused agent finds nothing worth taking. The narrower
+alternative, custody under a separate identity, is weighed below and rejected on
+cost. Anyone attaching a private repository whose contents are the asset should
+read this consequence as the price of the feature.
 
 An operator who wants a different provisioning story keeps it. A key already at
 the derived path is used as it is, and a guest configured by hand keeps working,
 because the preflight asks whether the remote reads, not how.
+
+Nothing rotates or inspects a key through a Torio surface. Once provisioned, a
+key is visible in the failure that printed it and nowhere else: `project show`
+does not report one, no command lists what is under `<home>/.ssh/torio`, and
+rotating means deleting the guest file so the next `add` generates a new key.
+That is the mechanism, and it is a consequence accepted here rather than an
+omission. Reporting a held key in `project show` is the first thing to add if
+attaching private repositories becomes ordinary.
 
 A private HTTPS remote is unchanged and still fails closed. Reading one takes a
 stored credential, and storing one remains outside what Torio does.
@@ -124,3 +153,25 @@ use the same entry. Recording the canonical remote and selecting the key through
 **Generate one key for every repository.** Fewer keys and less machinery, but a
 forge deploy key is scoped to one repository, so one key cannot serve two, and an
 account-wide key would be a broader credential than the task needs.
+
+**Hold the private half under a separate identity.** ADR-0004 already keeps MCP
+credentials under `torio-mcp`, unreadable by the agent, reached only through a
+socket. The same shape here would keep the deploy key out of the agent's reach:
+a custodian identity owning the key and exposing it as an ssh agent socket the
+backend identity may connect to but not read. It is the strongest answer to the
+exfiltration cost above and it is rejected on cost rather than on principle. It
+needs a third identity, a socket lifecycle, and an agent process per project
+running for as long as the checkout is fetchable, to protect a credential that
+reads one repository the agent is already being handed the full contents of. If
+private repositories whose contents are less sensitive than their access ever
+arrive, this is the alternative to reopen.
+
+**Authorize from the host through the forge API.** `gh repo deploy-key add`
+would close the loop in one run: Torio reads the public half it already has,
+calls the forge with the operator's host credential, and clones. It is rejected
+because it puts Torio in the position of using the operator's forge credential
+to grant a standing capability, which is the custody ADR-0004 refuses, and it
+binds `add` to one forge's tooling. Printing the command instead was also
+considered and not taken: `gh repo deploy-key add` reads a key file, the key
+file is in the guest, and a pasteable command that needs the operator to first
+copy a key out of a VM is longer than the sentence it would replace.

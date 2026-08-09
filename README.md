@@ -11,8 +11,10 @@ One Go binary over [Lima](https://lima-vm.io) creates a Linux VM on your macOS
 or Linux workstation, runs an agent backend inside it (Hermes as a guest
 service, or Claude Code per session), attaches the repositories you name, and
 keeps a private Markdown vault the agent can search. What it never puts there
-is a credential: an agent that gets confused or prompt-injected reaches no
-token of yours and no remote. It commits; you push, after reading what it did.
+is a credential of yours: an agent that gets confused or prompt-injected
+reaches no token you hold. A private repository is read through a key the guest
+generates for that one repository, which you authorize read-only on the forge.
+It commits; you push, after reading what it did.
 
 Torio is not the AI, not the VM, and not the chat window. It is the layer that
 brings those into a known-good state and then gets out of the way. It has no
@@ -86,9 +88,11 @@ torio project add my-service https://github.com/you/my-service --use
 ```
 
 A private repository takes the same command. For an SSH remote, `add` generates
-a read-only deploy key on the guest and prints the public half; authorize it on
-the forge and run the same command again. Torio keeps no copy of the private
-half, and a remote the guest cannot read still fails closed.
+a deploy key on the guest and prints the public half; add it to the repository
+with write access off, not to your account, and run the same command again.
+Where you paste it is what keeps it read-only, and Torio cannot check which you
+did. Torio keeps no copy of the private half, and a remote the guest cannot
+read still fails closed.
 
 The backend binds `127.0.0.1:9119` inside the VM. Torio adds no tunnel
 feature; you open the forward yourself:

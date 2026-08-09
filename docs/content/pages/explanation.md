@@ -41,12 +41,21 @@ prompt. A remote the guest cannot read without prompting fails closed with a
 specific exit code.
 
 Read access to a private SSH remote is the one thing it helps with, and it helps
-without holding anything. The guest generates its own read-only deploy key,
-keeps the private half in a file the backend identity owns, and reports the
-public half. Authorizing that key on the forge is a human act with a human's
-account behind it; until it happens, the attach keeps failing closed. The
-private half never reaches the host, this repository, its evidence, or any pull
-request, and the key can read one repository and write nothing.
+without holding anything. The guest generates its own deploy key, keeps the
+private half in a file the backend identity owns, and reports the public half.
+Authorizing that key on the forge is a human act with a human's account behind
+it; until it happens, the attach keeps failing closed. The private half never
+reaches the host, this repository, its evidence, or any pull request.
+
+How narrow that key stays is decided by the human, not by Torio. Added to the
+repository as a deploy key with write access off, it reads one repository and
+writes nothing. Added to an account, it does everything that account can do, and
+the attach succeeds either way, because the only difference is on the forge.
+Torio says which to do at the moment the key is printed and stops there:
+verifying the answer would take a push, and running one to check a boundary is
+not a way to keep it. The key is also readable by the identity the model runs
+as, so the guest is no longer a place where a prompt-injected agent finds
+nothing worth taking.
 
 That division is the point. The control plane stays free of secret material by
 construction rather than by discipline, and the capability it does help

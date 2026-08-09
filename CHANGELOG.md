@@ -11,15 +11,19 @@
   repository, an ssh alias carrying `IdentitiesOnly` (without it the forge
   authenticates the wrong key and answers `Repository not found` for a
   repository that exists), that alias ordered ahead of the entry the push path
-  uses, and all of it in a guest file you had to already know to write. `add`
-  now generates a read-only ed25519 key on the guest, offers it to that one
-  remote, and prints the public half with the one step left: authorize it on the
-  forge and run the same command again. A key you authorized beforehand attaches
-  in one run, and a rerun before authorization reports the same key instead of
-  making another. Torio keeps no copy of the private half, never reads it, and
-  push still travels through the agent you forward with `project shell`, so the
-  key stays read-only. In `--json` the exit-7 error carries `deploy_key`
-  (`public_key`, `host`, `key_path`, `generated`)
+  uses, the key authorized read-only or the guest silently gains write, and all
+  of it in a guest file you had to already know to write. `add` now generates an
+  ed25519 key on the guest, offers it to that one remote, and prints the public
+  half with the one step left: add it to the repository as a deploy key with
+  write access off, then run the same command again. A key you authorized
+  beforehand attaches in one run, and a rerun before authorization reports the
+  same key instead of making another. Torio keeps no copy of the private half
+  and never reads it. Where you paste the key is what keeps it read-only:
+  added to your account instead of to the repository it attaches the project
+  equally well and grants the guest write access account-wide, and Torio cannot
+  tell the two apart, because checking would take a push it does not run. In
+  `--json` the exit-7 error carries `deploy_key` (`public_key`, `host`,
+  `key_path`, `generated`)
   ([ADR-0018](docs/adr/0018-guest-held-deploy-key-for-read-access.md)).
 
 ### Fixed
