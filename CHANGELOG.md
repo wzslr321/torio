@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Fixed
+
+- **`torio status` aligns its columns.** The table separated cells with a raw
+  tab, which left the alignment to whatever the reader renders a tab as: it
+  held only while every cell fit inside one tab stop, and `torio-claude-code`
+  does not, so the row an operator most needs to compare against the one above
+  it was the row that slipped a column. Columns are now padded to the widest
+  cell before the output leaves Torio, which also survives being pasted
+  somewhere with a different tab stop.
+
 ## 0.3.3 - 2026-08-09
 
 **Migration first: a Claude Code box bootstrapped before this release reports

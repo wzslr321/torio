@@ -195,8 +195,8 @@ torio vm ssh -- sudo -u hermes -- \
 <h2 id="watch-several-agents">Watch several agents at once</h2>
 <p>Running more than one box, the question stops being "what is this agent doing" and becomes "which of them needs me". <code>torio status</code> answers it in one row per box:</p>
 <div class="code-block"><pre data-lang="console"><code>$ torio status
-INSTANCE           BOX      BACKEND      SESSION  WAITING                    PROGRESS
-torio              running  hermes       —        ?                          14s
+INSTANCE           BOX      BACKEND      SESSION  WAITING              PROGRESS
+torio              running  hermes       —        ?                    14s
 torio-claude-code  running  claude-code  2        yes 7m pid 11673 +1  —</code></pre></div>
 <p>Asking is still asking, though, and the answer is worth having without asking. Put it on your status bar:</p>
 <div class="code-block"><pre data-lang="console"><code>$ torio status setup tmux &gt;&gt; ~/.tmux.conf

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -193,18 +194,30 @@ func (a *app) emitStatus(rep status.Report, format string) error {
 		_, err := fmt.Fprint(a.stdout, "no instances\nnext: torio vm init\n")
 		return err
 	}
-	if _, err := fmt.Fprint(a.stdout, "INSTANCE\tBOX\tBACKEND\tSESSION\tWAITING\tPROGRESS\n"); err != nil {
+	// Columns are padded here rather than separated by a tab. A tab puts the
+	// alignment in the reader's hands, and the answer is only right while every
+	// cell fits inside one tab stop: `torio-claude-code` does not, so the row an
+	// operator most needs to compare against the one above it was the row that
+	// slipped a column. This surface is also pasted into issues and posts, where
+	// the tab stop is somebody else's setting entirely.
+	w := tabwriter.NewWriter(a.stdout, 0, 0, columnGap, ' ', 0)
+	if _, err := fmt.Fprint(w, "INSTANCE\tBOX\tBACKEND\tSESSION\tWAITING\tPROGRESS\n"); err != nil {
 		return err
 	}
 	for _, in := range rep.Instances {
-		if _, err := fmt.Fprintf(a.stdout, "%s\t%s\t%s\t%s\t%s\t%s\n",
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			in.Name, in.Box, backendCell(in.Backend),
 			sessionCell(in.Session), waitingCell(in.Waiting), progressCell(in.Progress)); err != nil {
 			return err
 		}
 	}
-	return nil
+	return w.Flush()
 }
+
+// columnGap is the run of spaces between the widest cell in a column and the
+// next column. Two is the narrowest gap that still reads as a gap rather than
+// as one long value, and it keeps a six-column table inside a normal terminal.
+const columnGap = 2
 
 func backendCell(f status.BackendField) string {
 	if f.State != status.Known {

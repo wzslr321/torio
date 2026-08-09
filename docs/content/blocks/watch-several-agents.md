@@ -6,8 +6,8 @@ box:
 
 ```console
 $ torio status
-INSTANCE           BOX      BACKEND      SESSION  WAITING                    PROGRESS
-torio              running  hermes       —        ?                          14s
+INSTANCE           BOX      BACKEND      SESSION  WAITING              PROGRESS
+torio              running  hermes       —        ?                    14s
 torio-claude-code  running  claude-code  2        yes 7m pid 11673 +1  —
 ```
 
