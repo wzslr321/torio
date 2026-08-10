@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-Sixteen records cover the decisions that govern the delivered binary, the vault
+Eighteen records cover the decisions that govern the delivered binary, the vault
 standard it writes against, how both are published, and how the behaviour that
 standard asks for is measured.
 
@@ -23,6 +23,7 @@ standard asks for is measured.
 | [0016](0016-session-scoped-push-grant.md) | An agent session may ask to push; the signature it needs stops at the operator, and no pinned key means no grant |
 | [0017](0017-status-is-a-poll-of-facts.md) | Cross-instance status is a poll of provable facts with bounded Torio-maintained projections |
 | [0018](0018-guest-held-deploy-key-for-read-access.md) | Read access to a private SSH remote comes from a read-only key the guest generates and keeps, authorized by a human |
+| [0019](0019-bare-torio-opens-the-hub.md) | Running `torio` with no command on a terminal opens an interactive hub; what is not a terminal keeps the answer it has today |
 
 ## Rules
 
