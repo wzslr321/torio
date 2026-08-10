@@ -51,5 +51,5 @@ credential boundary; `e2e/` is a separate module that must not import them.
 
 ## Dependencies
 
-The root module keeps one direct dependency. A new one in `go.mod` needs the
-pull request to say why the standard library does not cover the case.
+A new direct dependency in `go.mod` needs the pull request to say why the
+standard library and current module graph do not cover the case.

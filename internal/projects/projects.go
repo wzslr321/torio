@@ -6,15 +6,15 @@
 // Two boundaries define the package. The workspace path is always derived from
 // the project ID as /home/hermes/projects/<id> — never taken from an operator,
 // never stored in config — so an attachment cannot point anywhere else on the
-// guest. And Torio holds no Git credential: every remote operation runs
-// noninteractively as the `hermes` service user, so a repository the guest
+// guest. Host Git credentials never enter this package: every remote operation
+// runs noninteractively as the `hermes` service user, so a repository the guest
 // cannot read fails closed instead of prompting.
 //
 // A private SSH remote is the ordinary case of that, so an unreadable one is
-// not the end of the attach. The guest generates its own read-only deploy key,
-// keeps the private half, and reports the public half for the operator to
-// authorize on the forge (ADR-0018). Torio never reads, transports or stores
-// that private half, and authorizing the key stays a human act.
+// not the end of the attach. The guest generates its own deploy key, keeps the
+// private half, and reports the public half for the operator to authorize
+// without write access on the forge (ADR-0018). Torio never reads, transports
+// or stores that private half, and authorizing the key stays a human act.
 package projects
 
 import (
@@ -122,7 +122,7 @@ type AddReport struct {
 	// Notes are bounded, non-secret state markers describing what a failure left
 	// behind and what a rerun will finish (see addNote*).
 	Notes []string
-	// DeployKey is the guest-held read-only key this run provisioned for an SSH
+	// DeployKey is the guest-held key this run provisioned for an SSH
 	// remote the guest could not read, nil whenever no key was involved. It is
 	// set on the failure path as well: the public half is the whole point of
 	// that failure, because authorizing it is what a rerun needs.

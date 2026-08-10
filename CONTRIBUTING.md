@@ -77,8 +77,7 @@ explicitly approved for a test-first rewrite — it never graduates into
 separate process and read its JSON envelopes; neither imports the product code.
 Keeping them out of the root module is what stops a test framework's dependency
 graph from reaching the module that holds the credential boundary — `go test
-./...` at the root does not descend into it, and the root `go.mod` still names
-one direct dependency.
+./...` at the root does not descend into it.
 
 Both levels use Ginkgo v2 and Gomega, behind build tags, so neither runs unless
 it is asked for.

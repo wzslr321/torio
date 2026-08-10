@@ -60,9 +60,9 @@
       <div class="content">
         <span class="mode-kicker">Tutorials</span>
         <h1 id="tutorials">Tutorials</h1>
-<p>Guided, start-to-finish walkthroughs. Right now there is one; more will be added as Torio grows.</p>
+<p>The complete first-run walkthrough.</p>
 <h2 id="get-started">Get started</h2>
-<p>By the end of this page you will have built the CLI, created the Linux VM, brought up the loopback-only Hermes backend, reached it from your host through a tunnel you control, created your Second Brain, attached your first repository, and held a real Hermes Desktop session against it — with no automated commit, push, or credential handling anywhere in the loop.</p>
+<p>By the end of this page you will have built the CLI, created the Linux VM, brought up the loopback-only Hermes backend, reached it from your host through a tunnel you control, created your Second Brain, attached your first repository, and held a real Hermes Desktop session against it. Git remote writes remain an operator action.</p>
 <p>Work straight down. Nothing here sends you to another page to finish a step; the links are for going deeper afterwards.</p>
 <nav class="toc" aria-label="Steps on this page">
 <ul><li><a href="#prerequisites">Before you start</a></li><li><a href="#build-cli">Step 1 — Install the CLI</a></li><li><a href="#vm-bring-up">Step 2 — Create and verify the VM</a></li><li><a href="#serve-bring-up">Step 3 — Bring up the loopback backend</a></li><li><a href="#tunnel">Step 4 — Reach the backend from your host</a></li><li><a href="#session-token">Step 5 — Pin a session token</a></li><li><a href="#brain-bring-up">Step 6 — Create the Second Brain</a></li><li><a href="#project-attach">Step 7 — Attach your first repository</a></li><li><a href="#desktop-connect">Step 8 — Connect Hermes Desktop</a></li><li><a href="#desktop-workspace">Step 9 — Point Desktop at the project</a></li><li><a href="#provider-auth">Step 10 — Configure a model provider</a></li><li><a href="#everyday-loop">Step 11 — Learn the everyday loop</a></li><li><a href="#step-end">Step 12 — Leave a clean end state</a></li></ul>
@@ -185,12 +185,12 @@ torio brain import ~/path/to/vault</code></pre></div>
 <div class="code-block"><pre data-lang="bash"><code>limactl copy torio:/home/hermes/brain/ ~/torio-brain-copy/</code></pre></div>
 <p>That is your command. Nothing verifies the result, and Torio does not call it a backup.</p>
 <h3 id="project-attach">Step 7 — Attach your first repository</h3>
-<p>The model can see the repositories you registered, and nothing else. Nothing is discovered, scanned, or picked up because it happened to be on disk.</p>
+<p>Torio manages only repositories in the registry. It discovers nothing from disk, and removing a registry entry leaves the checkout on the guest.</p>
 <div class="code-block"><pre data-lang="bash"><code>torio project add my-service https://github.com/you/my-service --use
 torio project list</code></pre></div>
 <p><code>add</code> clones the exact remote into the derived workspace path, gives you and <code>hermes</code> shared access to it, and registers the project with Hermes before it records anything in config. <code>--use</code> makes it the active project. If a valid checkout of that remote is already at the path, <code>add</code> verifies and adopts it rather than touching it.</p>
 <p><strong>You do not choose the path.</strong> It is always <code>/home/hermes/projects/&lt;id&gt;</code>, derived from the project id — never taken from you, never stored in config. Without <code>--id</code>, the id is the name you gave, which must be a lowercase slug; pass <code>--id</code> to pick a different one.</p>
-<p><strong>A private repository takes the same command.</strong> Torio stores no Git credentials, prompts for none, and passes none to the model. A remote the guest cannot read still fails closed, at exit <code>7</code>. For an SSH remote that failure comes with the way through: the guest generates its own deploy key and prints the public half.</p>
+<p><strong>A private repository takes the same command.</strong> Torio copies no host Git credential into the guest. A remote the guest cannot read still fails closed, at exit <code>7</code>. For an SSH remote that failure comes with the way through: the guest generates its own deploy key and prints the public half.</p>
 <div class="code-block"><pre data-lang="text"><code>The guest generated a deploy key for this project. Torio holds no copy of its private half.
 
 ssh-ed25519 AAAA…
@@ -234,10 +234,10 @@ hermes auth add &lt;provider&gt;</code></pre></div>
 <h3 id="everyday-loop">Step 11 — Learn the everyday loop</h3>
 <p>Once the VM and backend are up, the day-to-day loop is the same whichever editor or interface you use:</p>
 <ol><li>Work in a checkout — from a Desktop session, your own editor, or <code>torio project enter &lt;id&gt;</code>.</li><li>Edit, or let your AI tool edit, files there.</li><li>Run a check that reads rather than writes.</li><li>Review what changed: <code>git diff</code> and <code>git status</code>.</li><li>Decide whether any of it should leave the VM.</li><li>If it should: <code>torio project shell &lt;id&gt;</code>, commit, push, exit.</li></ol>
-<p>Steps 5 and 6 are the whole point of the split. Torio automates no part of either. The persistent backend cannot push at all — write capability exists only inside a session you opened, and ends when you exit it.</p>
+<p>Steps 5 and 6 are the split: Torio forwards operator write capability only inside a session you opened, and stops forwarding it when you exit.</p>
 <h3 id="step-end">Step 12 — Leave a clean end state</h3>
-<p>Leave the VM and the backend <strong>running</strong>. Nothing you did here committed, pushed, merged, or deleted anything — that is the intended shape of the loop.</p>
-<p>If a step failed, every known first-run failure and its fix is in <a href="how-to.html#troubleshooting">why something isn't running</a>.</p>
+<p>Leave the VM and the backend <strong>running</strong>. No project remote was modified.</p>
+<p>If a step failed, known first-run failures and fixes are in <a href="how-to.html#troubleshooting">why something isn't running</a>.</p>
 <h2 id="next">Where to go next</h2>
 <ul><li>Ready to push something? <a href="how-to.html#project-push">Push, when you decide to</a>.</li><li>Prefer your own editor over Desktop? <a href="how-to.html#editor">Edit a project with your own editor</a>.</li><li>Want the exact command surface and exit codes? <a href="reference.html">Reference</a>.</li><li>Want to know why the boundaries are drawn this way? <a href="explanation.html">Explanation</a>.</li></ul>
       </div>

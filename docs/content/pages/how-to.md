@@ -11,8 +11,8 @@ scope_notice: "One task per section, for when you already have a running setup. 
 # How-to guides
 
 Short, task-oriented guides for the things an operator does by hand. Each
-section stands alone; they share their text with
-[Get started](tutorials.html#get-started), so the two can never disagree.
+section stands alone and reuses the operational blocks from
+[Get started](tutorials.html#get-started).
 
 <!-- include: tunnel -->
 

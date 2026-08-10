@@ -107,9 +107,9 @@ func New(guest Guest, registry Registry, opts lima.BootstrapOptions) *Manager {
 // from.
 //
 // A remote the guest cannot read still fails closed as an auth error. For an
-// SSH remote that failure carries the public half of a read-only deploy key the
-// guest now holds, so the rerun that finishes the attach is the same command
-// again, once the key is authorized on the forge.
+// SSH remote that failure carries the public half of a deploy key the guest now
+// holds, so the rerun that finishes the attach is the same command again, once
+// the key is authorized without write access on the forge.
 func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 	const op = "add"
 	var report AddReport
@@ -715,7 +715,7 @@ func (m *Manager) preflightRemote(ctx context.Context, op, remote, keyPath strin
 func unreadableRemoteError(op string, key *DeployKey) error {
 	if key == nil {
 		return &Error{Op: op, Kind: KindAuth, Err: errors.New(
-			"the guest cannot read the remote noninteractively; for a private repository use the SSH remote, which Torio can provision a read-only deploy key for")}
+			"the guest cannot read the remote noninteractively; for a private repository use the SSH remote, which Torio can provision a deploy key for")}
 	}
 	// Without a position: the human path prints the key above this line, the JSON
 	// path carries it in the error details, and a message naming a place is wrong
@@ -1399,7 +1399,7 @@ func (m *Manager) readPublicKey(ctx context.Context, op, keyPath string) (string
 // The include is scoped to the one workspace and the setting lives outside the
 // checkout on purpose. Repository-local config would apply to the operator's
 // session too, and an operator pushes through the agent forwarded by
-// `project shell` (ADR-0003). Pinning the read-only key there would authenticate
+// `project shell` (ADR-0003). Pinning the deploy key there would authenticate
 // that push as the deploy key and fail after a successful login.
 //
 // The gitdir pattern keeps its trailing slash: Git appends `**` to a

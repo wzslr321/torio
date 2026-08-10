@@ -22,8 +22,8 @@ const (
 	// KindPrecondition is a guest that is not ready: no Running VM, no verified
 	// bootstrap, no passwordless sudo.
 	KindPrecondition ErrorKind = "precondition"
-	// KindAuth is a remote the guest cannot read noninteractively. Torio never
-	// stores or configures credentials, so this is always a human action.
+	// KindAuth is a remote the guest cannot read noninteractively. Torio may
+	// provision a guest deploy key, but forge authorization remains a human act.
 	KindAuth ErrorKind = "auth"
 	// KindConflict is existing state Torio refuses to adopt or overwrite.
 	KindConflict ErrorKind = "conflict"

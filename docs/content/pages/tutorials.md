@@ -10,16 +10,15 @@ scope_notice: "Get started is complete on this page — every command you need i
 
 # Tutorials
 
-Guided, start-to-finish walkthroughs. Right now there is one; more will be added
-as Torio grows.
+The complete first-run walkthrough.
 
 ## Get started {#get-started}
 
 By the end of this page you will have built the CLI, created the Linux VM,
 brought up the loopback-only Hermes backend, reached it from your host through a
 tunnel you control, created your Second Brain, attached your first repository,
-and held a real Hermes Desktop session against it — with no automated commit,
-push, or credential handling anywhere in the loop.
+and held a real Hermes Desktop session against it. Git remote writes remain an
+operator action.
 
 Work straight down. Nothing here sends you to another page to finish a step; the
 links are for going deeper afterwards.
@@ -57,10 +56,9 @@ links are for going deeper afterwards.
 
 ### Step 12 — Leave a clean end state {#step-end}
 
-Leave the VM and the backend **running**. Nothing you did here committed,
-pushed, merged, or deleted anything — that is the intended shape of the loop.
+Leave the VM and the backend **running**. No project remote was modified.
 
-If a step failed, every known first-run failure and its fix is in
+If a step failed, known first-run failures and fixes are in
 [why something isn't running](how-to.html#troubleshooting).
 
 ## Where to go next {#next}

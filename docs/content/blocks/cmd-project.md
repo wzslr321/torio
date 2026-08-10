@@ -7,11 +7,11 @@ takes no action itself; an absent or unknown subcommand is a usage error.
 | --- | --- |
 | `torio project add <name> [remote]` | Clone the exact remote into the derived workspace path, or verify and adopt a checkout already there; give the operator and the backend identity shared access; register the project where the backend keeps a registry, before recording it. `--id SLUG` picks an id other than `<name>`; `--use` makes it active on success. With the id alone and no remote, materializes an already registered project in the selected backend's guest, using the remote on record. |
 | `torio project list` | List the registered projects. Reads config only, runs nothing on the guest, and works with the VM stopped. |
-| `torio project show <id>` | Report the registry entry, checkout state, and Hermes registration. Reports drift as stable markers instead of repairing it, and returns no filenames, diffs, or raw Git output. |
-| `torio project use <id>` | Make a registered project the active one in Hermes. |
-| `torio project remove <id>` | Archive the Hermes project and drop the config entry. The checkout is never deleted, and the output says where it still is. |
+| `torio project show <id>` | Report the shared entry, checkout state, and backend registry state where one is declared. Reports drift without repairing it, and returns no filenames, diffs, or raw Git output. |
+| `torio project use <id>` | Make a project active in the backend registry. A backend with no registry refuses the command. |
+| `torio project remove <id>` | Archive the backend registry entry where declared, then drop the shared entry. The checkout and deploy key are retained and reported. |
 | `torio project enter <id>` | Open an ordinary interactive terminal in the checkout with SSH agent forwarding disabled. Interactive, so it does not support `--json`. |
-| `torio project agent <id>` | Start the configured backend inside the checkout, running as the backend identity rather than as you. No SSH agent is forwarded and the connection is never multiplexed, so the session cannot reach a Git remote or inherit a connection that can. Interactive; `--json` is a usage error. A backend that declares no interactive session has nothing to open. |
+| `torio project agent <id>` | Start the configured backend inside the checkout, running as the backend identity rather than as you. No SSH agent is forwarded and the connection is never multiplexed, so it cannot inherit an operator write connection. The guest's own read route remains available. Interactive; `--json` is a usage error. A backend that declares no interactive session has nothing to open. |
 | `torio project shell <id>` | Open an ephemeral operator session in the checkout with your SSH agent forwarded. Interactive, so it does not support `--json`. |
 
 **The workspace path is not an input.** It is always derived as
@@ -29,18 +29,19 @@ guest from the remote already on record — a separate step rather than somethin
 checkouts are independent working trees; what passes between them is what you
 push.
 
-**Torio stores no Git credentials.** A remote the guest cannot read without
-prompting fails closed. For an SSH remote, `add` generates a read-only deploy
-key on the guest and prints the public half; authorizing it on the forge is a
-human act, and the same command run again finishes the attach.
+**Torio stores no host Git credential.** A remote the guest cannot read without
+prompting fails closed. For an SSH remote, `add` generates a deploy key on the
+guest and prints the public half. Add it to that repository with write access
+off, then run the command again. Torio cannot verify the forge setting.
 
 `add` resets, cleans, and deletes nothing on the guest, so a rerun after a
 failure finishes the work rather than starting over.
 
-### Three sessions, one of which can push {#project-shell}
+### Session write paths {#project-shell}
 
-`enter` is you without push capability, `shell` is you with it, `agent` is the
-backend — which never has it. Only the middle one forwards your SSH agent.
+`enter` is an operator terminal with no forwarded agent. `shell` forwards the
+operator's agent. `agent` has no operator write route unless `--push-grant` is
+used with a pinned key; then each signature still waits for host approval.
 
 Use `torio project enter <id>` for ordinary editing, checks, and local commits.
 The SSH transport disables agent forwarding and connection multiplexing, so it
@@ -49,18 +50,17 @@ cannot reuse a push-capable operator connection.
 Use `torio project agent <id>` to put the backend to work in the checkout. It
 runs as the backend's own guest identity, not as you, on the same transport as
 `enter`: no forwarding, no multiplexing. The agent owns the tree and can commit
-in it; it has no route to a remote, so what it did is still sitting there for
-you to read.
+in it. A correctly authorized deploy key can fetch but not push; no operator
+write credential reaches the session.
 
 Inside the box the backend runs without permission prompts, and that is not a
 weakening. A prompt is a control inside the agent's own process. The box
 replaced it with controls the agent cannot reach: an unprivileged identity with
-no `sudo`, a closed group set, no credential that reaches a remote, and the edge
-of the VM.
+no `sudo`, a closed group set, no operator write credential, and the edge of the
+VM.
 
-The persistent backend service, where a backend runs one, has read access to an
-origin and nothing more. `project shell` forwards your SSH agent for exactly as
-long as the session lasts, and the capability leaves with you when you exit.
+`project shell` forwards your SSH agent for exactly as long as the session
+lasts, and the capability leaves with you when you exit.
 
 The session is preflighted first — the project registered, the VM
 bootstrap-verified, the checkout present with the registered origin and shared

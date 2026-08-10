@@ -46,8 +46,8 @@ against it.
   finding against the reviewer, not the author.
 - Future-proofing, extension points and abstractions for cases the diff does not
   have.
-- Dependency additions framed as "you could use library X". This repository
-  keeps one direct dependency in the root module on purpose.
+- Dependency additions framed as "you could use library X" without showing why
+  the existing module graph or standard library is insufficient.
 
 ## How to write the comment
 

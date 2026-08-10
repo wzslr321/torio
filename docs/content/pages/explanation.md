@@ -3,7 +3,7 @@ output: site/explanation.html
 nav: Explanation
 order: 5
 title: Explanation — why Torio is narrow · Torio
-description: Why Torio is intentionally narrow — the VM, loopback, and tunnel boundary, human-only credentials, projects as a list you keep, write capability that lives only in a session you opened, no editor integration, data that comes in and does not go out, and documentation generated from one source.
+description: Why Torio is narrow: the VM and loopback boundary, explicit credential custody, derived project paths, operator-controlled Git writes, no host mount, and one-way Brain import.
 kicker: Explanation
 scope_notice: "This page explains the reasoning behind the boundaries. It is background, not a procedure."
 ---
@@ -34,11 +34,11 @@ non-public API calls, and because `serve` is headless it never publishes a token
 of its own — so you pin one deliberately rather than the control plane minting
 and distributing credentials on your behalf.
 
-## Credentials are a human-only prerequisite {#credentials}
+## Credential custody is explicit {#credentials}
 
-Torio holds no credential on the host, reads none, and never causes a credential
-prompt. A remote the guest cannot read without prompting fails closed with a
-specific exit code.
+Torio stores no credential on the host. Provider credentials are configured by
+the operator inside the guest. MCP OAuth is created by an explicit login and
+stored under the separate `torio-mcp` guest identity.
 
 Read access to a private SSH remote is the one thing it helps with, and it helps
 without holding anything. The guest generates its own deploy key, keeps the
@@ -61,15 +61,14 @@ That division is the point. The control plane stays free of secret material by
 construction rather than by discipline, and the capability it does help
 provision is the weakest one that makes the tool usable.
 
-Model and provider credentials work the same way. `torio vm ssh` deliberately
-forwards no stdin or TTY, so the interactive provider picker cannot be driven
-through the control plane at all — configuring a model is something you do in
-your own shell on the guest.
+`torio vm ssh` forwards no stdin or TTY, so an interactive provider picker must
+run in the operator's own guest shell.
 
 ## Projects are a list you keep {#projects}
 
-The model can see the repositories you registered, and nothing else. Nothing is
-discovered, scanned, or picked up because it happened to be on disk.
+Torio manages only repositories in the registry. It does not discover or scan
+checkouts on disk. The registry is not an access-control list: removing an entry
+leaves its checkout on the guest until the operator removes it separately.
 
 The workspace path is never an input. It is derived from the project id, so
 there is no way to point Torio at an arbitrary directory and no path to store in
@@ -85,8 +84,9 @@ boundary. If read access cannot be provisioned, the correct outcome is to stop
 
 ## Write capability lives in a session, not in the system {#writes}
 
-There is no automated commit, push, merge, or release, and the persistent
-backend cannot perform one: it holds read access only.
+Torio never pushes, merges, or releases. An agent may edit and commit in its
+checkout, but remote write capability is not installed as a durable operator
+credential.
 
 When you want to write to a remote, `torio project shell` forwards your own SSH
 agent into an interactive session, and that capability ends when you exit. A
@@ -107,20 +107,17 @@ socket over bare — and an absent pin changes nothing about `shell`, because a
 document with no pin was written by an operator who has not chosen a key, and
 choosing one for them is choosing which key a guest may use.
 
-## No editor integration, and no host mount {#no-editor-integration}
+## No host mount {#no-editor-integration}
 
-Torio integrates with no editor and mounts no host directory into the VM. Both
-are deliberate. A broad host mount would carry host Git configuration, hooks,
-and keys across the VM boundary — the same reason a workspace is never seeded
-from a host checkout. So checkouts exist only on the VM's native filesystem,
-owned by the backend's guest identity, and an editor reaches them as your own
-tool over SSH rather than through a shared folder.
+Torio mounts no host directory into the VM. A broad mount would carry host Git
+configuration, hooks, and keys across the boundary. Checkouts stay on the VM's
+native filesystem, and editors reach them through a terminal or SSH. The
+repository includes an optional Neovim panel; it does not move the checkout to
+the host.
 
-The upside is that the boundary sits in one place regardless of tooling. Whether
-you edit in Neovim, VS Code, Cursor, or a CLI agent, the tool is yours to
-install and drive; read access remains a human prerequisite and writes to
-history remain something you do inside a session you opened. The
-[how-to guide](how-to.html#editor) covers each tool and its caveats.
+The boundary stays in one place regardless of tooling. The
+[how-to guide](how-to.html#editor) covers Neovim, Remote-SSH, and terminal
+agents.
 
 ## Data comes in and does not go out {#data-direction}
 
@@ -134,9 +131,6 @@ does not verify it and does not call it a backup.
 
 ## How this documentation avoids drifting {#single-source}
 
-Every page on this site and the runbook in the repository are generated from one
-set of Markdown sources under `docs/content/`. A section that appears in more
-than one place — pinning the session token, say, which is both a step in Get
-started and a task in the how-to guides — is a single file included in each, not
-a copy. A validation gate re-renders everything and fails if any committed
-output has drifted from its source, so the two cannot disagree even briefly.
+The site and runbook are generated from `docs/content/`. Shared sections are
+included from one file, and validation fails when committed output differs from
+its source.

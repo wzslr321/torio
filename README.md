@@ -4,33 +4,26 @@
 [![release](https://img.shields.io/github/v/release/wzslr321/torio)](https://github.com/wzslr321/torio/releases)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Agents work best with context and worst with credentials. Torio hands them one
-and not the other.
+Agents need context. Credentials need a boundary.
 
 One Go binary over [Lima](https://lima-vm.io) creates a Linux VM on your macOS
 or Linux workstation, runs an agent backend inside it (Hermes as a guest
 service, or Claude Code per session), attaches the repositories you name, and
-keeps a private Markdown vault the agent can search. What it never puts there
-is a credential of yours: an agent that gets confused or prompt-injected
-reaches no token you hold. A private repository is read through a key the guest
-generates for that one repository, which you authorize read-only on the forge.
-It commits; you push, after reading what it did.
+keeps a private Markdown vault the agent can search. Host Git and provider
+credentials are not copied into the VM. A private SSH repository is read
+through a guest-generated deploy key that you authorize without write access
+on the forge. MCP OAuth belongs to a separate guest identity. Torio forwards
+operator Git write capability only inside a session you open.
 
-Torio is not the AI, not the VM, and not the chat window. It is the layer that
-brings those into a known-good state and then gets out of the way. It has no
-daemon and no state beyond one non-secret config file.
+Torio is the control plane, not the agent, VM, or chat client.
 
-Run `torio` with no arguments on a terminal and it opens a hub: whatever setup
-the box still needs, every box on the host, the repositories attached to them,
-the vault, and the guest service. It runs each step itself and names the
-command behind it. Every command below still exists and still answers the same
-way.
+Run `torio` with no arguments on a terminal to open the hub. It covers setup,
+box status, projects, the vault, and the guest service. Each setup action names
+and uses the corresponding CLI command.
 
 ![One pass through the hub: the guest verified, the finished setup, the cross-box poll, a project attached from the registry screen, the Second Brain, and the guest service](docs/demo/hub.gif)
 
-The recording plays the waiting fast. On a real box the hub spends about twenty
-seconds proving what the guest holds, because it will not name a step it cannot
-prove is the one you are on.
+A real box may take longer to verify.
 
 Documentation lives at **[torio.dev](https://torio.dev)**.
 
@@ -39,11 +32,11 @@ Documentation lives at **[torio.dev](https://torio.dev)**.
 A permission prompt is a control inside the agent's own process. It can be
 ignored, and in practice it is clicked through. Torio replaces it with
 controls the agent cannot reach: an unprivileged identity with no `sudo`, a
-closed group set, a binary it cannot rewrite, no credential that reaches a Git
-remote, and the edge of a VM.
+closed group set, a binary it cannot rewrite, no operator write credential, and
+the edge of a VM.
 
-Write capability against a remote exists only inside a session you open, and
-it leaves with you:
+Operator write capability against a remote exists only inside a session you
+open, and it leaves with you:
 
 ```mermaid
 sequenceDiagram
@@ -52,7 +45,7 @@ sequenceDiagram
     participant Origin as Git origin
 
     Agent->>Agent: edit, run checks, commit
-    Note over Agent: no credential, so no push
+    Note over Agent: no operator write credential
     You->>Agent: torio project shell (your SSH agent, forwarded)
     You->>Origin: git push
     You->>Agent: exit
@@ -92,8 +85,6 @@ the step the box is actually on. Press `enter` to run that step and it re-reads
 the box and moves to the next one. Bootstrap can take ten minutes on a fresh
 box, so the wait is a spinner and an elapsed count rather than silence.
 `torio ui` opens the same hub by name, for a wrapper script or a keybinding.
-
-![The hub on a host with no box yet: the whole setup route on the left, the step it is on described on the right, and the key that runs it](docs/demo/screens/setup-first-run.png)
 
 The steps it runs are these commands, and running them yourself is the same
 sequence. Every one of them is idempotent.
@@ -153,10 +144,8 @@ It exits 0 whatever it finds, so a status bar can call it on a timer.
 `torio status setup tmux` prints the block that does that; `torio status setup
 zsh` prints the prompt equivalent, collapsed to one chip per box.
 
-The hub's dashboard is the same poll, redrawn on a timer, with the next step
-for the box you opened it on:
-
-![The dashboard: one row per box, the fields it could not prove marked as such, and the next step for this box above the table](docs/demo/screens/dashboard.png)
+The hub's dashboard shows the same poll and the next setup step for the selected
+box. Press `r` to refresh it.
 
 Work happens in the checkouts: from Desktop, from your own editor, or from
 `torio project enter <id>`, which the hub's project screen also opens. Edit,
@@ -169,26 +158,25 @@ git commit && git push
 exit                                   # the capability leaves with you
 ```
 
-Every command takes `--json` and emits a single machine-readable document on
-stdout; flags, exit codes and each command's contract are in the
-[reference](https://torio.dev/reference.html).
+Non-interactive commands expose their machine-readable results through `--json`.
+The [reference](https://torio.dev/reference.html) lists the exceptions, flags,
+exit codes, and command contracts.
 
 ## What Torio will not do
 
-- **Hold your Git or model-provider credentials.** Git write arrives only as
-  your forwarded SSH agent in a session you opened: mediated, when you pin an
-  `operator_key`, so no signature happens without you. MCP OAuth is the deliberate
-  exception: an interactive login stores it under the separate `torio-mcp`
-  guest identity, never under the agent uid or on the host.
+- **Copy host credentials into the VM.** Git write arrives as your forwarded
+  SSH agent in a session you opened. With an `operator_key`, it is mediated and
+  every signature needs host approval. Provider credentials are configured in
+  the guest; MCP OAuth belongs to the separate `torio-mcp` identity.
 - **Expose the backend.** It remains loopback-only inside the VM; its working
   tunnel is yours to open and close. MCP login opens only its fixed loopback
   OAuth callback forward and closes it with the command.
-- **Write history.** No commit, push, merge, tag, or release. The persistent
-  backend reads only.
+- **Push, merge, tag, or release for you.** An agent may edit and commit in its
+  checkout. Remote writes require an operator session or an approved signature.
 - **Take data out.** Import brings a vault in; there is no export. Copying the
   Brain back out is a `limactl copy` you run yourself.
-- **Delete anything.** It never re-images or removes a VM, and removing a
-  project leaves its checkout on disk.
+- **Delete VMs or checkouts.** It never re-images or removes a VM, and removing
+  a project leaves its checkout on disk.
 - **Run agents for you.** No task queue, no dispatcher, no autonomous workers.
 - **Grant MCP tools implicitly.** `torio mcp install` ships the broker and relay,
   but policy is a root-owned, exact list written by the operator. OAuth begins
@@ -284,25 +272,8 @@ way: [`brainkit/README.md`](brainkit/README.md) and
 | macOS / Apple Silicon | `vz` | `aarch64` |
 | Linux / x86_64 | `qemu` | `x86_64` |
 
-Both pin the same Ubuntu build by digest, so the two hosts do not run
-measurably different guests. An unsupported host is refused up front, not deep
-inside the first command that needs a pin. A row lands only after something has
-booted it.
-
-## Roadmap
-
-Where it is going, roughly in order:
-
-- **More hosts.** arm64 Linux is one table row plus an image digest away; it
-  waits on someone booting and verifying it, not on design.
-- **Editor integration.** A Neovim panel already ships in
-  [`integrations/neovim`](integrations/neovim/README.md): `:Torio` lists
-  projects, opens routine or push-capable terminals, reports health, and shows
-  Hermes sessions. It is not packaged for a plugin manager yet, and no other
-  editor has an equivalent.
-
-If one of these is yours, [`CONTRIBUTING.md`](CONTRIBUTING.md) has the how and
-[`AGENTS.md`](AGENTS.md) has the boundaries no change may cross.
+Both use a pinned Ubuntu image for their guest architecture. Unsupported hosts
+are refused before Torio creates a VM.
 
 ## Documentation
 
@@ -319,10 +290,6 @@ If one of these is yours, [`CONTRIBUTING.md`](CONTRIBUTING.md) has the how and
 - [`docs/adr/`](docs/adr/README.md): the accepted decisions. Why the VM is the
   trust boundary, why write capability is operator-carried, why the egress
   allowlist was rejected.
-- [`docs/demo/`](docs/demo): a frame of each hub screen under
-  [`screens/`](docs/demo/screens), the walkthrough above as
-  [`hub.gif`](docs/demo/hub.gif) and [`hub.mp4`](docs/demo/hub.mp4), and the
-  tapes that record them against a running box.
 - [`SECURITY.md`](SECURITY.md), [`CONTRIBUTING.md`](CONTRIBUTING.md),
   [`CHANGELOG.md`](CHANGELOG.md).
 

@@ -1,8 +1,8 @@
 ## Push, when you decide to {#project-push}
 
-The persistent Hermes backend has read access to your checkouts and nothing
-more. It cannot push, and no credential of yours is stored anywhere it could
-reach.
+The persistent backend receives no operator write credential. A private
+repository's guest deploy key is read-only only if you authorized it that way;
+Torio cannot verify the forge setting.
 
 When you want to write to a remote, open a session that carries your own
 capability:
@@ -48,7 +48,7 @@ session opened; Torio still makes no claim about what a signature was used for.
 
 ### Let an agent session ask to push {#push-grant}
 
-An agent session normally receives no route to a remote. With a pinned
+An agent session normally receives no operator write route. With a pinned
 `operator_key`,
 
 ```bash

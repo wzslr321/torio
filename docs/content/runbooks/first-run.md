@@ -19,8 +19,8 @@ interactively, deriving each step from the box rather than from your place in
 this document. The steps below are what it runs, in the order it runs them, and
 they remain the surface for a script or a CI job.
 
-The operational sections below are shared with the documentation site and
-generated from one source, so the two cannot drift.
+The operational sections below and the documentation site are generated from
+the same sources.
 
 <!-- include: prerequisites level=2 heading="Prerequisites" -->
 
