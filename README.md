@@ -20,12 +20,17 @@ Torio is not the AI, not the VM, and not the chat window. It is the layer that
 brings those into a known-good state and then gets out of the way. It has no
 daemon and no state beyond one non-secret config file.
 
-Run `torio` with no arguments on a terminal and it opens a hub. It reads the
-box, works out which steps of the setup are still missing, and runs them one at
-a time, naming the command behind each one. Every command below still exists
-and still answers the same way.
+Run `torio` with no arguments on a terminal and it opens a hub: whatever setup
+the box still needs, every box on the host, the repositories attached to them,
+the vault, and the guest service. It runs each step itself and names the
+command behind it. Every command below still exists and still answers the same
+way.
 
-![The hub on a host with no box yet: the whole setup route on the left, the step it is on described on the right, and the key that runs it](docs/demo/screens/setup-first-run.png)
+![One pass through the hub: the guest verified, the finished setup, the cross-box poll, a project attached from the registry screen, the Second Brain, and the guest service](docs/demo/hub.gif)
+
+The recording plays the waiting fast. On a real box the hub spends about twenty
+seconds proving what the guest holds, because it will not name a step it cannot
+prove is the one you are on.
 
 Documentation lives at **[torio.dev](https://torio.dev)**.
 
@@ -53,8 +58,6 @@ sequenceDiagram
     You->>Agent: exit
     Note over Agent: the capability leaves with you
 ```
-
-![An agent commits inside the VM, its push is refused for want of a credential, and the operator pushes the same commit from a session of their own](docs/demo/torio-demo.gif)
 
 By default that session forwards your agent whole. Pin one identity as
 `operator_key` in the config and it gets a mediated agent instead: the pinned
@@ -90,12 +93,7 @@ the box and moves to the next one. Bootstrap can take ten minutes on a fresh
 box, so the wait is a spinner and an elapsed count rather than silence.
 `torio ui` opens the same hub by name, for a wrapper script or a keybinding.
 
-Once the setup is finished the same five screens are the day-to-day surface.
-The recording below plays the waiting fast: on a real box those twenty seconds
-are the hub proving what the guest holds, which it does before it will name a
-step.
-
-![One pass through the hub: the guest verified, the finished setup, the cross-box poll, a project attached from the registry screen, the Second Brain, and the guest service](docs/demo/hub.gif)
+![The hub on a host with no box yet: the whole setup route on the left, the step it is on described on the right, and the key that runs it](docs/demo/screens/setup-first-run.png)
 
 The steps it runs are these commands, and running them yourself is the same
 sequence. Every one of them is idempotent.
