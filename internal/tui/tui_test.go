@@ -283,6 +283,29 @@ func TestTypingInTheSetupFormDoesNotQuitTheHub(t *testing.T) {
 	}
 }
 
+// The footer is the only place the hub says which keys are live. A form owns
+// every key except the one that gives the keyboard back, so a footer that still
+// offered the global ones would be naming keys that do nothing.
+func TestTheFooterOffersNoGlobalKeysWhileAFormOwnsTheKeyboard(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateNotFound}
+	r := settled(t, f)
+
+	press(t, r, "enter")
+	if !r.setup.capturing() {
+		t.Fatal("the create step did not open a form")
+	}
+
+	footer := r.footer()
+	for _, offered := range []string{"q quit", "tab screen", "r refresh"} {
+		if strings.Contains(footer, offered) {
+			t.Errorf("the form footer offers %q, which the form itself consumes: %s", offered, footer)
+		}
+	}
+	if !strings.Contains(footer, "esc cancel") {
+		t.Errorf("the form footer does not say how to give the keyboard back: %s", footer)
+	}
+}
+
 // Outside a form the same key still quits.
 func TestQuitOutsideAFormStillQuits(t *testing.T) {
 	f := &fakeDeps{boxState: lima.StateRunning}

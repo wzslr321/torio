@@ -575,6 +575,11 @@ func (r *root) body(w int) string {
 
 func (r *root) footer() string {
 	keys := r.screenKeys()
+	// A screen reading text consumes the global keys too, so offering them
+	// would name keys that type a character instead of doing what they say.
+	if r.capturing() {
+		return styDim.Render(keys)
+	}
 	global := "tab screen · r refresh · q quit"
 	if keys != "" {
 		return styDim.Render(keys + " · " + global)
