@@ -23,6 +23,8 @@ and your shell does not search the current directory, so `torio` yields
 `command not found` until you install it. Running it in place as `./torio …` from
 the repository root also works, but then every command needs the prefix.
 
+<!-- include: cmd-ui -->
+
 <!-- include: cmd-vm -->
 
 <!-- include: cmd-backend -->

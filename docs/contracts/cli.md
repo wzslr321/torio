@@ -145,16 +145,40 @@ output in `--json` mode MUST be exactly one envelope.
 ## Command surface
 
 This is the full list. Any parent (`vm`, `serve`, `brain`, `project`, `mcp`)
-without a subcommand, or with an unknown one, is a usage error (exit 2) —
-fail-closed, like the root command.
+without a subcommand, or with an unknown one, is a usage error (exit 2),
+fail-closed. An unknown command is a usage error at the root as well.
+
+The root with **no** command has one carve-out, and only the root has it
+(ADR-0019). Where standard input and standard output are both a terminal and
+`--json` was not given, it opens the interactive hub and exits 0 when the
+operator quits. Everywhere else it is the usage error it has always been, with
+the same message and the same exit code: a piped invocation, a job with no
+terminal, and a `--json` caller all read
+`torio: no command given; run 'torio --help'` on stderr and exit 2.
 
 ### Informational
 
 ```text
 torio version [--json]
+torio ui
 torio status [--json] [--format table|tmux|prompt]
 torio status setup tmux|zsh [--json]
 ```
+
+`ui` names the hub that bare `torio` opens on a terminal, so a wrapper or a
+keybinding can ask for it explicitly.
+
+- It is interactive and emits no JSON. `--json` is a usage error (exit 2)
+  rather than an empty envelope, for the reason every interactive command
+  refuses it: there is no document to emit.
+- Where standard input and standard output are not both a terminal it is a
+  precondition failure (`NOT_A_TERMINAL`, exit 3), not a usage error. The
+  command is spelled correctly and would work on a terminal; what is missing is
+  the machine's, not the operator's.
+- It runs the same operations the individual commands run and adds none of its
+  own. Every machine-readable answer stays with the command that produces one.
+- It silences the diagnostic logger while it owns the screen, so `--verbose`
+  has no effect on it.
 
 `status` is the only command that answers across boxes. Every other command
 addresses the one instance this invocation selected; this one polls every box
