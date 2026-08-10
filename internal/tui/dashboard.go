@@ -1,0 +1,220 @@
+package tui
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/wzslr321/torio/internal/redact"
+	"github.com/wzslr321/torio/internal/status"
+	"github.com/wzslr321/torio/internal/tui/wizard"
+)
+
+type pollMsg struct {
+	report status.Report
+	err    error
+}
+
+// dashScreen renders the cross-box poll. It shows every box on the host, not
+// only the one this invocation selected: which box needs a human is exactly the
+// question an operator opens the hub to answer, and a surface that showed one
+// box would answer it wrongly by omission.
+type dashScreen struct {
+	report status.Report
+	loaded bool
+	failed string
+	cursor int
+}
+
+func (s *dashScreen) load(d Deps) tea.Cmd {
+	if d.Poll == nil {
+		return nil
+	}
+	timeout := d.Timeout
+	poll := d.Poll
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), longOr(timeout))
+		defer cancel()
+		rep, err := poll(ctx)
+		return pollMsg{report: rep, err: err}
+	}
+}
+
+func (s *dashScreen) update(r *root, msg tea.Msg) tea.Cmd {
+	switch msg := msg.(type) {
+	case pollMsg:
+		s.loaded = true
+		if msg.err != nil {
+			s.failed = redact.String(msg.err.Error())
+			return nil
+		}
+		s.failed = ""
+		s.report = msg.report
+		if s.cursor >= len(s.report.Instances) {
+			s.cursor = 0
+		}
+		return nil
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "up", "k":
+			if s.cursor > 0 {
+				s.cursor--
+			}
+		case "down", "j":
+			if s.cursor < len(s.report.Instances)-1 {
+				s.cursor++
+			}
+		}
+	}
+	return nil
+}
+
+func (s *dashScreen) keys() string { return "↑/↓ box · w wizard" }
+
+func (s *dashScreen) view(r *root, w int) string {
+	var b strings.Builder
+
+	if banner := attentionBanner(s.report); banner != "" {
+		b.WriteString(banner + "  ")
+	}
+	b.WriteString(nextHint(r) + "\n\n")
+
+	switch {
+	case s.failed != "":
+		b.WriteString(styAmber.Render("the poll failed: ") + styText.Render(s.failed))
+		return b.String()
+	case !s.loaded:
+		b.WriteString(styMuted.Render("Polling every box on this host…"))
+		return b.String()
+	case len(s.report.Instances) == 0:
+		b.WriteString(styMuted.Render("No boxes on this host yet. The Setup screen creates one."))
+		return b.String()
+	}
+
+	b.WriteString(styMuted.Render(row("INSTANCE", "BOX", "BACKEND", "SESSIONS", "WAITING", "PROGRESS")) + "\n")
+	for i, in := range s.report.Instances {
+		line := row(
+			truncate(in.Name, 18),
+			boxWord(in.Box),
+			backendWord(in.Backend),
+			sessionWord(in.Session),
+			waitingWord(in.Waiting),
+			progressWord(in.Progress),
+		)
+		if i == s.cursor {
+			b.WriteString(styWorking.Render("▸") + line + "\n")
+			continue
+		}
+		b.WriteString(" " + line + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// row lays the columns out at fixed widths. A tab would put the alignment in
+// the terminal's hands, and the row an operator most needs to compare with the
+// one above it is the one whose name is longest.
+func row(instance, box, backend, sessions, waiting, progress string) string {
+	return fmt.Sprintf("%s%s%s%s%s%s",
+		pad(instance, 20), pad(box, 12), pad(backend, 14),
+		pad(sessions, 11), pad(waiting, 19), progress)
+}
+
+// attentionBanner is the one inverted element in the hub. It appears only when
+// a backend is provably blocked on the operator.
+func attentionBanner(rep status.Report) string {
+	for _, in := range rep.Instances {
+		if in.Waiting.State == status.Known && in.Waiting.Waiting {
+			return styAttention.Render(fmt.Sprintf("%s needs you %d", in.Name, len(in.Waiting.Waits)))
+		}
+	}
+	return ""
+}
+
+// nextHint is the dashboard's guidance, and it is the wizard's answer verbatim.
+// Two surfaces deriving "what now" separately is how they come to disagree.
+func nextHint(r *root) string {
+	if !r.verified {
+		return styDim.Render("reading " + r.deps.Instance + "…")
+	}
+	step := wizard.Next(r.facts)
+	if step == wizard.StepDone {
+		return styMuted.Render("next: ") + styLive.Render("nothing outstanding on "+r.deps.Instance)
+	}
+	return styMuted.Render("next: ") +
+		styText.Render(wizard.Describe(step).Title) +
+		styDim.Render("  press w")
+}
+
+func boxWord(box string) string {
+	switch box {
+	case "running":
+		return styLive.Render("● running")
+	case "stopped":
+		return styDim.Render("○ stopped")
+	default:
+		return styAmber.Render("? " + box)
+	}
+}
+
+func backendWord(f status.BackendField) string {
+	if f.State != status.Known {
+		return styAmber.Render("?")
+	}
+	return styText.Render(f.Name)
+}
+
+func sessionWord(f status.SessionField) string {
+	switch f.State {
+	case status.NotApplicable:
+		return styDim.Render("—")
+	case status.Known:
+		if len(f.Sessions) == 0 {
+			return styDim.Render("0")
+		}
+		return styText.Render(fmt.Sprintf("%d", len(f.Sessions)))
+	default:
+		return styAmber.Render("?")
+	}
+}
+
+func waitingWord(f status.WaitingField) string {
+	switch f.State {
+	case status.NotApplicable:
+		return styDim.Render("—")
+	case status.Known:
+		if !f.Waiting {
+			return styDim.Render("—")
+		}
+		return styAmber.Render(fmt.Sprintf("needs you %d", len(f.Waits)))
+	default:
+		return styAmber.Render("?")
+	}
+}
+
+func progressWord(f status.ProgressField) string {
+	switch f.State {
+	case status.NotApplicable:
+		return styDim.Render("—")
+	case status.Known:
+		return styWorking.Render("· " + compactAge(f.AgeSeconds))
+	default:
+		return styAmber.Render("?")
+	}
+}
+
+// compactAge renders an age the way the status line already does, so the two
+// surfaces read the same.
+func compactAge(seconds int64) string {
+	switch {
+	case seconds < 60:
+		return fmt.Sprintf("%ds", seconds)
+	case seconds < 3600:
+		return fmt.Sprintf("%dm", seconds/60)
+	case seconds < 86400:
+		return fmt.Sprintf("%dh", seconds/3600)
+	default:
+		return fmt.Sprintf("%dd", seconds/86400)
+	}
+}
