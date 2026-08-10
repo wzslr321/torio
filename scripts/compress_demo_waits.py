@@ -11,11 +11,18 @@ Nothing is reordered, nothing is cut, and no frame is invented: a still stretch
 is played fast, so the spinner in it spins fast. What the recording shows and
 the order it shows it in are what the tape recorded.
 
-Stillness is measured on a small greyscale copy of each frame, which is what
-makes a spinner count as still: one character cell changing in a 160-pixel-wide
-frame moves the average by a hundredth of a level, while switching screens moves
-it by several. The threshold sits between those two by an order of magnitude in
-both directions, and `--stats` prints the distribution the choice is made from.
+Stillness is measured over a window rather than between neighbouring frames. A
+spinner never stops changing, so a frame-to-frame measure calls a whole wait
+busy; against the frame from a second ago it is one character in a different
+phase, which is nothing. Typing is the opposite: a keystroke is as small as a
+spinner tick, but a second of typing has put a word on screen. Both are read
+from a small greyscale copy of each frame, and `--stats` prints the distribution
+the threshold is chosen from.
+
+The measure has one blind spot, and the lead is how it is handled: a command
+short enough to be worth demonstrating puts too few characters on screen to
+clear the threshold. Nothing is waiting in the first seconds of a take, so they
+play whole rather than being measured.
 
 Usage:
     python3 scripts/compress_demo_waits.py docs/demo/hub-raw.mp4 \
@@ -65,8 +72,19 @@ def ffprobe(path: Path) -> tuple[Fraction, int, int]:
     return rate, width, height
 
 
-def frame_differences(path: Path, height: int, width: int) -> list[float]:
-    """Mean absolute difference between each frame and the one before it."""
+def frame_differences(path: Path, height: int, width: int, lag: int) -> tuple[list[float], list[float]]:
+    """How much each frame differs from the one before it, and from `lag` back.
+
+    The second one is what decides whether the screen is doing anything. A
+    spinner never stops changing, so measuring against the previous frame calls
+    the whole wait busy; measured against half a second ago it is a single
+    character in a different phase, which is nothing. Typing is the opposite:
+    each keystroke is as small as a spinner tick, but half a second of it has
+    put a whole word on screen, so it stays.
+
+    The adjacent difference is kept for the one thing it answers better: whether
+    anything moved at all, which is how a spinner is told from a settled screen.
+    """
     probe_h = max(2, round(height * PROBE_WIDTH / width / 2) * 2)
     raw = subprocess.run(
         [
@@ -79,18 +97,20 @@ def frame_differences(path: Path, height: int, width: int) -> list[float]:
 
     size = PROBE_WIDTH * probe_h
     count = len(raw) // size
-    diffs: list[float] = []
-    previous = raw[0:size]
+    frames = [raw[i * size : (i + 1) * size] for i in range(count)]
+
+    adjacent: list[float] = []
+    windowed: list[float] = []
     for i in range(1, count):
-        current = raw[i * size : (i + 1) * size]
-        total = sum(abs(a - b) for a, b in zip(current, previous))
-        diffs.append(total / size)
-        previous = current
-    return diffs
+        adjacent.append(sum(abs(a - b) for a, b in zip(frames[i], frames[i - 1])) / size)
+        back = frames[max(0, i - lag)]
+        windowed.append(sum(abs(a - b) for a, b in zip(frames[i], back)) / size)
+    return adjacent, windowed
 
 
 def plan(
-    diffs: list[float],
+    adjacent: list[float],
+    windowed: list[float],
     fps: float,
     hold_reading: float,
     hold_waiting: float,
@@ -98,6 +118,7 @@ def plan(
     threshold: float,
     motion: float,
     busy_fraction: float,
+    lead: int,
 ) -> list[Segment]:
     """Decide the playback rate of every frame.
 
@@ -110,12 +131,21 @@ def plan(
 
     Both are stillness by the same threshold. What separates them is how often
     anything at all changed inside the run.
+
+    The opening plays whole. A command short enough to be worth demonstrating is
+    also short enough to look like a spinner to the measurement above: five
+    characters appearing over a second move the average about as much as one
+    spinner glyph turning, and no threshold separates them. Nothing is waiting
+    in the first seconds of a take anyway, so the lead is exempt rather than
+    measured.
     """
-    still = [d < threshold for d in diffs]
+    still = [d < threshold for d in windowed]
+    for i in range(min(lead, len(still))):
+        still[i] = False
     reading_frames = max(1, round(hold_reading * fps))
     waiting_frames = max(1, round(hold_waiting * fps))
 
-    rates: list[float] = [1.0] * (len(diffs) + 1)
+    rates: list[float] = [1.0] * (len(windowed) + 1)
     run_start: int | None = None
     for i, quiet in enumerate([*still, False]):
         if quiet and run_start is None:
@@ -124,7 +154,7 @@ def plan(
         if quiet:
             continue
         if run_start is not None:
-            run = diffs[run_start:i]
+            run = adjacent[run_start:i]
             moving = sum(1 for d in run if d > motion)
             busy = run and moving / len(run) >= busy_fraction
             hold_frames = waiting_frames if busy else reading_frames
@@ -204,9 +234,14 @@ def main() -> int:
     parser.add_argument("source", type=Path, help="the recording as vhs wrote it")
     parser.add_argument("--mp4", type=Path, help="where to write the compressed MP4")
     parser.add_argument("--gif", type=Path, help="where to write the compressed GIF")
-    parser.add_argument("--hold-reading", type=float, default=2.5,
+    parser.add_argument("--lead", type=float, default=3.0,
+                        help="seconds at the start of the take that play whole")
+    parser.add_argument("--window", type=float, default=1.0,
+                        help="seconds a change is looked for over: a screen that "
+                        "matches what it was this long ago is doing nothing")
+    parser.add_argument("--hold-reading", type=float, default=1.2,
                         help="seconds a settled screen is held at real speed")
-    parser.add_argument("--hold-waiting", type=float, default=1.0,
+    parser.add_argument("--hold-waiting", type=float, default=0.3,
                         help="seconds a spinner is held at real speed")
     parser.add_argument("--speed", type=float, default=20.0,
                         help="rate the rest of a still stretch is played at")
@@ -229,24 +264,29 @@ def main() -> int:
         return 2
 
     rate, width, height = ffprobe(args.source)
-    diffs = frame_differences(args.source, height, width)
     fps = float(rate)
+    lag = max(1, round(args.window * fps))
+    adjacent, windowed = frame_differences(args.source, height, width, lag)
 
     if args.stats:
-        ordered = sorted(diffs)
-        for label, index in (("min", 0), ("p50", len(ordered) // 2),
-                             ("p90", len(ordered) * 9 // 10),
-                             ("p99", len(ordered) * 99 // 100),
-                             ("max", len(ordered) - 1)):
-            print(f"{label}: {ordered[index]:.4f}")
-        quiet = sum(1 for d in diffs if d < args.threshold)
-        print(f"still at threshold {args.threshold}: {quiet}/{len(diffs)} frames")
+        for name, series in (("adjacent", adjacent), ("windowed", windowed)):
+            ordered = sorted(series)
+            cuts = " ".join(
+                f"{label} {ordered[index]:.4f}"
+                for label, index in (("p50", len(ordered) // 2),
+                                     ("p90", len(ordered) * 9 // 10),
+                                     ("p99", len(ordered) * 99 // 100),
+                                     ("max", len(ordered) - 1))
+            )
+            quiet = sum(1 for d in series if d < args.threshold)
+            print(f"{name}: {cuts}  still {quiet}/{len(series)}")
         return 0
 
-    segments = plan(diffs, fps, args.hold_reading, args.hold_waiting,
-                    args.speed, args.threshold, args.motion, args.busy_fraction)
+    segments = plan(adjacent, windowed, fps, args.hold_reading, args.hold_waiting,
+                    args.speed, args.threshold, args.motion, args.busy_fraction,
+                    round(args.lead * fps))
     kept = sum((s.end - s.start) / s.speed for s in segments)
-    print(f"{len(diffs) + 1} frames in {(len(diffs) + 1) / fps:.1f}s "
+    print(f"{len(windowed) + 1} frames in {(len(windowed) + 1) / fps:.1f}s "
           f"-> {kept / fps:.1f}s in {len(segments)} segments")
 
     graph = filtergraph(segments, rate)

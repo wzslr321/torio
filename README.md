@@ -95,7 +95,7 @@ The recording below plays the waiting fast: on a real box those twenty seconds
 are the hub proving what the guest holds, which it does before it will name a
 step.
 
-![One pass through the hub: the guest verified, the finished setup, the cross-box poll, the registry with a project form that cancels, the Second Brain, and the guest service](docs/demo/hub.gif)
+![One pass through the hub: the guest verified, the finished setup, the cross-box poll, a project attached from the registry screen, the Second Brain, and the guest service](docs/demo/hub.gif)
 
 The steps it runs are these commands, and running them yourself is the same
 sequence. Every one of them is idempotent.

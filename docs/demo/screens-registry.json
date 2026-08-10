@@ -7,14 +7,14 @@
       "remote": "git@github.com:wzslr321/torio.git"
     },
     {
-      "id": "hermes-agent",
-      "display_name": "hermes-agent",
-      "remote": "https://github.com/NousResearch/hermes-agent.git"
-    },
-    {
       "id": "my-service",
       "display_name": "my-service",
       "remote": "https://github.com/you/my-service.git"
+    },
+    {
+      "id": "notes-service",
+      "display_name": "notes-service",
+      "remote": "git@github.com:you/notes-service.git"
     }
   ]
 }

@@ -59,11 +59,17 @@ Type "export PS1='> '; clear"
 Enter
 Show
 
-# One word, no arguments. The header lands immediately: this box, this backend,
-# running. The step it is on has to wait for the guest.
+# One word, no arguments. It sits on screen for a beat before the return,
+# because the whole claim is that this is the only thing to remember.
 Sleep 500ms
+Set TypingSpeed 100ms
 Type "torio"
+Set TypingSpeed 60ms
+Sleep 1200ms
 Enter
+
+# The header lands immediately: this box, this backend, running. The step it is
+# on has to wait for the guest.
 Sleep 24s
 
 # Every step verified, and the one thing Torio cannot verify said out loud.
@@ -77,16 +83,21 @@ Sleep 7s
 Type "3"
 Sleep 4s
 
-# Adding one is a form. Escape leaves the registry as it was.
+# Adding one is a form, and this add is real: the box already has this checkout,
+# so `add` adopts what is there rather than cloning anything, and the row that
+# appears afterwards is the registry having actually changed.
 Type "a"
-Sleep 1s
-Type "notes-service"
-Sleep 1s
+Sleep 800ms
+Set TypingSpeed 90ms
+Type "hermes-agent"
+Sleep 600ms
 Tab
-Type "https://github.com/you/notes-service.git"
-Sleep 2s
-Escape
-Sleep 2s
+Set TypingSpeed 45ms
+Type "https://github.com/NousResearch/hermes-agent.git"
+Set TypingSpeed 60ms
+Sleep 1500ms
+Enter
+Sleep 12s
 
 # The vault, read from the guest.
 Type "4"
