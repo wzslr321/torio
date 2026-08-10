@@ -172,7 +172,7 @@ func TestVerifyBrokerUserRejectsPrivilegedSupplementaryGroup(t *testing.T) {
 	}}
 	rep := &MCPBrokerReport{}
 
-	if err := New(fr).verifyBrokerUser(context.Background(), rep); err == nil {
+	if err := New(fr).verifyBrokerUserFor(context.Background(), rep, HermesUser); err == nil {
 		t.Fatal("broker identity with docker authority was accepted")
 	}
 }
@@ -182,7 +182,7 @@ func TestVerifyHermesCustodyRejectsDockerMembership(t *testing.T) {
 		{result: stdoutResult("hermes torio-projects torio-mcp-clients docker\n")},
 	}}
 	rep := &MCPBrokerReport{}
-	if err := New(fr).verifyHermesNotBrokerOwner(context.Background(), rep); err == nil {
+	if err := New(fr).verifyAgentNotBrokerOwner(context.Background(), rep, HermesUser); err == nil {
 		t.Fatal("hermes with docker authority was accepted as unable to read broker credentials")
 	}
 }
@@ -193,7 +193,7 @@ func TestVerifyHermesCustodyRejectsSudoAuthority(t *testing.T) {
 		{result: stdoutResult("User hermes may run the following commands\n")},
 	}}
 	rep := &MCPBrokerReport{}
-	if err := New(fr).verifyHermesNotBrokerOwner(context.Background(), rep); err == nil {
+	if err := New(fr).verifyAgentNotBrokerOwner(context.Background(), rep, HermesUser); err == nil {
 		t.Fatal("hermes with sudo authority was accepted as unable to read broker credentials")
 	}
 }
@@ -231,7 +231,7 @@ func TestVerifyBrokerUserRejectsTheHermesUID(t *testing.T) {
 		{result: stdoutResult("997\n")},
 	}}
 	rep := &MCPBrokerReport{}
-	if err := New(fr).verifyBrokerUser(context.Background(), rep); err == nil {
+	if err := New(fr).verifyBrokerUserFor(context.Background(), rep, HermesUser); err == nil {
 		t.Fatal("broker identity sharing the Hermes numeric uid was accepted")
 	}
 }

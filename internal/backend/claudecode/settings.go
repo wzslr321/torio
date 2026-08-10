@@ -36,12 +36,6 @@ const (
 //go:embed templates/managed-settings.json
 var embeddedManagedSettings []byte
 
-// ManagedSettings returns the exact bytes Torio installs. It is exported so a
-// golden test can lock them: a change to what the box tells the agent about
-// permissions or the updater should be a reviewed change to a file, not a
-// side effect of editing a string.
-func ManagedSettings() []byte { return embeddedManagedSettings }
-
 // VerifyGuardrails proves the managed settings and the helper they run are the
 // ones Torio wrote, and reports what MCP servers the guest is configured with.
 //

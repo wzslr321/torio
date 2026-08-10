@@ -25,11 +25,6 @@ var initialWaitingMarker = []byte(`{"schema_version":"2","waits":[]}` + "\n")
 //go:embed templates/torio-waiting-marker.sh
 var embeddedWaitingMarker []byte
 
-// WaitingMarkerScript returns the helper's exact bytes, exported so a test can
-// lock them. What the agent's hooks write into its own home, and in what shape,
-// is the thing a status surface then renders.
-func WaitingMarkerScript() []byte { return embeddedWaitingMarker }
-
 // reconcileWaitingMarkerHelper proves the hook helper is the one Torio wrote.
 //
 // It is installed when absent and reported, never rewritten, when it has

@@ -25,22 +25,6 @@ type registryJSON struct {
 	Projects      []projectJSON `json:"projects"`
 }
 
-// LoadRegistry reads the shared project registry.
-//
-// The second return value reports whether a document was there. An absent
-// registry is not an error and not an empty registry either: it means this
-// installation has not migrated yet, and the caller reads the instance
-// document's legacy `projects` array instead. Distinguishing the two is the
-// whole point — treating "no file" as "no projects" would make an upgrade look
-// like someone had detached everything.
-//
-// Every returned error is redacted at the package boundary, for the same reason
-// Load's are: the path is caller-controlled and the document is operator-
-// authored.
-func LoadRegistry(path string) (_ []Project, _ bool, err error) {
-	return loadRegistry(path, true)
-}
-
 func loadRegistry(path string, checkParent bool) (_ []Project, _ bool, err error) {
 	defer func() { err = redactErr(err) }()
 

@@ -336,10 +336,6 @@ func (a *Adapter) brokerMissing(rep *MCPBrokerReport, name, detail, remediation 
 	return &Error{Op: mcpBrokerOp, Kind: KindNotFound, Err: fmt.Errorf("%s: %s (%s)", name, detail, remediation)}
 }
 
-func (a *Adapter) verifyBrokerUser(ctx context.Context, rep *MCPBrokerReport) error {
-	return a.verifyBrokerUserFor(ctx, rep, HermesUser)
-}
-
 func (a *Adapter) verifyBrokerUserFor(ctx context.Context, rep *MCPBrokerReport, agentUser string) error {
 	const name = "broker_user"
 	res, err := a.brokerProbe(ctx, rep, name, "id", "-u", TorioMCPUser)
@@ -448,15 +444,6 @@ func (a *Adapter) verifyAgentIsBrokerClient(ctx context.Context, rep *MCPBrokerR
 	}
 	rep.record(name, true, "member")
 	return nil
-}
-
-// verifyHermesNotBrokerOwner is the custody invariant. It rejects direct owner
-// membership and indirect privilege escalation: sudo or any group outside the
-// managed guest set could bypass the broker home's 0700 mode. It is checked
-// separately from client-group membership so a broken security boundary is not
-// confused with missing socket plumbing.
-func (a *Adapter) verifyHermesNotBrokerOwner(ctx context.Context, rep *MCPBrokerReport) error {
-	return a.verifyAgentNotBrokerOwner(ctx, rep, HermesUser)
 }
 
 func (a *Adapter) verifyAgentNotBrokerOwner(ctx context.Context, rep *MCPBrokerReport, agentUser string) error {

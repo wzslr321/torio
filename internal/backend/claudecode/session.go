@@ -12,11 +12,6 @@ const AgentSessionHelper = "/usr/local/bin/torio-agent-session"
 //go:embed templates/torio-agent-session.sh
 var embeddedAgentSession []byte
 
-// AgentSession returns the helper's exact bytes, exported so a test can lock
-// them: what an agent session runs, and as whom, is not something to discover
-// from a diff.
-func AgentSession() []byte { return embeddedAgentSession }
-
 // AgentPushSessionHelper is the entry point of a session that may ask to push.
 //
 // It is a second file rather than a flag on the first. The ordinary helper is
@@ -28,10 +23,6 @@ const AgentPushSessionHelper = "/usr/local/bin/torio-agent-push-session"
 
 //go:embed templates/torio-agent-push-session.sh
 var embeddedAgentPushSession []byte
-
-// AgentPushSession returns the push-capable helper's exact bytes, locked by test
-// for the same reason as AgentSession and with more riding on it.
-func AgentPushSession() []byte { return embeddedAgentPushSession }
 
 // loginArgv starts the agent in its own home so its login flow can run. Every
 // element is a constant: nothing an operator typed reaches this command.
