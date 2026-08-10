@@ -115,6 +115,12 @@ func (s *setupScreen) readForm() (VMInitOptions, error) {
 // act performs the current step. Each branch is the same manager call the
 // equivalent command makes.
 func (s *setupScreen) act(r *root) tea.Cmd {
+	// The same rule the view applies: a step derived from facts nothing has
+	// proven is not a step. On a running box the unproven answer is bootstrap,
+	// which is minutes of guest work nobody asked for.
+	if !r.verified {
+		return nil
+	}
 	d := r.deps
 	switch wizard.Next(r.facts) {
 	case wizard.StepVMInit:
@@ -155,6 +161,9 @@ func (s *setupScreen) act(r *root) tea.Cmd {
 func (s *setupScreen) keys(r *root) string {
 	if s.editing {
 		return "enter create · tab field · esc cancel"
+	}
+	if !r.verified {
+		return ""
 	}
 	switch wizard.Next(r.facts) {
 	case wizard.StepDone, wizard.StepBoxUnusable:

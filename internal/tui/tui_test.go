@@ -182,6 +182,31 @@ func TestProbeAsksNoGuestQuestionsOfABoxThatIsNotRunning(t *testing.T) {
 	}
 }
 
+// Between the box answering and the guest answering, the setup screen refuses
+// to name a step, because the step would follow from facts nothing has proven.
+// The key that runs a step has to refuse for the same reason: on a running box
+// the unproven answer is "bootstrap", which is minutes of work the operator did
+// not ask for.
+func TestNoStepRunsBeforeTheGuestHasAnswered(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	r := newRoot(f.deps())
+
+	// The box half of the probe only. The guest half is the command this
+	// returns, deliberately left unrun.
+	r.Update(boxMsg{state: lima.StateRunning})
+	if !r.probed || r.verified {
+		t.Fatalf("wanted a probed, unverified box; probed=%v verified=%v", r.probed, r.verified)
+	}
+
+	if keys := r.setup.keys(r); keys != "" {
+		t.Errorf("the setup screen offers %q before the guest answered", keys)
+	}
+	press(t, r, "enter")
+	if len(f.calls) != 0 {
+		t.Errorf("enter ran %v against a box nothing had been proven about", f.calls)
+	}
+}
+
 // The wizard's action is the manager call the equivalent command makes.
 func TestSetupRunsTheStepTheGraphChose(t *testing.T) {
 	f := &fakeDeps{boxState: lima.StateStopped}
