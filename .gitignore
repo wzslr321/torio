@@ -24,9 +24,12 @@ artifacts/
 .idea/
 .vscode/
 
-# Demo recording: the GIF is committed (README needs it); the MP4 is the
-# preview copy vhs also emits, and two copies of the same take is one too many.
-docs/demo/*.mp4
+# Demo recordings: what gets published is committed, what a take produces on
+# the way there is not. torio-demo.mp4 is the preview copy vhs emits beside the
+# committed GIF of the same thing; hub-raw.mp4 is the take before its waiting is
+# fast-forwarded into docs/demo/hub.mp4 and hub.gif.
+docs/demo/torio-demo.mp4
+docs/demo/hub-raw.mp4
 
 # Screenshot tape: the frames it captures are committed, the animation is not.
 # vhs requires an Output line, so the recording exists as a by-product and

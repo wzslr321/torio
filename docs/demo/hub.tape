@@ -1,11 +1,19 @@
-# Records docs/demo/hub.gif: one pass through the hub on a box that is already
-# set up.
+# Records the walkthrough of the hub on a box that is already set up: five
+# screens, each of which is a read of the same box, and a form that cancels
+# without doing anything.
 #
-# What the take is about is the second half: five screens, each of which is a
-# read of the same box, and a form that cancels without doing anything. The
-# first twenty seconds are the hub proving what the guest holds before it will
-# name a step. That wait is in the recording because it is in the product; a
-# take that cut it would promise a hub that answers instantly.
+# This tape produces the raw take. The published files come from it in a second
+# step, which fast-forwards the waiting:
+#
+#   vhs docs/demo/hub.tape
+#   python3 scripts/compress_demo_waits.py docs/demo/hub-raw.mp4 \
+#       --mp4 docs/demo/hub.mp4 --gif docs/demo/hub.gif
+#
+# The raw take spends twenty seconds on the hub proving what the guest holds
+# before it will name a step, and a few more on each screen it reads. Watching
+# that is nobody's idea of a demonstration, so the second step keeps the start
+# of every wait at real speed and plays the rest fast. Nothing is reordered and
+# nothing is removed; a wait is shown as a wait, briefly.
 #
 # The registry is staged from screens-registry.json into a throwaway
 # XDG_CONFIG_HOME, so the project list is three example repositories rather than
@@ -17,13 +25,13 @@
 # own terminal and wrong in a file that gets published.
 #
 # Prerequisites, all on the host:
-#   - vhs installed (`brew install vhs`) and the JetBrains Mono font
-#     (`brew install --cask font-jetbrains-mono`)
+#   - vhs and ffmpeg installed (`brew install vhs ffmpeg`) and the JetBrains
+#     Mono font (`brew install --cask font-jetbrains-mono`)
 #   - the default hermes box running, bootstrapped, with a Brain and a service
 #   - the binary built from this tree: `go build -o torio ./cmd/torio`
-#   - run from the repository root: `vhs docs/demo/hub.tape`
+#   - run from the repository root
 
-Output docs/demo/hub.gif
+Output docs/demo/hub-raw.mp4
 
 Set FontSize 20
 Set Width 1600
@@ -53,7 +61,7 @@ Show
 
 # One word, no arguments. The header lands immediately: this box, this backend,
 # running. The step it is on has to wait for the guest.
-Sleep 1s
+Sleep 500ms
 Type "torio"
 Enter
 Sleep 24s
@@ -89,4 +97,4 @@ Type "5"
 Sleep 6s
 
 Type "q"
-Sleep 2s
+Sleep 800ms

@@ -91,8 +91,9 @@ box, so the wait is a spinner and an elapsed count rather than silence.
 `torio ui` opens the same hub by name, for a wrapper script or a keybinding.
 
 Once the setup is finished the same five screens are the day-to-day surface.
-The first twenty seconds below are the hub proving what the guest holds, which
-it does before it will name a step:
+The recording below plays the waiting fast: on a real box those twenty seconds
+are the hub proving what the guest holds, which it does before it will name a
+step.
 
 ![One pass through the hub: the guest verified, the finished setup, the cross-box poll, the registry with a project form that cancels, the Second Brain, and the guest service](docs/demo/hub.gif)
 
@@ -320,10 +321,10 @@ If one of these is yours, [`CONTRIBUTING.md`](CONTRIBUTING.md) has the how and
 - [`docs/adr/`](docs/adr/README.md): the accepted decisions. Why the VM is the
   trust boundary, why write capability is operator-carried, why the egress
   allowlist was rejected.
-- [`docs/demo/screens/`](docs/demo/screens): a frame of each hub screen, and
-  [`docs/demo/screens.tape`](docs/demo/screens.tape) with
-  [`hub.tape`](docs/demo/hub.tape), which record them and the walkthrough above
-  against a running box.
+- [`docs/demo/`](docs/demo): a frame of each hub screen under
+  [`screens/`](docs/demo/screens), the walkthrough above as
+  [`hub.gif`](docs/demo/hub.gif) and [`hub.mp4`](docs/demo/hub.mp4), and the
+  tapes that record them against a running box.
 - [`SECURITY.md`](SECURITY.md), [`CONTRIBUTING.md`](CONTRIBUTING.md),
   [`CHANGELOG.md`](CHANGELOG.md).
 
