@@ -51,6 +51,19 @@ func (e *ExitError) Error() string {
 // output to redact, because this runner never sees the child's streams.
 type InteractiveExecRunner struct{}
 
+// InteractiveProcess validates a command and builds the process used by an
+// interactive runner. Terminal ownership stays with the caller.
+func InteractiveProcess(ctx context.Context, cmd InteractiveCommand) (*exec.Cmd, error) {
+	if strings.TrimSpace(cmd.Name) == "" {
+		return nil, errors.New("execx: empty interactive command name")
+	}
+	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
+	if cmd.Env != nil {
+		c.Env = cmd.Env
+	}
+	return c, nil
+}
+
 // RunInteractive runs cmd with the parent's standard input, output and error
 // wired straight through to the child, and returns when the child exits. A
 // clean exit returns nil; a non-zero exit returns an *ExitError with the code;
@@ -62,13 +75,9 @@ type InteractiveExecRunner struct{}
 // there is no Result, no output bound, and no timeout, because there is nothing
 // to inspect and nobody to hurry.
 func (r *InteractiveExecRunner) RunInteractive(ctx context.Context, cmd InteractiveCommand) error {
-	if strings.TrimSpace(cmd.Name) == "" {
-		return errors.New("execx: empty interactive command name")
-	}
-
-	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
-	if cmd.Env != nil {
-		c.Env = cmd.Env
+	c, err := InteractiveProcess(ctx, cmd)
+	if err != nil {
+		return err
 	}
 	// The whole point of this runner: the child gets the parent's real
 	// descriptors, so a TTY stays a TTY and the operator's keystrokes reach

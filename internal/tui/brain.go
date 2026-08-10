@@ -32,7 +32,7 @@ func (s *brainScreen) load(d Deps) tea.Cmd {
 	timeout := d.Timeout
 	statusFn := d.BrainStatus
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), longOr(timeout))
+		ctx, cancel := context.WithTimeout(d.parentContext(), longOr(timeout))
 		defer cancel()
 		rep, err := statusFn(ctx)
 		return brainMsg{report: rep, err: err}

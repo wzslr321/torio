@@ -54,7 +54,7 @@ func (s *serveScreen) load(d Deps) tea.Cmd {
 	timeout := d.Timeout
 	statusFn := d.ServeStatus
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), longOr(timeout))
+		ctx, cancel := context.WithTimeout(d.parentContext(), longOr(timeout))
 		defer cancel()
 		rep, err := statusFn(ctx)
 		return serveMsg{report: rep, err: err}
@@ -68,7 +68,7 @@ func (s *serveScreen) fetchLogs(d Deps) tea.Cmd {
 	timeout := d.Timeout
 	logs := d.ServeLogs
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), longOr(timeout))
+		ctx, cancel := context.WithTimeout(d.parentContext(), longOr(timeout))
 		defer cancel()
 		text, err := logs(ctx, logLines)
 		return logsMsg{text: text, err: err}
