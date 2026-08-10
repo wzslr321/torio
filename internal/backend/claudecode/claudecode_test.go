@@ -124,7 +124,7 @@ func TestProvisionScriptInstallsTheWaitingMarkerParser(t *testing.T) {
 // relevant, so changing it must be a reviewed change to a file rather than a
 // side effect of editing a string.
 func TestManagedSettingsMatchGolden(t *testing.T) {
-	got := string(ManagedSettings())
+	got := string(embeddedManagedSettings)
 	for _, want := range []string{
 		`"defaultMode": "bypassPermissions"`,
 		`"allowManagedMcpServersOnly": true`,
@@ -146,7 +146,7 @@ func TestManagedSettingsMatchGolden(t *testing.T) {
 // It is root-owned on the guest and takes one validated path; what it runs, and
 // as whom, must be constants in the file rather than anything the host sent.
 func TestAgentSessionHelperRunsAFixedCommandAsTheAgent(t *testing.T) {
-	script := string(AgentSession())
+	script := string(embeddedAgentSession)
 	for _, want := range []string{
 		`exec sudo -n -u "$agent_user" -H -- "$agent_command"`,
 		`agent_user='` + User + `'`,
@@ -232,10 +232,10 @@ func TestLoginArgvSurvivesARemoteShell(t *testing.T) {
 // only worth something while the default helper is the one every ordinary
 // session opens.
 func TestAgentPushSessionHelperIsTheOnlyOneThatTouchesTheSocket(t *testing.T) {
-	if strings.Contains(string(AgentSession()), "SSH_AUTH_SOCK") {
+	if strings.Contains(string(embeddedAgentSession), "SSH_AUTH_SOCK") {
 		t.Error("the default agent session helper gained SSH_AUTH_SOCK; the grant belongs in the second helper")
 	}
-	if !strings.Contains(string(AgentPushSession()), "SSH_AUTH_SOCK") {
+	if !strings.Contains(string(embeddedAgentPushSession), "SSH_AUTH_SOCK") {
 		t.Error("the push session helper does not hand the agent a socket")
 	}
 	if AgentSessionHelper == AgentPushSessionHelper {
@@ -247,7 +247,7 @@ func TestAgentPushSessionHelperIsTheOnlyOneThatTouchesTheSocket(t *testing.T) {
 // the two-sided validation. The host is a caller, not a trusted input source,
 // and the socket it names decides which agent the session talks to.
 func TestAgentPushSessionHelperValidatesWhatTheHostSent(t *testing.T) {
-	script := string(AgentPushSession())
+	script := string(embeddedAgentPushSession)
 	for _, want := range []string{
 		`socket_pattern='^/tmp/torio-push-[0-9a-f]{32}\.sock$'`,
 		`[ "$#" -eq 2 ] || die 'expected exactly two arguments: the project path and the agent socket'`,

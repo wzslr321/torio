@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -140,7 +139,6 @@ func newRoot(d Deps) *root {
 		active: screenSetup,
 		spin:   sp,
 	}
-	r.projects = newProjectsScreen()
 	r.serve = newServeScreen()
 	return r
 }
@@ -159,7 +157,7 @@ func (r *root) opContext(long bool) (context.Context, context.CancelFunc) {
 	if d <= 0 {
 		d = 30 * time.Second
 	}
-	return context.WithTimeout(context.Background(), d)
+	return context.WithTimeout(r.deps.parentContext(), d)
 }
 
 // probeFacts asks the box what it is. It is the only place setup state is
@@ -172,7 +170,7 @@ func (r *root) probeFacts() tea.Cmd {
 	r.probing = true
 	d := r.deps
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), longOr(d.Timeout))
+		ctx, cancel := context.WithTimeout(d.parentContext(), longOr(d.Timeout))
 		defer cancel()
 		st, err := d.VMStatus(ctx)
 		return boxMsg{state: st.State, err: err}
@@ -185,7 +183,7 @@ func (r *root) probeGuest() tea.Cmd {
 	d := r.deps
 	box := r.facts.Box
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), longOr(d.LongTimeout))
+		ctx, cancel := context.WithTimeout(d.parentContext(), longOr(d.LongTimeout))
 		defer cancel()
 
 		f := wizard.Facts{
@@ -265,10 +263,12 @@ func (r *root) handoff(label string, build func() (execx.InteractiveCommand, err
 // the session ends. The child keeps this process group, so an interrupt reaches
 // the session rather than the hub, which is the behaviour the equivalent
 // command already has.
-func execSession(spec execx.InteractiveCommand) tea.Cmd {
-	c := exec.Command(spec.Name, spec.Args...)
-	c.Env = spec.Env
-	return tea.ExecProcess(c, func(err error) tea.Msg { return execDoneMsg{err: err} })
+func execSession(ctx context.Context, spec execx.InteractiveCommand) (tea.Cmd, error) {
+	c, err := execx.InteractiveProcess(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	return tea.ExecProcess(c, func(err error) tea.Msg { return execDoneMsg{err: err} }), nil
 }
 
 func (r *root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -323,7 +323,7 @@ func (r *root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return r, nil
 		}
 		r.note = msg.label + " finished"
-		return r, r.afterChange(msg.label)
+		return r, r.afterChange()
 
 	case specMsg:
 		if msg.err != nil {
@@ -331,7 +331,13 @@ func (r *root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			r.errText = fmt.Sprintf("%s: %s", msg.label, redact.String(msg.err.Error()))
 			return r, nil
 		}
-		return r, execSession(msg.spec)
+		cmd, err := execSession(r.deps.parentContext(), msg.spec)
+		if err != nil {
+			r.busy = ""
+			r.errText = fmt.Sprintf("%s: %s", msg.label, redact.String(err.Error()))
+			return r, nil
+		}
+		return r, cmd
 
 	case execDoneMsg:
 		r.busy = ""
@@ -356,7 +362,7 @@ func (r *root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // afterChange re-reads what the action changed. Every action here alters box
 // or guest state, so the cheapest correct answer is to re-probe rather than to
 // guess which facts moved.
-func (r *root) afterChange(string) tea.Cmd {
+func (r *root) afterChange() tea.Cmd {
 	cmds := []tea.Cmd{r.probeFacts()}
 	if r.active == screenProjects {
 		cmds = append(cmds, r.projects.load(r.deps))

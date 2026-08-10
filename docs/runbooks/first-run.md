@@ -18,8 +18,8 @@ interactively, deriving each step from the box rather than from your place in
 this document. The steps below are what it runs, in the order it runs them, and
 they remain the surface for a script or a CI job.
 
-The operational sections below are shared with the documentation site and
-generated from one source, so the two cannot drift.
+The operational sections below and the documentation site are generated from
+the same sources.
 
 ## Prerequisites
 
@@ -381,8 +381,8 @@ backup.
 
 ## 7. Attach a repository
 
-The model can see the repositories you registered, and nothing else. Nothing is
-discovered, scanned, or picked up because it happened to be on disk.
+Torio manages only repositories in the registry. It discovers nothing from
+disk, and removing a registry entry leaves the checkout on the guest.
 
 ```bash
 torio project add my-service https://github.com/you/my-service --use
@@ -400,11 +400,10 @@ derived from the project id — never taken from you, never stored in config.
 Without `--id`, the id is the name you gave, which must be a lowercase slug;
 pass `--id` to pick a different one.
 
-**A private repository takes the same command.** Torio stores no Git
-credentials, prompts for none, and passes none to the model. A remote the guest
-cannot read still fails closed, at exit `7`. For an SSH remote that failure
-comes with the way through: the guest generates its own deploy key and prints
-the public half.
+**A private repository takes the same command.** Torio copies no host Git
+credential into the guest. A remote the guest cannot read still fails closed,
+at exit `7`. For an SSH remote that failure comes with the way through: the
+guest generates its own deploy key and prints the public half.
 
 ```text
 The guest generated a deploy key for this project. Torio holds no copy of its private half.
@@ -473,11 +472,11 @@ These are guarantees `torio project` enforces, not rules you have to remember.
 Each one fails closed: when Torio cannot prove the condition, it stops and says
 so rather than proceeding.
 
-- **The control plane is credential- and config-neutral.** It never copies or materializes host Git state in the VM — no host `.git/`, `.git/config`, hooks, SSH keys, tokens, `.env`, or host Git configuration — and never causes a credential prompt. It runs credential-neutral `git`. Read access to a private SSH remote is provisioned by a key the guest generates and keeps; the host holds no copy, and authorizing that key is yours.
+- **Host Git state never crosses the boundary.** Torio copies no host `.git/`, hooks, SSH keys, tokens, `.env`, or Git configuration into the VM. Private SSH read access uses a key the guest generates and keeps; the host holds no copy, and you authorize it on the forge.
 - **A workspace is never seeded from the host.** A recursive copy would drag the host `.git/` — config, hooks, host-only keys — across the VM boundary. If read access cannot be provisioned, the correct outcome is to stop at that prerequisite, not to weaken the boundary.
 - **Attaching is non-destructive.** `add` clones only into a path that is absent. A checkout already there with the registered origin is verified and adopted as-is. Anything else — not a repository, a different origin, unreadable — is a hard stop. Nothing is overwritten, reset, cleaned, deleted, or recloned over.
 - **No substitution.** If the exact remote is unreadable, Torio does not swap in another repository and does not attempt an auth workaround.
-- **Writes to history are yours.** The control plane runs no `git commit`, `push`, merge, deploy, or release. The persistent backend holds read access only; write capability exists solely inside a `torio project shell` session you opened, and leaves when you exit it.
+- **No unattended operator signature.** Torio never pushes, merges, deploys, or releases. Its write route exists inside `project shell`, or one approved signature at a time in an agent session opened with `--push-grant`; no unanswered prompt signs. The forge-side permission of a guest deploy key is outside this guarantee.
 
 ## 8. Connect Hermes Desktop
 
@@ -545,9 +544,9 @@ this runbook, as is the credential entry the step above describes.
 
 ## 10. Push, when you decide to
 
-The persistent Hermes backend has read access to your checkouts and nothing
-more. It cannot push, and no credential of yours is stored anywhere it could
-reach.
+The persistent backend receives no operator write credential. A private
+repository's guest deploy key is read-only only if you authorized it that way;
+Torio cannot verify the forge setting.
 
 When you want to write to a remote, open a session that carries your own
 capability:
@@ -593,7 +592,7 @@ session opened; Torio still makes no claim about what a signature was used for.
 
 ### Let an agent session ask to push
 
-An agent session normally receives no route to a remote. With a pinned
+An agent session normally receives no operator write route. With a pinned
 `operator_key`,
 
 ```bash

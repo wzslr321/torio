@@ -24,7 +24,7 @@ func TestManagedSettingsRunTheInstalledHelper(t *testing.T) {
 			} `json:"hooks"`
 		} `json:"hooks"`
 	}
-	if err := json.Unmarshal(ManagedSettings(), &doc); err != nil {
+	if err := json.Unmarshal(embeddedManagedSettings, &doc); err != nil {
 		t.Fatalf("managed settings are not valid JSON: %v", err)
 	}
 
@@ -59,7 +59,7 @@ func TestManagedSettingsRunTheInstalledHelper(t *testing.T) {
 // same file and the same schema version, and neither is free to
 // move without the other.
 func TestWaitingMarkerHelperWritesTheConventionTheReaderEnforces(t *testing.T) {
-	script := string(WaitingMarkerScript())
+	script := string(embeddedWaitingMarker)
 	for _, want := range []string{
 		`marker="$HOME/.` + strings.TrimPrefix(status.MarkerFileName, ".") + `"`,
 		`"schema_version":"` + status.MarkerSchemaVersion + `"`,
@@ -98,7 +98,7 @@ func keysOf[V any](m map[string]V) []string {
 // declares. Two spellings here would write a marker that names nothing, on
 // every box, silently.
 func TestWaitingMarkerHelperWalksForTheDeclaredSessionProcess(t *testing.T) {
-	script := string(WaitingMarkerScript())
+	script := string(embeddedWaitingMarker)
 	spec := (claudeBackend{}).Status()
 	if !strings.Contains(script, "session_process='"+spec.SessionProcess+"'") {
 		t.Errorf("helper does not walk for %q, the process name the probe declares", spec.SessionProcess)
@@ -115,7 +115,7 @@ func TestWaitingMarkerHelperWalksForTheDeclaredSessionProcess(t *testing.T) {
 // key updates and clears by that identifier so one session cannot erase a wait
 // another live session still owns.
 func TestWaitingMarkerHelperKeepsIndependentSessionEntries(t *testing.T) {
-	script := string(WaitingMarkerScript())
+	script := string(embeddedWaitingMarker)
 	for _, want := range []string{
 		`/usr/bin/jq -er`,
 		`.session_id`,

@@ -4,11 +4,11 @@
 //
 // Redaction is by shape only. A companion type that also masked literal secret
 // values registered at runtime existed here and was never constructed by
-// production code: Torio ingests no runtime secret to register — config is
-// non-secret by contract, no credentials are stored, and the operator's push
-// capability travels through a forwarded SSH agent Torio never sees. It was
-// removed rather than kept as an unexercised path; reinstating it is mechanical
-// if Torio ever does take a secret in.
+// production code: Torio ingests no runtime secret to register — host config is
+// non-secret, guest credentials never cross into this process, and the
+// operator's push capability travels through a forwarded SSH agent Torio never
+// sees. It was removed rather than kept as an unexercised path; reinstating it
+// is mechanical if Torio ever does take a secret in.
 package redact
 
 import (

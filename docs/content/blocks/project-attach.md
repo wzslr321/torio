@@ -1,7 +1,7 @@
 ## Attach a repository {#project-attach}
 
-The model can see the repositories you registered, and nothing else. Nothing is
-discovered, scanned, or picked up because it happened to be on disk.
+Torio manages only repositories in the registry. It discovers nothing from
+disk, and removing a registry entry leaves the checkout on the guest.
 
 ```bash
 torio project add my-service https://github.com/you/my-service --use
@@ -19,11 +19,10 @@ derived from the project id — never taken from you, never stored in config.
 Without `--id`, the id is the name you gave, which must be a lowercase slug;
 pass `--id` to pick a different one.
 
-**A private repository takes the same command.** Torio stores no Git
-credentials, prompts for none, and passes none to the model. A remote the guest
-cannot read still fails closed, at exit `7`. For an SSH remote that failure
-comes with the way through: the guest generates its own deploy key and prints
-the public half.
+**A private repository takes the same command.** Torio copies no host Git
+credential into the guest. A remote the guest cannot read still fails closed,
+at exit `7`. For an SSH remote that failure comes with the way through: the
+guest generates its own deploy key and prints the public half.
 
 ```text
 The guest generated a deploy key for this project. Torio holds no copy of its private half.

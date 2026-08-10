@@ -38,11 +38,11 @@ func healthyGuest() map[string]execx.Result {
 	return map[string]execx.Result{
 		settingsKind:   out("regular file\n"),
 		settingsOG:     out("root:root 644\n"),
-		settingsSum:    digestLine(ManagedSettings(), managedSettingsPath),
+		settingsSum:    digestLine(embeddedManagedSettings, managedSettingsPath),
 		helperJQ:       out("jq-1.7\n"),
 		helperKind:     out("regular file\n"),
 		helperOG:       out("root:root 755\n"),
-		helperSum:      digestLine(WaitingMarkerScript(), WaitingMarkerHelper),
+		helperSum:      digestLine(embeddedWaitingMarker, WaitingMarkerHelper),
 		markerKind:     out("regular file\n"),
 		markerOG:       out(User + ":" + User + " 600\n"),
 		mcpConfigProbe: exit(1),

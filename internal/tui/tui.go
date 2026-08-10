@@ -45,6 +45,8 @@ type VMInitOptions struct {
 // A nil operation is a capability this build or this backend does not have. The
 // screens check before offering it rather than calling and reporting a failure.
 type Deps struct {
+	ctx context.Context
+
 	// Instance, Backend and Version identify what the header describes.
 	Instance string
 	Backend  string
@@ -107,6 +109,7 @@ type Deps struct {
 // The program is bound to ctx, so the signal handling the binary already
 // installs tears the hub down the same way it tears down any other command.
 func Run(ctx context.Context, d Deps) error {
+	d.ctx = ctx
 	p := tea.NewProgram(newRoot(d), tea.WithAltScreen(), tea.WithContext(ctx))
 	_, err := p.Run()
 	if err != nil && ctx.Err() != nil {
@@ -115,4 +118,11 @@ func Run(ctx context.Context, d Deps) error {
 		return nil
 	}
 	return err
+}
+
+func (d Deps) parentContext() context.Context {
+	if d.ctx != nil {
+		return d.ctx
+	}
+	return context.Background()
 }

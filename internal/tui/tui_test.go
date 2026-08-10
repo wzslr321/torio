@@ -164,6 +164,23 @@ func press(t *testing.T, r *root, s string) {
 	drain(t, r, cmd)
 }
 
+func TestOperationStopsWithTheHubContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	d := (&fakeDeps{}).deps()
+	d.ctx = ctx
+	r := newRoot(d)
+
+	cmd := r.run("work", false, func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	cancel()
+	msg := cmd().(opMsg)
+	if !errors.Is(msg.err, context.Canceled) {
+		t.Fatalf("operation error = %v, want context cancellation", msg.err)
+	}
+}
+
 // The probe must not ask a stopped box guest questions. Every answer would be
 // a failure to reach it, reported as a fact about setup rather than about the
 // box being off.

@@ -2,39 +2,31 @@
 
 ## Unreleased
 
+## 0.3.4 - 2026-08-10
+
 ### Added
 
-- **`torio project add` provisions read access for a private SSH remote.**
-  Attaching a private repository used to end at one line telling you to
-  provision access out of band, and what that meant was six steps no Torio
-  surface described: a key generated as the backend identity, one deploy key per
-  repository, an ssh alias carrying `IdentitiesOnly` (without it the forge
-  authenticates the wrong key and answers `Repository not found` for a
-  repository that exists), that alias ordered ahead of the entry the push path
-  uses, the key authorized read-only or the guest silently gains write, and all
-  of it in a guest file you had to already know to write. `add` now generates an
-  ed25519 key on the guest, offers it to that one remote, and prints the public
-  half with the one step left: add it to the repository as a deploy key with
-  write access off, then run the same command again. A key you authorized
-  beforehand attaches in one run, and a rerun before authorization reports the
-  same key instead of making another. Torio keeps no copy of the private half
-  and never reads it. Where you paste the key is what keeps it read-only:
-  added to your account instead of to the repository it attaches the project
-  equally well and grants the guest write access account-wide, and Torio cannot
-  tell the two apart, because checking would take a push it does not run. In
-  `--json` the exit-7 error carries `deploy_key` (`public_key`, `host`,
-  `key_path`, `generated`)
+- **An interactive hub.** Bare `torio` on a terminal opens setup, cross-box
+  status, projects, the Second Brain, and the guest service. `torio ui` opens it
+  explicitly. Non-terminal and JSON behavior remains unchanged
+  ([ADR-0019](docs/adr/0019-bare-torio-opens-the-hub.md)).
+- **Private SSH repository setup.** `torio project add` generates a guest-held
+  deploy key and prints its public half. Add it to that repository with write
+  access off, then rerun the command. Torio neither reads the private half nor
+  verifies the forge setting
   ([ADR-0018](docs/adr/0018-guest-held-deploy-key-for-read-access.md)).
 
 ### Fixed
 
-- **`torio status` aligns its columns.** The table separated cells with a raw
-  tab, which left the alignment to whatever the reader renders a tab as: it
-  held only while every cell fit inside one tab stop, and `torio-claude-code`
-  does not, so the row an operator most needs to compare against the one above
-  it was the row that slipped a column. Columns are now padded to the widest
-  cell before the output leaves Torio, which also survives being pasted
-  somewhere with a different tab stop.
+- TUI operations and interactive sessions stop when the hub context is canceled.
+- `torio status` pads columns instead of relying on terminal tab stops.
+- User documentation now matches deploy-key setup, TUI refresh behavior,
+  credential custody, editor support, and JSON availability.
+
+### Internal
+
+- Removed test-only production wrappers, redundant TUI setup, and the static
+  screenshot/video pipeline. The recorded hub GIF and its VHS source remain.
 
 ## 0.3.3 - 2026-08-09
 

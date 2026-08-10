@@ -79,7 +79,7 @@ func writeRegistryDoc(t *testing.T, body string) string {
 // upgrade look like someone had detached every project.
 func TestLoadRegistryTellsAbsentFromEmpty(t *testing.T) {
 	absent := registryPath(t)
-	got, present, err := LoadRegistry(absent)
+	got, present, err := loadRegistry(absent, true)
 	if err != nil {
 		t.Fatalf("LoadRegistry on an absent document: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestLoadRegistryTellsAbsentFromEmpty(t *testing.T) {
 	}
 
 	empty := writeRegistryDoc(t, `{"schema_version":"1","projects":[]}`)
-	got, present, err = LoadRegistry(empty)
+	got, present, err = loadRegistry(empty, true)
 	if err != nil {
 		t.Fatalf("LoadRegistry on an empty document: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestWriteRegistryRoundTrips(t *testing.T) {
 	if err := WriteRegistry(path, in); err != nil {
 		t.Fatalf("WriteRegistry: %v", err)
 	}
-	got, present, err := LoadRegistry(path)
+	got, present, err := loadRegistry(path, true)
 	if err != nil || !present {
 		t.Fatalf("LoadRegistry: %v (present=%v)", err, present)
 	}
@@ -209,7 +209,7 @@ func TestLoadRegistryRejectsMalformedDocuments(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := writeRegistryDoc(t, body)
-			if _, _, err := LoadRegistry(path); err == nil {
+			if _, _, err := loadRegistry(path, true); err == nil {
 				t.Fatal("malformed registry document was accepted")
 			}
 		})
@@ -223,7 +223,7 @@ func TestRegistryErrorsCarryNoSecret(t *testing.T) {
 	const token = "ghp_00000000000000000000000000000000000000"
 	path := writeRegistryDoc(t,
 		`{"schema_version":"1","projects":[{"id":"a","display_name":"A","remote":"https://x-access-token:`+token+`@github.com/o/r"}]}`)
-	_, _, err := LoadRegistry(path)
+	_, _, err := loadRegistry(path, true)
 	if err == nil {
 		t.Fatal("a registry carrying a token was accepted")
 	}

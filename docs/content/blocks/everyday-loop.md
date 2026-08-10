@@ -10,6 +10,5 @@ or interface you use:
 5. Decide whether any of it should leave the VM.
 6. If it should: `torio project shell <id>`, commit, push, exit.
 
-Steps 5 and 6 are the whole point of the split. Torio automates no part of
-either. The persistent backend cannot push at all — write capability exists only
-inside a session you opened, and ends when you exit it.
+Steps 5 and 6 are the split: Torio forwards operator write capability only
+inside a session you opened, and stops forwarding it when you exit.

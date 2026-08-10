@@ -186,7 +186,7 @@ Torio owns and reports, per box, whether it is running, which backend it was
 provisioned for, what that backend has running, whether anything there is
 waiting on a human, and when it last provably did work.
 
-- Human output is a header line and one tab-separated row per box:
+- Human output is a header line and one row per box, padded into columns:
   `INSTANCE  BOX  BACKEND  SESSION  WAITING  PROGRESS`. A host with no boxes
   prints `no instances` and a next step.
 - Every field is one of three things, and never a fourth: a proven value, `?`

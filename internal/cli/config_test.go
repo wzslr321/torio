@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wzslr321/torio/internal/redact"
 )
@@ -65,18 +66,19 @@ func TestConfigGlobalAcceptedBeforeAndAfterCommand(t *testing.T) {
 	}
 }
 
-// TestConfigDefaultTimeoutIsConsumed proves the config file is genuinely used
-// by command execution (not merely parsed): a valid-but-tiny default_timeout
-// bounds the operation, so the (already-expired) context makes `torio version`
-// abort. If config were ignored, the default 30s policy would let it succeed.
+// TestConfigDefaultTimeoutIsConsumed proves command dispatch replaces the
+// built-in timeout with the configured value.
 func TestConfigDefaultTimeoutIsConsumed(t *testing.T) {
 	cfgHome := t.TempDir()
-	// 1ns is within policy but expires before any work runs, so a consumed
-	// config timeout aborts the bounded operation.
-	writeCLIConfig(t, cfgHome, `{"schema_version":"2","default_timeout":"1ns"}`)
-	code, _, _ := runVersionWithXDG(t, []string{"version"}, cfgHome)
-	if code == int(ExitOK) {
-		t.Fatalf("exit = 0, want non-zero: config default_timeout must be consumed by the bounded operation")
+	writeCLIConfig(t, cfgHome, `{"schema_version":"2","default_timeout":"137ms"}`)
+	t.Setenv("XDG_CONFIG_HOME", cfgHome)
+	var stdout, stderr bytes.Buffer
+	a := &app{stdout: &stdout, stderr: &stderr, build: testBuild()}
+	if code := runWithApp(context.Background(), a, []string{"version"}); code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if want := 137 * time.Millisecond; a.timeout != want {
+		t.Fatalf("operation timeout = %s, want configured %s", a.timeout, want)
 	}
 }
 

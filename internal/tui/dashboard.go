@@ -35,7 +35,7 @@ func (s *dashScreen) load(d Deps) tea.Cmd {
 	timeout := d.Timeout
 	poll := d.Poll
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), longOr(timeout))
+		ctx, cancel := context.WithTimeout(d.parentContext(), longOr(timeout))
 		defer cancel()
 		rep, err := poll(ctx)
 		return pollMsg{report: rep, err: err}

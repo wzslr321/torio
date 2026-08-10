@@ -31,8 +31,6 @@ type projectsScreen struct {
 	confirm bool
 }
 
-func newProjectsScreen() projectsScreen { return projectsScreen{} }
-
 // capturing is true while the screen owns the keyboard, so the root does not
 // read a typed "q" as a request to quit.
 func (s *projectsScreen) capturing() bool { return s.adding }

@@ -39,7 +39,7 @@ func newProjectCmd(a *app) *cobra.Command {
 			"The workspace path is always derived as <backend workspace>/<id>, never taken " +
 			"from an operator, so it moves with --backend and a project can exist in more " +
 			"than one guest without either checkout being addressable from the other. " +
-			"Torio stores no Git credentials: a remote the guest cannot already read " +
+			"Torio copies no host Git credential: a remote the guest cannot already read " +
 			"noninteractively fails closed.",
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -252,7 +252,8 @@ func newProjectRemoveCmd(a *app) *cobra.Command {
 // push-capable boundary.
 // newProjectAgentCmd opens the backend's own session in a checkout. It
 // completes the triad: `enter` is you without push capability, `shell` is you
-// with it, `agent` is the agent, which never has it.
+// with it, and `agent` is the backend identity. The agent gets no operator
+// credential by default; --push-grant adds the mediated approval path.
 //
 // It carries no machine output for the same reason `enter` does not: it hands
 // the operator's terminal to a remote process, so there is no document to emit.
@@ -264,14 +265,14 @@ func newProjectAgentCmd(a *app) *cobra.Command {
 		Long: "Start the configured backend inside the project checkout, running as the " +
 			"backend's guest identity rather than as you.\n\n" +
 			"No SSH agent is forwarded and the connection is never multiplexed, so the " +
-			"session cannot reach a Git remote and cannot inherit a connection that " +
-			"can. The agent edits and commits in a tree it owns; pushing stays yours, " +
+			"session cannot inherit your Git credentials. The agent edits and commits " +
+			"in a tree it owns; by default, pushing stays yours, " +
 			"from `torio project shell <id>`, after you have read what it did.\n\n" +
 			"Inside the box the backend runs without permission prompts. That is not a " +
 			"weakening: the prompt was a control inside the agent's own process, and " +
 			"the box replaced it with ones the agent cannot reach — an unprivileged " +
-			"identity, a closed group set, no route to a remote, and the edge of the " +
-			"VM.\n\n" +
+			"identity, a closed group set, no operator credential, and the edge of " +
+			"the VM.\n\n" +
 			"A backend that declares no interactive session has nothing to open here. " +
 			"This command is interactive and does not support --json.",
 		Args: cobra.ExactArgs(1),

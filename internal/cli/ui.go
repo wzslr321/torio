@@ -21,13 +21,9 @@ func newUICmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "ui",
 		Short: "Open the interactive hub",
-		Long: "Open the interactive hub: setup, box status, projects, the Second Brain and the " +
-			"guest service on one screen.\n\n" +
-			"Running `torio` with no command on a terminal opens the same hub. This command names " +
-			"it, so a wrapper or a keybinding can ask for it explicitly and get a precondition " +
-			"failure rather than a usage error when there is no terminal to draw on.\n\n" +
-			"The hub runs the same operations the individual commands run. It emits no JSON: " +
-			"every machine-readable answer stays with the command that already produces one.",
+		Long: "Open the setup, status, project, Brain, and service hub. Bare `torio` opens " +
+			"the same hub on a terminal. The hub emits no JSON; use the individual commands " +
+			"for machine-readable output.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if a.jsonOut {
@@ -38,7 +34,7 @@ func newUICmd(a *app) *cobra.Command {
 					Exit:    ExitPrecondition,
 					Code:    "NOT_A_TERMINAL",
 					Command: "ui",
-					Message: "the hub needs a terminal, and standard input and output here are not one; run a command instead",
+					Message: "the hub requires a terminal on standard input and output; run an individual command instead",
 				}
 			}
 			return a.launchHub(cmd.Context())
