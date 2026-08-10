@@ -105,6 +105,16 @@ type app struct {
 	// writes into the configuration it prints. Production reads it from the
 	// kernel; tests inject a fixed path so what they pin is the snippet.
 	executablePath func() (string, error)
+
+	// isTerminal reports whether this invocation can draw a full-screen program.
+	// It is a seam because a test process never has a terminal, so without one
+	// the hub branch could not be exercised at all and the non-hub branch could
+	// not be proven to be the one a script still takes.
+	isTerminal func() bool
+
+	// runTUI opens the hub. Production wires the real program; tests inject a
+	// recorder, so no test starts an event loop or takes over the terminal.
+	runTUI func(context.Context) error
 }
 
 // Run builds the command tree, executes it, and returns the process exit code.
@@ -208,6 +218,12 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 	if a.lookupOperatorUser == nil {
 		a.lookupOperatorUser = defaultLookupOperatorUser
 	}
+	if a.isTerminal == nil {
+		a.isTerminal = defaultIsTerminal
+	}
+	if a.runTUI == nil {
+		a.runTUI = a.defaultRunTUI
+	}
 	// An unsupported host is rejected here, once, rather than deep inside the
 	// first command that needs a pin. The adapter still fails closed on its own
 	// (lima.Adapter.profile), but that message would arrive after an operator
@@ -250,10 +266,13 @@ func newRootCmd(a *app) *cobra.Command {
 		SilenceErrors: true, // this package renders errors; Cobra must not
 		SilenceUsage:  true,
 		// The root is runnable so unknown input reaches RunE and we control the
-		// message, rather than Cobra's default handling.
+		// message, rather than Cobra's default handling. An empty invocation on
+		// a terminal is the one case that is not an error: it opens the hub.
+		// A misspelled command is still a misspelled command, on a terminal or
+		// not, and is never answered with a screen.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				return usageError("no command given; run 'torio --help'")
+				return a.openHubOrUsage(cmd.Context())
 			}
 			return usageError(fmt.Sprintf("unknown command %q", args[0]))
 		},
@@ -347,6 +366,7 @@ func newRootCmd(a *app) *cobra.Command {
 		"agent backend this invocation is about; selects the instance that runs it (default hermes)")
 
 	root.AddCommand(newVersionCmd(a))
+	root.AddCommand(newUICmd(a))
 	root.AddCommand(newStatusCmd(a))
 	root.AddCommand(newVMCmd(a))
 	root.AddCommand(newServeCmd(a))

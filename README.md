@@ -20,7 +20,17 @@ Torio is not the AI, not the VM, and not the chat window. It is the layer that
 brings those into a known-good state and then gets out of the way. It has no
 daemon and no state beyond one non-secret config file.
 
-![An agent commits inside the VM, its push is refused for want of a credential, and the operator pushes the same commit from a session of their own](docs/demo/torio-demo.gif)
+Run `torio` with no arguments on a terminal and it opens a hub: whatever setup
+the box still needs, every box on the host, the repositories attached to them,
+the vault, and the guest service. It runs each step itself and names the
+command behind it. Every command below still exists and still answers the same
+way.
+
+![One pass through the hub: the guest verified, the finished setup, the cross-box poll, a project attached from the registry screen, the Second Brain, and the guest service](docs/demo/hub.gif)
+
+The recording plays the waiting fast. On a real box the hub spends about twenty
+seconds proving what the guest holds, because it will not name a step it cannot
+prove is the one you are on.
 
 Documentation lives at **[torio.dev](https://torio.dev)**.
 
@@ -71,7 +81,22 @@ scripts/install.sh                     # into ~/.local/bin
 
 or build from source: `go build -o torio ./cmd/torio`.
 
-Then bring the stack up. Every step is idempotent.
+Then run it with no arguments and let it bring the stack up:
+
+```bash
+torio
+```
+
+The hub starts on the setup screen, which shows the whole route and points at
+the step the box is actually on. Press `enter` to run that step and it re-reads
+the box and moves to the next one. Bootstrap can take ten minutes on a fresh
+box, so the wait is a spinner and an elapsed count rather than silence.
+`torio ui` opens the same hub by name, for a wrapper script or a keybinding.
+
+![The hub on a host with no box yet: the whole setup route on the left, the step it is on described on the right, and the key that runs it](docs/demo/screens/setup-first-run.png)
+
+The steps it runs are these commands, and running them yourself is the same
+sequence. Every one of them is idempotent.
 
 ```bash
 torio vm init                          # pinned Lima template; no --force exists
@@ -128,9 +153,15 @@ It exits 0 whatever it finds, so a status bar can call it on a timer.
 `torio status setup tmux` prints the block that does that; `torio status setup
 zsh` prints the prompt equivalent, collapsed to one chip per box.
 
+The hub's dashboard is the same poll, redrawn on a timer, with the next step
+for the box you opened it on:
+
+![The dashboard: one row per box, the fields it could not prove marked as such, and the next step for this box above the table](docs/demo/screens/dashboard.png)
+
 Work happens in the checkouts: from Desktop, from your own editor, or from
-`torio project enter <id>`. Edit, run checks that read rather than write,
-review `git diff`. When you decide something should leave the VM:
+`torio project enter <id>`, which the hub's project screen also opens. Edit,
+run checks that read rather than write, review `git diff`. When you decide
+something should leave the VM:
 
 ```bash
 torio project shell my-service         # your SSH agent, forwarded for this session
@@ -288,6 +319,10 @@ If one of these is yours, [`CONTRIBUTING.md`](CONTRIBUTING.md) has the how and
 - [`docs/adr/`](docs/adr/README.md): the accepted decisions. Why the VM is the
   trust boundary, why write capability is operator-carried, why the egress
   allowlist was rejected.
+- [`docs/demo/`](docs/demo): a frame of each hub screen under
+  [`screens/`](docs/demo/screens), the walkthrough above as
+  [`hub.gif`](docs/demo/hub.gif) and [`hub.mp4`](docs/demo/hub.mp4), and the
+  tapes that record them against a running box.
 - [`SECURITY.md`](SECURITY.md), [`CONTRIBUTING.md`](CONTRIBUTING.md),
   [`CHANGELOG.md`](CHANGELOG.md).
 

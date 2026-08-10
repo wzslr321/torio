@@ -7,7 +7,8 @@ symptom, then apply the fix.
 | What you see | What it means, and what to do |
 | --- | --- |
 | `zsh: command not found: torio` | The binary is not on your `PATH`. Build it and install it once — `go build -o torio ./cmd/torio` then `sudo install -m 755 torio /usr/local/bin/torio` — or run it in place as `./torio` from the repository root. |
-| `torio: no command given; run 'torio --help'` (exit 2) | You ran `torio` with no subcommand. Add one, for example `torio vm status`, or run `torio --help` to list the command surface. |
+| `torio: no command given; run 'torio --help'` (exit 2) | You ran `torio` with no subcommand somewhere that is not a terminal, such as a pipeline or a CI job, or you passed `--json`. Add a subcommand, for example `torio vm status`, or run `torio --help` to list the command surface. On a terminal the same invocation opens the hub instead. |
+| `torio: the hub needs a terminal …` (exit 3) | `torio ui` was run where standard input and standard output are not both a terminal. Run it in a terminal, or use the individual commands, which is what a script wants anyway. |
 | A `vm` command fails mentioning `limactl` (exit 8) | Lima is not installed, or `limactl` is not on your `PATH`. Install Lima and confirm `limactl` runs; Torio drives the VM through it. |
 | `torio: stopped`, or a precondition error (exit 3) | The VM is not running. Start it with `torio vm start`, then re-run your command. |
 | `torio: not_found` from `torio vm status` (exit 0) | No VM exists yet. This is the answer on a host that has never run Torio; create one with `torio vm init`. |
