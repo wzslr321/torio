@@ -1,6 +1,11 @@
-.PHONY: validate nvim-smoke e2e platform-e2e brain-evals fmt fmt-check vet lint docs docs-check package-release
+.PHONY: freeze-check validate nvim-smoke e2e platform-e2e brain-evals fmt fmt-check vet lint docs docs-check package-release
 
 export PYTHONDONTWRITEBYTECODE := 1
+
+FREEZE_BASE ?= main
+
+freeze-check:
+	python3 scripts/check_feature_freeze.py --base "$(FREEZE_BASE)"
 
 docs:
 	python3 scripts/build_docs.py
