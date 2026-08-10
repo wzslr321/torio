@@ -1,5 +1,7 @@
 .PHONY: validate nvim-smoke e2e platform-e2e brain-evals fmt fmt-check vet lint docs docs-check package-release
 
+export PYTHONDONTWRITEBYTECODE := 1
+
 docs:
 	python3 scripts/build_docs.py
 
@@ -14,7 +16,7 @@ validate: docs-check
 # Local-only check; CI has no Neovim and nothing else runs this smoke test.
 nvim-smoke:
 	@if command -v nvim >/dev/null 2>&1; then \
-		TORIO_NVIM_ROOT="$(CURDIR)/integrations/neovim" nvim --headless -u NONE -l integrations/neovim/tests/smoke.lua; \
+		NVIM_LOG_FILE=/dev/null TORIO_NVIM_ROOT="$(CURDIR)/integrations/neovim" nvim --headless -u NONE -l integrations/neovim/tests/smoke.lua; \
 	else \
 		echo "nvim not installed; Neovim integration smoke test skipped"; \
 	fi

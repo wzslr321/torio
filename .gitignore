@@ -23,13 +23,3 @@ artifacts/
 .DS_Store
 .idea/
 .vscode/
-
-# Demo recording: what gets published is committed, the take it comes from is
-# not. hub-raw.mp4 is the recording before its waiting is fast-forwarded into
-# docs/demo/hub.mp4 and hub.gif.
-docs/demo/hub-raw.mp4
-
-# Screenshot tape: the frames it captures are committed, the animation is not.
-# vhs requires an Output line, so the recording exists as a by-product and
-# nothing reads it.
-docs/demo/screens/screens.gif

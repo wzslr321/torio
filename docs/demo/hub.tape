@@ -1,37 +1,17 @@
-# Records the walkthrough of the hub on a box that is already set up: five
-# screens, each of which is a read of the same box, and a form that cancels
-# without doing anything.
-#
-# This tape produces the raw take. The published files come from it in a second
-# step, which fast-forwards the waiting:
-#
-#   vhs docs/demo/hub.tape
-#   python3 scripts/compress_demo_waits.py docs/demo/hub-raw.mp4 \
-#       --mp4 docs/demo/hub.mp4 --gif docs/demo/hub.gif
-#
-# The raw take spends twenty seconds on the hub proving what the guest holds
-# before it will name a step, and a few more on each screen it reads. Watching
-# that is nobody's idea of a demonstration, so the second step keeps the start
-# of every wait at real speed and plays the rest fast. Nothing is reordered and
-# nothing is removed; a wait is shown as a wait, briefly.
+# Records the README walkthrough against an already configured box.
 #
 # The registry is staged from screens-registry.json into a throwaway
 # XDG_CONFIG_HOME, so the project list is three example repositories rather than
 # whatever the author happens to have attached. Everything else is read from the
 # running box.
 #
-# The service journal is deliberately not opened. It is real output from a real
-# backend and nothing redacts it on the way to the screen, which is fine on your
-# own terminal and wrong in a file that gets published.
-#
 # Prerequisites, all on the host:
-#   - vhs and ffmpeg installed (`brew install vhs ffmpeg`) and the JetBrains
-#     Mono font (`brew install --cask font-jetbrains-mono`)
+#   - vhs and JetBrains Mono installed
 #   - the default hermes box running, bootstrapped, with a Brain and a service
 #   - the binary built from this tree: `go build -o torio ./cmd/torio`
 #   - run from the repository root
 
-Output docs/demo/hub-raw.mp4
+Output docs/demo/hub.gif
 
 Set FontSize 20
 Set Width 1600
@@ -75,7 +55,7 @@ Sleep 24s
 # Every step verified, and the one thing Torio cannot verify said out loud.
 Sleep 4s
 
-# The same poll `torio status` prints, redrawn on a timer.
+# The same poll `torio status` prints.
 Type "2"
 Sleep 7s
 
