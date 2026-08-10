@@ -90,7 +90,11 @@ the box and moves to the next one. Bootstrap can take ten minutes on a fresh
 box, so the wait is a spinner and an elapsed count rather than silence.
 `torio ui` opens the same hub by name, for a wrapper script or a keybinding.
 
-![The setup screen on a finished box: every step verified, and the one thing Torio cannot verify said out loud](docs/demo/screens/setup-complete.png)
+Once the setup is finished the same five screens are the day-to-day surface.
+The first twenty seconds below are the hub proving what the guest holds, which
+it does before it will name a step:
+
+![One pass through the hub: the guest verified, the finished setup, the cross-box poll, the registry with a project form that cancels, the Second Brain, and the guest service](docs/demo/hub.gif)
 
 The steps it runs are these commands, and running them yourself is the same
 sequence. Every one of them is idempotent.
@@ -316,8 +320,10 @@ If one of these is yours, [`CONTRIBUTING.md`](CONTRIBUTING.md) has the how and
 - [`docs/adr/`](docs/adr/README.md): the accepted decisions. Why the VM is the
   trust boundary, why write capability is operator-carried, why the egress
   allowlist was rejected.
-- [`docs/demo/screens/`](docs/demo/screens): a frame of each hub screen,
-  recorded from a running box by [`docs/demo/screens.tape`](docs/demo/screens.tape).
+- [`docs/demo/screens/`](docs/demo/screens): a frame of each hub screen, and
+  [`docs/demo/screens.tape`](docs/demo/screens.tape) with
+  [`hub.tape`](docs/demo/hub.tape), which record them and the walkthrough above
+  against a running box.
 - [`SECURITY.md`](SECURITY.md), [`CONTRIBUTING.md`](CONTRIBUTING.md),
   [`CHANGELOG.md`](CHANGELOG.md).
 
