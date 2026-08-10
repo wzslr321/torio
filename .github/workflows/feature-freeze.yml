@@ -1,0 +1,20 @@
+name: feature-freeze
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  guard:
+    name: feature-freeze
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - run: make freeze-check FREEZE_BASE=${{ github.event.pull_request.base.sha }}
+        env:
+          GH_TOKEN: ${{ github.token }}
