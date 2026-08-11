@@ -65,9 +65,14 @@ type factsMsg struct {
 // opMsg is the completion of any action that either worked or did not. The
 // label is what the operator was told is happening, so a failure names the
 // thing that failed rather than the layer that reported it.
+//
+// detail is material the operator needs to act on the failure, rendered under
+// the banner: today, the deploy key a failed add left the guest holding. A
+// success discards it.
 type opMsg struct {
-	label string
-	err   error
+	label  string
+	err    error
+	detail string
 }
 
 // specMsg carries a resolved interactive session, which the hub then hands the
@@ -119,6 +124,10 @@ type root struct {
 
 	// errText is the last failure, shown until dismissed.
 	errText string
+	// errDetail is what the failure left for the operator to act on, shown and
+	// dismissed with errText. It is rendered unstyled so a terminal selection
+	// of the key line picks up no decoration.
+	errDetail string
 	// note is a transient one-line outcome, replaced by the next one.
 	note string
 
@@ -232,17 +241,27 @@ func longOr(d time.Duration) time.Duration {
 
 // run starts one operation, refusing to start a second while one is in flight.
 func (r *root) run(label string, long bool, fn func(context.Context) error) tea.Cmd {
+	return r.runDetailed(label, long, func(ctx context.Context) (string, error) {
+		return "", fn(ctx)
+	})
+}
+
+// runDetailed is run for an operation whose failure can carry material the
+// operator acts on next: a failed add may hold the deploy key to authorize.
+func (r *root) runDetailed(label string, long bool, fn func(context.Context) (string, error)) tea.Cmd {
 	if r.busy != "" {
 		return nil
 	}
 	r.busy = label
 	r.busyStart = time.Now()
 	r.errText = ""
+	r.errDetail = ""
 	r.note = ""
 	return func() tea.Msg {
 		ctx, cancel := r.opContext(long)
 		defer cancel()
-		return opMsg{label: label, err: fn(ctx)}
+		detail, err := fn(ctx)
+		return opMsg{label: label, err: err, detail: detail}
 	}
 }
 
@@ -320,6 +339,7 @@ func (r *root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		r.busy = ""
 		if msg.err != nil {
 			r.errText = fmt.Sprintf("%s: %s", msg.label, redact.String(msg.err.Error()))
+			r.errDetail = msg.detail
 			return r, nil
 		}
 		r.note = msg.label + " finished"
@@ -389,6 +409,7 @@ func (r *root) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return r, tea.Quit
 	case "esc":
 		r.errText = ""
+		r.errDetail = ""
 		return r, r.delegate(msg)
 	case "tab":
 		r.switchTo(screenOrder[(int(r.active)+1)%len(screenOrder)])
@@ -549,7 +570,11 @@ func (r *root) body(w int) string {
 
 	if r.errText != "" {
 		b.WriteString(styErrPanel.Width(w - 2).Render(styAmber.Render("failed  ") + styText.Render(r.errText)))
-		b.WriteString("\n\n")
+		b.WriteString("\n")
+		if r.errDetail != "" {
+			b.WriteString("\n" + r.errDetail + "\n")
+		}
+		b.WriteString("\n")
 	}
 
 	switch r.active {

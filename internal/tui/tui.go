@@ -88,8 +88,12 @@ type Deps struct {
 	BrainStatus func(context.Context) (brain.StatusReport, error)
 	BrainInit   func(context.Context) error
 
-	ProjectList   func() ([]projects.Project, error)
-	ProjectAdd    func(ctx context.Context, id, remote string) error
+	ProjectList func() ([]projects.Project, error)
+	// ProjectAdd returns the deploy key a failed add left the guest holding,
+	// when there is one (ADR-0018). The command surface prints that key; the
+	// hub has to render it too, or its failure banner instructs the operator
+	// to add a key they cannot see.
+	ProjectAdd    func(ctx context.Context, id, remote string) (*projects.DeployKey, error)
 	ProjectUse    func(ctx context.Context, id string) error
 	ProjectRemove func(ctx context.Context, id string) error
 

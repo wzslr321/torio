@@ -124,8 +124,12 @@ func (s *projectsScreen) updateForm(r *root, msg tea.KeyMsg) tea.Cmd {
 		}
 		s.closeForm()
 		d := r.deps
-		return r.run("adding "+id, true, func(ctx context.Context) error {
-			return d.ProjectAdd(ctx, id, remote)
+		return r.runDetailed("adding "+id, true, func(ctx context.Context) (string, error) {
+			key, err := d.ProjectAdd(ctx, id, remote)
+			if err != nil && key != nil {
+				return deployKeyDetail(key), err
+			}
+			return "", err
 		})
 	}
 	var cmd tea.Cmd
@@ -289,4 +293,21 @@ func plural(n int, one, many string) string {
 		return "1 " + one
 	}
 	return strconv.Itoa(n) + " " + many
+}
+
+// deployKeyDetail is the operator's way forward when an add fails with a key
+// the guest holds. It says what the command surface says (printDeployKey in
+// internal/cli): the key is on its own line so a terminal selection picks up
+// no prose, and the account-key warning sits next to the key because the
+// screen showing the key is where that choice gets made.
+func deployKeyDetail(key *projects.DeployKey) string {
+	state := "The guest already held a deploy key for this project."
+	if key.Generated {
+		state = "The guest generated a deploy key for this project."
+	}
+	return state + " Torio holds no copy of its private half.\n\n" +
+		key.PublicKey + "\n\n" +
+		"Add that key to the repository on " + key.Host + " as a deploy key, with write access off,\n" +
+		"then run the add again. Adding it to your account instead would give the guest\n" +
+		"write access to every repository that account can reach."
 }

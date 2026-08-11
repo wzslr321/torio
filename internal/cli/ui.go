@@ -177,9 +177,12 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 		},
 
 		ProjectList: projectSvc.List,
-		ProjectAdd: func(ctx context.Context, id, remote string) error {
-			_, err := projectSvc.Add(ctx, projects.AddRequest{ID: id, DisplayName: id, Remote: remote})
-			return err
+		ProjectAdd: func(ctx context.Context, id, remote string) (*projects.DeployKey, error) {
+			report, err := projectSvc.Add(ctx, projects.AddRequest{ID: id, DisplayName: id, Remote: remote})
+			if err != nil {
+				return report.DeployKey, err
+			}
+			return nil, nil
 		},
 		ProjectUse: func(ctx context.Context, id string) error {
 			_, err := projectSvc.Use(ctx, id)

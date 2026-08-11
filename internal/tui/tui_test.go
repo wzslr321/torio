@@ -31,7 +31,8 @@ type fakeDeps struct {
 	brainReport brain.StatusReport
 	pollReport  status.Report
 
-	failWith error
+	failWith  error
+	deployKey *projects.DeployKey
 }
 
 func (f *fakeDeps) record(name string) error {
@@ -86,8 +87,11 @@ func (f *fakeDeps) deps() Deps {
 		BrainInit:   func(context.Context) error { return f.record("brain-init") },
 
 		ProjectList: func() ([]projects.Project, error) { return f.projectList, nil },
-		ProjectAdd: func(_ context.Context, id, _ string) error {
-			return f.record("project-add:" + id)
+		ProjectAdd: func(_ context.Context, id, _ string) (*projects.DeployKey, error) {
+			if err := f.record("project-add:" + id); err != nil {
+				return f.deployKey, err
+			}
+			return nil, nil
 		},
 		ProjectUse:    func(_ context.Context, id string) error { return f.record("project-use:" + id) },
 		ProjectRemove: func(_ context.Context, id string) error { return f.record("project-remove:" + id) },
@@ -286,6 +290,65 @@ func TestFailedOperationIsReportedAndClearedOnEscape(t *testing.T) {
 	press(t, r, "esc")
 	if r.errText != "" {
 		t.Errorf("escape left the error on screen: %q", r.errText)
+	}
+}
+
+// A failed add can carry the deploy key the guest now holds (ADR-0018). The
+// command surface prints that key; a hub that drops it tells the operator to
+// add a key they cannot see (#45). The key must reach the screen with the host
+// to authorize it on and the write-access warning, and escape must take it
+// away with the failure it belongs to.
+func TestFailedAddShowsTheDeployKey(t *testing.T) {
+	f := &fakeDeps{
+		boxState: lima.StateRunning,
+		failWith: errors.New("the guest cannot read the remote yet"),
+		deployKey: &projects.DeployKey{
+			PublicKey: "ssh-ed25519 AAAATESTKEY torio:p1",
+			Host:      "github.com",
+			KeyPath:   "/home/agent/.ssh/torio/p1",
+			Generated: true,
+		},
+	}
+	r := settled(t, f)
+
+	press(t, r, "3")
+	press(t, r, "a")
+	press(t, r, "p")
+	press(t, r, "1")
+	press(t, r, "enter")
+
+	view := r.View()
+	if !strings.Contains(view, "ssh-ed25519 AAAATESTKEY torio:p1") {
+		t.Errorf("a failed add did not put the public key on screen:\n%s", view)
+	}
+	if !strings.Contains(view, "github.com") {
+		t.Errorf("the view does not name the host to authorize the key on:\n%s", view)
+	}
+	if !strings.Contains(view, "write access off") {
+		t.Errorf("the view does not carry the write-access warning:\n%s", view)
+	}
+
+	press(t, r, "esc")
+	if strings.Contains(r.View(), "ssh-ed25519 AAAATESTKEY") {
+		t.Error("escape left the key on screen")
+	}
+}
+
+// A failure with no key on offer stays exactly what it was: a banner alone.
+func TestFailedAddWithoutAKeyShowsNoDetailBlock(t *testing.T) {
+	f := &fakeDeps{
+		boxState: lima.StateRunning,
+		failWith: errors.New("the box is not running"),
+	}
+	r := settled(t, f)
+
+	press(t, r, "3")
+	press(t, r, "a")
+	press(t, r, "p")
+	press(t, r, "enter")
+
+	if r.errDetail != "" {
+		t.Errorf("a keyless failure carried a detail block: %q", r.errDetail)
 	}
 }
 
