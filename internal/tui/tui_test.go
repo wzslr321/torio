@@ -758,6 +758,145 @@ func TestReturningFromASessionReprobes(t *testing.T) {
 	}
 }
 
+// The rebind chooser is ADR-0021 at the keyboard: b offers every backend the
+// build knows, and picking one swaps the whole seam struct, discards every
+// probed fact, and probes the new binding from nothing. Nothing on screen may
+// survive from the box the hub was on.
+func TestRebindSwapsTheBindingAndReprobes(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "torio"}},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := f.deps()
+	d.ctx = ctx
+	d.Backends = []string{"claude-code", "hermes"}
+	rebound := ""
+	next := &fakeDeps{boxState: lima.StateRunning}
+	d.Rebind = func(name string) (Deps, error) {
+		rebound = name
+		nd := next.deps()
+		nd.Backend = name
+		return nd, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "b")
+	if view := r.View(); !strings.Contains(view, "claude-code") {
+		t.Fatalf("the chooser does not offer the other backend:\n%s", view)
+	}
+	press(t, r, "k")
+	press(t, r, "enter")
+
+	if rebound != "claude-code" {
+		t.Fatalf("rebound to %q, want claude-code", rebound)
+	}
+	if r.deps.Backend != "claude-code" {
+		t.Errorf("the hub still describes %q", r.deps.Backend)
+	}
+	if r.deps.ctx != ctx {
+		t.Error("the program context did not survive the rebind")
+	}
+	if !r.probed {
+		t.Error("the new binding was not probed")
+	}
+	if len(r.projects.list) != 0 {
+		t.Error("the old binding's projects survived the rebind")
+	}
+	if view := r.View(); !strings.Contains(view, "claude-code") {
+		t.Errorf("the header does not name the new backend:\n%s", view)
+	}
+}
+
+// A rebind that fails leaves the hub exactly where it was: same binding, same
+// screens, with the failure named like any other.
+func TestFailedRebindKeepsTheOldBinding(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.Backends = []string{"claude-code", "hermes"}
+	d.Rebind = func(string) (Deps, error) {
+		return Deps{}, errors.New("instance torio-claude-code has no box")
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+
+	press(t, r, "b")
+	press(t, r, "k")
+	press(t, r, "enter")
+
+	if r.deps.Backend != "hermes" {
+		t.Errorf("a failed rebind moved the binding to %q", r.deps.Backend)
+	}
+	if !strings.Contains(r.errText, "has no box") {
+		t.Errorf("error text = %q, want it to carry the cause", r.errText)
+	}
+	if r.busy != "" {
+		t.Errorf("the hub is still busy after a failed rebind: %q", r.busy)
+	}
+}
+
+// A rebind tears down every seam an operation runs through, so it is refused
+// while one is in flight, the same way a second operation is.
+func TestRebindIsRefusedWhileAnOperationIsInFlight(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.Backends = []string{"claude-code", "hermes"}
+	d.Rebind = func(name string) (Deps, error) { return f.deps(), nil }
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.busy = "bootstrapping the guest"
+
+	press(t, r, "b")
+
+	if r.choosing {
+		t.Fatal("the chooser opened while an operation was in flight")
+	}
+}
+
+// Escape closes the chooser without touching the binding.
+func TestEscapeClosesTheChooserWithoutRebinding(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.Backends = []string{"claude-code", "hermes"}
+	rebound := false
+	d.Rebind = func(string) (Deps, error) { rebound = true; return f.deps(), nil }
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+
+	press(t, r, "b")
+	if !r.choosing {
+		t.Fatal("b did not open the chooser")
+	}
+	press(t, r, "esc")
+
+	if r.choosing {
+		t.Error("escape left the chooser open")
+	}
+	if rebound {
+		t.Error("closing the chooser ran a rebind")
+	}
+}
+
+// A build that fills no rebind seam has no chooser and offers no key for it.
+// The footer naming a dead key would be the footer lying.
+func TestNoChooserWhenTheBuildOffersNoRebind(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	r := settled(t, f)
+
+	press(t, r, "b")
+
+	if r.choosing {
+		t.Fatal("a chooser opened with no rebind seam to run")
+	}
+	if strings.Contains(r.footer(), "b backend") {
+		t.Errorf("the footer offers a key that does nothing: %s", r.footer())
+	}
+}
+
 // The header must not wait on the guest. A box that is running is knowable in
 // one host command, and holding that back until several guest commands finish
 // is what leaves an operator looking at an empty frame.

@@ -75,6 +75,24 @@ func TestRegisterRejectsADuplicateName(t *testing.T) {
 	Register(stub{"hermes"})
 }
 
+// TestNamesListsTheRegisteredBackendsSorted pins the set the hub's rebind
+// chooser offers (ADR-0021): exactly what Lookup accepts, in an order that
+// does not depend on map iteration.
+func TestNamesListsTheRegisteredBackendsSorted(t *testing.T) {
+	withRegistry(t, map[string]Backend{"hermes": stub{"hermes"}, "claude-code": stub{"claude-code"}})
+
+	got := Names()
+	want := []string{"claude-code", "hermes"}
+	if len(got) != len(want) {
+		t.Fatalf("Names() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Names() = %v, want %v", got, want)
+		}
+	}
+}
+
 // withRegistry swaps the process-wide registry for one test and restores it.
 func withRegistry(t *testing.T, entries map[string]Backend) {
 	t.Helper()

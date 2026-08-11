@@ -87,6 +87,14 @@ type specMsg struct {
 // execDoneMsg is the operator coming back from an interactive session.
 type execDoneMsg struct{ err error }
 
+// rebindMsg is a finished rebind (ADR-0021): the seams of the new binding, or
+// the error that left the old one in place.
+type rebindMsg struct {
+	name string
+	deps Deps
+	err  error
+}
+
 type tickMsg time.Time
 
 func tick() tea.Cmd {
@@ -130,6 +138,10 @@ type root struct {
 	errDetail string
 	// note is a transient one-line outcome, replaced by the next one.
 	note string
+
+	// choosing is the rebind chooser (ADR-0021), open over the active screen.
+	choosing     bool
+	chooseCursor int
 
 	setup    setupScreen
 	dash     dashScreen
@@ -265,6 +277,73 @@ func (r *root) runDetailed(label string, long bool, fn func(context.Context) (st
 	}
 }
 
+// canRebind reports whether this build offers the chooser: a seam to run and
+// more than one backend to pick from.
+func (r *root) canRebind() bool {
+	return r.deps.Rebind != nil && len(r.deps.Backends) > 1
+}
+
+// openChooser opens the rebind chooser on the current backend. It refuses
+// while an operation is in flight, the same way a second operation is
+// refused: a rebind tears down every seam the operation is running through.
+func (r *root) openChooser() {
+	if !r.canRebind() || r.busy != "" {
+		return
+	}
+	r.choosing = true
+	r.chooseCursor = 0
+	for i, name := range r.deps.Backends {
+		if name == r.deps.Backend {
+			r.chooseCursor = i
+		}
+	}
+}
+
+func (r *root) chooseKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "ctrl+c":
+		return tea.Quit
+	case "esc":
+		r.choosing = false
+	case "up", "k":
+		if r.chooseCursor > 0 {
+			r.chooseCursor--
+		}
+	case "down", "j":
+		if r.chooseCursor < len(r.deps.Backends)-1 {
+			r.chooseCursor++
+		}
+	case "enter":
+		r.choosing = false
+		name := r.deps.Backends[r.chooseCursor]
+		// Rebinding to the backend the hub is on would tear the screen down
+		// to rebuild the same thing; picking it means closing the chooser.
+		if name == r.deps.Backend {
+			return nil
+		}
+		return r.rebind(name)
+	}
+	return nil
+}
+
+// rebind runs the rebind seam off the ui loop, holding the busy lock the way
+// any operation does.
+func (r *root) rebind(name string) tea.Cmd {
+	if r.busy != "" {
+		return nil
+	}
+	r.busy = "rebinding to " + name
+	r.busyStart = time.Now()
+	r.errText = ""
+	r.errDetail = ""
+	r.note = ""
+	d := r.deps
+	return func() tea.Msg {
+		nd, err := d.Rebind(name)
+		return rebindMsg{name: name, deps: nd, err: err}
+	}
+}
+
 // handoff resolves an interactive session and gives it the terminal.
 func (r *root) handoff(label string, build func() (execx.InteractiveCommand, error)) tea.Cmd {
 	if r.busy != "" || build == nil {
@@ -345,6 +424,30 @@ func (r *root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		r.note = msg.label + " finished"
 		return r, r.afterChange()
 
+	case rebindMsg:
+		r.busy = ""
+		if msg.err != nil {
+			r.errText = fmt.Sprintf("rebinding to %s: %s", msg.name, redact.String(msg.err.Error()))
+			return r, nil
+		}
+		nd := msg.deps
+		// The binding changes; the program's lifetime does not. The context
+		// the hub was started with stays the one signal handling tears down.
+		nd.ctx = r.deps.ctx
+		r.deps = nd
+		// Nothing on screen may survive from the previous box (ADR-0021 P4):
+		// every fact is discarded and every screen starts from nothing.
+		r.facts = wizard.Facts{}
+		r.probed, r.probing, r.verified, r.verifying = false, false, false, false
+		r.errText, r.errDetail = "", ""
+		r.setup = setupScreen{}
+		r.dash = dashScreen{}
+		r.projects = projectsScreen{}
+		r.brain = brainScreen{}
+		r.serve = newServeScreen()
+		r.note = "rebound to " + msg.name
+		return r, tea.Batch(r.probeFacts(), r.enter())
+
 	case specMsg:
 		if msg.err != nil {
 			r.busy = ""
@@ -404,9 +507,18 @@ func (r *root) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return r, r.delegate(msg)
 	}
 
+	// The chooser is modal: it owns every key until it closes, because the
+	// keys underneath it act on a binding the operator is about to leave.
+	if r.choosing {
+		return r, r.chooseKey(msg)
+	}
+
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return r, tea.Quit
+	case "b":
+		r.openChooser()
+		return r, nil
 	case "esc":
 		r.errText = ""
 		r.errDetail = ""
@@ -577,16 +689,18 @@ func (r *root) body(w int) string {
 		b.WriteString("\n")
 	}
 
-	switch r.active {
-	case screenSetup:
+	switch {
+	case r.choosing:
+		b.WriteString(r.chooserView())
+	case r.active == screenSetup:
 		b.WriteString(r.setup.view(r, w))
-	case screenDashboard:
+	case r.active == screenDashboard:
 		b.WriteString(r.dash.view(r, w))
-	case screenProjects:
+	case r.active == screenProjects:
 		b.WriteString(r.projects.view(r, w))
-	case screenBrain:
+	case r.active == screenBrain:
 		b.WriteString(r.brain.view(r, w))
-	case screenServe:
+	case r.active == screenServe:
 		b.WriteString(r.serve.view(r, w))
 	}
 
@@ -605,6 +719,9 @@ func (r *root) body(w int) string {
 }
 
 func (r *root) footer() string {
+	if r.choosing {
+		return styDim.Render("↑/↓ pick · enter rebind · esc cancel")
+	}
 	keys := r.screenKeys()
 	// A screen reading text consumes the global keys too, so offering them
 	// would name keys that type a character instead of doing what they say.
@@ -612,10 +729,35 @@ func (r *root) footer() string {
 		return styDim.Render(keys)
 	}
 	global := "tab screen · r refresh · q quit"
+	if r.canRebind() {
+		global = "b backend · " + global
+	}
 	if keys != "" {
 		return styDim.Render(keys + " · " + global)
 	}
 	return styDim.Render(global)
+}
+
+// chooserView is the rebind chooser. Picking a backend rebuilds every seam
+// for it and re-probes from nothing; the current one is marked because
+// picking it does nothing but close the chooser.
+func (r *root) chooserView() string {
+	var b strings.Builder
+	b.WriteString(styStrong.Render("Rebind the hub") + "\n")
+	b.WriteString(styMuted.Render("Every seam is rebuilt for the backend picked, and the screen re-probes from nothing.") + "\n\n")
+	for i, name := range r.deps.Backends {
+		marker := "  "
+		label := styText.Render(name)
+		if i == r.chooseCursor {
+			marker = styWorking.Render("▸ ")
+			label = styStrong.Render(name)
+		}
+		if name == r.deps.Backend {
+			label += styDim.Render("  current")
+		}
+		b.WriteString(marker + label + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func (r *root) screenKeys() string {

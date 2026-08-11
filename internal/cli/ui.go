@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
@@ -196,6 +197,9 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 		Poll: func(ctx context.Context) (status.Report, error) {
 			return a.newPoller().Poll(ctx)
 		},
+
+		Backends: backend.Names(),
+		Rebind:   a.rebindDeps,
 	}
 
 	// A session the backend does not declare stays nil, so the screens report a
@@ -206,6 +210,51 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 		}
 		d.AgentSpec = a.newAgentSpec
 		d.ShellSpec = a.newShellSpec
+	}
+	return d, nil
+}
+
+// rebindDeps re-runs, for one backend name, the resolution the pre-run did for
+// this invocation: derive the instance, load and strictly validate its config
+// document, require the instance's declaration to agree, and rebuild every
+// seam (ADR-0021). Resolution stays in this layer; the hub only swaps what it
+// is handed. A failure at any step restores the old binding untouched, so the
+// hub keeps acting on the box it was on.
+//
+// The settled timeout is kept: a per-instance default_timeout applies at
+// launch, where an explicit flag can still override it, and a rebind has no
+// flags to lose.
+func (a *app) rebindDeps(name string) (tui.Deps, error) {
+	prevName, prevInstance := a.backendName, a.instance
+	prevRuntime, prevBackend := a.runtime, a.backend
+	restore := func() {
+		a.backendName, a.instance = prevName, prevInstance
+		a.runtime, a.backend = prevRuntime, prevBackend
+		lima.InstanceName = prevInstance
+	}
+
+	a.backendName = name
+	if err := a.resolveInstance(); err != nil {
+		restore()
+		return tui.Deps{}, err
+	}
+	lima.InstanceName = a.instance
+	rt, err := config.Load(a.configOptions())
+	if err != nil {
+		restore()
+		return tui.Deps{}, err
+	}
+	a.runtime = rt
+	b, err := a.resolveBackend()
+	if err != nil {
+		restore()
+		return tui.Deps{}, err
+	}
+	a.backend = b
+	d, err := a.tuiDeps()
+	if err != nil {
+		restore()
+		return tui.Deps{}, err
 	}
 	return d, nil
 }
