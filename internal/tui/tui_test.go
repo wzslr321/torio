@@ -33,6 +33,7 @@ type fakeDeps struct {
 
 	failWith  error
 	deployKey *projects.DeployKey
+	serveErr  error
 }
 
 func (f *fakeDeps) record(name string) error {
@@ -74,7 +75,7 @@ func (f *fakeDeps) deps() Deps {
 		},
 		CredentialState: func(lima.BootstrapReport) string { return f.credState },
 
-		ServeStatus:  func(context.Context) (serve.StatusReport, error) { return f.serveReport, nil },
+		ServeStatus:  func(context.Context) (serve.StatusReport, error) { return f.serveReport, f.serveErr },
 		ServeInstall: func(context.Context) error { return f.record("serve-install") },
 		ServeStart:   func(context.Context) error { return f.record("serve-start") },
 		ServeStop:    func(context.Context) error { return f.record("serve-stop") },
@@ -430,12 +431,28 @@ func isQuit(cmd tea.Cmd) bool {
 	return ok
 }
 
-// A backend with no session declares no way into a checkout, so the screen
-// reports the capability rather than offering an action that cannot work.
-func TestProjectsRefusesAnAgentSessionTheBackendDoesNotDeclare(t *testing.T) {
+// A backend with no session still owes the operator a way forward on Enter.
+// Its way into a project is the gateway, so the key opens a panel with the
+// service's state and the tunnel that reaches it, in the words the runbooks
+// use (docs/content/blocks/tunnel.md, desktop-connect.md). A failure banner
+// here taught the operator that selecting a project is broken, when the
+// backend was doing exactly what it declares.
+func TestEnterOpensTheGatewayPanelWhenTheBackendHasNoSession(t *testing.T) {
 	f := &fakeDeps{
 		boxState:    lima.StateRunning,
 		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
+		serveReport: serve.StatusReport{
+			ServiceDeclared: true,
+			Installed:       true,
+			Enabled:         true,
+			Active:          true,
+			ActiveState:     "active",
+			EndpointReady:   true,
+			EndpointCode:    200,
+			Version:         "1.0",
+			Ready:           true,
+			URL:             "http://127.0.0.1:9119/api/status",
+		},
 	}
 	r := settled(t, f)
 	r.switchTo(screenProjects)
@@ -446,6 +463,74 @@ func TestProjectsRefusesAnAgentSessionTheBackendDoesNotDeclare(t *testing.T) {
 	if r.busy != "" {
 		t.Errorf("a session was started for a backend that declares none: %q", r.busy)
 	}
+	if r.errText != "" {
+		t.Fatalf("enter reported a failure instead of the way forward: %q", r.errText)
+	}
+	view := r.View()
+	for _, want := range []string{
+		"ssh -F ~/.lima/torio/ssh.config",
+		"-L 19119:127.0.0.1:9119",
+		"lima-torio",
+		"http://127.0.0.1:19119",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the gateway panel does not carry %q:\n%s", want, view)
+		}
+	}
+
+	press(t, r, "esc")
+	if strings.Contains(r.View(), "ssh -F") {
+		t.Error("escape left the gateway panel on screen")
+	}
+}
+
+// A gateway that is not ready is reported as what it is, with the tab that
+// fixes it, not as a hub failure and not as a tunnel that would dial a dead
+// endpoint as if nothing were wrong.
+func TestGatewayPanelNamesTheServeTabWhenTheServiceIsNotReady(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
+		serveReport: serve.StatusReport{
+			ServiceDeclared: true,
+			Installed:       true,
+			ActiveState:     "inactive",
+			URL:             "http://127.0.0.1:9119/api/status",
+		},
+		serveErr: errors.New("service is \"inactive\", not active; run `torio serve start`"),
+	}
+	r := settled(t, f)
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(r.deps))
+
+	press(t, r, "enter")
+
+	view := r.View()
+	if !strings.Contains(view, "installed, not running") {
+		t.Errorf("the panel does not carry the service state:\n%s", view)
+	}
+	if !strings.Contains(view, "Serve tab") {
+		t.Errorf("the panel does not name the tab that starts the service:\n%s", view)
+	}
+}
+
+// A backend with neither a session nor a service has no way forward to offer,
+// and the screen reports the missing capability rather than opening a panel
+// about a gateway that does not exist.
+func TestEnterStillRefusesWhenThereIsNoSessionAndNoService(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
+	}
+	d := f.deps()
+	d.ServiceDeclared = false
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "enter")
+
 	if !strings.Contains(r.errText, "no agent session") {
 		t.Errorf("error text = %q, want it to name the missing capability", r.errText)
 	}
