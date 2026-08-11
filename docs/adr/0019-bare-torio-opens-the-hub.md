@@ -3,6 +3,9 @@
 - Status: Accepted
 - Date: 2026-08-10
 - Applies to: `internal/cli`, `internal/tui`, `docs/contracts/cli.md`
+- Superseded in part by: [ADR-0021](0021-hub-rebinds-to-another-backend.md),
+  which replaces the fixed-lifetime binding clause in Consequences ("The hub is
+  fixed for its lifetime to the instance and backend resolved before dispatch")
 
 ## Context
 
