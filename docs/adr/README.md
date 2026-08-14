@@ -26,6 +26,7 @@ standard asks for is measured.
 | [0019](0019-bare-torio-opens-the-hub.md) | Running `torio` with no command on a terminal opens an interactive hub; what is not a terminal keeps the answer it has today |
 | [0020](0020-decision-first-adrs.md) | An ADR is decision-first, names its premises, walks through the operator's hands, and fits a page |
 | [0021](0021-hub-rebinds-to-another-backend.md) | The hub rebinds to another backend through the seam that bound it first; the binding is per rebind, not per process |
+| [0022](0022-codex-backend.md) | Codex CLI is the third backend, and every control it obeys lives in a root-owned file |
 
 ## Rules
 
