@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-Eighteen records cover the decisions that govern the delivered binary, the vault
+Twenty records cover the decisions that govern the delivered binary, the vault
 standard it writes against, how both are published, and how the behaviour that
 standard asks for is measured.
 
@@ -24,6 +24,8 @@ standard asks for is measured.
 | [0017](0017-status-is-a-poll-of-facts.md) | Cross-instance status is a poll of provable facts with bounded Torio-maintained projections |
 | [0018](0018-guest-held-deploy-key-for-read-access.md) | Read access to a private SSH remote comes from a read-only key the guest generates and keeps, authorized by a human |
 | [0019](0019-bare-torio-opens-the-hub.md) | Running `torio` with no command on a terminal opens an interactive hub; what is not a terminal keeps the answer it has today |
+| [0020](0020-decision-first-adrs.md) | An ADR is decision-first, names its premises, walks through the operator's hands, and fits a page |
+| [0021](0021-hub-rebinds-to-another-backend.md) | The hub rebinds to another backend through the seam that bound it first; the binding is per rebind, not per process |
 
 ## Rules
 
@@ -41,16 +43,27 @@ prose stays as it was written, because the record of what was believed then is
 the thing being kept. A reader arriving at the old ADR — often from a source
 comment citing one of its clauses — learns from the header that the question
 moved on, without the header pretending the old text ever said something else.
-[ADR-0004](0004-mcp-credential-custody-and-egress.md) carries one.
+[ADR-0004](0004-mcp-credential-custody-and-egress.md) and
+[ADR-0019](0019-bare-torio-opens-the-hub.md) carry one.
 
 A later record may also correct a *measurement* in an earlier one without
 touching its decision. That is not a supersession and does not earn a header
 line; the correction is carried in the later record's own text, under an errata
 heading, so the earlier text stays as it was written.
 
-Every ADR carries context, decision, consequences and rejected alternatives. The
-rejected alternatives are not decoration — they are how a reader tells a decision
-from a default.
+A record after ADR-0020 follows [`TEMPLATE.md`](TEMPLATE.md): the decision
+first and at most ten lines of it, numbered falsifiable premises, a walkthrough
+of the operator's actions when a surface changes, then context, consequences
+and rejected alternatives, all within 120 lines. The rejected alternatives are
+not decoration — they are how a reader tells a decision from a default.
+Records before ADR-0020 keep their original shape; immutability outranks
+uniformity.
+
+A record whose premise a later ADR makes false gains a header pointer
+(`P2 invalidated by: ADR-NNNN`), following the same mechanics as
+`Superseded in part by:`, a header line and never an edit to the body. The later
+record declares the collision with `Invalidates: ADR-NNNN P2` in its own
+header.
 
 A change to a security boundary also updates [`../03-architecture.md`](../03-architecture.md)
 and the invariants in [`../../AGENTS.md`](../../AGENTS.md).

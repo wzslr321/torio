@@ -53,6 +53,15 @@ func Lookup(name string) (Backend, error) {
 	return b, nil
 }
 
+// Names lists the registered backends in sorted order. The hub's rebind
+// chooser offers exactly this set (ADR-0021), so what an operator can pick
+// and what Lookup accepts cannot disagree.
+func Names() []string {
+	mu.RLock()
+	defer mu.RUnlock()
+	return namesLocked()
+}
+
 func namesLocked() []string {
 	out := make([]string, 0, len(registry))
 	for name := range registry {

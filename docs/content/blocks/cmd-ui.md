@@ -14,7 +14,8 @@ time. Interactive sessions receive the terminal directly.
 
 Keys are shown at the bottom of every screen. `1` to `5` and `tab` switch
 screens, `enter` runs the highlighted thing, `r` re-reads state, `w` jumps to
-the setup step you are on, and `q` quits.
+the setup step you are on, `b` rebinds the hub to another backend, and `q`
+quits.
 
 - The hub emits no JSON. `--json` is a usage error (exit 2).
 - Without a terminal on both standard input and standard output, `torio ui`
@@ -23,5 +24,8 @@ the setup step you are on, and `q` quits.
   have.
 - `--verbose` has no effect while the hub owns the screen. Run the equivalent
   command for diagnostics.
-- It works on the instance and backend this invocation resolved. To open it
-  against another backend, quit and run `torio --backend <name> ui`.
+- It opens on the instance and backend this invocation resolved. `b` rebinds
+  it to another backend without quitting: the hub re-resolves the instance the
+  same way `--backend` does, discards everything on screen, and re-reads the
+  new box from nothing. Each backend keeps its own project registry, so a
+  project appears on the other side only after it is added there too.

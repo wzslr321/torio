@@ -88,13 +88,25 @@ type Deps struct {
 	BrainStatus func(context.Context) (brain.StatusReport, error)
 	BrainInit   func(context.Context) error
 
-	ProjectList   func() ([]projects.Project, error)
-	ProjectAdd    func(ctx context.Context, id, remote string) error
+	ProjectList func() ([]projects.Project, error)
+	// ProjectAdd returns the deploy key a failed add left the guest holding,
+	// when there is one (ADR-0018). The command surface prints that key; the
+	// hub has to render it too, or its failure banner instructs the operator
+	// to add a key they cannot see.
+	ProjectAdd    func(ctx context.Context, id, remote string) (*projects.DeployKey, error)
 	ProjectUse    func(ctx context.Context, id string) error
 	ProjectRemove func(ctx context.Context, id string) error
 
 	// Poll is the cross-box status poll the dashboard renders.
 	Poll func(context.Context) (status.Report, error)
+
+	// Backends is every backend this build can bind, for the rebind chooser
+	// (ADR-0021). Rebind re-runs the resolution dispatch ran for this
+	// invocation and returns the seams of the new binding; the hub swaps
+	// them, discards every probed fact, and probes again from nothing. It
+	// still resolves nothing itself. A nil Rebind is a build with no chooser.
+	Backends []string
+	Rebind   func(backend string) (Deps, error)
 
 	// The interactive handoffs. Each returns the argv of a real session; the
 	// hub releases the terminal to it and takes it back when the session ends.

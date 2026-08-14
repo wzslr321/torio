@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -11,11 +12,18 @@ import (
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/projects"
 	"github.com/wzslr321/torio/internal/redact"
+	"github.com/wzslr321/torio/internal/serve"
 )
 
 type projectsMsg struct {
 	list []projects.Project
 	err  error
+}
+
+// connectMsg is the gateway's state arriving for the connect panel.
+type connectMsg struct {
+	report serve.StatusReport
+	err    error
 }
 
 // projectsScreen is the registry and the ways into a checkout.
@@ -29,6 +37,15 @@ type projectsScreen struct {
 	focus   int
 	fields  []textinput.Model
 	confirm bool
+
+	// connectID is the project the gateway panel is open for, empty when
+	// closed. The panel is the Enter answer on a backend whose way into a
+	// project is a service rather than a session: what the gateway is doing,
+	// and the tunnel that reaches it.
+	connectID     string
+	connectRep    serve.StatusReport
+	connectErr    string
+	connectLoaded bool
 }
 
 // capturing is true while the screen owns the keyboard, so the root does not
@@ -88,14 +105,34 @@ func (s *projectsScreen) update(r *root, msg tea.Msg) tea.Cmd {
 		}
 		return nil
 
+	case connectMsg:
+		s.connectLoaded = true
+		s.connectRep = msg.report
+		s.connectErr = ""
+		if msg.err != nil {
+			s.connectErr = redact.String(msg.err.Error())
+		}
+		return nil
+
 	case tea.KeyMsg:
 		if s.adding {
 			return s.updateForm(r, msg)
+		}
+		if s.connectID != "" {
+			return s.updateConnect(msg)
 		}
 		if s.confirm {
 			return s.updateConfirm(r, msg)
 		}
 		return s.updateList(r, msg)
+	}
+	return nil
+}
+
+func (s *projectsScreen) updateConnect(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc", "enter":
+		s.connectID = ""
 	}
 	return nil
 }
@@ -124,8 +161,12 @@ func (s *projectsScreen) updateForm(r *root, msg tea.KeyMsg) tea.Cmd {
 		}
 		s.closeForm()
 		d := r.deps
-		return r.run("adding "+id, true, func(ctx context.Context) error {
-			return d.ProjectAdd(ctx, id, remote)
+		return r.runDetailed("adding "+id, true, func(ctx context.Context) (string, error) {
+			key, err := d.ProjectAdd(ctx, id, remote)
+			if err != nil && key != nil {
+				return deployKeyDetail(key), err
+			}
+			return "", err
 		})
 	}
 	var cmd tea.Cmd
@@ -182,13 +223,19 @@ func (s *projectsScreen) updateList(r *root, msg tea.KeyMsg) tea.Cmd {
 		if !ok {
 			return nil
 		}
-		if d.AgentSpec == nil {
-			r.errText = "this backend opens no agent session in a checkout"
-			return nil
+		if d.AgentSpec != nil {
+			return r.handoff("agent session in "+p.ID, func() (execx.InteractiveCommand, error) {
+				return d.AgentSpec(p.Path)
+			})
 		}
-		return r.handoff("agent session in "+p.ID, func() (execx.InteractiveCommand, error) {
-			return d.AgentSpec(p.Path)
-		})
+		// No session declared. When the backend runs a service instead, its
+		// way into a project is the gateway, and Enter owes the operator that
+		// way rather than a failure about the way it does not have.
+		if d.ServiceDeclared && d.ServeStatus != nil {
+			return s.openConnect(r, p)
+		}
+		r.errText = "this backend opens no agent session in a checkout"
+		return nil
 	case "s":
 		p, ok := s.selected()
 		if !ok {
@@ -205,12 +252,36 @@ func (s *projectsScreen) updateList(r *root, msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-func (s *projectsScreen) keys() string {
+// openConnect opens the gateway panel for one project and asks the service
+// how it is doing. The ask is a read, not an operation: it takes no busy lock,
+// and the panel says it is asking until the answer lands.
+func (s *projectsScreen) openConnect(r *root, p projects.Project) tea.Cmd {
+	s.connectID = p.ID
+	s.connectLoaded = false
+	s.connectErr = ""
+	d := r.deps
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(d.parentContext(), longOr(d.Timeout))
+		defer cancel()
+		rep, err := d.ServeStatus(ctx)
+		return connectMsg{report: rep, err: err}
+	}
+}
+
+// keys names only what the keys do on this backend. A hub bound to a backend
+// with no session must not offer "enter agent" and "s shell": both would be
+// keys that do nothing, and the footer is the one place the hub says which
+// keys are live.
+func (s *projectsScreen) keys(r *root) string {
 	switch {
 	case s.adding:
 		return "enter add · tab field · esc cancel"
+	case s.connectID != "":
+		return "esc close"
 	case s.confirm:
 		return "y remove · n keep"
+	case r.deps.AgentSpec == nil:
+		return "a add · u use · enter open · d remove"
 	default:
 		return "a add · u use · enter agent · s shell · d remove"
 	}
@@ -218,6 +289,10 @@ func (s *projectsScreen) keys() string {
 
 func (s *projectsScreen) view(r *root, w int) string {
 	var b strings.Builder
+
+	if s.connectID != "" {
+		return s.viewConnect(r)
+	}
 
 	if s.adding {
 		b.WriteString(styStrong.Render("Add a project") + "\n")
@@ -289,4 +364,74 @@ func plural(n int, one, many string) string {
 		return "1 " + one
 	}
 	return strconv.Itoa(n) + " " + many
+}
+
+// viewConnect is the way forward into a project on a backend whose surface is
+// a gateway rather than a terminal session. It says what the runbooks say
+// (docs/content/blocks/tunnel.md, desktop-connect.md): the state the service
+// is in, the forward the operator opens, and where Hermes Desktop points. The
+// command lines are rendered unstyled so a terminal selection picks up no
+// decoration.
+func (s *projectsScreen) viewConnect(r *root) string {
+	d := r.deps
+	var b strings.Builder
+	b.WriteString(styStrong.Render("Continue with "+s.connectID+" on "+d.Backend) + "\n")
+	b.WriteString(styMuted.Render("This backend serves a gateway rather than a terminal session. The guest binds") + "\n")
+	b.WriteString(styMuted.Render("loopback only, so clients reach it over an SSH tunnel you control.") + "\n\n")
+
+	if !s.connectLoaded {
+		return b.String() + styMuted.Render("Asking the gateway how it is doing…")
+	}
+
+	rep := s.connectRep
+	b.WriteString(serviceWord(rep) + "\n")
+	if !rep.Ready {
+		if s.connectErr != "" {
+			b.WriteString(styMuted.Render(s.connectErr) + "\n")
+		}
+		b.WriteString(styMuted.Render("Start it from the Serve tab (5), then come back here.") + "\n")
+	}
+
+	if guest, host, ok := gatewayPorts(rep.URL); ok {
+		b.WriteString("\n" + styMuted.Render("Forward a host port to it:") + "\n\n")
+		b.WriteString("  ssh -F ~/.lima/" + d.Instance + "/ssh.config -L " + host + ":127.0.0.1:" + guest + " -N -f \\\n")
+		b.WriteString("      -o ExitOnForwardFailure=yes lima-" + d.Instance + "\n\n")
+		b.WriteString(styMuted.Render("Then in Hermes Desktop, Settings, Gateway Connection, Remote gateway: set the") + "\n")
+		b.WriteString(styMuted.Render("Remote URL to ") + styText.Render("http://127.0.0.1:"+host) + styMuted.Render(" with the session token you pinned.") + "\n")
+	}
+
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// gatewayPorts derives the two ends of the operator's forward from the guest
+// loopback URL the status report probed. The host port is the guest port moved
+// up by ten thousand, the convention the runbooks teach (9119 becomes 19119),
+// so the hub and the docs describe the same tunnel.
+func gatewayPorts(raw string) (guest, host string, ok bool) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Port() == "" {
+		return "", "", false
+	}
+	p, err := strconv.Atoi(u.Port())
+	if err != nil {
+		return "", "", false
+	}
+	return u.Port(), strconv.Itoa(p + 10000), true
+}
+
+// deployKeyDetail is the operator's way forward when an add fails with a key
+// the guest holds. It says what the command surface says (printDeployKey in
+// internal/cli): the key is on its own line so a terminal selection picks up
+// no prose, and the account-key warning sits next to the key because the
+// screen showing the key is where that choice gets made.
+func deployKeyDetail(key *projects.DeployKey) string {
+	state := "The guest already held a deploy key for this project."
+	if key.Generated {
+		state = "The guest generated a deploy key for this project."
+	}
+	return state + " Torio holds no copy of its private half.\n\n" +
+		key.PublicKey + "\n\n" +
+		"Add that key to the repository on " + key.Host + " as a deploy key, with write access off,\n" +
+		"then run the add again. Adding it to your account instead would give the guest\n" +
+		"write access to every repository that account can reach."
 }
