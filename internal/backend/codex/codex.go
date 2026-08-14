@@ -97,15 +97,15 @@ chmod 0710 ` + Home + `
 install -d -o ` + User + ` -g ` + lima.TorioProjectsGroup + ` -m 2770 ` + WorkspacePath + `
 install -d -o ` + User + ` -g ` + User + ` -m 0750 ` + ProfilePath + `
 install -d -o ` + User + ` -g ` + User + ` -m 0750 ` + BrainPath + `
-install -d -o root -g root -m 0755 ` + managedConfigDir + `
+install -d -o root -g root -m 0755 ` + systemConfigDir + `
 install -d -o root -g root -m 0755 ` + installDir + `
 `
 }
 
-// managedConfigDir is the system configuration layer Codex reads on Linux. It is
+// systemConfigDir is the system configuration layer Codex reads on Linux. It is
 // root-owned, and provisioning creates it so the guardrail step has somewhere to
 // write before anything has run as the agent.
-const managedConfigDir = "/etc/codex"
+const systemConfigDir = "/etc/codex"
 
 // Registry is nil: Codex keeps no project registry. A project is a directory it
 // is started in, and there is nothing for Torio to register a checkout with.

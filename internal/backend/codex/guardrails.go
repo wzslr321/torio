@@ -11,22 +11,31 @@ import (
 	"github.com/wzslr321/torio/internal/backend"
 )
 
-// The managed configuration.
+// The system configuration.
 //
 // Read the template's own header before adding anything to this file, and before
 // describing it to an operator: it is a guardrail and not a boundary, and every
 // name in this package is chosen to keep those apart.
 //
-// Codex reads a system layer on Linux that outranks the agent's own
-// configuration. That is what makes a guardrail possible here at all: the file
-// Torio writes is one the agent cannot write, and the file the agent writes
-// cannot override it.
-const managedConfigPath = managedConfigDir + "/managed_config.toml"
+// Codex reads a system layer on Linux that the agent's own configuration cannot
+// displace. That is what makes a guardrail possible here at all: the file Torio
+// writes is one the agent cannot write.
+//
+// There were two root-owned paths this could have been, and the choice matters.
+// `/etc/codex/config.toml` is the system configuration layer. The other,
+// `/etc/codex/managed_config.toml`, is named legacy where it is read, and it is
+// loaded twice: once as configuration and once reinterpreted as an admin
+// requirement. Settings placed there would constrain what may later be chosen as
+// well as choosing it, which is a second effect nobody asked for and one this
+// package could not honestly describe. The requirement Torio does want, the MCP
+// allowlist, goes to `/etc/codex/requirements.toml`, where it is the only thing
+// that file says.
+const systemConfigPath = systemConfigDir + "/config.toml"
 
-//go:embed templates/managed_config.toml
-var embeddedManagedConfig []byte
+//go:embed templates/config.toml
+var embeddedSystemConfig []byte
 
-// VerifyGuardrails proves the managed configuration and the helper it names are
+// VerifyGuardrails proves the system configuration and the helper it names are
 // the ones Torio wrote, and reports what MCP servers the agent has configured.
 //
 // None of the four is a boundary and each says so where it is recorded. The
@@ -40,7 +49,7 @@ var embeddedManagedConfig []byte
 // installed and a helper that was not is a guardrail with a hole in the middle,
 // and both halves belong in one check.
 func (codexBackend) VerifyGuardrails(ctx context.Context, r backend.StepRunner) error {
-	if err := reconcileManagedConfig(ctx, r); err != nil {
+	if err := reconcileSystemConfig(ctx, r); err != nil {
 		return err
 	}
 	if err := reconcileWaitingMarkerHelper(ctx, r); err != nil {
@@ -52,76 +61,76 @@ func (codexBackend) VerifyGuardrails(ctx context.Context, r backend.StepRunner) 
 	return reportMCPServers(ctx, r)
 }
 
-func reconcileManagedConfig(ctx context.Context, r backend.StepRunner) error {
-	const name = "codex_managed_config"
+func reconcileSystemConfig(ctx context.Context, r backend.StepRunner) error {
+	const name = "codex_system_config"
 
-	kind, err := r.Probe(ctx, name, "stat", "-c", "%F", managedConfigPath)
+	kind, err := r.Probe(ctx, name, "stat", "-c", "%F", systemConfigPath)
 	if err != nil {
 		return err
 	}
 	if kind.ExitCode == 1 && trimmed(kind.Stdout) == "" {
-		absent, err := r.Probe(ctx, name, "test", "!", "-e", managedConfigPath)
+		absent, err := r.Probe(ctx, name, "test", "!", "-e", systemConfigPath)
 		if err != nil {
 			return err
 		}
 		if absent.ExitCode != 0 {
-			return r.Fail(name, "could not prove the managed configuration path is absent",
-				"inspect "+managedConfigPath+" on the guest")
+			return r.Fail(name, "could not prove the system configuration path is absent",
+				"inspect "+systemConfigPath+" on the guest")
 		}
 		if !r.Reconcile() {
-			return r.Fail(name, "no managed configuration at "+managedConfigPath,
+			return r.Fail(name, "no system configuration at "+systemConfigPath,
 				"run `torio vm bootstrap`, which installs it root-owned")
 		}
-		res, err := r.ProbeInput(ctx, name, embeddedManagedConfig, managedConfigInstallArgv())
+		res, err := r.ProbeInput(ctx, name, embeddedSystemConfig, systemConfigInstallArgv())
 		if err != nil {
 			return err
 		}
 		if res.ExitCode != 0 {
-			return r.Fail(name, "could not install the managed configuration",
+			return r.Fail(name, "could not install the system configuration",
 				"confirm passwordless root provisioning is intact and re-run bootstrap")
 		}
 		r.Record(name+"_installed", true, "installed embedded configuration atomically")
-		kind, err = r.Probe(ctx, name, "stat", "-c", "%F", managedConfigPath)
+		kind, err = r.Probe(ctx, name, "stat", "-c", "%F", systemConfigPath)
 		if err != nil {
 			return err
 		}
 	}
 	if kind.ExitCode != 0 || trimmed(kind.Stdout) != "regular file" {
-		return r.Fail(name, "the managed configuration is not a regular file",
+		return r.Fail(name, "the system configuration is not a regular file",
 			"a symlink here would move the guardrails somewhere the agent may own; remove it and re-run bootstrap")
 	}
 
-	og, err := r.Probe(ctx, name, "stat", "-c", "%U:%G %a", managedConfigPath)
+	og, err := r.Probe(ctx, name, "stat", "-c", "%U:%G %a", systemConfigPath)
 	if err != nil {
 		return err
 	}
 	owner, group, mode, ok := parseOwnershipMode(og.Stdout)
 	if og.ExitCode != 0 || !ok {
-		return r.Fail(name, "could not read the managed configuration ownership/mode",
-			"verify "+managedConfigPath+" on the guest")
+		return r.Fail(name, "could not read the system configuration ownership/mode",
+			"verify "+systemConfigPath+" on the guest")
 	}
 	if owner != "root" || group != "root" {
-		return r.Fail(name, fmt.Sprintf("managed configuration owned by %s:%s, want root:root", owner, group),
+		return r.Fail(name, fmt.Sprintf("system configuration owned by %s:%s, want root:root", owner, group),
 			"a configuration the agent owns is one the agent can retune between sessions")
 	}
 	if writable, parsed := modeGrantsForeignWrite(mode); !parsed || writable {
-		return r.Fail(name, "managed configuration mode "+mode+" is group- or world-writable",
+		return r.Fail(name, "system configuration mode "+mode+" is group- or world-writable",
 			"reinstall it 0644 root:root")
 	}
 
 	// Content is compared by digest rather than by parsing. What matters is that
 	// the file is the one Torio wrote, and a semantic comparison would accept a
 	// document that means the same thing to a parser we do not own.
-	sum, err := r.Probe(ctx, name, "sha256sum", "--", managedConfigPath)
+	sum, err := r.Probe(ctx, name, "sha256sum", "--", systemConfigPath)
 	if err != nil {
 		return err
 	}
 	got := strings.Fields(string(sum.Stdout))
-	want := sha256.Sum256(embeddedManagedConfig)
+	want := sha256.Sum256(embeddedSystemConfig)
 	wantHex := hex.EncodeToString(want[:])
 	if sum.ExitCode != 0 || len(got) == 0 {
-		return r.Fail(name, "could not read the managed configuration digest",
-			"verify "+managedConfigPath+" on the guest")
+		return r.Fail(name, "could not read the system configuration digest",
+			"verify "+systemConfigPath+" on the guest")
 	}
 	if got[0] != wantHex {
 		// Two different things reach here and the operator has to tell them
@@ -129,26 +138,26 @@ func reconcileManagedConfig(ctx context.Context, r backend.StepRunner) error {
 		// embedded configuration moved on and this box still carries the previous
 		// one. Neither is repaired in place, because a guardrail that rewrites
 		// itself is one whose changes nobody reviews.
-		return r.Fail(name, "managed configuration has drifted from the version Torio installs",
-			"inspect "+managedConfigPath+"; if it is the previous version Torio shipped, remove it and re-run `torio vm bootstrap` to install the current one")
+		return r.Fail(name, "system configuration has drifted from the version Torio installs",
+			"inspect "+systemConfigPath+"; if it is the previous version Torio shipped, remove it and re-run `torio vm bootstrap` to install the current one")
 	}
 	r.Record(name, true, "root:root "+mode+" sha256="+wantHex[:12])
 	return nil
 }
 
-// managedConfigInstallArgv writes the file atomically through a root-owned
+// systemConfigInstallArgv writes the file atomically through a root-owned
 // staging path in the same directory, so no reader ever sees a partial document
 // and the final rename is a same-filesystem move.
-func managedConfigInstallArgv() []string {
+func systemConfigInstallArgv() []string {
 	script := `
-tmp="$(mktemp ` + managedConfigDir + `/.managed_config.XXXXXX)"
+tmp="$(mktemp ` + systemConfigDir + `/.config.XXXXXX)"
 trap 'rm -f -- "$tmp"' EXIT
 cat >"$tmp"
 chown root:root "$tmp"
 chmod 0644 "$tmp"
 sync -f "$tmp"
-mv -T -- "$tmp" ` + managedConfigPath + `
-sync -f ` + managedConfigDir + `
+mv -T -- "$tmp" ` + systemConfigPath + `
+sync -f ` + systemConfigDir + `
 trap - EXIT
 `
 	return []string{"sudo", "-n", "/bin/bash", "-ceu", script}

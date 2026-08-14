@@ -11,7 +11,7 @@ import (
 	"github.com/wzslr321/torio/internal/backend"
 )
 
-// WaitingMarkerHelper is the fixed guest path the managed configuration runs as
+// WaitingMarkerHelper is the fixed guest path the system configuration runs as
 // a hook. It is root-owned for the same reason the configuration that names it
 // is: the agent cannot silently retune the integration between sessions. The
 // marker it writes is agent-owned and remains an operational signal, never a
@@ -32,7 +32,7 @@ var embeddedWaitingMarker []byte
 // reconcileWaitingMarkerHelper proves the hook helper is the one Torio wrote.
 //
 // It is installed when absent and reported, never rewritten, when it has
-// drifted: the same rule the managed configuration follows, and for the same
+// drifted: the same rule the system configuration follows, and for the same
 // reason. A box bootstrapped before this existed reports it missing until
 // `torio vm bootstrap` runs again, and reports its agent's waiting state as
 // unknown in the meantime, which is the honest answer for a box whose hooks were

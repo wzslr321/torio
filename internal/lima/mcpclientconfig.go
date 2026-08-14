@@ -16,9 +16,22 @@ const ClaudeManagedMCPPath = "/etc/claude-code/managed-mcp.json"
 
 type mcpClientConfigInput struct {
 	Services []string `json:"services"`
+	// Rendered carries a document the host produced whole. It exists for a
+	// backend whose file the host must be able to compare byte for byte, which
+	// means the bytes cannot be assembled on the guest by a program that might
+	// format them differently than the verifier expects.
+	Rendered string `json:"rendered,omitempty"`
 }
 
 func (a *Adapter) reconcileMCPClientConfig(ctx context.Context, identity backend.Identity, grant PolicyGrant, rep *MCPBrokerInstallReport) (bool, error) {
+	// Codex takes a different route through this step and says so here rather
+	// than inside the shared program: its root-owned file is an allowlist the
+	// host renders whole, and its declarations are written by the agent's own
+	// command instead of by editing a file Torio does not own the format of.
+	if identity.Name == "codex" {
+		return a.reconcileCodexMCPConfig(ctx, identity, grant, rep)
+	}
+
 	input := mcpClientConfigInput{Services: make([]string, 0, len(grant.Services))}
 	for _, service := range grant.Services {
 		if err := ValidateServiceName(service.Name); err != nil {
@@ -151,6 +164,11 @@ elif kind == "claude":
     document={"mcpServers":{s:{"type":"stdio","command":relay,"args":[s],"env":{}} for s in services}}
     rendered=(json.dumps(document,indent=2,sort_keys=True)+"\n").encode()
     changed=commit(path,rendered,0o644)
+elif kind == "codex":
+    document=payload.get("rendered")
+    if not isinstance(document,str) or not document:
+        raise SystemExit(6)
+    changed=commit(path,document.encode(),0o644)
 else:
     raise SystemExit(5)
 print("changed" if changed else "unchanged")

@@ -18,7 +18,7 @@ func markerHelperProbes() map[string]execx.Result {
 }
 
 // TestTheHelperTheAgentsHooksRunIsTheOneTorioWrote pins the digest check. The
-// managed configuration names this path, so a helper the agent could rewrite
+// system configuration names this path, so a helper the agent could rewrite
 // would be an agent choosing what its own hooks do.
 func TestTheHelperTheAgentsHooksRunIsTheOneTorioWrote(t *testing.T) {
 	t.Run("the installed helper passes", func(t *testing.T) {
