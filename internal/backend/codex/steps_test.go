@@ -28,6 +28,9 @@ type fakeRunner struct {
 	remediation string
 	pinned      string
 	repairs     bool
+	// onCall runs before each probe is answered, so a test can make the guest
+	// change under a step the way a real one does when the step repairs it.
+	onCall func(argv string)
 }
 
 func newFakeRunner(answers map[string]execx.Result) *fakeRunner {
@@ -39,6 +42,9 @@ var errUnexpectedProbe = errors.New("unexpected probe")
 func (f *fakeRunner) Probe(_ context.Context, _ string, argv ...string) (execx.Result, error) {
 	joined := strings.Join(argv, " ")
 	f.calls = append(f.calls, joined)
+	if f.onCall != nil {
+		f.onCall(joined)
+	}
 	res, ok := f.answers[joined]
 	if !ok {
 		return execx.Result{}, errUnexpectedProbe
