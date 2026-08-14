@@ -236,12 +236,7 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 		})
 
 		ambient := torio.mustRun("status-after-bootstrap", "status", "status")
-		instances, ok := ambient.Data["instances"].([]any)
-		Expect(ok).To(BeTrue(), "status data carries no instances array")
-		Expect(instances).To(HaveLen(1))
-		row, ok := instances[0].(map[string]any)
-		Expect(ok).To(BeTrue(), "status instance is not an object")
-		Expect(row["instance"]).To(Equal(instanceName))
+		row := statusRowFor(ambient, instanceName)
 		Expect(row["box"]).To(Equal("running"))
 		backendField, ok := row["backend"].(map[string]any)
 		Expect(ok).To(BeTrue(), "status backend is not an object")
@@ -260,9 +255,7 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 			expectData(helper, map[string]any{"exit_code": float64(0)})
 
 			afterHelper := torio.mustRun("status-after-waiting-helper", "status", "status")
-			afterInstances, afterOK := afterHelper.Data["instances"].([]any)
-			Expect(afterOK).To(BeTrue())
-			afterRow := afterInstances[0].(map[string]any)
+			afterRow := statusRowFor(afterHelper, instanceName)
 			afterWaiting := afterRow["waiting"].(map[string]any)
 			Expect(afterWaiting).To(HaveKeyWithValue("state", "known"))
 			Expect(afterWaiting).To(HaveKeyWithValue("waiting", false))
@@ -398,6 +391,35 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 		expectData(status, map[string]any{"state": "stopped"})
 	}, SpecTimeout(8*time.Minute))
 })
+
+// statusRowFor returns the `torio status` row for one instance, and fails
+// naming what it did see when there is none.
+//
+// It finds the row rather than taking the first, and asserts nothing about how
+// many there are. `torio status` polls every box on the machine, so a run on a
+// developer's laptop sees their own boxes beside the one this journey built. The
+// spec's subject is the box it just created; requiring it to be the only one
+// made the journey pass on a clean CI runner and fail on every machine that had
+// ever used the product, which is the wrong way round for a gate whose job is to
+// catch what CI cannot.
+func statusRowFor(rep envelope, instanceName string) map[string]any {
+	GinkgoHelper()
+	instances, ok := rep.Data["instances"].([]any)
+	Expect(ok).To(BeTrue(), "status data carries no instances array")
+
+	seen := make([]string, 0, len(instances))
+	for _, raw := range instances {
+		row, isMap := raw.(map[string]any)
+		Expect(isMap).To(BeTrue(), "status instance is not an object")
+		name, _ := row["instance"].(string)
+		seen = append(seen, name)
+		if name == instanceName {
+			return row
+		}
+	}
+	Fail(fmt.Sprintf("status reports no row for %q; it listed %v", instanceName, seen))
+	return nil
+}
 
 func environmentOr(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
