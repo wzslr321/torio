@@ -598,7 +598,13 @@ identity the agent has a shell as
   relay arguments. It is agent-writable, so this is explicitly a drift detector,
   not an enforcement boundary. For Claude Code, Torio installs root-owned
   `/etc/claude-code/managed-mcp.json`, pins `allowManagedMcpServersOnly: true`,
-  and removes native MCP declarations from agent-owned `.claude.json`.
+  and removes native MCP declarations from agent-owned `.claude.json`. For Codex,
+  Torio installs root-owned `/etc/codex/requirements.toml`, whose `mcp_servers`
+  allowlist permits only the relay path carrying one named service, and writes
+  the declarations themselves through `codex mcp add`; an empty allowlist is
+  written when the policy grants nothing, because an absent one permits
+  everything. `status` reads `codex mcp list --json`, so a declaration the
+  allowlist disabled is reported rather than counted as configured.
 - When the selected identity has just joined the client group, `install` reports
   `restart_required`. A long-lived process does not acquire a
   group because the group database changed underneath it — the backend keeps what

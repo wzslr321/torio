@@ -9,6 +9,7 @@ import (
 
 	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/backend/claudecode"
+	"github.com/wzslr321/torio/internal/backend/codex"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
 )
@@ -252,7 +253,7 @@ func TestBackendStatusChangesNothing(t *testing.T) {
 // showed nothing on a box with MCP servers configured — the same silence a
 // backend that declares no check at all produces.
 func TestTheRealBackendsDeclareTheChecksTheyRecord(t *testing.T) {
-	for _, b := range []backend.Backend{lima.Hermes(), claudecode.New()} {
+	for _, b := range []backend.Backend{lima.Hermes(), claudecode.New(), codex.New()} {
 		name := b.Identity().Name
 		checks := b.StatusChecks()
 		r := &recordingRunner{}

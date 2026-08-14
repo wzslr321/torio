@@ -207,7 +207,8 @@ torio vm ssh -- sudo -u hermes -- \
 <div class="code-block"><pre data-lang="console"><code>$ torio status
 INSTANCE           BOX      BACKEND      SESSION  WAITING              PROGRESS
 torio              running  hermes       —        ?                    14s
-torio-claude-code  running  claude-code  2        yes 7m pid 11673 +1  —</code></pre></div>
+torio-claude-code  running  claude-code  2        yes 7m pid 11673 +1  —
+torio-codex        running  codex        1        no                   —</code></pre></div>
 <p>Asking is still asking, though, and the answer is worth having without asking. Put it on your status bar:</p>
 <div class="code-block"><pre data-lang="console"><code>$ torio status setup tmux &gt;&gt; ~/.tmux.conf
 $ tmux source-file ~/.tmux.conf</code></pre></div>

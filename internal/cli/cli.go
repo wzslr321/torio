@@ -18,6 +18,7 @@ import (
 
 	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/backend/claudecode"
+	"github.com/wzslr321/torio/internal/backend/codex"
 	"github.com/wzslr321/torio/internal/brain"
 	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
@@ -127,6 +128,7 @@ type app struct {
 func init() {
 	backend.Register(lima.Hermes())
 	backend.Register(claudecode.New())
+	backend.Register(codex.New())
 }
 
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer, build BuildInfo) int {
