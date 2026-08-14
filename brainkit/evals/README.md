@@ -211,6 +211,11 @@ Numbers do not travel either. A report names its model and its runner because a
 pass-rate is a fact about a pair. A second backend earns its own reports; it does
 not inherit these.
 
+Codex ships without a runner, and the reports here say nothing about it. Its
+non-interactive `codex exec` makes one straightforward to write; until somebody
+does, the kit's behavioural evidence is Claude Code's alone and is labelled that
+way.
+
 ## Fixtures
 
 A fixture is a directory under `fixtures/` with a `vault/` and optionally a

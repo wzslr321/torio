@@ -1,0 +1,44 @@
+# Torio's system configuration for Codex on this guest, installed at
+# /etc/codex/config.toml and proven by digest on every bootstrap.
+#
+# This file is a GUARDRAIL, not a boundary. It shapes how Codex behaves; it does
+# not constrain what the process can do. The agent executes arbitrary code as its
+# own uid, so it could work around anything set here. What root ownership buys is
+# narrower and still worth having: the agent cannot silently retune its own
+# guardrails, and a change to them is visible as drift. The boundaries are
+# elsewhere and are enforced below the agent's privilege: the uid, the exact
+# group set, the absent sudo, ssh.forwardAgent off, and the edge of the VM.
+#
+# Every key here is one the released Codex reads, checked against that binary
+# rather than against documentation. Nothing is added speculatively, and the
+# reason is the opposite of the obvious one: an unrecognized key is ignored
+# silently, not rejected, so a guardrail with a misspelled name would look
+# installed, pass its own digest check, and constrain nothing.
+
+# Prompts are off, and the sandbox with them, because the thing they stand in for
+# is now real. On a laptop these are the only control there is, and an operator
+# clicks through them anyway. Inside the box the enforcement moved below the
+# process, and an inner sandbox would only stop the agent reaching the vault and
+# the workspace it was given.
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+# The install is pinned and root-owned. A binary that shops for a newer one on
+# startup is a box whose agent version can change underneath the operator.
+check_for_update_on_startup = false
+
+# The waiting marker. Codex hands each hook a JSON document on standard input;
+# the helper takes the session id out of it and nothing else. Two events set the
+# marker and two clear it, so a session that stops for a human is recorded and a
+# session that gets an answer stops being recorded.
+[[hooks.Stop]]
+hooks = [{ type = "command", command = "/usr/local/bin/torio-waiting-marker set" }]
+
+[[hooks.PermissionRequest]]
+hooks = [{ type = "command", command = "/usr/local/bin/torio-waiting-marker set" }]
+
+[[hooks.UserPromptSubmit]]
+hooks = [{ type = "command", command = "/usr/local/bin/torio-waiting-marker clear" }]
+
+[[hooks.SessionEnd]]
+hooks = [{ type = "command", command = "/usr/local/bin/torio-waiting-marker clear" }]

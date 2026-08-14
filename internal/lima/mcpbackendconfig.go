@@ -118,6 +118,8 @@ func (a *Adapter) verifyBackendMCPConfig(ctx context.Context, rep *MCPBrokerRepo
 		return a.verifyHermesMCPConfigForPolicy(ctx, rep)
 	case "claude-code":
 		return a.verifyClaudeManagedMCPConfig(ctx, rep)
+	case "codex":
+		return a.verifyCodexMCPConfig(ctx, rep)
 	default:
 		return a.brokerFailed(rep, "agent_mcp_config", "selected backend has no MCP configuration verifier", "use a supported backend")
 	}

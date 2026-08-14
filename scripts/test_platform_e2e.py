@@ -87,7 +87,7 @@ class PlatformE2EContractTests(unittest.TestCase):
         self.assertIn(
             "backend: ${{ fromJSON(inputs.backend != '' "
             "&& format('[\"{0}\"]', inputs.backend) "
-            "|| '[\"hermes\",\"claude-code\"]') }}",
+            "|| '[\"hermes\",\"claude-code\",\"codex\"]') }}",
             text,
         )
         # Independent legs: which one broke is the first thing worth knowing.
@@ -244,11 +244,18 @@ class PlatformE2EContractTests(unittest.TestCase):
         self.assertIn('filepath.Join(repositoryRoot, "e2e/platform/cleanup.sh")', text)
         self.assertNotRegex(text, r"fake|stub|mock")
 
-    def test_journey_executes_the_waiting_helper_on_the_claude_guest(self) -> None:
+    def test_journey_executes_the_waiting_helper_on_every_guest_that_writes_one(self) -> None:
+        # Gated on the declaration rather than on one backend's name. Keyed to a
+        # name, this block ran for the backend that happened to be first to write
+        # a marker and silently skipped the next one, which is the same shape of
+        # gap the matrix exists to close.
         text = JOURNEY.read_text(encoding="utf-8")
         self.assertIn("torio-waiting-marker", text)
         self.assertIn("waiting-helper-concurrent-set-clear", text)
-        self.assertIn('profile.name == backendClaudeCode', text)
+        self.assertIn("profile.declaresWaitingMarker", text)
+        # The exercise renames its own process to the agent it is pretending to
+        # be, so it has to be the profile's identity and not a literal.
+        self.assertIn("fmt.Sprintf(waitingHelperExercise, profile.user)", text)
 
     def test_project_fixture_is_public_and_checks_a_known_commit(self) -> None:
         text = JOURNEY.read_text(encoding="utf-8")

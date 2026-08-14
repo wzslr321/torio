@@ -7,6 +7,7 @@ import (
 
 	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/backend/claudecode"
+	"github.com/wzslr321/torio/internal/backend/codex"
 	"github.com/wzslr321/torio/internal/lima"
 )
 
@@ -15,7 +16,7 @@ import (
 // another identity's home would be a directory the owning identity cannot
 // write, which is exactly how the import transfer failed once before.
 func TestTheVaultFollowsTheBackendIdentity(t *testing.T) {
-	for _, b := range []backend.Backend{lima.Hermes(), claudecode.New()} {
+	for _, b := range []backend.Backend{lima.Hermes(), claudecode.New(), codex.New()} {
 		m := New(nil, lima.BootstrapOptions{Backend: b})
 		id := b.Identity()
 

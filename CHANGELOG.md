@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added
+
+- **Codex CLI as the third backend.** `torio vm init --backend codex` builds a
+  box that runs Codex as its own guest identity, with the same custody the other
+  process backend has: no sudo, an exact group set, and a pinned binary the agent
+  cannot rewrite. The archive is proven against a digest committed in this
+  repository rather than one fetched beside it, because the release publishes
+  checksums only for a different set of artifacts. Sessions, the Second Brain
+  retrieval skill, the waiting marker `torio status` reads, and the MCP relay all
+  work as they do elsewhere; what differs is where the controls live, which is a
+  root-owned system configuration layer and a root-owned MCP allowlist under
+  `/etc/codex` ([ADR-0022](docs/adr/0022-codex-backend.md)).
+- Signing a Codex box in asks for a device code, so a box with no browser needs
+  no forwarded port to receive a credential. An API key remains available through
+  `codex login --with-api-key`, which reads the key from standard input.
+
 ## 0.3.4 - 2026-08-10
 
 ### Added
