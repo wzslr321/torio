@@ -37,12 +37,12 @@ func okBrokerScript() []scriptedResponse {
 		{result: stdoutResult("torio-mcp:x:997:997::/home/torio-mcp:/usr/sbin/nologin\n")}, // getent passwd
 		{result: stdoutResult("torio-mcp\n")},                                              // primary group
 		{result: stdoutResult("torio-mcp torio-mcp-clients\n")},                            // all broker groups
-		{result: exitResult(1, "", "not allowed")},                                         // no sudo grants
+		{result: stdoutResult(sudoDeniedFixture)},                                          // no sudo grants
 		{result: stdoutResult("1000\n")},                                                   // id -u hermes
 		{result: stdoutResult("torio-mcp-clients:x:995:hermes\n")},                         // getent group
 		{result: stdoutResult("hermes torio-projects torio-mcp-clients\n")},                // id -nG hermes (client)
 		{result: stdoutResult("hermes torio-projects torio-mcp-clients\n")},                // id -nG hermes (not owner)
-		{result: exitResult(1, "", "not allowed")},                                         // no hermes sudo grants
+		{result: stdoutResult(sudoDeniedFixture)},                                          // no hermes sudo grants
 		{result: stdoutResult("directory\ndirectory\n")},                                   // stat -c %F home: present
 		{result: stdoutResult("torio-mcp:torio-mcp 700\n")},                                // stat -c %U:%G %a home
 		{result: exitResult(1, "directory\n", "stat: cannot statx '...': No such file")},   // stat mcp-tokens: absent
@@ -92,12 +92,12 @@ func TestVerifyMCPBrokerHappyPath(t *testing.T) {
 		brokerProbeArgs("getent", "passwd", TorioMCPUser),
 		brokerProbeArgs("id", "-gn", TorioMCPUser),
 		brokerProbeArgs("id", "-nG", TorioMCPUser),
-		brokerProbeArgs("sudo", "-n", "-l", "-U", TorioMCPUser),
+		brokerProbeArgs(sudoProbeArgv(TorioMCPUser)...),
 		brokerProbeArgs("id", "-u", HermesUser),
 		brokerProbeArgs("getent", "group", TorioMCPClientsGroup),
 		brokerProbeArgs("id", "-nG", HermesUser),
 		brokerProbeArgs("id", "-nG", HermesUser),
-		brokerProbeArgs("sudo", "-n", "-l", "-U", HermesUser),
+		brokerProbeArgs(sudoProbeArgv(HermesUser)...),
 		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", statControlPath, TorioMCPHome),
 		brokerProbeArgs("sudo", "-n", "stat", "-c", "%U:%G %a", TorioMCPHome),
 		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", statControlPath, HermesMCPTokensPath),
@@ -168,7 +168,7 @@ func TestVerifyBrokerUserRejectsPrivilegedSupplementaryGroup(t *testing.T) {
 		{result: stdoutResult("torio-mcp:x:997:997::/home/torio-mcp:/usr/sbin/nologin\n")},
 		{result: stdoutResult("torio-mcp\n")},
 		{result: stdoutResult("torio-mcp torio-mcp-clients docker\n")},
-		{result: exitResult(1, "", "not allowed")},
+		{result: stdoutResult(sudoDeniedFixture)},
 	}}
 	rep := &MCPBrokerReport{}
 
@@ -227,7 +227,7 @@ func TestVerifyBrokerUserRejectsTheHermesUID(t *testing.T) {
 		{result: stdoutResult("torio-mcp:x:997:997::/home/torio-mcp:/usr/sbin/nologin\n")},
 		{result: stdoutResult("torio-mcp\n")},
 		{result: stdoutResult("torio-mcp torio-mcp-clients\n")},
-		{result: exitResult(1, "", "not allowed")},
+		{result: stdoutResult(sudoDeniedFixture)},
 		{result: stdoutResult("997\n")},
 	}}
 	rep := &MCPBrokerReport{}

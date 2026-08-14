@@ -394,15 +394,16 @@ func (a *Adapter) verifyBrokerUserFor(ctx context.Context, rep *MCPBrokerReport,
 			"add only torio-mcp-clients so the broker can publish its socket")
 	}
 
-	sudo, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "-l", "-U", TorioMCPUser)
+	sudo, err := a.brokerProbe(ctx, rep, name, sudoProbeArgv(TorioMCPUser)...)
 	if err != nil {
 		return err
 	}
-	if sudo.exit == 0 {
+	switch sudoVerdict(sudo) {
+	case sudoPresent:
 		return a.brokerFailed(rep, name, "broker has sudo authority", "remove every sudoers grant for torio-mcp")
-	}
-	if sudo.exit != 1 {
+	case sudoUnprovable:
 		return a.brokerFailed(rep, name, "could not prove the absence of sudo authority", "inspect sudoers and retry")
+	case sudoAbsent:
 	}
 	agentUID, err := a.brokerProbe(ctx, rep, name, "id", "-u", agentUser)
 	if err != nil {
@@ -474,15 +475,16 @@ func (a *Adapter) verifyAgentNotBrokerOwner(ctx context.Context, rep *MCPBrokerR
 				"restore the selected backend's primary, torio-projects, and torio-mcp-clients groups only")
 		}
 	}
-	sudo, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "-l", "-U", agentUser)
+	sudo, err := a.brokerProbe(ctx, rep, name, sudoProbeArgv(agentUser)...)
 	if err != nil {
 		return err
 	}
-	if sudo.exit == 0 {
+	switch sudoVerdict(sudo) {
+	case sudoPresent:
 		return a.brokerFailed(rep, name, "agent has sudo authority", "remove every sudoers grant for the selected backend user")
-	}
-	if sudo.exit != 1 {
+	case sudoUnprovable:
 		return a.brokerFailed(rep, name, "could not prove the absence of agent sudo authority", "inspect sudoers and retry")
+	case sudoAbsent:
 	}
 	rep.record(name, true, "managed groups only; no sudo authority")
 	return nil

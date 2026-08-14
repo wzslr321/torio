@@ -105,12 +105,12 @@ func okMCPScript() []scriptedResp {
 		out("torio-mcp:x:997:997::/home/torio-mcp:/usr/sbin/nologin\n"),
 		out("torio-mcp\n"),
 		out("torio-mcp torio-mcp-clients\n"),
-		{res: execx.Result{ExitCode: 1}},                 // no broker sudo grants
+		out(cliSudoDenied),                               // broker holds no sudo
 		out("1000\n"),                                    // id -u hermes
 		out("torio-mcp-clients:x:995:hermes\n"),          // getent group
 		out("hermes torio-projects torio-mcp-clients\n"), // id -nG hermes (client)
 		out("hermes torio-projects torio-mcp-clients\n"), // id -nG hermes (not owner)
-		{res: execx.Result{ExitCode: 1}},                 // no hermes sudo grants
+		out(cliSudoDenied),                               // hermes holds no sudo
 		// Each `stat %F` probe names a control path first, so a present path
 		// answers with two lines and an absent one with the control line alone.
 		// An empty reply means the probe never ran, which fails closed.
@@ -431,12 +431,12 @@ func freshMCPInstallScript() []scriptedResp {
 		out("torio-mcp:x:997:997::/home/torio-mcp:/usr/sbin/nologin\n"),
 		out("torio-mcp\n"),
 		out("torio-mcp torio-mcp-clients\n"),
-		fail(1, ""),   // broker has no sudo grants
-		out("1000\n"), // id -u hermes
+		out(cliSudoDenied), // broker holds no sudo
+		out("1000\n"),      // id -u hermes
 		out("torio-mcp-clients:x:995:hermes\n"),
 		out("hermes torio-projects torio-mcp-clients\n"),
 		out("hermes torio-projects torio-mcp-clients\n"),
-		fail(1, ""), // hermes has no sudo grants
+		out(cliSudoDenied), // hermes holds no sudo
 		out("directory\ndirectory\n"),
 		out("torio-mcp:torio-mcp 700\n"),
 		out("directory\ndirectory\n"),           // verify policy directory path
@@ -575,3 +575,8 @@ func TestMCPInstallReportsTheGrantItProvisioned(t *testing.T) {
 		}
 	}
 }
+
+// cliSudoDenied is what a guest prints for an identity that holds no sudo, asked
+// by a caller that already holds root. The fixtures it replaces carried a bare
+// exit 1, which sudo does not produce for this question.
+const cliSudoDenied = "User torio-mcp is not allowed to run sudo on lima-guest.\n"

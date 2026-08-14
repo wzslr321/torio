@@ -41,12 +41,12 @@ func identityVerificationScript() []scriptedResponse {
 		{result: stdoutResult("torio-mcp:x:997:997::/home/torio-mcp:/usr/sbin/nologin\n")},
 		{result: stdoutResult("torio-mcp\n")},
 		{result: stdoutResult("torio-mcp torio-mcp-clients\n")},
-		{result: exitResult(1, "", "not allowed")},
+		{result: stdoutResult(sudoDeniedFixture)},
 		{result: stdoutResult("1000\n")},
 		{result: stdoutResult("torio-mcp-clients:x:995:hermes\n")},
 		{result: stdoutResult("hermes torio-projects torio-mcp-clients\n")},
 		{result: stdoutResult("hermes torio-projects torio-mcp-clients\n")},
-		{result: exitResult(1, "", "not allowed")},
+		{result: stdoutResult(sudoDeniedFixture)},
 		// Two lines: the verification probe names statControlPath first, so a
 		// present path answers with the control line and its own.
 		{result: stdoutResult("directory\ndirectory\n")},
