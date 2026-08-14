@@ -1,4 +1,5 @@
-# Torio's managed configuration for Codex on this guest.
+# Torio's system configuration for Codex on this guest, installed at
+# /etc/codex/config.toml and proven by digest on every bootstrap.
 #
 # This file is a GUARDRAIL, not a boundary. It shapes how Codex behaves; it does
 # not constrain what the process can do. The agent executes arbitrary code as its

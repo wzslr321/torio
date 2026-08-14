@@ -97,7 +97,7 @@ func TestDeclaredCapabilitiesMatchWhatCodexHas(t *testing.T) {
 func TestProvisionScriptCreatesEveryPathBootstrapLaterProves(t *testing.T) {
 	script := New().ProvisionScript()
 
-	for _, want := range []string{Home, ProfilePath, BrainPath, WorkspacePath, managedConfigDir, installDir} {
+	for _, want := range []string{Home, ProfilePath, BrainPath, WorkspacePath, systemConfigDir, installDir} {
 		if !strings.Contains(script, want) {
 			t.Errorf("provisioning never mentions %s, which bootstrap then proves", want)
 		}
