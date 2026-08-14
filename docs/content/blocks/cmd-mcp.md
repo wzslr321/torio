@@ -27,11 +27,16 @@ pinned official MCP Go SDK. Tokens stay below `/home/torio-mcp/oauth` as
 `torio-mcp:torio-mcp 0600` files inside the private `0700` home. Torio accepts no
 token, client secret or credential file from the host.
 
-Both backends launch the credential-free relay over stdio. Hermes' `config.yaml`
-is agent-writable, so its exact relay check is a drift detector, not a boundary.
+Every backend launches the credential-free relay over stdio, and each one puts
+the control somewhere its own agent cannot reach. Hermes' `config.yaml` is
+agent-writable, so its exact relay check is a drift detector, not a boundary.
 Claude Code uses root-owned `/etc/claude-code/managed-mcp.json` together with
 `allowManagedMcpServersOnly: true`; install removes native MCP entries from the
-agent-owned `.claude.json`, and status rejects their return.
+agent-owned `.claude.json`, and status rejects their return. Codex declares its
+servers in a file it owns, written through its own `codex mcp` command, and
+root-owned `/etc/codex/requirements.toml` allows only the relay path carrying one
+named service; status reads what Codex resolved rather than what it declared, so
+a server the allowlist disabled is reported rather than counted.
 
 Every report enumerates the verified grant by service and endpoint, including
 tool and write-tool counts plus the policy generation digest. While any service

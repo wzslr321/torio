@@ -56,7 +56,9 @@ than as a fault:
 - **The retrieval skill.** Each backend ships its own, because a retrieval skill
   names the tools one agent has and the vault path one identity owns: the Hermes
   skill calls `search_files` under `/home/hermes/brain`, the Claude Code skill
-  calls `Grep` under `/home/claude/brain`. Torio installs the one the backend
+  calls `Grep` under `/home/claude/brain`, and the Codex skill searches
+  `/home/codex/brain` with the `grep` and `find` the guest image ships. Torio
+  installs the one the backend
   declares, at the path that backend discovers skills in, and `brain status`
   names that path. A backend that declares none reports `not_applicable`, which
   is deliberately not `not_installed` — reporting a missing thing where nothing

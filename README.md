@@ -138,6 +138,7 @@ $ torio status
 INSTANCE           BOX      BACKEND      SESSION  WAITING           PROGRESS
 torio              running  hermes       —        ?                 24s
 torio-claude-code  running  claude-code  1        yes 3m pid 11673  —
+torio-codex        running  codex        1        no                —
 ```
 
 It exits 0 whatever it finds, so a status bar can call it on a timer.
@@ -196,12 +197,12 @@ checkouts.
 You do not track which VM that is. `--backend` names the agent and Torio finds
 its box: the default one is `torio`, the rest are `torio-<backend>`.
 
-| | `hermes` (default) | `claude-code` |
-| --- | --- | --- |
-| Shape | a guest service on loopback | a per-session process |
-| Reached by | a client through a tunnel you open | `torio project agent <id>` |
-| Project registry | yes, driven by Torio | none; a project is a directory |
-| Pinned by | an upstream commit | a version, checksum-verified |
+| | `hermes` (default) | `claude-code` | `codex` |
+| --- | --- | --- | --- |
+| Shape | a guest service on loopback | a per-session process | a per-session process |
+| Reached by | a client through a tunnel you open | `torio project agent <id>` | `torio project agent <id>` |
+| Project registry | yes, driven by Torio | none; a project is a directory | none; a project is a directory |
+| Pinned by | an upstream commit | a version, checksum-verified | a version, digest-verified |
 
 ```bash
 torio vm init --backend claude-code

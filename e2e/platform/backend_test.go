@@ -18,10 +18,11 @@ import (
 // land exactly in the shared parts, the ones that are supposed to be identical
 // on every backend and are therefore the whole point of having a contract. What
 // differs between backends belongs in the small per-backend blocks below; what
-// does not differ is asserted once, for both.
+// does not differ is asserted once, for every backend that ships.
 const (
 	backendHermes     = "hermes"
 	backendClaudeCode = "claude-code"
+	backendCodex      = "codex"
 )
 
 func journeyBackend() string {
@@ -59,6 +60,11 @@ type backendProfile struct {
 	declaresRegistry bool
 	declaresService  bool
 	declaresSession  bool
+	// declaresWaitingMarker is the fourth, and it is separate because a backend
+	// can run a session process without having any way to say that the session is
+	// waiting on a human. Where it is true the journey drives the hook helper and
+	// reads the answer back out of `torio status`.
+	declaresWaitingMarker bool
 	// requiredChecks are bootstrap checks that must be present and OK. They are
 	// the backend's own custody proofs, the ones no other backend has.
 	requiredChecks []string
@@ -68,16 +74,17 @@ func profileFor(name string) backendProfile {
 	switch name {
 	case backendClaudeCode:
 		return backendProfile{
-			name:             backendClaudeCode,
-			user:             "claude",
-			workspace:        "/home/claude/projects",
-			vault:            "/home/claude/brain",
-			versionCheck:     "claude_version",
-			versionCommand:   []string{"sudo", "-u", "claude", "--", "claude", "--version"},
-			skillFile:        "/home/claude/.claude/skills/torio-brain/SKILL.md",
-			declaresRegistry: false,
-			declaresService:  false,
-			declaresSession:  true,
+			name:                  backendClaudeCode,
+			user:                  "claude",
+			workspace:             "/home/claude/projects",
+			vault:                 "/home/claude/brain",
+			versionCheck:          "claude_version",
+			versionCommand:        []string{"sudo", "-u", "claude", "--", "claude", "--version"},
+			skillFile:             "/home/claude/.claude/skills/torio-brain/SKILL.md",
+			declaresRegistry:      false,
+			declaresService:       false,
+			declaresSession:       true,
+			declaresWaitingMarker: true,
 			// The four proofs this backend's custody rests on: the identity
 			// exists, it cannot become root, it holds nothing beyond its own
 			// work, and the binary it runs is one it cannot rewrite.
@@ -93,18 +100,46 @@ func profileFor(name string) backendProfile {
 				"agent_session_helper",
 			},
 		}
+	case backendCodex:
+		return backendProfile{
+			name:                  backendCodex,
+			user:                  "codex",
+			workspace:             "/home/codex/projects",
+			vault:                 "/home/codex/brain",
+			versionCheck:          "codex_version",
+			versionCommand:        []string{"sudo", "-u", "codex", "--", "codex", "--version"},
+			skillFile:             "/home/codex/.codex/skills/torio-brain/SKILL.md",
+			declaresRegistry:      false,
+			declaresService:       false,
+			declaresSession:       true,
+			declaresWaitingMarker: true,
+			// The same custody proofs the other process backend rests on, plus
+			// the system configuration layer this one puts its guardrails in.
+			requiredChecks: []string{
+				"codex_user",
+				"codex_no_sudo",
+				"codex_groups_exact",
+				"codex_install",
+				"codex_system_config",
+				"codex_waiting_marker_dependencies",
+				"codex_waiting_marker_helper",
+				"codex_waiting_marker_state",
+				"agent_session_helper",
+			},
+		}
 	case backendHermes:
 		return backendProfile{
-			name:             backendHermes,
-			user:             "hermes",
-			workspace:        "/home/hermes/projects",
-			vault:            "/home/hermes/brain",
-			versionCheck:     "hermes_version",
-			versionCommand:   []string{"sudo", "-u", "hermes", "--", "hermes", "--version"},
-			skillFile:        "/home/hermes/.hermes/skills/brain/torio-brain/SKILL.md",
-			declaresRegistry: true,
-			declaresService:  true,
-			declaresSession:  false,
+			name:                  backendHermes,
+			user:                  "hermes",
+			workspace:             "/home/hermes/projects",
+			vault:                 "/home/hermes/brain",
+			versionCheck:          "hermes_version",
+			versionCommand:        []string{"sudo", "-u", "hermes", "--", "hermes", "--version"},
+			skillFile:             "/home/hermes/.hermes/skills/brain/torio-brain/SKILL.md",
+			declaresRegistry:      true,
+			declaresService:       true,
+			declaresSession:       false,
+			declaresWaitingMarker: false,
 			requiredChecks: []string{
 				"hermes_user",
 				"hermes_torio_projects",
@@ -118,8 +153,8 @@ func profileFor(name string) backendProfile {
 	// default case here made a typo in a CI matrix run the first backend's
 	// journey twice and report both legs green — the one outcome a two-backend
 	// gate exists to make impossible.
-	Fail(fmt.Sprintf("unknown PLATFORM_E2E_BACKEND %q; known backends are %q and %q",
-		name, backendHermes, backendClaudeCode))
+	Fail(fmt.Sprintf("unknown PLATFORM_E2E_BACKEND %q; known backends are %q, %q and %q",
+		name, backendHermes, backendClaudeCode, backendCodex))
 	return backendProfile{}
 }
 

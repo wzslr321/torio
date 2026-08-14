@@ -30,6 +30,15 @@ yours. Torio sees none of the flow — it builds the transport and hands over th
 terminal. No SSH agent is forwarded, so a login session cannot reach a Git
 remote.
 
+What the session then shows is the backend's own flow, and it differs. Claude
+Code starts and prompts. Codex asks for a device code, which is the flow that
+works on a box with no browser: it prints a code and a URL you open wherever you
+already are, and nothing has to reach the guest's loopback. An operator who
+would rather use an API key can run `codex login --with-api-key` in a
+`torio vm shell` session as the backend identity and paste the key on standard
+input; both routes leave the credential in the same place, and `backend status`
+reports it the same way.
+
 `status` verifies and never repairs. It runs the same guest checks as `vm
 bootstrap`, with every repair turned off: a box missing something bootstrap
 would install — the pinned binary, the command-path link, the managed settings —
@@ -51,7 +60,9 @@ credential comes to report that its state is unknowable.
 For a backend that is an MCP client, `status` also reports its configured server
 names. On Hermes this comes from an agent-owned file and is therefore a drift
 detector. Claude Code's released route is the root-owned managed MCP document;
-unmanaged native entries are excluded by the pinned managed setting. In both
-cases tool permission comes from the separate root-owned broker policy, not from
-the backend report. See
+unmanaged native entries are excluded by the pinned managed setting. Codex keeps
+its declarations in a file the agent owns, and a root-owned allowlist decides
+which of them may run, matching each against the relay path and the single
+service argument it is permitted to carry. In every case tool permission comes
+from the separate root-owned broker policy, not from the backend report. See
 [ADR-0013](https://github.com/wzslr321/torio/blob/main/docs/adr/0013-mcp-managed-client-config-and-activation.md).

@@ -104,7 +104,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: ${{ fromJSON(inputs.backend != '' && format('["{0}"]', inputs.backend) || '["hermes","claude-code"]') }}
+        backend: ${{ fromJSON(inputs.backend != '' && format('["{0}"]', inputs.backend) || '["hermes","claude-code","codex"]') }}
     env:
       TORIO_INSTANCE: torio-ci-${{ matrix.backend }}-${{ github.run_id }}-${{ github.run_attempt }}
       PLATFORM_E2E_STAGE: ${{ inputs.stage || 'full' }}

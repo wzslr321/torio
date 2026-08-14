@@ -18,18 +18,23 @@ import (
 )
 
 const (
-	defaultFixtureRemote  = "https://github.com/octocat/Hello-World.git"
-	defaultFixtureCommit  = "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
+	defaultFixtureRemote = "https://github.com/octocat/Hello-World.git"
+	defaultFixtureCommit = "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
+	// The exercise is parameterized by the agent identity, which on both process
+	// backends is also the name a session reports in the process table. The helper
+	// walks up to the nearest ancestor with that name, so a run under the wrong
+	// one would fail to find a waiting process and prove nothing.
 	waitingHelperExercise = `
 import ctypes,json,os,subprocess
 
+agent="%[1]s"
 helper="/usr/local/bin/torio-waiting-marker"
-marker="/home/claude/.torio-waiting.json"
+marker="/home/%[1]s/.torio-waiting.json"
 
 def invoke(action, session_id):
     pid=os.fork()
     if pid == 0:
-        ctypes.CDLL(None).prctl(15, b"claude", 0, 0, 0)
+        ctypes.CDLL(None).prctl(15, agent.encode(), 0, 0, 0)
         result=subprocess.run(
             [helper, action],
             input=json.dumps({"session_id": session_id}),
@@ -243,7 +248,7 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 		Expect(backendField).To(HaveKeyWithValue("state", "known"))
 		Expect(backendField).To(HaveKeyWithValue("name", profile.name))
 
-		if profile.name == backendClaudeCode {
+		if profile.declaresWaitingMarker {
 			waitingField, waitingOK := row["waiting"].(map[string]any)
 			Expect(waitingOK).To(BeTrue(), "status waiting is not an object")
 			Expect(waitingField).To(HaveKeyWithValue("state", "known"))
@@ -251,7 +256,7 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 
 			helper := torio.mustRun("waiting-helper-concurrent-set-clear", "vm.ssh",
 				"vm", "ssh", "--", "sudo", "-u", profile.user, "-H", "--",
-				"python3", "-c", waitingHelperExercise)
+				"python3", "-c", fmt.Sprintf(waitingHelperExercise, profile.user))
 			expectData(helper, map[string]any{"exit_code": float64(0)})
 
 			afterHelper := torio.mustRun("status-after-waiting-helper", "status", "status")
