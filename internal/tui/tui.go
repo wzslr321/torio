@@ -121,6 +121,12 @@ type Deps struct {
 	LoginSpec func() (execx.InteractiveCommand, error)
 	AgentSpec func(ctx context.Context, id string) (execx.InteractiveCommand, error)
 	ShellSpec func(ctx context.Context, id string) (execx.InteractiveCommand, error)
+
+	// ProjectSetRemote corrects the remote of a project already on record
+	// (ADR-0023). It is here because the hub lists the records, so the hub is
+	// where a wrong one is seen; sending the operator to a command to fix what
+	// the screen is showing them is the dead end this removes.
+	ProjectSetRemote func(ctx context.Context, id, remote string) error
 }
 
 // Run opens the hub and blocks until the operator quits.

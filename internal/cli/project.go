@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -23,6 +24,7 @@ type projectService interface {
 	Show(context.Context, string) (projects.ShowReport, error)
 	Use(context.Context, string) (projects.UseReport, error)
 	Remove(context.Context, string) (projects.RemoveReport, error)
+	SetRemote(context.Context, string, string) (projects.SetRemoteReport, error)
 	EnterPreflight(context.Context, string) (projects.EnterSession, error)
 	ShellPreflight(context.Context, string) (projects.ShellSession, error)
 	RemoteAccess(context.Context, string, projects.SessionIdentity) (projects.RemoteAccess, error)
@@ -53,6 +55,7 @@ func newProjectCmd(a *app) *cobra.Command {
 	cmd.AddCommand(newProjectShowCmd(a))
 	cmd.AddCommand(newProjectUseCmd(a))
 	cmd.AddCommand(newProjectRemoveCmd(a))
+	cmd.AddCommand(newProjectSetRemoteCmd(a))
 	cmd.AddCommand(newProjectEnterCmd(a))
 	cmd.AddCommand(newProjectShellCmd(a))
 	cmd.AddCommand(newProjectAgentCmd(a))
@@ -243,6 +246,43 @@ func newProjectRemoveCmd(a *app) *cobra.Command {
 				return cliErr
 			}
 			return a.emitProjectRemove(report)
+		},
+	}
+}
+
+// newProjectSetRemoteCmd corrects the remote of a project already on record.
+//
+// It exists because the alternative was `remove` followed by `add`, which is
+// not a correction: it drops the entry before anything replaces it, stops on
+// the checkouts other guests still hold, and discards the deploy keys those
+// guests had authorized (ADR-0023).
+func newProjectSetRemoteCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "set-remote <id> <remote>",
+		Short: "Correct the remote of a project already on record",
+		Long: "Replace the remote of a registered project without removing the entry. The " +
+			"registry is shared by every instance, so the correction applies to every " +
+			"backend. The checkout on this backend's guest is repointed when its origin " +
+			"still holds the remote being replaced; an origin pointing anywhere else is " +
+			"reported and left alone, and checkouts on other guests are corrected the next " +
+			"time a command runs there.\n\n" +
+			"The id and the display name do not change: every derived path, registration " +
+			"and deploy key keeps naming the same project.",
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := a.opContext(cmd)
+			defer cancel()
+			service, err := a.projectService("project.set_remote")
+			if err != nil {
+				return err
+			}
+			report, err := service.SetRemote(ctx, args[0], args[1])
+			if err != nil {
+				cliErr := mapProjectError("project.set_remote", err)
+				cliErr.Details = projectNotesDetails(report.Notes)
+				return cliErr
+			}
+			return a.emitProjectSetRemote(report)
 		},
 	}
 }
@@ -839,6 +879,55 @@ func (a *app) emitProjectUse(report projects.UseReport) error {
 	}
 	_, err := fmt.Fprintf(a.stdout, "%s: active\nnext: %s\n", report.Project.ID, next)
 	return err
+}
+
+// projectSetRemoteData reports both remotes, because the value of the answer is
+// the change: an operator correcting a record needs to see what it held before
+// as much as what it holds now. A remote is not a secret; it is already in
+// `project list` and on the hub's own screen.
+type projectSetRemoteData struct {
+	projectData
+	PreviousRemote    string   `json:"previous_remote"`
+	CheckoutRepointed bool     `json:"checkout_repointed"`
+	Notes             []string `json:"notes"`
+	NextStep          string   `json:"next_step"`
+}
+
+func (a *app) emitProjectSetRemote(report projects.SetRemoteReport) error {
+	next := "torio project show " + report.Project.ID
+	if a.jsonOut {
+		return writeJSON(a.stdout, successEnvelope("project.set_remote", projectSetRemoteData{
+			projectData:       projectView(report.Project),
+			PreviousRemote:    report.PreviousRemote,
+			CheckoutRepointed: report.CheckoutRepointed,
+			Notes:             notes(report.Notes),
+			NextStep:          next,
+		}))
+	}
+	// What happened to the checkout is stated rather than implied. The record
+	// always moves; the tree does not always follow, and an operator who reads
+	// only "corrected" would have to guess which of the two they got.
+	checkout := "checkout left as it is"
+	switch {
+	case report.CheckoutRepointed:
+		checkout = "checkout origin repointed"
+	case slices.Contains(report.Notes, "checkout_absent"):
+		checkout = "no checkout on this backend's guest"
+	case slices.Contains(report.Notes, "checkout_origin_differs"):
+		checkout = "checkout origin points elsewhere and was not touched"
+	case slices.Contains(report.Notes, "checkout_untouched_guest_unavailable"):
+		checkout = "guest not reachable, so the checkout was not touched"
+	}
+	if _, err := fmt.Fprintf(a.stdout,
+		"%s: remote corrected (%s)\n"+
+			"  was: %s\n"+
+			"  now: %s\n"+
+			"  the registry is shared, so every backend reads the corrected remote\n"+
+			"next: %s\n",
+		report.Project.ID, checkout, report.PreviousRemote, report.Project.Remote, next); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (a *app) emitProjectRemove(report projects.RemoveReport) error {

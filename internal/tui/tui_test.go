@@ -1088,3 +1088,81 @@ func TestCleanSessionEndLeavesNoError(t *testing.T) {
 		t.Errorf("note = %q, want it to say the session ended", r.note)
 	}
 }
+
+// Everything the hub lists, it has to be able to act on. A record whose remote
+// names a host no guest can resolve is corrected here, prefilled with what the
+// record holds, so the operator edits an address rather than retyping one
+// (ADR-0023).
+func TestProjectsCorrectsARemoteFromTheHub(t *testing.T) {
+	f := &fakeDeps{
+		boxState: lima.StateRunning,
+		projectList: []projects.Project{{
+			ID:     "lean-triage",
+			Remote: "git@gh-lean-triage:leancodepl/lean-triage.git",
+			Path:   "/w/lean-triage",
+		}},
+	}
+	d := f.deps()
+	gotID, gotRemote := "", ""
+	d.ProjectSetRemote = func(_ context.Context, id, remote string) error {
+		gotID, gotRemote = id, remote
+		return nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "e")
+	if !r.projects.editing {
+		t.Fatal("e did not open the remote correction")
+	}
+	if got := r.projects.fields[0].Value(); got != "git@gh-lean-triage:leancodepl/lean-triage.git" {
+		t.Errorf("field = %q, want it prefilled with the recorded remote", got)
+	}
+	// The screen owns the keyboard while it is open, or a typed "q" quits the
+	// hub in the middle of an edit.
+	if !r.projects.capturing() {
+		t.Error("the correction form does not hold the keyboard")
+	}
+
+	r.projects.fields[0].SetValue("git@github.com:leancodepl/lean-triage.git")
+	_, cmd := r.Update(key("enter"))
+	if cmd == nil {
+		t.Fatal("enter produced no work")
+	}
+	drain(t, r, cmd)
+
+	if gotID != "lean-triage" {
+		t.Errorf("corrected %q, want the selected project", gotID)
+	}
+	if got, want := gotRemote, "git@github.com:leancodepl/lean-triage.git"; got != want {
+		t.Errorf("corrected to %q, want %q", got, want)
+	}
+	if r.projects.editing {
+		t.Error("the form stayed open after it was submitted")
+	}
+}
+
+// A backend build with no correction seam does not offer the key.
+func TestProjectsOffersNoRemoteCorrectionWithoutTheSeam(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
+	}
+	d := f.deps()
+	d.ProjectSetRemote = nil
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "e")
+
+	if r.projects.editing {
+		t.Error("a correction was opened with no seam to run it")
+	}
+	if strings.Contains(r.projects.keys(r), "e remote") {
+		t.Error("the footer offers a key the build cannot answer")
+	}
+}

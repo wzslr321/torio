@@ -165,6 +165,23 @@ type RemoveReport struct {
 	Notes        []string
 }
 
+// SetRemoteReport is the outcome of correcting one recorded remote (ADR-0023).
+//
+// The record is the part that always moves. The checkout is repointed only
+// where its origin still matched the remote being replaced, because Torio does
+// not repoint a working tree it cannot vouch for, and Notes says which of those
+// happened.
+type SetRemoteReport struct {
+	Project Project
+	// PreviousRemote is what the record held before this correction.
+	PreviousRemote string
+	// CheckoutRepointed reports that the guest checkout's origin was moved to
+	// the corrected remote. False covers every reason it was not: no checkout,
+	// a box that is not running, or an origin that matched neither remote.
+	CheckoutRepointed bool
+	Notes             []string
+}
+
 // CheckoutStatus is the derived state of the guest checkout. It carries only
 // booleans and metadata — never a file name, a diff, or raw Git output.
 type CheckoutStatus struct {

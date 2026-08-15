@@ -38,6 +38,13 @@ type projectsScreen struct {
 	fields  []textinput.Model
 	confirm bool
 
+	// editing is the remote correction, open on one project at a time. It
+	// reuses fields because it is a form like the addition, and keeps the id
+	// separately because the correction names the record it rewrites rather
+	// than whatever the cursor is on when it is submitted.
+	editing bool
+	editID  string
+
 	// connectID is the project the gateway panel is open for, empty when
 	// closed. The panel is the Enter answer on a backend whose way into a
 	// project is a service rather than a session: what the gateway is doing,
@@ -50,7 +57,7 @@ type projectsScreen struct {
 
 // capturing is true while the screen owns the keyboard, so the root does not
 // read a typed "q" as a request to quit.
-func (s *projectsScreen) capturing() bool { return s.adding }
+func (s *projectsScreen) capturing() bool { return s.adding || s.editing }
 
 func (s *projectsScreen) load(d Deps) tea.Cmd {
 	if d.ProjectList == nil {
@@ -81,6 +88,54 @@ func (s *projectsScreen) openForm() {
 func (s *projectsScreen) closeForm() {
 	s.adding = false
 	s.fields = nil
+}
+
+// openEdit opens the remote correction on one project, prefilled with what the
+// record holds: a correction is an edit of an address, not a retyping of one,
+// and retyping is how a second repository ends up under a name that already
+// means something.
+func (s *projectsScreen) openEdit(p projects.Project) {
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.CharLimit = 400
+	ti.Width = 52
+	ti.SetValue(p.Remote)
+	ti.CursorEnd()
+	ti.Focus()
+	s.fields = []textinput.Model{ti}
+	s.focus = 0
+	s.editID = p.ID
+	s.editing = true
+}
+
+func (s *projectsScreen) closeEdit() {
+	s.editing = false
+	s.editID = ""
+	s.fields = nil
+}
+
+// updateEdit drives the correction form.
+func (s *projectsScreen) updateEdit(r *root, msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc":
+		s.closeEdit()
+		return nil
+	case "enter":
+		remote := strings.TrimSpace(s.fields[0].Value())
+		id := s.editID
+		if remote == "" {
+			r.errText = "a project needs a remote"
+			return nil
+		}
+		s.closeEdit()
+		d := r.deps
+		return r.run("correcting the remote of "+id, true, func(ctx context.Context) error {
+			return d.ProjectSetRemote(ctx, id, remote)
+		})
+	}
+	var cmd tea.Cmd
+	s.fields[s.focus], cmd = s.fields[s.focus].Update(msg)
+	return cmd
 }
 
 func (s *projectsScreen) selected() (projects.Project, bool) {
@@ -117,6 +172,9 @@ func (s *projectsScreen) update(r *root, msg tea.Msg) tea.Cmd {
 	case tea.KeyMsg:
 		if s.adding {
 			return s.updateForm(r, msg)
+		}
+		if s.editing {
+			return s.updateEdit(r, msg)
 		}
 		if s.connectID != "" {
 			return s.updateConnect(msg)
@@ -210,6 +268,13 @@ func (s *projectsScreen) updateList(r *root, msg tea.KeyMsg) tea.Cmd {
 		if _, ok := s.selected(); ok {
 			s.confirm = true
 		}
+	case "e":
+		p, ok := s.selected()
+		if !ok || d.ProjectSetRemote == nil {
+			return nil
+		}
+		s.openEdit(p)
+		return textinput.Blink
 	case "u":
 		p, ok := s.selected()
 		if !ok || d.ProjectUse == nil {
@@ -277,12 +342,17 @@ func (s *projectsScreen) keys(r *root) string {
 	switch {
 	case s.adding:
 		return "enter add · tab field · esc cancel"
+	case s.editing:
+		return "enter save · esc cancel"
 	case s.connectID != "":
 		return "esc close"
 	case s.confirm:
 		return "y remove · n keep"
 	}
 	parts := []string{"a add"}
+	if r.deps.ProjectSetRemote != nil {
+		parts = append(parts, "e remote")
+	}
 	if r.deps.ProjectUse != nil {
 		parts = append(parts, "u use")
 	}
@@ -312,6 +382,16 @@ func (s *projectsScreen) view(r *root, w int) string {
 			b.WriteString(marker + styMuted.Render(pad(label, 8)) + styField.Render(s.fields[i].View()) + "\n")
 		}
 		b.WriteString("\n" + styBtn.Render("Add"))
+		return b.String()
+	}
+
+	if s.editing {
+		b.WriteString(styStrong.Render("Correct the remote of "+s.editID) + "\n")
+		b.WriteString(styMuted.Render(
+			"The registry is shared, so this applies to every backend. A host only this "+
+				"machine knows resolves nowhere else.") + "\n\n")
+		b.WriteString(styWorking.Render("▸ ") + styMuted.Render(pad("remote", 8)) + styField.Render(s.fields[0].View()) + "\n")
+		b.WriteString("\n" + styBtn.Render("Save"))
 		return b.String()
 	}
 

@@ -32,8 +32,23 @@
   a working-tree build can be installed at the same time; each keeps its own
   directory and its own name.
 
+- **`torio project set-remote <id> <remote>`.** Corrects the remote of a project
+  already on record, without removing the entry, the checkouts other guests
+  hold, or the deploy keys those guests had authorized. The registry is shared,
+  so the correction applies to every backend. The checkout on the selected
+  backend's guest is repointed when its origin still holds the remote being
+  replaced; any other origin is reported and left alone. The hub offers the same
+  correction on `e`, prefilled with what the record holds
+  ([ADR-0023](docs/adr/0023-recorded-remotes-are-resolvable-from-a-guest.md)).
+
 ### Fixed
 
+- **A host the guest cannot resolve is named as one.** A remote whose host only
+  the operator's machine knows, which is what a host-local SSH alias is, used to
+  fail as though an authorization were missing, and offered a deploy key to
+  authorize. Authorizing it changed nothing: the guest had never reached the
+  forge to present it. The run now reports the host that did not resolve and
+  names the command that corrects the record.
 - **The hub preflights a session before it opens one.** Opening an agent session
   or a shell from the project screen now runs the same checks
   `torio project agent` and `torio project shell` run, so a checkout that is not

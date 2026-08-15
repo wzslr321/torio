@@ -288,3 +288,86 @@ func TestFileValidateDoesNotLeakSecretShapedField(t *testing.T) {
 		})
 	}
 }
+
+// A remote that turned out to be wrong is corrected in place. Dropping the
+// entry to retype it loses the record while nothing has replaced it, and stops
+// on checkouts other guests still hold (ADR-0023).
+func TestWithUpdatedRemoteReplacesOneRecordedRemote(t *testing.T) {
+	f := File{
+		SchemaVersion: ConfigSchemaVersion,
+		Projects: []Project{
+			{ID: "demo", DisplayName: "Demo", Remote: "git@gh-demo:owner/demo.git"},
+			{ID: "other", DisplayName: "Other", Remote: "git@github.com:owner/other.git"},
+		},
+	}
+
+	out, err := f.WithUpdatedRemote("demo", "git@github.com:owner/demo.git", AddOptions{})
+	if err != nil {
+		t.Fatalf("WithUpdatedRemote() error = %v", err)
+	}
+
+	if got, want := out.Projects[0].Remote, "git@github.com:owner/demo.git"; got != want {
+		t.Errorf("remote = %q, want %q", got, want)
+	}
+	if got, want := out.Projects[0].DisplayName, "Demo"; got != want {
+		t.Errorf("display name = %q, want it untouched %q", got, want)
+	}
+	if got, want := out.Projects[1].Remote, "git@github.com:owner/other.git"; got != want {
+		t.Errorf("the other project's remote = %q, want it untouched %q", got, want)
+	}
+	// The document is a value: correcting one entry must not have rewritten the
+	// one the caller still holds.
+	if got := f.Projects[0].Remote; got != "git@gh-demo:owner/demo.git" {
+		t.Errorf("the input document was mutated: remote = %q", got)
+	}
+}
+
+func TestWithUpdatedRemoteReportsAnUnknownProject(t *testing.T) {
+	f := File{SchemaVersion: ConfigSchemaVersion}
+
+	if _, err := f.WithUpdatedRemote("demo", "git@github.com:owner/demo.git", AddOptions{}); !errors.Is(err, ErrProjectNotFound) {
+		t.Fatalf("error = %v, want ErrProjectNotFound", err)
+	}
+}
+
+// The same rule the addition path holds to: two projects sharing one remote
+// means the second workspace shadows the first, so it takes a deliberate
+// decision rather than arriving through a correction.
+func TestWithUpdatedRemoteRefusesADuplicateRemote(t *testing.T) {
+	f := File{
+		SchemaVersion: ConfigSchemaVersion,
+		Projects: []Project{
+			{ID: "demo", DisplayName: "Demo", Remote: "git@github.com:owner/demo.git"},
+			{ID: "other", DisplayName: "Other", Remote: "git@github.com:owner/other.git"},
+		},
+	}
+
+	_, err := f.WithUpdatedRemote("demo", "git@github.com:owner/other.git", AddOptions{})
+	if !errors.Is(err, ErrDuplicateRemote) {
+		t.Fatalf("error = %v, want ErrDuplicateRemote", err)
+	}
+
+	out, err := f.WithUpdatedRemote("demo", "git@github.com:owner/other.git", AddOptions{AllowDuplicateRemote: true})
+	if err != nil {
+		t.Fatalf("WithUpdatedRemote(allowed) error = %v", err)
+	}
+	if got, want := out.Projects[0].Remote, "git@github.com:owner/other.git"; got != want {
+		t.Errorf("remote = %q, want %q", got, want)
+	}
+}
+
+// An invalid remote is refused by the same validation an addition runs, so a
+// correction can never write what an addition could not.
+func TestWithUpdatedRemoteValidatesTheReplacement(t *testing.T) {
+	f := File{
+		SchemaVersion: ConfigSchemaVersion,
+		Projects:      []Project{{ID: "demo", DisplayName: "Demo", Remote: "git@github.com:owner/demo.git"}},
+	}
+
+	if _, err := f.WithUpdatedRemote("demo", "https://user:token@example.test/x.git", AddOptions{}); err == nil {
+		t.Fatal("a remote carrying a credential was accepted")
+	}
+	if _, err := f.WithUpdatedRemote("demo", "", AddOptions{}); err == nil {
+		t.Fatal("an empty remote was accepted")
+	}
+}

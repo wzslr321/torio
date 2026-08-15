@@ -352,6 +352,88 @@ func (m *Manager) Use(ctx context.Context, id string) (UseReport, error) {
 // the config entry only after that succeeded, so an interruption always leaves
 // the config entry behind — the marker a rerun needs to finish the removal.
 // The checkout is never touched, and the report says so.
+// SetRemote corrects the remote of a registered project (ADR-0023).
+//
+// The record is what the operator asked to change and is what always changes.
+// The checkout is a second copy of the same fact, so it follows only where it
+// still holds the remote being replaced: an origin pointing anywhere else is
+// somebody's deliberate act, and repointing it would be Torio editing a working
+// tree it cannot vouch for. Every other guest's checkout of the same project is
+// out of reach from here and stays as it is until the next command runs there.
+//
+// Nothing is removed. The entry keeps its id and its display name, so the
+// derived paths, the registrations and the per-guest deploy keys all still name
+// the same project.
+func (m *Manager) SetRemote(ctx context.Context, id, remote string) (SetRemoteReport, error) {
+	const op = "set_remote"
+	var report SetRemoteReport
+
+	entry, workspace, err := m.resolve(op, id)
+	if err != nil {
+		return report, err
+	}
+	report.PreviousRemote = entry.Remote
+	corrected := entry
+	corrected.Remote = remote
+	report.Project = view(corrected, workspace)
+
+	// The document decides whether the replacement is writable at all, before
+	// any guest is touched: it runs the addition's own validation, so a
+	// correction can never record what an addition would have refused.
+	if err := m.registry.Update(func(current config.File) (config.File, error) {
+		return current.WithUpdatedRemote(id, remote, config.AddOptions{})
+	}); err != nil {
+		if errors.Is(err, config.ErrDuplicateProjectID) || errors.Is(err, config.ErrDuplicateRemote) {
+			return report, &Error{Op: op, Kind: KindConflict, Err: err}
+		}
+		if errors.Is(err, config.ErrProjectNotFound) {
+			return report, &Error{Op: op, Kind: KindConflict, Err: err}
+		}
+		return report, &Error{Op: op, Kind: KindConfigWrite, Err: err}
+	}
+
+	// From here the record is already corrected. A guest that cannot be reached
+	// is reported, never rolled back: the record was the thing asked for, and
+	// undoing it would leave the operator with the remote they just told Torio
+	// was wrong.
+	if err := m.requirePrepared(ctx, op); err != nil {
+		report.Notes = append(report.Notes, "checkout_untouched_guest_unavailable")
+		return report, nil
+	}
+	checkout, err := m.inspectCheckout(ctx, op, workspace, entry.Remote)
+	if err != nil {
+		report.Notes = append(report.Notes, "checkout_untouched_guest_unavailable")
+		return report, nil
+	}
+	switch {
+	case !checkout.PathExists || !checkout.Repository:
+		report.Notes = append(report.Notes, "checkout_absent")
+		return report, nil
+	case !checkout.OriginMatches:
+		report.Notes = append(report.Notes, "checkout_origin_differs")
+		return report, nil
+	}
+
+	// Plainly as the agent identity, without the transport environment the
+	// clone and the readability preflight carry: setting a URL rewrites the
+	// checkout's own configuration and reaches no remote.
+	if err := m.mustRun(ctx, op, KindGit, "repoint the checkout origin",
+		guestexec.UserExecAs(m.identity().GuestUser, "git", "-C", workspace, "remote", "set-url", "origin", remote)); err != nil {
+		return report, err
+	}
+	final, err := m.inspectCheckout(ctx, op, workspace, remote)
+	if err != nil {
+		return report, err
+	}
+	if !final.OriginMatches {
+		return report, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf(
+			"the checkout for %q still does not carry the corrected remote", id)}
+	}
+	report.CheckoutRepointed = true
+	report.Notes = append(report.Notes, "checkout_repointed")
+	return report, nil
+}
+
 func (m *Manager) Remove(ctx context.Context, id string) (RemoveReport, error) {
 	const op = "remove"
 	var report RemoveReport
@@ -707,7 +789,39 @@ func (m *Manager) preflightRemote(ctx context.Context, op, remote, keyPath strin
 	if err != nil {
 		return false, err
 	}
+	if res.ExitCode != 0 && mentionsUnresolvedHost(res.Stderr) {
+		return false, unresolvedHostError(op, remote)
+	}
 	return res.ExitCode == 0, nil
+}
+
+// unresolvedHostMarker is what SSH prints when the name in a remote is one the
+// guest has no way to look up. It is matched rather than parsed: the host it
+// names is already known from the remote, and the rest of the line is a
+// resolver diagnostic that varies.
+const unresolvedHostMarker = "Could not resolve hostname"
+
+func mentionsUnresolvedHost(stderr []byte) bool {
+	return bytes.Contains(stderr, []byte(unresolvedHostMarker))
+}
+
+// unresolvedHostError separates a host the guest never reached from a remote it
+// was not allowed to read.
+//
+// The two used to answer alike, and the answer was the wrong one: an operator
+// told to authorize a deploy key authorizes it, reruns, and gets the same
+// refusal, because nothing was ever presented to the forge. A host only the
+// operator's own machine knows is what this looks like from inside a VM, and
+// the record is the thing to correct (ADR-0023).
+func unresolvedHostError(op, remote string) error {
+	host := classifyRemote(remote).Host
+	if host == "" {
+		host = remote
+	}
+	return &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf(
+		"the guest cannot resolve %q, so the remote on record names a host it has no way to reach; "+
+			"a host-local SSH alias looks like this from inside the VM. Correct the record with `torio project set-remote <id> <remote>`",
+		host)}
 }
 
 // unreadableRemoteError says what the operator has to do next, and says it

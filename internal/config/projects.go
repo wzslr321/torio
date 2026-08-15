@@ -122,6 +122,51 @@ func (f File) WithProject(p Project, opts AddOptions) (_ File, err error) {
 	return out, nil
 }
 
+// WithUpdatedRemote returns a copy of f with the remote of project id replaced.
+//
+// It is the correction path for a record whose remote turned out to name
+// something the guests cannot reach (ADR-0023). Only the remote moves: the id
+// is what every derived path and every checkout is named from, and the display
+// name is what the backend's own registry knows the project by, so a
+// correction that quietly changed either would be a different project under an
+// unchanged name.
+//
+// It validates exactly what an addition validates, including the duplicate
+// remote rule, so a correction can never write a document an addition could
+// not have written.
+func (f File) WithUpdatedRemote(id, remote string, opts AddOptions) (_ File, err error) {
+	defer func() { err = redactErr(err) }()
+
+	updated := make([]Project, 0, len(f.Projects))
+	found := false
+	for _, p := range f.Projects {
+		if p.ID != id {
+			if !opts.AllowDuplicateRemote && p.Remote == remote {
+				return File{}, fmt.Errorf("%w: project %q", ErrDuplicateRemote, p.ID)
+			}
+			updated = append(updated, p)
+			continue
+		}
+		found = true
+		p.Remote = remote
+		if err := p.validate(); err != nil {
+			return File{}, err
+		}
+		updated = append(updated, p)
+	}
+	if !found {
+		return File{}, fmt.Errorf("%w: %q", ErrProjectNotFound, id)
+	}
+
+	out := f
+	out.SchemaVersion = ConfigSchemaVersion
+	out.Projects = updated
+	if err := out.Validate(); err != nil {
+		return File{}, err
+	}
+	return out, nil
+}
+
 // WithoutProject returns a copy of f with project id removed. It is a value
 // operation like WithProject, and it reports ErrProjectNotFound when the ID is
 // absent so a caller can tell "already gone" from "removed now" — a rerun after

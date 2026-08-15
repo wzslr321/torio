@@ -60,6 +60,12 @@ var _ SSHAgent = (*fakeAgent)(nil)
 // be read: a diagnostic that quotes the URL, credential and all.
 const remoteFailureStderr = "fatal: Authentication failed for 'https://user:" + testSecret + "@github.invalid/owner/demo.git/'"
 
+// unresolvableHostStderr is what a guest answers when the recorded host is a
+// name only the operator's machine knows. Read from a codex guest on
+// 2026-08-15 against a remote carrying a host-local SSH alias.
+const unresolvableHostStderr = "ssh: Could not resolve hostname gh-demo: Temporary failure in name resolution\n" +
+	"fatal: Could not read from remote repository."
+
 type fakeCall struct {
 	argv []string
 }
@@ -116,6 +122,9 @@ type fakeGuest struct {
 	// whether the noninteractive preflight can read it.
 	remote         string
 	remoteReadable bool
+	// remoteUnresolvable models a host the guest has no way to reach at all,
+	// which is a different answer from a remote it may not read.
+	remoteUnresolvable bool
 
 	// deployKeyExists is the guest-side deploy key at testKeyPath, and
 	// keyAuthorized is whether the forge accepts it. They are separate because
@@ -254,8 +263,17 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 	case strings.Contains(joined, "git config --global includeIf.gitdir:"+testPath+"/.path"):
 		return okResult(""), nil
 
+	// --- correcting the recorded remote ---
+	case strings.Contains(joined, "git -C "+testPath+" remote set-url origin "):
+		_, url, _ := strings.Cut(joined, "remote set-url origin ")
+		f.origin = strings.TrimSpace(url)
+		return okResult(""), nil
+
 	// --- remote preflight and clone ---
 	case strings.Contains(joined, "git ls-remote -- "+f.remote+" HEAD"):
+		if f.remoteUnresolvable {
+			return exitResult(128, "", unresolvableHostStderr), nil
+		}
 		if !f.canReadRemote(joined) {
 			return exitResult(128, "", remoteFailureStderr), nil
 		}

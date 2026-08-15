@@ -54,6 +54,11 @@ type fakeProjectService struct {
 	shellSession projects.ShellSession
 	shellErr     error
 
+	setRemoteID     string
+	setRemoteURL    string
+	setRemoteReport projects.SetRemoteReport
+	setRemoteErr    error
+
 	serviceEnv      projects.ServiceEnvCheck
 	serviceEnvErr   error
 	serviceEnvCalls int
@@ -79,6 +84,11 @@ func (f *fakeProjectService) Use(_ context.Context, id string) (projects.UseRepo
 func (f *fakeProjectService) Remove(_ context.Context, id string) (projects.RemoveReport, error) {
 	f.removeID = id
 	return f.removeReport, f.removeErr
+}
+
+func (f *fakeProjectService) SetRemote(_ context.Context, id, remote string) (projects.SetRemoteReport, error) {
+	f.setRemoteID, f.setRemoteURL = id, remote
+	return f.setRemoteReport, f.setRemoteErr
 }
 
 func (f *fakeProjectService) EnterPreflight(_ context.Context, id string) (projects.EnterSession, error) {
@@ -1000,6 +1010,88 @@ func TestProjectAddNeverEchoesACredentialShapedRemote(t *testing.T) {
 		}
 		if strings.Contains(stdout+stderr, knownShapeCanary) {
 			t.Errorf("%v: output leaked the credential-shaped remote: %q %q", args, stdout, stderr)
+		}
+	}
+}
+
+// Correcting a remote is its own command because removing and re-adding is not
+// a correction: it drops the record first and then stops on the checkouts other
+// guests hold (ADR-0023).
+func TestProjectSetRemoteCorrectsTheRecord(t *testing.T) {
+	service := &fakeProjectService{
+		setRemoteReport: projects.SetRemoteReport{
+			Project:           sampleProject(),
+			PreviousRemote:    "git@gh-torio:wzslr321/torio.git",
+			CheckoutRepointed: true,
+			Notes:             []string{"checkout_repointed"},
+		},
+	}
+
+	code, stdout, stderr := runProjectCLI(t, []string{
+		"project", "set-remote", "torio", "git@github.com:wzslr321/torio.git",
+	}, service)
+
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	if service.setRemoteID != "torio" {
+		t.Errorf("corrected %q, want the id given", service.setRemoteID)
+	}
+	if got, want := service.setRemoteURL, "git@github.com:wzslr321/torio.git"; got != want {
+		t.Errorf("corrected to %q, want %q", got, want)
+	}
+	if !strings.Contains(stdout, "git@github.com:wzslr321/torio.git") {
+		t.Errorf("stdout = %q, want it to name the corrected remote", stdout)
+	}
+}
+
+func TestProjectSetRemoteEmitsOneEnvelope(t *testing.T) {
+	service := &fakeProjectService{
+		setRemoteReport: projects.SetRemoteReport{
+			Project:        sampleProject(),
+			PreviousRemote: "git@gh-torio:wzslr321/torio.git",
+			Notes:          []string{"checkout_absent"},
+		},
+	}
+
+	code, stdout, _ := runProjectCLI(t, []string{
+		"--json", "project", "set-remote", "torio", "git@github.com:wzslr321/torio.git",
+	}, service)
+
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Remote            string   `json:"remote"`
+			PreviousRemote    string   `json:"previous_remote"`
+			CheckoutRepointed bool     `json:"checkout_repointed"`
+			Notes             []string `json:"notes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("stdout is not one envelope: %v; got %q", err, stdout)
+	}
+	if !env.OK {
+		t.Errorf("envelope ok = false, want true")
+	}
+	if got, want := env.Data.PreviousRemote, "git@gh-torio:wzslr321/torio.git"; got != want {
+		t.Errorf("previous_remote = %q, want %q", got, want)
+	}
+	if env.Data.CheckoutRepointed {
+		t.Error("checkout_repointed = true, want false when no checkout was there")
+	}
+}
+
+func TestProjectSetRemoteRequiresBothArguments(t *testing.T) {
+	for _, args := range [][]string{
+		{"project", "set-remote"},
+		{"project", "set-remote", "torio"},
+	} {
+		code, _, _ := runProjectCLI(t, args, &fakeProjectService{})
+		if code != int(ExitUsage) {
+			t.Errorf("%v: exit = %d, want %d", args, code, ExitUsage)
 		}
 	}
 }

@@ -203,6 +203,10 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 			_, err := projectSvc.Remove(ctx, id)
 			return err
 		},
+		ProjectSetRemote: func(ctx context.Context, id, remote string) error {
+			_, err := projectSvc.SetRemote(ctx, id, remote)
+			return err
+		},
 
 		Poll: func(ctx context.Context) (status.Report, error) {
 			return a.newPoller().Poll(ctx)
