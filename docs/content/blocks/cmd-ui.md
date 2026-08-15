@@ -35,3 +35,8 @@ quits.
   are listed on either side. The checkouts are not shared, so opening a project
   the new box has never held materializes its checkout first, from the remote on
   record, and then opens the session.
+- A rebind also reconciles the Second Brain on both sides of the move: the box
+  being left is synced before the binding changes, the box arrived at right
+  after, and the note under the header says what each side carried, in counts.
+  Neither sync can fail the rebind — a box that cannot sync is reported in that
+  note and the move lands anyway.

@@ -102,10 +102,15 @@ type execDoneMsg struct {
 
 // rebindMsg is a finished rebind (ADR-0021): the seams of the new binding, or
 // the error that left the old one in place.
+//
+// brainNotes is what reconciling the Second Brain on the way said, one line
+// per side, counts only (ADR-0026). The side being left is synced before the
+// binding moves, so a failed rebind still carries that side's outcome.
 type rebindMsg struct {
-	name string
-	deps Deps
-	err  error
+	name       string
+	deps       Deps
+	err        error
+	brainNotes []string
 }
 
 type tickMsg time.Time
@@ -341,19 +346,82 @@ func (r *root) chooseKey(msg tea.KeyMsg) tea.Cmd {
 
 // rebind runs the rebind seam off the ui loop, holding the busy lock the way
 // any operation does.
+//
+// The Second Brain of the box being left is reconciled before the binding
+// moves and the new box's replica right after it does, because a rebind is the
+// operator's attention crossing from one box to another and the one Brain's
+// promise is only as good as both sides having synced (ADR-0026). Neither sync
+// may fail the rebind: the operator asked to move, and the Brain not moving
+// with them is something to say, not a reason to hold them on the box they
+// were leaving.
 func (r *root) rebind(name string) tea.Cmd {
 	if r.busy != "" {
 		return nil
 	}
 	r.busy = "rebinding to " + name
+	if r.deps.BrainSync != nil {
+		r.busy += ", reconciling the Second Brain on the way"
+	}
 	r.busyStart = time.Now()
 	r.errText = ""
 	r.errDetail = ""
 	r.note = ""
 	d := r.deps
 	return func() tea.Msg {
+		var notes []string
+		if d.BrainSync != nil {
+			notes = append(notes, syncBrainForRebind(d, d.Backend))
+		}
 		nd, err := d.Rebind(name)
-		return rebindMsg{name: name, deps: nd, err: err}
+		if err != nil {
+			return rebindMsg{name: name, err: err, brainNotes: notes}
+		}
+		if nd.BrainSync != nil {
+			// The new binding carries no context of its own yet; the program's
+			// is the one every operation is bounded from.
+			nd2 := nd
+			nd2.ctx = d.ctx
+			notes = append(notes, syncBrainForRebind(nd2, name))
+		}
+		return rebindMsg{name: name, deps: nd, brainNotes: notes}
+	}
+}
+
+// syncBrainForRebind reconciles one side and answers in one line. It is
+// bounded the way any long operation is: a sync commits, bundles, carries and
+// merges, and an unbounded one would hold the rebind on a box that stopped
+// answering.
+func syncBrainForRebind(d Deps, backend string) string {
+	timeout := d.LongTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(d.parentContext(), timeout)
+	defer cancel()
+	rep, err := d.BrainSync(ctx)
+	return rebindBrainNote(backend, rep, err)
+}
+
+// rebindBrainNote is one side of the reconciliation as one line. Counts and
+// the host vault path are all it may carry: a note is rendered, and the
+// transport invariant keeps vault content out of everything the hub shows
+// (ADR-0025).
+func rebindBrainNote(backend string, rep brain.SyncReport, err error) string {
+	prefix := "brain on " + backend + ": "
+	switch {
+	case err != nil:
+		return prefix + "not reconciled (" + redact.String(err.Error()) + ")"
+	case rep.Conflicted():
+		// The conflict is resolved in the host vault with Git (ADR-0025);
+		// naming the fact without the path would say a problem exists and not
+		// where it is settled.
+		return prefix + "conflict, resolve in " + rep.HubPath
+	case rep.HubCreated:
+		return prefix + "host vault created from this replica"
+	case rep.ToHub == 0 && rep.ToGuest == 0:
+		return prefix + "level with the host vault"
+	default:
+		return prefix + fmt.Sprintf("%d to the host, %d back", rep.ToHub, rep.ToGuest)
 	}
 }
 
@@ -500,8 +568,12 @@ func (r *root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case rebindMsg:
 		r.busy = ""
+		brainNote := strings.Join(msg.brainNotes, " · ")
 		if msg.err != nil {
 			r.errText = fmt.Sprintf("rebinding to %s: %s", msg.name, redact.String(msg.err.Error()))
+			// The box being left was reconciled before the move was refused;
+			// that outcome is kept, or the sync happened and nothing says so.
+			r.note = brainNote
 			return r, nil
 		}
 		nd := msg.deps
@@ -520,6 +592,9 @@ func (r *root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		r.brain = brainScreen{}
 		r.serve = newServeScreen()
 		r.note = "rebound to " + msg.name
+		if brainNote != "" {
+			r.note += " · " + brainNote
+		}
 		return r, tea.Batch(r.probeFacts(), r.enter())
 
 	case specMsg:

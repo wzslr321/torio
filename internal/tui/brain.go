@@ -61,7 +61,10 @@ func (s *brainScreen) update(r *root, msg tea.Msg) tea.Cmd {
 		case "y":
 			if d.BrainSync != nil {
 				// Long: it commits, bundles, carries and merges (ADR-0025).
-				return r.run("reconciling the Second Brain", true, d.BrainSync)
+				return r.run("reconciling the Second Brain", true, func(ctx context.Context) error {
+					_, err := d.BrainSync(ctx)
+					return err
+				})
 			}
 		}
 	}

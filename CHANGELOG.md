@@ -43,6 +43,15 @@
   was, and names the host vault, where it is resolved with ordinary Git.
   `brain status` now reports how far the replica is from the hub
   ([ADR-0025](docs/adr/0025-one-second-brain-with-the-host-as-its-hub.md)).
+- **A rebind reconciles the Second Brain on both sides of the move.** Pressing
+  `b` and picking another backend syncs the Brain of the box being left before
+  the binding changes and the Brain of the box arrived at right after, so the
+  notes the operator just wrote are on the box their attention lands on. The
+  hub's note reports what each side carried, in counts. Neither sync can fail
+  the rebind: a box that cannot sync — stopped, or its vault uninitialized — is
+  reported in that note and the move lands anyway, and a merge conflict names
+  the host vault where it is resolved
+  ([ADR-0026](docs/adr/0026-a-rebind-reconciles-the-second-brain-it-crosses.md)).
 - **Opening a session materializes the checkout it needs.** The registry is
   shared by every instance and the checkouts are not, so a project attached
   under one backend is registered and absent under the next. Pressing enter on

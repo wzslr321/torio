@@ -897,6 +897,151 @@ func TestNoChooserWhenTheBuildOffersNoRebind(t *testing.T) {
 	}
 }
 
+// A rebind is the operator's attention leaving one box for another, and the
+// one Brain's promise is only as good as both boxes having synced (ADR-0025).
+// The hub reconciles the box it is leaving and the one it arrives at, and its
+// note says what each side did, in counts (ADR-0026).
+func TestRebindReconcilesTheBrainOnBothSides(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.Backends = []string{"claude-code", "hermes"}
+	oldSynced, newSynced := 0, 0
+	d.BrainSync = func(context.Context) (brain.SyncReport, error) {
+		oldSynced++
+		return brain.SyncReport{ToHub: 2}, nil
+	}
+	next := &fakeDeps{boxState: lima.StateRunning}
+	d.Rebind = func(name string) (Deps, error) {
+		nd := next.deps()
+		nd.Backend = name
+		nd.BrainSync = func(context.Context) (brain.SyncReport, error) {
+			newSynced++
+			return brain.SyncReport{ToGuest: 1}, nil
+		}
+		return nd, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+
+	press(t, r, "b")
+	press(t, r, "k")
+	press(t, r, "enter")
+
+	if oldSynced != 1 || newSynced != 1 {
+		t.Fatalf("synced the old side %d times and the new side %d, want 1 and 1", oldSynced, newSynced)
+	}
+	if r.deps.Backend != "claude-code" {
+		t.Fatalf("the binding did not move: %q", r.deps.Backend)
+	}
+	if !strings.Contains(r.note, "rebound to claude-code") {
+		t.Errorf("note = %q, want the rebind named first", r.note)
+	}
+	if !strings.Contains(r.note, "hermes") || !strings.Contains(r.note, "2 to the host") {
+		t.Errorf("note = %q, want the side that was left and what it carried", r.note)
+	}
+	if !strings.Contains(r.note, "1 back") {
+		t.Errorf("note = %q, want what the new side received", r.note)
+	}
+}
+
+// The Brain not moving with the operator is something to say, not a reason to
+// hold them on the box they were leaving: a sync failure is the note's
+// content, never the rebind's failure (ADR-0026).
+func TestRebindStillRebindsWhenTheBrainCannotSync(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.Backends = []string{"claude-code", "hermes"}
+	d.BrainSync = func(context.Context) (brain.SyncReport, error) {
+		return brain.SyncReport{}, errors.New("verify the box first")
+	}
+	next := &fakeDeps{boxState: lima.StateRunning}
+	d.Rebind = func(name string) (Deps, error) {
+		nd := next.deps()
+		nd.Backend = name
+		return nd, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+
+	press(t, r, "b")
+	press(t, r, "k")
+	press(t, r, "enter")
+
+	if r.deps.Backend != "claude-code" {
+		t.Fatalf("a sync failure held the binding on %q", r.deps.Backend)
+	}
+	if r.errText != "" {
+		t.Errorf("a sync failure became a rebind failure: %q", r.errText)
+	}
+	if !strings.Contains(r.note, "not reconciled") || !strings.Contains(r.note, "verify the box first") {
+		t.Errorf("note = %q, want the sync outcome and its reason", r.note)
+	}
+}
+
+// A rebind that fails leaves the old binding in place, but the box being left
+// had already been reconciled on the way out; that outcome is kept, and the
+// side never arrived at is never synced.
+func TestFailedRebindKeepsTheOldBindingAndItsBrainNote(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.Backends = []string{"claude-code", "hermes"}
+	synced := 0
+	d.BrainSync = func(context.Context) (brain.SyncReport, error) {
+		synced++
+		return brain.SyncReport{}, nil
+	}
+	d.Rebind = func(string) (Deps, error) {
+		return Deps{}, errors.New("instance torio-claude-code has no box")
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+
+	press(t, r, "b")
+	press(t, r, "k")
+	press(t, r, "enter")
+
+	if synced != 1 {
+		t.Fatalf("the side being left was synced %d times, want 1", synced)
+	}
+	if r.deps.Backend != "hermes" {
+		t.Errorf("a failed rebind moved the binding to %q", r.deps.Backend)
+	}
+	if !strings.Contains(r.errText, "has no box") {
+		t.Errorf("error text = %q, want it to carry the cause", r.errText)
+	}
+	if !strings.Contains(r.note, "hermes") {
+		t.Errorf("note = %q, want the outbound reconciliation kept", r.note)
+	}
+}
+
+// A conflict stops one direction and is resolved in the host vault with Git
+// (ADR-0025), so the note has to name that path or the operator knows a
+// conflict exists and not where it is settled.
+func TestRebindNamesTheHostVaultOnAConflict(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.Backends = []string{"claude-code", "hermes"}
+	next := &fakeDeps{boxState: lima.StateRunning}
+	d.Rebind = func(name string) (Deps, error) {
+		nd := next.deps()
+		nd.Backend = name
+		nd.BrainSync = func(context.Context) (brain.SyncReport, error) {
+			return brain.SyncReport{ConflictInbound: true, HubPath: "/home/op/.local/share/torio/brain/vault"}, nil
+		}
+		return nd, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+
+	press(t, r, "b")
+	press(t, r, "k")
+	press(t, r, "enter")
+
+	if !strings.Contains(r.note, "conflict") || !strings.Contains(r.note, "/home/op/.local/share/torio/brain/vault") {
+		t.Errorf("note = %q, want the conflict and the vault it is resolved in", r.note)
+	}
+}
+
 // The header must not wait on the guest. A box that is running is knowable in
 // one host command, and holding that back until several guest commands finish
 // is what leaves an operator looking at an empty frame.
@@ -1295,9 +1440,9 @@ func TestBrainTabSyncsWithTheHostVault(t *testing.T) {
 	f := &fakeDeps{boxState: lima.StateRunning}
 	d := f.deps()
 	synced := 0
-	d.BrainSync = func(context.Context) error {
+	d.BrainSync = func(context.Context) (brain.SyncReport, error) {
 		synced++
-		return nil
+		return brain.SyncReport{}, nil
 	}
 	r := newRoot(d)
 	drain(t, r, r.probeFacts())
