@@ -1287,3 +1287,45 @@ func TestProjectsDoesNotMaterializeOverDriftItMustNotTouch(t *testing.T) {
 		t.Errorf("error text = %q, want the drift reported", r.errText)
 	}
 }
+
+// One Brain means the hub has to be able to make this box agree with the rest,
+// or the operator is sent to a command for the one thing the Brain tab is about
+// (ADR-0025).
+func TestBrainTabSyncsWithTheHostVault(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	synced := 0
+	d.BrainSync = func(context.Context) error {
+		synced++
+		return nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenBrain)
+	drain(t, r, r.brain.load(d))
+
+	press(t, r, "y")
+
+	if synced != 1 {
+		t.Errorf("sync ran %d times, want 1", synced)
+	}
+	if !strings.Contains(r.brain.keys(r), "y sync") {
+		t.Errorf("footer = %q, want the sync key offered", r.brain.keys(r))
+	}
+}
+
+// A build with no sync seam does not offer the key.
+func TestBrainTabOffersNoSyncWithoutTheSeam(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.BrainSync = nil
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenBrain)
+
+	press(t, r, "y")
+
+	if strings.Contains(r.brain.keys(r), "y sync") {
+		t.Errorf("footer = %q, want no sync key", r.brain.keys(r))
+	}
+}

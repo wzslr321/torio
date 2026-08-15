@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -79,14 +81,26 @@ type fakeGuest struct {
 	transportErr       error
 	calls              []fakeCall
 	copies             []fakeCopy
-	copyToErr          error
-	importFiles        int
-	privateExists      map[string]bool
-	pristineTree       bool
-	exchangedEmpty     bool
-	cancel             context.CancelFunc
-	cancelOn           string
-	failExchangeAt     int
+	copyFromErr        error
+	// carriedBundle is the file name CopyFromGuest writes into the host staging
+	// directory, empty for a transport that carries nothing.
+	carriedBundle string
+	copyToErr     error
+	// behindHub is what `rev-list --count main..refs/torio/hub` prints, and
+	// guestMergeConflicts makes the inbound merge report a conflict.
+	behindHub           string
+	aheadOfHub          string
+	hubRefKnown         bool
+	syncStagingShared   bool
+	guestMergeConflicts bool
+
+	importFiles    int
+	privateExists  map[string]bool
+	pristineTree   bool
+	exchangedEmpty bool
+	cancel         context.CancelFunc
+	cancelOn       string
+	failExchangeAt int
 }
 
 func readyFake() *fakeGuest {
@@ -101,6 +115,8 @@ func readyFake() *fakeGuest {
 		totalBytes:   4096,
 		importFiles:  2,
 		failContains: map[string]int{},
+		behindHub:    "0",
+		aheadOfHub:   "0",
 	}
 }
 
@@ -185,6 +201,20 @@ func (f *fakeGuest) CopyToGuest(_ context.Context, hostSourceDir, guestDestinati
 	return f.copyToErr
 }
 
+// CopyFromGuest records the direction and, when a test asked for one, writes
+// the bundle the host side then reads. Writing a real file matters: the sync
+// checks that what it asked for actually arrived.
+func (f *fakeGuest) CopyFromGuest(_ context.Context, guestSourceDir, hostDestinationDir, guestHome string) error {
+	f.copies = append(f.copies, fakeCopy{direction: "from_guest", host: hostDestinationDir, guest: guestSourceDir, home: guestHome})
+	if f.copyFromErr != nil {
+		return f.copyFromErr
+	}
+	if f.carriedBundle == "" {
+		return nil
+	}
+	return os.WriteFile(filepath.Join(hostDestinationDir, f.carriedBundle), []byte("bundle"), 0o600)
+}
+
 func (f *fakeGuest) route(ctx context.Context, stdin []byte, argv []string) (execx.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return execx.Result{ExitCode: -1}, err
@@ -210,6 +240,42 @@ func (f *fakeGuest) route(ctx context.Context, stdin []byte, argv []string) (exe
 
 	switch {
 	case strings.Contains(joined, "sudo -n -- true"):
+		return okResult(""), nil
+
+	// --- reconciliation with the hub vault (ADR-0025) ---
+	case strings.Contains(joined, "install -d -o "+fakeGuestSessionUser+" -g "+lima.TorioProjectsGroup+" -m 2770 "+syncStagingPath):
+		return okResult(""), nil
+	case strings.Contains(joined, "rm -rf -- "+syncStagingPath):
+		return okResult(""), nil
+	case strings.Contains(joined, "chmod 2770 "+syncStagingPath):
+		f.syncStagingShared = true
+		return okResult(""), nil
+	case strings.Contains(joined, "bundle create"):
+		return okResult(""), nil
+	case strings.Contains(joined, "bundle verify"):
+		return okResult(""), nil
+	case strings.Contains(joined, "git -C "+Path) && strings.Contains(joined, "add -A"):
+		return okResult(""), nil
+	case strings.Contains(joined, "git -C "+Path) && strings.Contains(joined, " commit -q -m "+syncCommitMessage):
+		f.gitDirty = false
+		return okResult(""), nil
+	case strings.Contains(joined, "git -C "+Path+" fetch --quiet"):
+		return okResult(""), nil
+	case strings.Contains(joined, "git -C "+Path+" rev-parse --verify --quiet "+hubRef):
+		if !f.hubRefKnown {
+			return exitResult(1, "", ""), nil
+		}
+		return okResult("0123456789abcdef\n"), nil
+	case strings.Contains(joined, "git -C "+Path+" rev-list --count "+hubBranch+".."+hubRef):
+		return okResult(f.behindHub + "\n"), nil
+	case strings.Contains(joined, "git -C "+Path+" rev-list --count "+hubRef+".."+hubBranch):
+		return okResult(f.aheadOfHub + "\n"), nil
+	case strings.Contains(joined, "git -C "+Path) && strings.Contains(joined, "merge --abort"):
+		return okResult(""), nil
+	case strings.Contains(joined, "git -C "+Path) && strings.Contains(joined, "merge --no-edit"):
+		if f.guestMergeConflicts {
+			return exitResult(1, "", "CONFLICT"), nil
+		}
 		return okResult(""), nil
 	case strings.Contains(joined, "mkdir -m 0700 "+lockPath):
 		if f.lockHeld {
@@ -657,6 +723,10 @@ func (g *blockingGuest) SSHInput(ctx context.Context, stdin []byte, command []st
 
 func (g *blockingGuest) CopyToGuest(ctx context.Context, hostSourceDir, guestDestinationDir, guestHome string) error {
 	return g.base.CopyToGuest(ctx, hostSourceDir, guestDestinationDir, guestHome)
+}
+
+func (g *blockingGuest) CopyFromGuest(ctx context.Context, guestSourceDir, hostDestinationDir, guestHome string) error {
+	return g.base.CopyFromGuest(ctx, guestSourceDir, hostDestinationDir, guestHome)
 }
 
 func (g *blockingGuest) block(command []string) {

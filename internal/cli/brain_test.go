@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -34,10 +35,64 @@ func TestBrainHelpNamesNoBoxAndNoGuestPath(t *testing.T) {
 	}
 }
 
-// TestBrainStatusPrintsTheCopyOutCommandForThisBox is the other half: the
-// instruction did not disappear, it moved to where both values are known.
-func TestBrainStatusPrintsTheCopyOutCommandForThisBox(t *testing.T) {
-	svc := &fakeBrainService{statusReport: brain.StatusReport{State: brain.StateInitialized, Path: "/home/claude/brain"}}
+// TestBrainStatusSaysWhereThisReplicaStands is the other half: the instruction
+// did not disappear, it moved to where the values are known. What it says moved
+// too. There is one Brain and this box holds a replica of it (ADR-0025), so the
+// useful next step is reconciling, not the copy-out an operator used to compose
+// by hand.
+func TestBrainStatusSaysWhereThisReplicaStands(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		report brain.StatusReport
+		want   string
+	}{
+		{
+			name:   "never reconciled",
+			report: brain.StatusReport{State: brain.StateInitialized, Path: "/home/claude/brain"},
+			want:   "torio brain sync",
+		},
+		{
+			name: "level with the hub",
+			report: brain.StatusReport{
+				State: brain.StateInitialized, Path: "/home/claude/brain", HubRefKnown: true,
+			},
+			want: "level with the host vault",
+		},
+		{
+			name: "out of step",
+			report: brain.StatusReport{
+				State: brain.StateInitialized, Path: "/home/claude/brain",
+				HubRefKnown: true, AheadOfHub: 2, BehindHub: 1,
+			},
+			want: "torio brain sync",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &fakeBrainService{statusReport: tc.report}
+			var out bytes.Buffer
+			a := &app{stdout: &out, stderr: &bytes.Buffer{}, build: testBuild()}
+			a.newBrain = func(*lima.Adapter, lima.BootstrapOptions) brainService { return svc }
+			a.newLima = func() *lima.Adapter { return nil }
+			a.lookupOperatorUser = func() (string, error) { return "testop", nil }
+
+			cmd := newBrainStatusCmd(a)
+			cmd.SetContext(context.Background())
+			if err := cmd.RunE(cmd, nil); err != nil {
+				t.Fatalf("brain status: %v", err)
+			}
+			if !strings.Contains(out.String(), tc.want) {
+				t.Errorf("status did not say %q\ngot: %s", tc.want, out.String())
+			}
+		})
+	}
+}
+
+// The replica line is where an operator reads how far this box is from the
+// rest, so it has to distinguish "never met the hub" from "level with it".
+func TestBrainStatusDistinguishesNeverReconciledFromLevel(t *testing.T) {
+	svc := &fakeBrainService{statusReport: brain.StatusReport{
+		State: brain.StateInitialized, Path: "/home/claude/brain",
+	}}
 	var out bytes.Buffer
 	a := &app{stdout: &out, stderr: &bytes.Buffer{}, build: testBuild()}
 	a.newBrain = func(*lima.Adapter, lima.BootstrapOptions) brainService { return svc }
@@ -49,9 +104,11 @@ func TestBrainStatusPrintsTheCopyOutCommandForThisBox(t *testing.T) {
 	if err := cmd.RunE(cmd, nil); err != nil {
 		t.Fatalf("brain status: %v", err)
 	}
-	want := "limactl copy " + lima.InstanceName + ":/home/claude/brain/"
-	if !strings.Contains(out.String(), want) {
-		t.Errorf("status did not print %q\ngot: %s", want, out.String())
+	if !strings.Contains(out.String(), "never reconciled") {
+		t.Errorf("status did not distinguish a box that never reconciled\ngot: %s", out.String())
+	}
+	if strings.Contains(out.String(), "0 ahead, 0 behind") {
+		t.Errorf("a box that never reconciled was shown as level with the hub\ngot: %s", out.String())
 	}
 }
 
@@ -63,6 +120,9 @@ type fakeBrainService struct {
 	importReport brain.TransferReport
 	importErr    error
 	importOpts   brain.ImportOptions
+	syncReport   brain.SyncReport
+	syncErr      error
+	syncCalls    int
 }
 
 func (f *fakeBrainService) Init(context.Context) (brain.InitReport, error) {
@@ -71,6 +131,11 @@ func (f *fakeBrainService) Init(context.Context) (brain.InitReport, error) {
 
 func (f *fakeBrainService) Status(context.Context) (brain.StatusReport, error) {
 	return f.statusReport, f.statusErr
+}
+
+func (f *fakeBrainService) Sync(context.Context) (brain.SyncReport, error) {
+	f.syncCalls++
+	return f.syncReport, f.syncErr
 }
 
 func (f *fakeBrainService) Import(_ context.Context, opts brain.ImportOptions) (brain.TransferReport, error) {
@@ -464,5 +529,84 @@ func TestBrainStatusReportsRetrievalSkillHonestly(t *testing.T) {
 				t.Fatalf("retrieval_skill = %#v, want %q", data["retrieval_skill"], tc.state)
 			}
 		})
+	}
+}
+
+// One Brain, replicated into every backend's guest, means there has to be a way
+// to make two boxes agree. The report is counts and one host path: what moved,
+// never what it said (ADR-0025).
+func TestBrainSyncReportsWhatMovedAndWhereTheHubIs(t *testing.T) {
+	service := &fakeBrainService{
+		syncReport: brain.SyncReport{
+			HubPath:     "/home/op/.local/share/torio/brain/vault",
+			Snapshotted: true,
+			ToHub:       3,
+			ToGuest:     2,
+		},
+	}
+
+	code, stdout, stderr := runBrainCLI(t, []string{"brain", "sync"}, service)
+
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	if service.syncCalls != 1 {
+		t.Errorf("sync ran %d times, want 1", service.syncCalls)
+	}
+	for _, want := range []string{"3", "2", "/home/op/.local/share/torio/brain/vault"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout = %q, want it to carry %q", stdout, want)
+		}
+	}
+}
+
+// A conflict is an outcome an operator resolves with Git, not a failure of the
+// command: the other direction may well have carried.
+func TestBrainSyncReportsAConflictWithoutFailing(t *testing.T) {
+	service := &fakeBrainService{
+		syncReport: brain.SyncReport{
+			HubPath:          "/home/op/.local/share/torio/brain/vault",
+			ConflictOutbound: true,
+			ToGuest:          1,
+			Notes:            []string{"conflict_to_hub"},
+		},
+	}
+
+	code, stdout, _ := runBrainCLI(t, []string{"brain", "sync"}, service)
+
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0: a conflict is an outcome, not a failure", code)
+	}
+	if !strings.Contains(stdout, "conflict") {
+		t.Errorf("stdout = %q, want it to name the conflict", stdout)
+	}
+	if !strings.Contains(stdout, "/home/op/.local/share/torio/brain/vault") {
+		t.Errorf("stdout = %q, want it to say where the conflict is resolved", stdout)
+	}
+}
+
+func TestBrainSyncEmitsOneEnvelope(t *testing.T) {
+	service := &fakeBrainService{
+		syncReport: brain.SyncReport{HubPath: "/home/op/vault", ToHub: 1},
+	}
+
+	code, stdout, _ := runBrainCLI(t, []string{"--json", "brain", "sync"}, service)
+
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			HubPath string `json:"hub_path"`
+			ToHub   int    `json:"commits_to_hub"`
+			ToGuest int    `json:"commits_to_guest"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("stdout is not one envelope: %v; got %q", err, stdout)
+	}
+	if !env.OK || env.Data.ToHub != 1 || env.Data.HubPath != "/home/op/vault" {
+		t.Errorf("envelope = %+v, want the sync report", env)
 	}
 }

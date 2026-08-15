@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/wzslr321/torio/internal/brain"
+	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/lima"
 )
 
@@ -16,6 +17,7 @@ type brainService interface {
 	Init(context.Context) (brain.InitReport, error)
 	Status(context.Context) (brain.StatusReport, error)
 	Import(context.Context, brain.ImportOptions) (brain.TransferReport, error)
+	Sync(context.Context) (brain.SyncReport, error)
 }
 
 func newBrainCmd(a *app) *cobra.Command {
@@ -46,6 +48,7 @@ func newBrainCmd(a *app) *cobra.Command {
 	cmd.AddCommand(newBrainInitCmd(a))
 	cmd.AddCommand(newBrainStatusCmd(a))
 	cmd.AddCommand(newBrainImportCmd(a))
+	cmd.AddCommand(newBrainSyncCmd(a))
 	return cmd
 }
 
@@ -138,14 +141,111 @@ func newBrainStatusCmd(a *app) *cobra.Command {
 				cliErr.Details = brainStatusDetails(report)
 				return cliErr
 			}
-			// The copy-out command is written here rather than in help text
-			// because only a run knows which box and which vault it is about.
-			notes := append(brainSkillNotes(report.SkillState, report.SkillPath, false),
-				fmt.Sprintf("copy out (operator command, not a backup): limactl copy %s:%s/ <host-destination>/",
-					lima.InstanceName, report.Path))
+			// Written here rather than in help text because only a run knows
+			// which box this is about, and what it should do next depends on
+			// whether this replica has ever met the host vault.
+			next := "reconcile this replica with the host vault: torio brain sync"
+			if report.HubRefKnown && report.AheadOfHub == 0 && report.BehindHub == 0 {
+				next = "this replica is level with the host vault"
+			}
+			notes := append(brainSkillNotes(report.SkillState, report.SkillPath, false), next)
 			return a.emitBrainStatus("brain.status", report, notes)
 		},
 	}
+}
+
+// newBrainSyncCmd reconciles the bound guest's vault with the host's.
+//
+// There is one Second Brain and every backend's guest keeps a copy of it
+// (ADR-0025). This is what makes two copies agree: each side writes a Git
+// bundle, the transport carries the file, and the other side merges from it.
+// Nothing gains a network remote and no note content is reported.
+func newBrainSyncCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "sync",
+		Short: "Reconcile this backend's Brain replica with the one on the host",
+		Long: "Carry this guest's vault to the host vault and the host vault back, using Git " +
+			"bundles over the same one-shot transport `brain import` uses. Unsaved work in the " +
+			"guest vault is committed first, because an agent writes notes and never commits " +
+			"them.\n\n" +
+			"Neither vault gains a network remote: a bundle is a file, read once and removed. A " +
+			"merge that cannot be made automatically stops that direction, leaves it exactly as " +
+			"it was, and names the host vault, where you resolve it with ordinary Git. Counts " +
+			"are reported; note names and content are not.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Carrying a vault is bounded like every operation, but it is the
+			// long kind: it commits, bundles, copies and merges.
+			ctx, cancel := context.WithTimeout(cmd.Context(), config.MaxTimeout)
+			defer cancel()
+			service, err := a.brainService("brain.sync")
+			if err != nil {
+				return err
+			}
+			report, err := service.Sync(ctx)
+			if err != nil {
+				cliErr := mapBrainError("brain.sync", err)
+				if len(report.Notes) > 0 {
+					cliErr.Details = map[string]any{"notes": notes(report.Notes)}
+				}
+				return cliErr
+			}
+			return a.emitBrainSync(report)
+		},
+	}
+}
+
+type brainSyncData struct {
+	HubPath          string   `json:"hub_path"`
+	HubCreated       bool     `json:"hub_created"`
+	Snapshotted      bool     `json:"snapshotted"`
+	ToHub            int      `json:"commits_to_hub"`
+	ToGuest          int      `json:"commits_to_guest"`
+	ConflictOutbound bool     `json:"conflict_to_hub"`
+	ConflictInbound  bool     `json:"conflict_to_guest"`
+	Notes            []string `json:"notes"`
+	NextStep         string   `json:"next_step"`
+}
+
+func (a *app) emitBrainSync(report brain.SyncReport) error {
+	next := "torio brain status"
+	if report.Conflicted() {
+		// The remedy is Git in the host vault, because the vault is Markdown in
+		// a Git repository and that is the whole reason the format was chosen.
+		next = "git -C " + report.HubPath + " status"
+	}
+	if a.jsonOut {
+		return writeJSON(a.stdout, successEnvelope("brain.sync", brainSyncData{
+			HubPath:          report.HubPath,
+			HubCreated:       report.HubCreated,
+			Snapshotted:      report.Snapshotted,
+			ToHub:            report.ToHub,
+			ToGuest:          report.ToGuest,
+			ConflictOutbound: report.ConflictOutbound,
+			ConflictInbound:  report.ConflictInbound,
+			Notes:            notes(report.Notes),
+			NextStep:         next,
+		}))
+	}
+	state := "reconciled"
+	switch {
+	case report.HubCreated:
+		state = "host vault created from this replica"
+	case report.Conflicted():
+		state = "conflict; one direction was left as it was"
+	}
+	lines := fmt.Sprintf("brain: %s\n"+
+		"  carried to the host: %d commit(s)\n"+
+		"  carried to this guest: %d commit(s)\n"+
+		"  host vault: %s\n",
+		state, report.ToHub, report.ToGuest, report.HubPath)
+	if report.Snapshotted {
+		lines += "  unsaved work in this guest's vault was committed before it was carried\n"
+	}
+	if _, err := fmt.Fprintf(a.stdout, "%snext: %s\n", lines, next); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (a *app) brainService(command string) (brainService, error) {
@@ -163,23 +263,29 @@ func (a *app) brainService(command string) (brainService, error) {
 }
 
 type brainStatusData struct {
-	State             string   `json:"state"`
-	Path              string   `json:"path"`
-	PathExists        bool     `json:"path_exists"`
-	NativeFilesystem  bool     `json:"native_filesystem"`
-	FSType            string   `json:"fstype"`
-	Owner             string   `json:"owner"`
-	Group             string   `json:"group"`
-	Mode              string   `json:"mode"`
-	GitState          string   `json:"git_state"`
-	GitHasRemote      bool     `json:"git_has_remote"`
-	MarkdownFiles     int      `json:"markdown_files"`
-	AttachmentFiles   int      `json:"attachment_files"`
-	TotalBytes        int64    `json:"total_bytes"`
-	ProjectRegistered bool     `json:"project_registered"`
-	ProjectConflict   bool     `json:"project_conflict"`
-	RetrievalSkill    string   `json:"retrieval_skill"`
-	Issues            []string `json:"issues"`
+	State             string `json:"state"`
+	Path              string `json:"path"`
+	PathExists        bool   `json:"path_exists"`
+	NativeFilesystem  bool   `json:"native_filesystem"`
+	FSType            string `json:"fstype"`
+	Owner             string `json:"owner"`
+	Group             string `json:"group"`
+	Mode              string `json:"mode"`
+	GitState          string `json:"git_state"`
+	GitHasRemote      bool   `json:"git_has_remote"`
+	MarkdownFiles     int    `json:"markdown_files"`
+	AttachmentFiles   int    `json:"attachment_files"`
+	TotalBytes        int64  `json:"total_bytes"`
+	ProjectRegistered bool   `json:"project_registered"`
+	ProjectConflict   bool   `json:"project_conflict"`
+	RetrievalSkill    string `json:"retrieval_skill"`
+	// How far this replica stands from the one Brain on the host (ADR-0025).
+	// hub_ref_known is false on a box that has never reconciled, where the two
+	// counts would otherwise read as agreement.
+	HubRefKnown bool     `json:"hub_ref_known"`
+	AheadOfHub  int      `json:"commits_ahead_of_hub"`
+	BehindHub   int      `json:"commits_behind_hub"`
+	Issues      []string `json:"issues"`
 }
 
 type brainInitData struct {
@@ -225,6 +331,9 @@ func brainData(report brain.StatusReport) brainStatusData {
 		ProjectRegistered: report.ProjectRegistered,
 		ProjectConflict:   report.ProjectConflict,
 		RetrievalSkill:    string(report.SkillState),
+		HubRefKnown:       report.HubRefKnown,
+		AheadOfHub:        report.AheadOfHub,
+		BehindHub:         report.BehindHub,
 		Issues:            issues,
 	}
 }
@@ -355,12 +464,20 @@ func (a *app) emitBrainStatus(command string, report brain.StatusReport, extra [
 	if len(report.Issues) > 0 {
 		issues = strings.Join(report.Issues, ",")
 	}
+	// Where this replica stands relative to the one Brain. A box that has never
+	// reconciled is told so rather than shown two zeroes, which would read as
+	// being level with a hub it has never met (ADR-0025).
+	hub := "never reconciled with the host vault"
+	if report.HubRefKnown {
+		hub = fmt.Sprintf("%d ahead, %d behind the host vault", report.AheadOfHub, report.BehindHub)
+	}
 	_, err := fmt.Fprintf(a.stdout,
 		"Brain: %s\n"+
 			"  path:        %s\n"+
 			"  filesystem:  %s (native=%t)\n"+
 			"  owner/mode:  %s:%s %s\n"+
 			"  git:         %s (remote=%t)\n"+
+			"  replica:     %s\n"+
 			"  markdown:    %d files\n"+
 			"  attachments: %d files\n"+
 			"  total bytes: %d\n"+
@@ -369,7 +486,7 @@ func (a *app) emitBrainStatus(command string, report brain.StatusReport, extra [
 			"  issues:      %s\n",
 		report.State, report.Path, report.FSType, report.NativeFilesystem,
 		report.Owner, report.Group, report.Mode, report.GitState, report.GitHasRemote,
-		report.MarkdownFiles, report.AttachmentFiles, report.TotalBytes,
+		hub, report.MarkdownFiles, report.AttachmentFiles, report.TotalBytes,
 		project, report.SkillState, issues)
 	if err != nil {
 		return err

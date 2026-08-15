@@ -160,7 +160,7 @@ func newGroupRunCmd(a *app) *cobra.Command {
 # A deliberate ratchet, updated on purpose when a command is added or removed:
 # the derivation reads internal/cli/, and this pin is what makes an accidental
 # change to the surface fail a test instead of passing silently.
-PINNED_COMMAND_COUNT = 32
+PINNED_COMMAND_COUNT = 33
 
 
 class CommandSurface(unittest.TestCase):
@@ -191,6 +191,7 @@ class CommandSurface(unittest.TestCase):
         self.assertEqual(PINNED_COMMAND_COUNT, len(surface))
         self.assertIn("torio vm bootstrap", surface)
         self.assertIn("torio project set-remote", surface)
+        self.assertIn("torio brain sync", surface)
         self.assertIn("torio mcp login", surface)
         self.assertIn("torio version", surface)
 

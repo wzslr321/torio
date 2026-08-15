@@ -31,7 +31,18 @@
   branch, the commit and whether the tree was dirty. A release, a dev build and
   a working-tree build can be installed at the same time; each keeps its own
   directory and its own name.
-
+- **One Second Brain, with the host as its hub.** The canonical vault is now a
+  Git worktree on the host, under
+  `${XDG_DATA_HOME:-~/.local/share}/torio/brain/vault`, and each backend's guest
+  keeps a replica of it. `torio brain sync`, or `y` on the hub's Brain tab,
+  reconciles the bound guest with the host both ways by carrying Git bundles
+  over the same one-shot transport `brain import` uses. Unsaved work in a guest
+  vault is committed first, because an agent writes notes and never commits
+  them. Neither vault gains a network remote, and no host mount is introduced. A
+  merge that cannot be made automatically stops that direction, leaves it as it
+  was, and names the host vault, where it is resolved with ordinary Git.
+  `brain status` now reports how far the replica is from the hub
+  ([ADR-0025](docs/adr/0025-one-second-brain-with-the-host-as-its-hub.md)).
 - **Opening a session materializes the checkout it needs.** The registry is
   shared by every instance and the checkouts are not, so a project attached
   under one backend is registered and absent under the next. Pressing enter on

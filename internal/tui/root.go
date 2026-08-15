@@ -854,7 +854,7 @@ func (r *root) screenKeys() string {
 	case screenProjects:
 		return r.projects.keys(r)
 	case screenBrain:
-		return r.brain.keys()
+		return r.brain.keys(r)
 	case screenServe:
 		return r.serve.keys()
 	}

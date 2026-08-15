@@ -85,6 +85,10 @@ type Deps struct {
 	ServeRestart func(context.Context) error
 	ServeLogs    func(context.Context, int) (string, error)
 
+	// BrainSync reconciles this box's replica of the one Second Brain with the
+	// copy on the host (ADR-0025). A nil seam is a build that cannot.
+	BrainSync func(ctx context.Context) error
+
 	BrainStatus func(context.Context) (brain.StatusReport, error)
 	BrainInit   func(context.Context) error
 

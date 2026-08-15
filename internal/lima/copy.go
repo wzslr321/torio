@@ -29,6 +29,23 @@ func (a *Adapter) CopyToGuest(ctx context.Context, hostSourceDir, guestDestinati
 	return a.copy(ctx, op, host, InstanceName+":"+guest)
 }
 
+// CopyFromGuest transfers one guest staging directory back to a private host
+// staging directory. It is the mirror of CopyToGuest, validated by the same
+// function with the sides swapped, and it exists because one Second Brain
+// replicated into several guests needs bytes to travel both ways (ADR-0025).
+//
+// What travels is a Git bundle: one file, written by the guest, read on the
+// host by `git fetch`. It configures no remote on either side, so the rule that
+// a vault carrying a network remote is drift is untouched.
+func (a *Adapter) CopyFromGuest(ctx context.Context, guestSourceDir, hostDestinationDir, guestHome string) error {
+	const op = "copy_from_guest"
+	host, guest, err := transferPaths(hostDestinationDir, guestSourceDir, guestHome)
+	if err != nil {
+		return &Error{Op: op, Kind: KindVerificationFailed, Err: err}
+	}
+	return a.copy(ctx, op, InstanceName+":"+guest, host)
+}
+
 func (a *Adapter) copy(ctx context.Context, op, source, destination string) error {
 	res, err := a.runRaw(ctx, "copy", source, destination)
 	if err != nil {
