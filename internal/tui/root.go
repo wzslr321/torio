@@ -715,6 +715,8 @@ func (r *root) capturing() bool {
 		return r.setup.capturing()
 	case screenProjects:
 		return r.projects.capturing()
+	case screenBrain:
+		return r.brain.capturing()
 	default:
 		return false
 	}
