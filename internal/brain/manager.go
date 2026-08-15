@@ -22,6 +22,7 @@ type Guest interface {
 	SSH(ctx context.Context, command []string) (execx.Result, error)
 	SSHInput(ctx context.Context, stdin []byte, command []string) (execx.Result, error)
 	CopyToGuest(ctx context.Context, hostSourceDir, guestDestinationDir, guestHome string) error
+	CopyFromGuest(ctx context.Context, guestSourceDir, hostDestinationDir, guestHome string) error
 }
 
 var _ Guest = (*lima.Adapter)(nil)
@@ -30,10 +31,24 @@ var _ Guest = (*lima.Adapter)(nil)
 type Manager struct {
 	guest         Guest
 	bootstrapOpts lima.BootstrapOptions
+	// hostGit runs Git on the host, against the hub vault. It is a seam for the
+	// same reason the guest boundary is one: a test must be able to drive the
+	// whole reconciliation without a Git binary or a directory to write in.
+	hostGit HostRunner
+	// hubRoot overrides where the host vault lives. Empty means the resolved
+	// default; tests point it at a temporary directory.
+	hubRoot string
+}
+
+// HostRunner is the typed host-command boundary. Only Git runs through it, only
+// against the hub vault, and its output is read for refs and counts rather than
+// content.
+type HostRunner interface {
+	Run(ctx context.Context, argv []string) (execx.Result, error)
 }
 
 func New(guest Guest, opts lima.BootstrapOptions) *Manager {
-	return &Manager{guest: guest, bootstrapOpts: opts}
+	return &Manager{guest: guest, bootstrapOpts: opts, hostGit: hostExecRunner{}}
 }
 
 // backend is the agent backend this instance runs, arriving with the bootstrap
@@ -782,6 +797,13 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 	report.TotalBytes, err = parseTotalBytes(size)
 	if err != nil {
 		return report, &Error{Op: op, Kind: KindVerification, Err: err}
+	}
+
+	// How far this replica stands from the one Brain on the host. It is read
+	// only where there is a Git repository to read it from, and it never
+	// decides the state below (ADR-0025).
+	if gitRepo {
+		m.describeHubDistance(ctx, op, &report)
 	}
 
 	report.ManagedScaffold = scaffoldComplete && gitRepo && !report.GitHasRemote && !hasSymlink

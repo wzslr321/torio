@@ -5,6 +5,14 @@
   [ADR-0015](0015-mediated-agent-forwarding.md), for what `ssh -A` puts inside the
   guest: the forwarded agent is Torio's, holds one pinned key, and asks before
   every signature.
+- Superseded in part by:
+  [ADR-0025](0025-one-second-brain-with-the-host-as-its-hub.md), for where the
+  canonical vault is and for whether Brain data leaves a guest. "The canonical
+  Brain is `/home/hermes/brain`" now names a replica: the canonical vault is on
+  the host, each backend's guest keeps one copy of it, and `brain sync` carries
+  Git bundles between them. This record's own condition for that return is met:
+  "if a full Brain backup ever becomes a product requirement it deserves its own
+  ADR". No host mount is introduced and no vault gains a network remote.
 - Date: 2026-08-05
 - Consolidates: the onboarding/Brain/multi-project scope decision and the removal
   of `brain export`. The superseded originals are recoverable at

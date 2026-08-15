@@ -544,8 +544,8 @@ func TestProjectsHandsOverToADeclaredAgentSession(t *testing.T) {
 	}
 	d := f.deps()
 	handed := ""
-	d.AgentSpec = func(path string) (execx.InteractiveCommand, error) {
-		handed = path
+	d.AgentSpec = func(_ context.Context, id string) (execx.InteractiveCommand, error) {
+		handed = id
 		return execx.InteractiveCommand{Name: "limactl", Args: []string{"shell"}}, nil
 	}
 	r := newRoot(d)
@@ -565,8 +565,8 @@ func TestProjectsHandsOverToADeclaredAgentSession(t *testing.T) {
 	if spec.err != nil {
 		t.Fatalf("resolving the session failed: %v", spec.err)
 	}
-	if handed != "/w/torio" {
-		t.Errorf("session opened in %q, want the project path", handed)
+	if handed != "torio" {
+		t.Errorf("session opened for %q, want the project the operator picked", handed)
 	}
 }
 
@@ -928,5 +928,542 @@ func TestNoSetupStepIsNamedBeforeTheGuestAnswers(t *testing.T) {
 
 	if view := r.View(); strings.Contains(view, "Bootstrap the guest") {
 		t.Errorf("a setup step was named from unproven facts:\n%s", view)
+	}
+}
+
+// The seam that opens a session is also the seam that preflights it, so a
+// checkout a session cannot be opened in comes back as the reason and the
+// remedy, on screen, and no terminal is handed over. Before this the hub
+// reached the guest helper with an unverified path and the operator was left
+// reading a bare exit status the repaint had already eaten.
+func TestProjectsReportsAFailedSessionPreflightAndOpensNothing(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
+	}
+	d := f.deps()
+	d.AgentSpec = func(context.Context, string) (execx.InteractiveCommand, error) {
+		return execx.InteractiveCommand{}, errors.New(
+			"the checkout for \"torio\" is not in a state a session can be opened in (checkout_absent); " +
+				"re-run `torio project add torio` to reconcile it")
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	_, cmd := r.Update(key("enter"))
+	if cmd == nil {
+		t.Fatal("enter produced no work")
+	}
+	msg := cmd()
+	spec, ok := msg.(specMsg)
+	if !ok {
+		t.Fatalf("enter produced %T, want a resolution result", msg)
+	}
+	if spec.err == nil {
+		t.Fatal("the refused preflight produced a session")
+	}
+	r.Update(spec)
+	if !strings.Contains(r.errText, "checkout_absent") {
+		t.Errorf("error text = %q, want it to name what drifted", r.errText)
+	}
+	if !strings.Contains(r.errText, "torio project add torio") {
+		t.Errorf("error text = %q, want it to name the remedy", r.errText)
+	}
+	if r.busy != "" {
+		t.Errorf("busy = %q, want the operation released", r.busy)
+	}
+}
+
+// The footer is the one place the hub says which keys are live, so it must not
+// name a key the backend has nothing to answer with.
+func TestProjectsFooterOmitsUseWhereThereIsNoRegistry(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
+	}
+	d := f.deps()
+	d.ProjectUse = nil
+	r := newRoot(d)
+	r.switchTo(screenProjects)
+
+	if got := r.projects.keys(r); strings.Contains(got, "u use") {
+		t.Errorf("footer = %q, want no use key on a backend that keeps no registry", got)
+	}
+}
+
+// Where the registry exists the key stays offered.
+func TestProjectsFooterKeepsUseWhereThereIsARegistry(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
+	}
+	d := f.deps()
+	d.ProjectUse = func(context.Context, string) error { return nil }
+	r := newRoot(d)
+	r.switchTo(screenProjects)
+
+	if got := r.projects.keys(r); !strings.Contains(got, "u use") {
+		t.Errorf("footer = %q, want the use key on a backend that keeps a registry", got)
+	}
+}
+
+// The tail is bounded because a session can print without limit and the hub
+// only needs the end of it: the last thing a helper said before it exited is
+// what names the reason.
+func TestSessionTailKeepsOnlyTheEnd(t *testing.T) {
+	tail := &tailBuffer{max: 8}
+
+	if _, err := tail.Write([]byte("0123456789abcdef")); err != nil {
+		t.Fatalf("writing the tail failed: %v", err)
+	}
+	if got, want := tail.String(), "89abcdef"; got != want {
+		t.Errorf("tail = %q, want the last %d bytes, %q", got, tail.max, want)
+	}
+
+	if _, err := tail.Write([]byte("XY")); err != nil {
+		t.Fatalf("writing the tail failed: %v", err)
+	}
+	if got, want := tail.String(), "abcdefXY"; got != want {
+		t.Errorf("tail = %q, want %q after the second write", got, want)
+	}
+}
+
+// A session still gets the operator's real terminal; the tail is a copy taken
+// on the way past, never a replacement for it.
+func TestSessionProcessCopiesStderrWithoutTakingIt(t *testing.T) {
+	c, tail, err := sessionProcess(context.Background(), execx.InteractiveCommand{Name: "true"})
+	if err != nil {
+		t.Fatalf("building the session process failed: %v", err)
+	}
+	if c.Stderr == nil {
+		t.Fatal("the session was given no stderr")
+	}
+	if _, err := c.Stderr.Write([]byte("torio-agent-session: project directory does not exist\n")); err != nil {
+		t.Fatalf("writing to the session stderr failed: %v", err)
+	}
+	if !strings.Contains(tail.String(), "project directory does not exist") {
+		t.Errorf("tail = %q, want it to hold what the session said", tail.String())
+	}
+}
+
+// A session that ends non-zero leaves the operator looking at a repainted
+// screen, so whatever it said on the way out has to come back with the failure.
+// Before this the hub showed the exit status alone, which named nothing.
+func TestSessionFailureShowsWhatTheSessionSaid(t *testing.T) {
+	r := newRoot((&fakeDeps{boxState: lima.StateRunning}).deps())
+	r.busy = "agent session in torio"
+
+	r.Update(execDoneMsg{
+		err:    errors.New("exit status 64"),
+		detail: "torio-agent-session: project directory does not exist",
+	})
+
+	if !strings.Contains(r.errText, "exit status 64") {
+		t.Errorf("error text = %q, want the exit status", r.errText)
+	}
+	if !strings.Contains(r.errDetail, "project directory does not exist") {
+		t.Errorf("detail = %q, want what the session said before it exited", r.errDetail)
+	}
+	if r.busy != "" {
+		t.Errorf("busy = %q, want the operation released", r.busy)
+	}
+}
+
+// A session that ended cleanly is not a failure and leaves no banner behind.
+func TestCleanSessionEndLeavesNoError(t *testing.T) {
+	r := newRoot((&fakeDeps{boxState: lima.StateRunning}).deps())
+	r.busy = "agent session in torio"
+
+	r.Update(execDoneMsg{detail: "torio: agent session in torio, running as codex."})
+
+	if r.errText != "" {
+		t.Errorf("error text = %q, want none after a clean session", r.errText)
+	}
+	if r.errDetail != "" {
+		t.Errorf("detail = %q, want none after a clean session", r.errDetail)
+	}
+	if !strings.Contains(r.note, "session ended") {
+		t.Errorf("note = %q, want it to say the session ended", r.note)
+	}
+}
+
+// Everything the hub lists, it has to be able to act on. A record whose remote
+// names a host no guest can resolve is corrected here, prefilled with what the
+// record holds, so the operator edits an address rather than retyping one
+// (ADR-0023).
+func TestProjectsCorrectsARemoteFromTheHub(t *testing.T) {
+	f := &fakeDeps{
+		boxState: lima.StateRunning,
+		projectList: []projects.Project{{
+			ID:     "lean-triage",
+			Remote: "git@gh-lean-triage:leancodepl/lean-triage.git",
+			Path:   "/w/lean-triage",
+		}},
+	}
+	d := f.deps()
+	gotID, gotRemote := "", ""
+	d.ProjectSetRemote = func(_ context.Context, id, remote string) error {
+		gotID, gotRemote = id, remote
+		return nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "e")
+	if !r.projects.editing {
+		t.Fatal("e did not open the remote correction")
+	}
+	if got := r.projects.fields[0].Value(); got != "git@gh-lean-triage:leancodepl/lean-triage.git" {
+		t.Errorf("field = %q, want it prefilled with the recorded remote", got)
+	}
+	// The screen owns the keyboard while it is open, or a typed "q" quits the
+	// hub in the middle of an edit.
+	if !r.projects.capturing() {
+		t.Error("the correction form does not hold the keyboard")
+	}
+
+	r.projects.fields[0].SetValue("git@github.com:leancodepl/lean-triage.git")
+	_, cmd := r.Update(key("enter"))
+	if cmd == nil {
+		t.Fatal("enter produced no work")
+	}
+	drain(t, r, cmd)
+
+	if gotID != "lean-triage" {
+		t.Errorf("corrected %q, want the selected project", gotID)
+	}
+	if got, want := gotRemote, "git@github.com:leancodepl/lean-triage.git"; got != want {
+		t.Errorf("corrected to %q, want %q", got, want)
+	}
+	if r.projects.editing {
+		t.Error("the form stayed open after it was submitted")
+	}
+}
+
+// A backend build with no correction seam does not offer the key.
+func TestProjectsOffersNoRemoteCorrectionWithoutTheSeam(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
+	}
+	d := f.deps()
+	d.ProjectSetRemote = nil
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "e")
+
+	if r.projects.editing {
+		t.Error("a correction was opened with no seam to run it")
+	}
+	if strings.Contains(r.projects.keys(r), "e remote") {
+		t.Error("the footer offers a key the build cannot answer")
+	}
+}
+
+// The whole point of switching backends in the hub: press enter on a project
+// this guest has never held, and it is made and opened. Before this the hub
+// handed the operator an error naming a command to go and run, which is the
+// dead end the rebind was supposed to remove (ADR-0024).
+func TestProjectsMaterializesAnAbsentCheckoutThenOpensTheSession(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "lean-triage", Path: "/w/lean-triage"}},
+	}
+	d := f.deps()
+	materialized := ""
+	opened := 0
+	d.ProjectMaterialize = func(_ context.Context, id string) (*projects.DeployKey, error) {
+		materialized = id
+		return nil, nil
+	}
+	d.AgentSpec = func(context.Context, string) (execx.InteractiveCommand, error) {
+		opened++
+		if materialized == "" {
+			return execx.InteractiveCommand{}, &projects.Error{
+				Op:     "enter",
+				Kind:   projects.KindVerification,
+				Issues: []string{"checkout_absent"},
+				Err:    errors.New("checkout_absent"),
+			}
+		}
+		return execx.InteractiveCommand{Name: "ssh"}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "enter")
+
+	if materialized != "lean-triage" {
+		t.Errorf("materialized %q, want the project the operator opened", materialized)
+	}
+	if opened != 2 {
+		t.Errorf("the session was resolved %d times, want a retry after the checkout was made", opened)
+	}
+	if r.errText != "" {
+		t.Errorf("error text = %q, want none once the checkout was made", r.errText)
+	}
+}
+
+// A materialization that fails closed on an authorization leaves the operator
+// the key to authorize, and never retries into the same refusal.
+func TestProjectsShowsTheDeployKeyWhenMaterializingFails(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "lean-triage", Path: "/w/lean-triage"}},
+	}
+	d := f.deps()
+	opened := 0
+	d.ProjectMaterialize = func(context.Context, string) (*projects.DeployKey, error) {
+		return &projects.DeployKey{
+			PublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample torio-deploy-lean-triage",
+			Host:      "github.com",
+		}, errors.New("the guest cannot read the remote yet")
+	}
+	d.AgentSpec = func(context.Context, string) (execx.InteractiveCommand, error) {
+		opened++
+		return execx.InteractiveCommand{}, &projects.Error{
+			Op:     "enter",
+			Kind:   projects.KindVerification,
+			Issues: []string{"checkout_absent"},
+			Err:    errors.New("checkout_absent"),
+		}
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "enter")
+
+	if opened != 1 {
+		t.Errorf("the session was resolved %d times, want no retry after the refusal", opened)
+	}
+	if !strings.Contains(r.errDetail, "ssh-ed25519") {
+		t.Errorf("detail = %q, want the deploy key to authorize", r.errDetail)
+	}
+}
+
+// Drift that is not an absent checkout is a working tree, and the hub refuses
+// it the way it always did rather than cloning over it.
+func TestProjectsDoesNotMaterializeOverDriftItMustNotTouch(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "lean-triage", Path: "/w/lean-triage"}},
+	}
+	d := f.deps()
+	called := false
+	d.ProjectMaterialize = func(context.Context, string) (*projects.DeployKey, error) {
+		called = true
+		return nil, nil
+	}
+	d.AgentSpec = func(context.Context, string) (execx.InteractiveCommand, error) {
+		return execx.InteractiveCommand{}, &projects.Error{
+			Op:     "enter",
+			Kind:   projects.KindVerification,
+			Issues: []string{"origin_mismatch"},
+			Err:    errors.New("origin_mismatch"),
+		}
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "enter")
+
+	if called {
+		t.Error("a checkout the hub must not touch was cloned over")
+	}
+	if !strings.Contains(r.errText, "origin_mismatch") {
+		t.Errorf("error text = %q, want the drift reported", r.errText)
+	}
+}
+
+// One Brain means the hub has to be able to make this box agree with the rest,
+// or the operator is sent to a command for the one thing the Brain tab is about
+// (ADR-0025).
+func TestBrainTabSyncsWithTheHostVault(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	synced := 0
+	d.BrainSync = func(context.Context) error {
+		synced++
+		return nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenBrain)
+	drain(t, r, r.brain.load(d))
+
+	press(t, r, "y")
+
+	if synced != 1 {
+		t.Errorf("sync ran %d times, want 1", synced)
+	}
+	if !strings.Contains(r.brain.keys(r), "y sync") {
+		t.Errorf("footer = %q, want the sync key offered", r.brain.keys(r))
+	}
+}
+
+// A build with no sync seam does not offer the key.
+func TestBrainTabOffersNoSyncWithoutTheSeam(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.BrainSync = nil
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenBrain)
+
+	press(t, r, "y")
+
+	if strings.Contains(r.brain.keys(r), "y sync") {
+		t.Errorf("footer = %q, want no sync key", r.brain.keys(r))
+	}
+}
+
+// Starting a box is offered in the hub and stopping it was not, so the one
+// operation an operator runs at the end of a day sent them back to the command
+// line. It is asked for before it happens: a box carries the running agent
+// sessions, and stopping one is not what a mistyped key should do.
+func TestDashboardStopsTheBoxAfterConfirming(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	stopped := 0
+	d.VMStop = func(context.Context) error {
+		stopped++
+		return nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenDashboard)
+
+	press(t, r, "x")
+	if stopped != 0 {
+		t.Fatal("the box was stopped without asking")
+	}
+	if !strings.Contains(r.dash.keys(r), "y stop") {
+		t.Errorf("footer = %q, want the confirmation offered", r.dash.keys(r))
+	}
+
+	press(t, r, "y")
+	if stopped != 1 {
+		t.Errorf("stop ran %d times, want 1", stopped)
+	}
+}
+
+// Declining leaves the box alone.
+func TestDashboardKeepsTheBoxWhenTheStopIsDeclined(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	stopped := 0
+	d.VMStop = func(context.Context) error {
+		stopped++
+		return nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenDashboard)
+
+	press(t, r, "x")
+	press(t, r, "n")
+
+	if stopped != 0 {
+		t.Error("the box was stopped after the operator declined")
+	}
+	if strings.Contains(r.dash.keys(r), "y stop") {
+		t.Errorf("footer = %q, want the confirmation closed", r.dash.keys(r))
+	}
+}
+
+// A box that is not running has nothing to stop.
+func TestDashboardOffersNoStopForABoxThatIsNotRunning(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateStopped}
+	d := f.deps()
+	d.VMStop = func(context.Context) error { return nil }
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenDashboard)
+
+	press(t, r, "x")
+
+	if r.dash.confirmStop {
+		t.Error("a stopped box was offered a stop")
+	}
+	if strings.Contains(r.dash.keys(r), "x stop") {
+		t.Errorf("footer = %q, want no stop key for a box that is not running", r.dash.keys(r))
+	}
+}
+
+// The hub lists projects but could not say what was wrong with one, so an
+// operator who saw a session refuse had to leave the hub to find out why. The
+// panel is `project show`: what the guest holds, and the markers naming what
+// drifted.
+func TestProjectsShowsWhatIsWrongWithOneProject(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "lean-triage", Path: "/w/lean-triage"}},
+	}
+	d := f.deps()
+	asked := ""
+	d.ProjectShow = func(_ context.Context, id string) (projects.ShowReport, error) {
+		asked = id
+		return projects.ShowReport{
+			Project:  projects.Project{ID: "lean-triage", Remote: "git@github.com:leancodepl/lean-triage.git"},
+			Checkout: projects.CheckoutStatus{PathExists: true, Repository: true},
+			Issues:   []string{"origin_mismatch", "worktree_dirty"},
+		}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "v")
+
+	if asked != "lean-triage" {
+		t.Errorf("asked about %q, want the selected project", asked)
+	}
+	view := r.View()
+	for _, want := range []string{"origin_mismatch", "worktree_dirty"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("panel does not name %q:\n%s", want, view)
+		}
+	}
+	// esc closes it, the way every other panel in the hub closes.
+	press(t, r, "esc")
+	if r.projects.showID != "" {
+		t.Error("the panel stayed open after esc")
+	}
+}
+
+// A build with no seam does not offer the key.
+func TestProjectsOffersNoDetailWithoutTheSeam(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
+	}
+	d := f.deps()
+	d.ProjectShow = nil
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "v")
+
+	if r.projects.showID != "" {
+		t.Error("a detail panel opened with no seam to fill it")
+	}
+	if strings.Contains(r.projects.keys(r), "v show") {
+		t.Errorf("footer = %q, want no detail key", r.projects.keys(r))
 	}
 }

@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
 	"github.com/wzslr321/torio/internal/projects"
@@ -23,6 +25,7 @@ type projectService interface {
 	Show(context.Context, string) (projects.ShowReport, error)
 	Use(context.Context, string) (projects.UseReport, error)
 	Remove(context.Context, string) (projects.RemoveReport, error)
+	SetRemote(context.Context, string, string) (projects.SetRemoteReport, error)
 	EnterPreflight(context.Context, string) (projects.EnterSession, error)
 	ShellPreflight(context.Context, string) (projects.ShellSession, error)
 	RemoteAccess(context.Context, string, projects.SessionIdentity) (projects.RemoteAccess, error)
@@ -53,6 +56,7 @@ func newProjectCmd(a *app) *cobra.Command {
 	cmd.AddCommand(newProjectShowCmd(a))
 	cmd.AddCommand(newProjectUseCmd(a))
 	cmd.AddCommand(newProjectRemoveCmd(a))
+	cmd.AddCommand(newProjectSetRemoteCmd(a))
 	cmd.AddCommand(newProjectEnterCmd(a))
 	cmd.AddCommand(newProjectShellCmd(a))
 	cmd.AddCommand(newProjectAgentCmd(a))
@@ -72,10 +76,10 @@ func newProjectAddCmd(a *app) *cobra.Command {
 			"finishes the work.\n\n" +
 			"The registry is shared by every instance, the checkouts are not: a project exists " +
 			"once, in one guest per backend that has materialized it. Rerun with the id alone " +
-			"and no remote — `torio project add demo --backend claude-code` — to materialize an " +
+			"and no remote, as `torio project add demo --backend claude-code`, to materialize an " +
 			"already registered project in another backend's guest, using the remote already on " +
-			"record. That is a separate step rather than something an interactive command does " +
-			"for you, because cloning reaches a Git remote.\n\n" +
+			"record. Opening a session on such a project does this for you, so this form is for " +
+			"materializing a checkout before you want to work in it.\n\n" +
 			"Without --id the project id is <name> itself, which must be a lowercase slug " +
 			"(letters, digits, inner hyphens); pass --id to choose one explicitly.",
 		Args: cobra.RangeArgs(1, 2),
@@ -247,6 +251,130 @@ func newProjectRemoveCmd(a *app) *cobra.Command {
 	}
 }
 
+// asCLIError maps a manager error, and passes one that is already mapped
+// through unchanged. The materializing preflight can fail either way: the
+// preflight itself reports a manager error, while the materialization inside it
+// has already produced the mapped error carrying its deploy-key details, and
+// re-mapping that would discard them.
+func asCLIError(command string, err error) *CLIError {
+	var cliErr *CLIError
+	if errors.As(err, &cliErr) {
+		return cliErr
+	}
+	return mapProjectError(command, err)
+}
+
+// enterPreflightMaterializing is the preflight every project session runs,
+// plus the one answer it is allowed to give itself.
+//
+// The registry is shared by every instance and the checkouts are not, so a
+// project attached under one backend is registered and absent under the next.
+// That is not drift and it is not a mistake: it is the ordinary state of a
+// project the operator has not opened here yet, and the remedy was a command
+// they had to be told about, run, and then repeat the original one. Torio
+// already knows the remote, because the record it just read holds it.
+//
+// It is deliberately the narrowest of answers. Only `checkout_absent`, alone,
+// is materialized; a checkout that exists and disagrees with the record is a
+// working tree, and cloning over one is the destructive act this package
+// exists to avoid. The materialization is the same one-argument `add` an
+// operator would have run, so it reaches a remote and can still fail closed on
+// an authorization only a human can give (ADR-0024).
+func (a *app) enterPreflightMaterializing(cmd *cobra.Command, cmdName string, service projectService, id string) (projects.EnterSession, error) {
+	ctx, cancel := a.opContext(cmd)
+	defer cancel()
+	session, err := service.EnterPreflight(ctx, id)
+	if err == nil || !projects.IsCheckoutAbsentOnly(err) {
+		return session, err
+	}
+	if mErr := a.materializeCheckout(cmd, cmdName, service, id); mErr != nil {
+		return projects.EnterSession{}, mErr
+	}
+	return service.EnterPreflight(ctx, id)
+}
+
+// materializeCheckout makes the checkout the record already describes.
+//
+// The remote is read back from the registry rather than taken from the
+// operator, for the same reason the one-argument `add` reads it: a retyped
+// remote can attach a different repository under a name that already means
+// something.
+func (a *app) materializeCheckout(cmd *cobra.Command, cmdName string, service projectService, id string) error {
+	known, err := findRegistered(service, id)
+	if err != nil {
+		return err
+	}
+	// A clone takes as long as the repository is large, and the operator did
+	// not ask for a clone: they asked to open a project. Holding it to the
+	// per-operation timeout would fail the first open of any sizeable
+	// repository on the clock, so it gets the policy maximum, which is what the
+	// hub already gives this work. It is derived from the command's own context
+	// rather than from the bounded one, so an interrupt still reaches it.
+	ctx, cancel := context.WithTimeout(cmd.Context(), config.MaxTimeout)
+	defer cancel()
+	if _, err := fmt.Fprintf(a.stdout,
+		"%s: no checkout on this backend's guest yet; materializing it from the remote on record\n",
+		id); err != nil {
+		return err
+	}
+	report, err := service.Add(ctx, projects.AddRequest{
+		ID:          id,
+		DisplayName: known.DisplayName,
+		Remote:      known.Remote,
+	})
+	if err != nil {
+		cliErr := mapProjectError(cmdName, err)
+		cliErr.Details = projectNotesDetails(report.Notes)
+		// The same actionable half `project add` prints: without the key the
+		// operator is told to authorize something they cannot see.
+		if key := report.DeployKey; key != nil {
+			cliErr.Details = withDeployKeyDetails(cliErr.Details, key)
+			if !a.jsonOut {
+				a.printDeployKey(key)
+			}
+		}
+		return cliErr
+	}
+	return nil
+}
+
+// newProjectSetRemoteCmd corrects the remote of a project already on record.
+//
+// It exists because the alternative was `remove` followed by `add`, which is
+// not a correction: it drops the entry before anything replaces it, stops on
+// the checkouts other guests still hold, and discards the deploy keys those
+// guests had authorized (ADR-0023).
+func newProjectSetRemoteCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "set-remote <id> <remote>",
+		Short: "Correct the remote of a project already on record",
+		Long: "Replace the remote of a registered project without removing the entry. The " +
+			"registry is shared by every instance, so the correction applies to every " +
+			"backend. The checkout on this backend's guest is repointed when its origin " +
+			"still holds the remote being replaced; an origin pointing anywhere else is " +
+			"reported and left alone, and checkouts on other guests are corrected the next " +
+			"time a command runs there.\n\n" +
+			"The id and the display name do not change: every derived path, registration " +
+			"and deploy key keeps naming the same project.",
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := a.opContext(cmd)
+			defer cancel()
+			service, err := a.projectService("project.set_remote")
+			if err != nil {
+				return err
+			}
+			report, err := service.SetRemote(ctx, args[0], args[1])
+			if err != nil {
+				cliErr := mapProjectError("project.set_remote", err)
+				cliErr.Details = projectNotesDetails(report.Notes)
+				return cliErr
+			}
+			return a.emitProjectSetRemote(report)
+		},
+	}
+}
+
 // newProjectEnterCmd opens an ordinary interactive project session. The SSH
 // transport disables agent forwarding; project shell remains the explicit
 // push-capable boundary.
@@ -297,11 +425,9 @@ func newProjectAgentCmd(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ctx, cancel := a.opContext(cmd)
-			session, err := service.EnterPreflight(ctx, args[0])
-			cancel()
+			session, err := a.enterPreflightMaterializing(cmd, "project.agent", service, args[0])
 			if err != nil {
-				return mapProjectError("project.agent", err)
+				return asCLIError("project.agent", err)
 			}
 			if !pushGrant {
 				agentCmd, err := a.newAgentSpec(session.Project.Path)
@@ -407,11 +533,9 @@ func newProjectEnterCmd(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ctx, cancel := a.opContext(cmd)
-			session, err := service.EnterPreflight(ctx, args[0])
-			cancel()
+			session, err := a.enterPreflightMaterializing(cmd, "project.enter", service, args[0])
 			if err != nil {
-				return mapProjectError("project.enter", err)
+				return asCLIError("project.enter", err)
 			}
 			enterCmd, err := a.newEnterSpec(session.Project.Path)
 			if err != nil {
@@ -516,8 +640,17 @@ func (a *app) preflightShell(cmd *cobra.Command, service projectService, id stri
 	ctx, cancel := a.opContext(cmd)
 	defer cancel()
 	session, err := service.ShellPreflight(ctx, id)
+	if err != nil && projects.IsCheckoutAbsentOnly(err) {
+		// The same one answer the agent and enter sessions give themselves: a
+		// checkout that is simply not here yet is made, from the remote the
+		// record already holds (ADR-0024).
+		if mErr := a.materializeCheckout(cmd, "project.shell", service, id); mErr != nil {
+			return projects.ShellSession{}, mErr
+		}
+		session, err = service.ShellPreflight(ctx, id)
+	}
 	if err != nil {
-		return projects.ShellSession{}, mapProjectError("project.shell", err)
+		return projects.ShellSession{}, asCLIError("project.shell", err)
 	}
 	return session, nil
 }
@@ -841,6 +974,55 @@ func (a *app) emitProjectUse(report projects.UseReport) error {
 	return err
 }
 
+// projectSetRemoteData reports both remotes, because the value of the answer is
+// the change: an operator correcting a record needs to see what it held before
+// as much as what it holds now. A remote is not a secret; it is already in
+// `project list` and on the hub's own screen.
+type projectSetRemoteData struct {
+	projectData
+	PreviousRemote    string   `json:"previous_remote"`
+	CheckoutRepointed bool     `json:"checkout_repointed"`
+	Notes             []string `json:"notes"`
+	NextStep          string   `json:"next_step"`
+}
+
+func (a *app) emitProjectSetRemote(report projects.SetRemoteReport) error {
+	next := "torio project show " + report.Project.ID
+	if a.jsonOut {
+		return writeJSON(a.stdout, successEnvelope("project.set_remote", projectSetRemoteData{
+			projectData:       projectView(report.Project),
+			PreviousRemote:    report.PreviousRemote,
+			CheckoutRepointed: report.CheckoutRepointed,
+			Notes:             notes(report.Notes),
+			NextStep:          next,
+		}))
+	}
+	// What happened to the checkout is stated rather than implied. The record
+	// always moves; the tree does not always follow, and an operator who reads
+	// only "corrected" would have to guess which of the two they got.
+	checkout := "checkout left as it is"
+	switch {
+	case report.CheckoutRepointed:
+		checkout = "checkout origin repointed"
+	case slices.Contains(report.Notes, "checkout_absent"):
+		checkout = "no checkout on this backend's guest"
+	case slices.Contains(report.Notes, "checkout_origin_differs"):
+		checkout = "checkout origin points elsewhere and was not touched"
+	case slices.Contains(report.Notes, "checkout_untouched_guest_unavailable"):
+		checkout = "guest not reachable, so the checkout was not touched"
+	}
+	if _, err := fmt.Fprintf(a.stdout,
+		"%s: remote corrected (%s)\n"+
+			"  was: %s\n"+
+			"  now: %s\n"+
+			"  the registry is shared, so every backend reads the corrected remote\n"+
+			"next: %s\n",
+		report.Project.ID, checkout, report.PreviousRemote, report.Project.Remote, next); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (a *app) emitProjectRemove(report projects.RemoveReport) error {
 	const next = "torio project list"
 	if a.jsonOut {
@@ -897,8 +1079,12 @@ func showNextStep(report projects.ShowReport) string {
 		}
 		return "torio project enter " + report.Project.ID
 	}
-	return fmt.Sprintf("torio project add %q %s --id %s",
-		report.Project.DisplayName, report.Project.Remote, report.Project.ID)
+	// The one-argument form: `show` resolved this project from the registry, so
+	// the remote and the display name are both on record and `add` completes
+	// itself from them. Asking the operator to retype a remote Torio already
+	// holds invites a different repository under a name that already means
+	// something.
+	return "torio project add " + report.Project.ID
 }
 
 func checkoutView(c projects.CheckoutStatus) projectCheckoutData {

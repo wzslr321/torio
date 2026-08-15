@@ -1604,3 +1604,230 @@ func TestReviewContextIsNotAPrecondition(t *testing.T) {
 		}
 	}
 }
+
+// The remedy has to be a command the operator can run. `torio project add` on
+// its own is not: it needs at least an id, and the one-argument form is exactly
+// the form that materializes an already-registered project from the remote on
+// record. Naming the generic verb leaves the operator to work out which of the
+// three shapes of `add` applies to a checkout that is simply not there.
+func TestSessionDriftErrorNamesTheCommandThatFixesIt(t *testing.T) {
+	err := sessionDriftError(enterOp, "lean-triage", CheckoutStatus{})
+
+	msg := err.Error()
+	if !strings.Contains(msg, "checkout_absent") {
+		t.Errorf("message = %q, want it to name what drifted", msg)
+	}
+	if !strings.Contains(msg, "torio project add lean-triage") {
+		t.Errorf("message = %q, want the remedy to name the project", msg)
+	}
+}
+
+// The registry is shared by every instance and the checkouts are not, so a
+// project attached on one backend is registered but absent on the next one.
+// Rerunning `add` for that id is what materializes it there, and it must clone
+// rather than treat the existing record as work already done. This is the state
+// an operator reaches by switching backends and opening a project, and the one
+// the hub's own materialize path depends on.
+func TestAddMaterializesARegisteredProjectWithAbsentCheckout(t *testing.T) {
+	g := readyFake()
+	r := registryWith(testProject())
+
+	report, err := newTestManager(g, r).Add(context.Background(), addRequest())
+	if err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	if !report.Cloned || report.Adopted {
+		t.Fatalf("report = %#v, want a cloned checkout", report)
+	}
+	if !g.saw("git clone") {
+		t.Fatalf("the absent checkout was not cloned: %v", g.calls)
+	}
+	// The record already said everything the entry says, so there is nothing
+	// to write. A rewrite here would mean the shared registry is touched every
+	// time a second guest materializes a project it already holds.
+	if len(r.saved) != 0 {
+		t.Fatalf("materializing rewrote the shared registry: %#v", r.saved)
+	}
+}
+
+// A host the guest cannot resolve is not a missing authorization, and saying it
+// is sends the operator to add a deploy key that changes nothing: the guest
+// never reached the forge to present it. This is what a host-local SSH alias
+// looks like from inside a VM, and correcting the record is the only thing
+// that helps (ADR-0023).
+func TestAddSaysTheGuestCannotResolveTheHost(t *testing.T) {
+	g := readyFake()
+	g.remoteUnresolvable = true
+
+	report, err := newTestManager(g, emptyRegistry()).Add(context.Background(), addRequest())
+	if err == nil {
+		t.Fatal("Add() succeeded against a host the guest cannot resolve")
+	}
+
+	msg := err.Error()
+	if !strings.Contains(msg, "resolve") {
+		t.Errorf("error = %q, want it to say the host did not resolve", msg)
+	}
+	if !strings.Contains(msg, "torio project set-remote") {
+		t.Errorf("error = %q, want it to name the command that corrects the record", msg)
+	}
+	if strings.Contains(msg, "deploy key") {
+		t.Errorf("error = %q, want it not to blame an authorization the guest never presented", msg)
+	}
+	if report.DeployKey != nil {
+		t.Error("a deploy key was offered for a host that was never reached")
+	}
+	if g.saw("ssh-keygen") {
+		t.Errorf("a deploy key was generated for an unreachable host: %v", g.calls)
+	}
+}
+
+// Correcting a remote rewrites the record and moves the checkout that was
+// pointing at the old one, so the tree and the registry keep agreeing. The
+// entry, and every other guest's copy of it, survive: that is the whole reason
+// this exists rather than a remove and a re-add (ADR-0023).
+func TestSetRemoteRewritesTheRecordAndRepointsAMatchingCheckout(t *testing.T) {
+	g := attachedFake()
+	r := registryWith(testProject())
+	const corrected = "git@github.com:owner/demo-renamed.git"
+
+	report, err := newTestManager(g, r).SetRemote(context.Background(), testID, corrected)
+	if err != nil {
+		t.Fatalf("SetRemote() error = %v", err)
+	}
+
+	if got, want := report.Project.Remote, corrected; got != want {
+		t.Errorf("report remote = %q, want %q", got, want)
+	}
+	if got, want := report.PreviousRemote, testRemote; got != want {
+		t.Errorf("previous remote = %q, want %q", got, want)
+	}
+	if !report.CheckoutRepointed {
+		t.Errorf("the matching checkout was not repointed; notes=%v", report.Notes)
+	}
+	if len(r.saved) != 1 {
+		t.Fatalf("registry writes = %d, want 1", len(r.saved))
+	}
+	if got := r.saved[0].Projects[0].Remote; got != corrected {
+		t.Errorf("persisted remote = %q, want %q", got, corrected)
+	}
+	if got, want := r.saved[0].Projects[0].DisplayName, testName; got != want {
+		t.Errorf("persisted display name = %q, want it untouched %q", got, want)
+	}
+	if !g.saw("remote set-url") {
+		t.Errorf("the checkout origin was never moved: %v", g.calls)
+	}
+}
+
+// An origin that matches neither the old record nor the new one is somebody
+// else's decision. The record is still corrected, because the record is what
+// the operator asked to correct, and the tree is reported and left alone.
+func TestSetRemoteLeavesACheckoutWhoseOriginDiverged(t *testing.T) {
+	g := attachedFake()
+	g.origin = "git@github.com:someone/entirely-other.git"
+	r := registryWith(testProject())
+
+	report, err := newTestManager(g, r).SetRemote(context.Background(), testID, "git@github.com:owner/demo-renamed.git")
+	if err != nil {
+		t.Fatalf("SetRemote() error = %v", err)
+	}
+
+	if report.CheckoutRepointed {
+		t.Error("a checkout pointing somewhere else was repointed")
+	}
+	if !slices.Contains(report.Notes, "checkout_origin_differs") {
+		t.Errorf("notes = %v, want the divergent origin reported", report.Notes)
+	}
+	if g.saw("remote set-url") {
+		t.Errorf("a tree Torio cannot vouch for was repointed: %v", g.calls)
+	}
+	if len(r.saved) != 1 {
+		t.Errorf("registry writes = %d, want the record corrected anyway", len(r.saved))
+	}
+}
+
+// A guest with no checkout for this project has nothing to repoint, which is
+// the ordinary case on every backend that has not materialized it yet.
+func TestSetRemoteCorrectsTheRecordWithNoCheckoutPresent(t *testing.T) {
+	g := readyFake()
+	r := registryWith(testProject())
+
+	report, err := newTestManager(g, r).SetRemote(context.Background(), testID, "git@github.com:owner/demo-renamed.git")
+	if err != nil {
+		t.Fatalf("SetRemote() error = %v", err)
+	}
+
+	if report.CheckoutRepointed {
+		t.Error("a checkout that does not exist was reported as repointed")
+	}
+	if !slices.Contains(report.Notes, "checkout_absent") {
+		t.Errorf("notes = %v, want the absent checkout reported", report.Notes)
+	}
+	if len(r.saved) != 1 {
+		t.Errorf("registry writes = %d, want 1", len(r.saved))
+	}
+}
+
+// An unregistered id has no record to correct.
+func TestSetRemoteRefusesAnUnregisteredProject(t *testing.T) {
+	g := readyFake()
+	r := emptyRegistry()
+
+	_, err := newTestManager(g, r).SetRemote(context.Background(), "nothing", "git@github.com:owner/x.git")
+	if err == nil {
+		t.Fatal("SetRemote() succeeded for a project that is not registered")
+	}
+	if len(r.saved) != 0 {
+		t.Errorf("registry writes = %d, want none", len(r.saved))
+	}
+}
+
+// The replacement goes through the same validation an addition runs, so a
+// correction cannot write a remote carrying a credential.
+func TestSetRemoteRefusesARemoteCarryingACredential(t *testing.T) {
+	g := attachedFake()
+	r := registryWith(testProject())
+
+	_, err := newTestManager(g, r).SetRemote(context.Background(), testID, "https://user:"+testSecret+"@example.test/x.git")
+	if err == nil {
+		t.Fatal("SetRemote() accepted a remote carrying a credential")
+	}
+	if strings.Contains(err.Error(), testSecret) {
+		t.Errorf("error echoed the credential: %q", err.Error())
+	}
+	if len(r.saved) != 0 {
+		t.Errorf("registry writes = %d, want none", len(r.saved))
+	}
+}
+
+// Opening a session on a project whose only drift is a checkout that is not
+// there is answerable: the entry is registered, so the remote is on record and
+// the checkout can be made. Every other drift is not, so the two have to be
+// told apart by something firmer than reading the message (ADR-0024).
+func TestCheckoutAbsentIsDistinguishedFromEveryOtherDrift(t *testing.T) {
+	absent := sessionDriftError(enterOp, testID, CheckoutStatus{})
+	if !IsCheckoutAbsentOnly(absent) {
+		t.Errorf("an absent checkout was not recognized: %v", absent)
+	}
+
+	// A checkout that exists and points somewhere else is a tree Torio must not
+	// touch, and cloning over it is exactly the destructive act it refuses.
+	diverged := sessionDriftError(enterOp, testID, CheckoutStatus{
+		PathExists: true, Directory: true, Repository: true, FullClone: true,
+		Clean: true, NoCredentialHelper: true, SharedPermissions: true,
+	})
+	if IsCheckoutAbsentOnly(diverged) {
+		t.Errorf("a checkout pointing elsewhere was treated as merely absent: %v", diverged)
+	}
+
+	for _, err := range []error{
+		nil,
+		errors.New("something else"),
+		&Error{Op: enterOp, Kind: KindPrecondition, Err: errors.New("VM is not running")},
+	} {
+		if IsCheckoutAbsentOnly(err) {
+			t.Errorf("IsCheckoutAbsentOnly(%v) = true, want false", err)
+		}
+	}
+}

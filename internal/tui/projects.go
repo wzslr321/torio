@@ -20,6 +20,12 @@ type projectsMsg struct {
 	err  error
 }
 
+// showMsg is one project's detail arriving for the detail panel.
+type showMsg struct {
+	report projects.ShowReport
+	err    error
+}
+
 // connectMsg is the gateway's state arriving for the connect panel.
 type connectMsg struct {
 	report serve.StatusReport
@@ -38,6 +44,20 @@ type projectsScreen struct {
 	fields  []textinput.Model
 	confirm bool
 
+	// editing is the remote correction, open on one project at a time. It
+	// reuses fields because it is a form like the addition, and keeps the id
+	// separately because the correction names the record it rewrites rather
+	// than whatever the cursor is on when it is submitted.
+	editing bool
+	editID  string
+
+	// showID is the project the detail panel is open for, empty when closed,
+	// with showRep and showErr the answer it is waiting on.
+	showID     string
+	showRep    projects.ShowReport
+	showErr    string
+	showLoaded bool
+
 	// connectID is the project the gateway panel is open for, empty when
 	// closed. The panel is the Enter answer on a backend whose way into a
 	// project is a service rather than a session: what the gateway is doing,
@@ -50,7 +70,7 @@ type projectsScreen struct {
 
 // capturing is true while the screen owns the keyboard, so the root does not
 // read a typed "q" as a request to quit.
-func (s *projectsScreen) capturing() bool { return s.adding }
+func (s *projectsScreen) capturing() bool { return s.adding || s.editing }
 
 func (s *projectsScreen) load(d Deps) tea.Cmd {
 	if d.ProjectList == nil {
@@ -83,6 +103,54 @@ func (s *projectsScreen) closeForm() {
 	s.fields = nil
 }
 
+// openEdit opens the remote correction on one project, prefilled with what the
+// record holds: a correction is an edit of an address, not a retyping of one,
+// and retyping is how a second repository ends up under a name that already
+// means something.
+func (s *projectsScreen) openEdit(p projects.Project) {
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.CharLimit = 400
+	ti.Width = 52
+	ti.SetValue(p.Remote)
+	ti.CursorEnd()
+	ti.Focus()
+	s.fields = []textinput.Model{ti}
+	s.focus = 0
+	s.editID = p.ID
+	s.editing = true
+}
+
+func (s *projectsScreen) closeEdit() {
+	s.editing = false
+	s.editID = ""
+	s.fields = nil
+}
+
+// updateEdit drives the correction form.
+func (s *projectsScreen) updateEdit(r *root, msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc":
+		s.closeEdit()
+		return nil
+	case "enter":
+		remote := strings.TrimSpace(s.fields[0].Value())
+		id := s.editID
+		if remote == "" {
+			r.errText = "a project needs a remote"
+			return nil
+		}
+		s.closeEdit()
+		d := r.deps
+		return r.run("correcting the remote of "+id, true, func(ctx context.Context) error {
+			return d.ProjectSetRemote(ctx, id, remote)
+		})
+	}
+	var cmd tea.Cmd
+	s.fields[s.focus], cmd = s.fields[s.focus].Update(msg)
+	return cmd
+}
+
 func (s *projectsScreen) selected() (projects.Project, bool) {
 	if s.cursor < 0 || s.cursor >= len(s.list) {
 		return projects.Project{}, false
@@ -105,6 +173,15 @@ func (s *projectsScreen) update(r *root, msg tea.Msg) tea.Cmd {
 		}
 		return nil
 
+	case showMsg:
+		s.showLoaded = true
+		s.showRep = msg.report
+		s.showErr = ""
+		if msg.err != nil {
+			s.showErr = redact.String(msg.err.Error())
+		}
+		return nil
+
 	case connectMsg:
 		s.connectLoaded = true
 		s.connectRep = msg.report
@@ -117,6 +194,15 @@ func (s *projectsScreen) update(r *root, msg tea.Msg) tea.Cmd {
 	case tea.KeyMsg:
 		if s.adding {
 			return s.updateForm(r, msg)
+		}
+		if s.editing {
+			return s.updateEdit(r, msg)
+		}
+		if s.showID != "" {
+			if k := msg.String(); k == "esc" || k == "enter" || k == "q" {
+				s.showID = ""
+			}
+			return nil
 		}
 		if s.connectID != "" {
 			return s.updateConnect(msg)
@@ -210,6 +296,19 @@ func (s *projectsScreen) updateList(r *root, msg tea.KeyMsg) tea.Cmd {
 		if _, ok := s.selected(); ok {
 			s.confirm = true
 		}
+	case "v":
+		p, ok := s.selected()
+		if !ok || d.ProjectShow == nil {
+			return nil
+		}
+		return s.openShow(r, p)
+	case "e":
+		p, ok := s.selected()
+		if !ok || d.ProjectSetRemote == nil {
+			return nil
+		}
+		s.openEdit(p)
+		return textinput.Blink
 	case "u":
 		p, ok := s.selected()
 		if !ok || d.ProjectUse == nil {
@@ -224,9 +323,7 @@ func (s *projectsScreen) updateList(r *root, msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		if d.AgentSpec != nil {
-			return r.handoff("agent session in "+p.ID, func() (execx.InteractiveCommand, error) {
-				return d.AgentSpec(p.Path)
-			})
+			return s.openSession(r, p, "agent session in "+p.ID, d.AgentSpec)
 		}
 		// No session declared. When the backend runs a service instead, its
 		// way into a project is the gateway, and Enter owes the operator that
@@ -245,11 +342,62 @@ func (s *projectsScreen) updateList(r *root, msg tea.KeyMsg) tea.Cmd {
 			r.errText = "this backend opens no shell in a checkout"
 			return nil
 		}
-		return r.handoff("shell in "+p.ID, func() (execx.InteractiveCommand, error) {
-			return d.ShellSpec(p.Path)
-		})
+		return s.openSession(r, p, "shell in "+p.ID, d.ShellSpec)
 	}
 	return nil
+}
+
+// openSession resolves one project session and hands the terminal to it.
+//
+// The resolution runs the same preflight the command surface runs, so it can
+// refuse. One refusal is answerable here: a project the registry holds and this
+// guest has no checkout for is the ordinary state of a project the operator has
+// not opened on this backend yet, and the record already says where to get it.
+// The hub makes it, says so while it does, and resolves once more (ADR-0024).
+//
+// Every other refusal stands. A checkout that exists and disagrees with the
+// record is a working tree, and cloning over one is the destructive act Torio
+// refuses everywhere else.
+func (s *projectsScreen) openSession(r *root, p projects.Project, label string, spec func(context.Context, string) (execx.InteractiveCommand, error)) tea.Cmd {
+	return r.handoff(label, func(ctx context.Context) (execx.InteractiveCommand, error) {
+		cmd, err := spec(ctx, p.ID)
+		if err == nil || !projects.IsCheckoutAbsentOnly(err) || r.deps.ProjectMaterialize == nil {
+			return cmd, err
+		}
+		if key, mErr := r.deps.ProjectMaterialize(ctx, p.ID); mErr != nil {
+			return execx.InteractiveCommand{}, &materializeError{err: mErr, key: key}
+		}
+		// Exactly one retry. A second refusal is a refusal, and a loop that
+		// kept answering it would clone in circles.
+		return spec(ctx, p.ID)
+	})
+}
+
+// materializeError carries a failed materialization and the deploy key it left
+// for the operator to authorize, so the banner can show what makes the failure
+// actionable rather than only naming it.
+type materializeError struct {
+	err error
+	key *projects.DeployKey
+}
+
+func (e *materializeError) Error() string { return e.err.Error() }
+func (e *materializeError) Unwrap() error { return e.err }
+
+// openShow opens the detail panel and asks what the guest holds. The ask is a
+// read, so it takes no busy lock: the panel says it is asking until the answer
+// lands, exactly as the gateway panel does.
+func (s *projectsScreen) openShow(r *root, p projects.Project) tea.Cmd {
+	s.showID = p.ID
+	s.showLoaded = false
+	s.showErr = ""
+	d := r.deps
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(d.parentContext(), longOr(d.Timeout))
+		defer cancel()
+		rep, err := d.ProjectShow(ctx, p.ID)
+		return showMsg{report: rep, err: err}
+	}
 }
 
 // openConnect opens the gateway panel for one project and asks the service
@@ -269,27 +417,48 @@ func (s *projectsScreen) openConnect(r *root, p projects.Project) tea.Cmd {
 }
 
 // keys names only what the keys do on this backend. A hub bound to a backend
-// with no session must not offer "enter agent" and "s shell": both would be
-// keys that do nothing, and the footer is the one place the hub says which
-// keys are live.
+// with no session must not offer "enter agent" and "s shell", and one bound to
+// a backend that keeps no registry must not offer "u use": each would be a key
+// that does nothing, and the footer is the one place the hub says which keys
+// are live.
 func (s *projectsScreen) keys(r *root) string {
 	switch {
 	case s.adding:
 		return "enter add · tab field · esc cancel"
+	case s.editing:
+		return "enter save · esc cancel"
 	case s.connectID != "":
 		return "esc close"
 	case s.confirm:
 		return "y remove · n keep"
-	case r.deps.AgentSpec == nil:
-		return "a add · u use · enter open · d remove"
-	default:
-		return "a add · u use · enter agent · s shell · d remove"
 	}
+	if s.showID != "" {
+		return "esc close"
+	}
+	parts := []string{"a add"}
+	if r.deps.ProjectShow != nil {
+		parts = append(parts, "v show")
+	}
+	if r.deps.ProjectSetRemote != nil {
+		parts = append(parts, "e remote")
+	}
+	if r.deps.ProjectUse != nil {
+		parts = append(parts, "u use")
+	}
+	if r.deps.AgentSpec == nil {
+		parts = append(parts, "enter open")
+	} else {
+		parts = append(parts, "enter agent", "s shell")
+	}
+	return strings.Join(append(parts, "d remove"), " · ")
 }
 
 func (s *projectsScreen) view(r *root, w int) string {
 	var b strings.Builder
 
+	if s.showID != "" {
+		return s.viewShow()
+	}
 	if s.connectID != "" {
 		return s.viewConnect(r)
 	}
@@ -305,6 +474,16 @@ func (s *projectsScreen) view(r *root, w int) string {
 			b.WriteString(marker + styMuted.Render(pad(label, 8)) + styField.Render(s.fields[i].View()) + "\n")
 		}
 		b.WriteString("\n" + styBtn.Render("Add"))
+		return b.String()
+	}
+
+	if s.editing {
+		b.WriteString(styStrong.Render("Correct the remote of "+s.editID) + "\n")
+		b.WriteString(styMuted.Render(
+			"The registry is shared, so this applies to every backend. A host only this "+
+				"machine knows resolves nowhere else.") + "\n\n")
+		b.WriteString(styWorking.Render("▸ ") + styMuted.Render(pad("remote", 8)) + styField.Render(s.fields[0].View()) + "\n")
+		b.WriteString("\n" + styBtn.Render("Save"))
 		return b.String()
 	}
 
@@ -372,6 +551,47 @@ func plural(n int, one, many string) string {
 // is in, the forward the operator opens, and where Hermes Desktop points. The
 // command lines are rendered unstyled so a terminal selection picks up no
 // decoration.
+// viewShow renders what the guest holds for one project. It names markers and
+// counts, never a file inside the checkout: `project show` returns no file
+// names, no diffs and no raw Git output, and the hub is not a second answer.
+func (s *projectsScreen) viewShow() string {
+	var b strings.Builder
+	b.WriteString(styStrong.Render(s.showID) + "\n\n")
+	switch {
+	case s.showErr != "":
+		b.WriteString(styAmber.Render("could not be read: ") + styText.Render(s.showErr) + "\n")
+		return b.String()
+	case !s.showLoaded:
+		b.WriteString(styMuted.Render("Asking the guest…") + "\n")
+		return b.String()
+	}
+
+	rep := s.showRep
+	c := rep.Checkout
+	if rep.Project.Remote != "" {
+		b.WriteString(styMuted.Render(rep.Project.Remote) + "\n")
+	}
+	if rep.Project.Path != "" {
+		b.WriteString(styMuted.Render(rep.Project.Path) + "\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(line(c.PathExists, "checkout", ternary(c.PathExists, "present", "absent")))
+	b.WriteString(line(c.Repository, "git repository", ternary(c.Repository, "yes", "no")))
+	b.WriteString(line(c.OriginMatches, "origin matches the record", ternary(c.OriginMatches, "yes", "no")))
+	b.WriteString(line(c.Clean, "worktree", ternary(c.Clean, "clean", "has uncommitted work")))
+	b.WriteString(line(c.SharedPermissions, "shared access", ternary(c.SharedPermissions, "yes", "no")))
+
+	if len(rep.Issues) == 0 {
+		b.WriteString("\n" + styMuted.Render("no issues") + "\n")
+		return b.String()
+	}
+	b.WriteString("\n" + styAmber.Render("issues") + "\n")
+	for _, issue := range rep.Issues {
+		b.WriteString(styMuted.Render("  "+issue) + "\n")
+	}
+	return b.String()
+}
+
 func (s *projectsScreen) viewConnect(r *root) string {
 	d := r.deps
 	var b strings.Builder

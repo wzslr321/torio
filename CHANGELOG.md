@@ -31,6 +31,69 @@
   branch, the commit and whether the tree was dirty. A release, a dev build and
   a working-tree build can be installed at the same time; each keeps its own
   directory and its own name.
+- **One Second Brain, with the host as its hub.** The canonical vault is now a
+  Git worktree on the host, under
+  `${XDG_DATA_HOME:-~/.local/share}/torio/brain/vault`, and each backend's guest
+  keeps a replica of it. `torio brain sync`, or `y` on the hub's Brain tab,
+  reconciles the bound guest with the host both ways by carrying Git bundles
+  over the same one-shot transport `brain import` uses. Unsaved work in a guest
+  vault is committed first, because an agent writes notes and never commits
+  them. Neither vault gains a network remote, and no host mount is introduced. A
+  merge that cannot be made automatically stops that direction, leaves it as it
+  was, and names the host vault, where it is resolved with ordinary Git.
+  `brain status` now reports how far the replica is from the hub
+  ([ADR-0025](docs/adr/0025-one-second-brain-with-the-host-as-its-hub.md)).
+- **Opening a session materializes the checkout it needs.** The registry is
+  shared by every instance and the checkouts are not, so a project attached
+  under one backend is registered and absent under the next. Pressing enter on
+  it in the hub, or running `torio project agent`, `enter` or `shell`, now
+  clones it from the remote on record and then opens the session, instead of
+  reporting drift and naming a command to go and run. Only a checkout that is
+  simply not there is made this way: a checkout that exists and disagrees with
+  the record is a working tree, and it is refused as before. The clone reaches a
+  remote, so it still stops with the deploy key to authorize where the guest may
+  not read one
+  ([ADR-0024](docs/adr/0024-a-session-materializes-the-checkout-it-needs.md)).
+- **`torio project set-remote <id> <remote>`.** Corrects the remote of a project
+  already on record, without removing the entry, the checkouts other guests
+  hold, or the deploy keys those guests had authorized. The registry is shared,
+  so the correction applies to every backend. The checkout on the selected
+  backend's guest is repointed when its origin still holds the remote being
+  replaced; any other origin is reported and left alone. The hub offers the same
+  correction on `e`, prefilled with what the record holds
+  ([ADR-0023](docs/adr/0023-recorded-remotes-are-resolvable-from-a-guest.md)).
+
+- **More of the surface reaches the hub.** The dashboard stops the bound box on
+  `x`, asking first, because stopping a box takes the agent sessions it is
+  carrying with it. The project screen opens a detail panel on `v`, which is
+  `project show`: what the guest holds and the markers naming what drifted,
+  without leaving the hub to find out why a session refused.
+
+### Fixed
+
+- **A host the guest cannot resolve is named as one.** A remote whose host only
+  the operator's machine knows, which is what a host-local SSH alias is, used to
+  fail as though an authorization were missing, and offered a deploy key to
+  authorize. Authorizing it changed nothing: the guest had never reached the
+  forge to present it. The run now reports the host that did not resolve and
+  names the command that corrects the record.
+- **The hub preflights a session before it opens one.** Opening an agent session
+  or a shell from the project screen now runs the same checks
+  `torio project agent` and `torio project shell` run, so a checkout that is not
+  on this backend's guest is named as such, with the command that reconciles it.
+  It previously reached the guest helper with a path nothing had verified and
+  came back as a bare exit status, which the repaint had already erased the
+  reason for.
+- A session that ends non-zero keeps the end of what it wrote on screen, under a
+  banner that stays until it is dismissed.
+- The hub's add form accepts the id alone, as it always said it did. The remote
+  and the display name come from the shared registry, which is what materializes
+  an already-registered project in another backend's guest.
+- The project screen stops offering `u use` on a backend that keeps no registry.
+  It had no registry to select in and the key always failed.
+- Drift and `project show` name `torio project add <id>`, the form that
+  reconciles a registered project from the remote on record, rather than a bare
+  verb or a form that asks for a remote Torio already holds.
 
 ## 0.3.4 - 2026-08-10
 

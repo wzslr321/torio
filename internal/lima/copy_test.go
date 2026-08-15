@@ -133,3 +133,45 @@ func TestCopyFailureNeverReturnsTransportOutputOrPaths(t *testing.T) {
 }
 
 var _ execx.Runner = (*fakeRunner)(nil)
+
+// The vault has to come back out for two boxes to agree on it (ADR-0025), and
+// it comes out the same way it went in: one bounded transport call, the guest
+// side named as a contained descendant of the owning identity's home.
+func TestCopyFromGuestUsesTheMirroredArgv(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{{result: exitResult(0, "", "")}}}
+	a := New(fr)
+
+	if err := a.CopyFromGuest(context.Background(), HermesHome+"/.torio-brain-sync-staging", "/private/tmp/torio-brain-sync-456", HermesHome); err != nil {
+		t.Fatalf("CopyFromGuest: %v", err)
+	}
+	want := []string{
+		"copy",
+		"torio:/home/hermes/.torio-brain-sync-staging/",
+		"/private/tmp/torio-brain-sync-456/",
+	}
+	if got := fr.callArgs(0); !equalArgs(got, want) {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+}
+
+// The same boundary in the same direction: a guest path outside the owning
+// identity's home is refused before anything is rendered into Lima's
+// colon-based remote syntax.
+func TestCopyFromGuestRefusesAGuestPathOutsideTheIdentityHome(t *testing.T) {
+	fr := &fakeRunner{script: []scriptedResponse{{result: exitResult(0, "", "")}}}
+	a := New(fr)
+
+	for _, guestDir := range []string{
+		"/tmp/anything",
+		HermesHome,
+		"/home/other/.torio-brain-sync-staging",
+		HermesHome + "/../etc",
+	} {
+		if err := a.CopyFromGuest(context.Background(), guestDir, "/private/tmp/torio-brain-sync-456", HermesHome); err == nil {
+			t.Errorf("CopyFromGuest(%q) was accepted", guestDir)
+		}
+	}
+	if len(fr.calls) != 0 {
+		t.Errorf("the transport ran %d times for refused paths", len(fr.calls))
+	}
+}

@@ -73,7 +73,11 @@ const (
 	// half-written payload can never be walked as a skill.
 	skillStagingPath = lima.HermesHome + "/.torio-brain-skill-staging"
 	lockPath         = lima.HermesHome + "/.torio-brain-init.lock"
-	staleLockAge     = "10"
+	// syncStagingPath is where a bundle is written on its way out and read on
+	// its way in (ADR-0025). Like every other staging directory it sits in the
+	// owning identity's home.
+	syncStagingPath = lima.HermesHome + "/.torio-brain-sync-staging"
+	staleLockAge    = "10"
 
 	// issueSkillDrift is the machine-readable issue string for a retrieval skill
 	// that does not match what Torio ships. Named once so the writer and the
@@ -195,7 +199,17 @@ type StatusReport struct {
 	// one backend's path while running another has been told a falsehood by a
 	// command whose whole job is to say what is true.
 	SkillPath string
-	Issues    []string
+	// HubRefKnown, AheadOfHub and BehindHub say how far this replica is from
+	// the one Second Brain on the host (ADR-0025). They are facts about where
+	// this box stands, never drift in it: a vault can be perfectly healthy and
+	// simply not level with the rest yet, and reporting that as damage would
+	// make every reconciliation look like a repair. A box that has never
+	// reconciled has nothing to compare with, which HubRefKnown says rather
+	// than leaving two zeroes to be read as agreement.
+	HubRefKnown bool
+	AheadOfHub  int
+	BehindHub   int
+	Issues      []string
 }
 
 // InitReport distinguishes a fresh scaffold from an idempotent verification or

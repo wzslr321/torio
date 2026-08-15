@@ -457,9 +457,9 @@ const HermesBrainSkillName = backend.BrainSkillName
 // Constraints from the transport: one line, and free of `$`, `%` and `"`,
 // which systemd would expand or terminate the quoted value on.
 const HermesEnvironmentHint = "This machine is managed by Torio. The user's private notes are one Markdown vault at " +
-	HermesBrainPath + "; there is no other vault, and no vault path to resolve from an environment variable " +
-	"or a fallback location. Read it with the " + HermesBrainSkillName + " skill: search for the few notes " +
-	"that answer the question, then read those. Never list or read the vault in bulk."
+	HermesBrainPath + "; there is no other vault on this machine, and no vault path to resolve from an " +
+	"environment variable or a fallback location. Read it with the " + HermesBrainSkillName + " skill: search " +
+	"for the few notes that answer the question, then read those. Never list or read the vault in bulk."
 
 // renderHermesUnit produces the exact bytes of the custom user systemd unit. It
 // is deterministic and derived entirely from the pinned constants, so the

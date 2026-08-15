@@ -1,17 +1,21 @@
 ## Command surface — `torio brain` {#brain}
 
-Manages the private Second Brain: a Markdown vault in the agent identity's own
-home, versioned by a local Git repository, owned by that identity, and — on a
-backend that keeps a project registry — registered as its own project so any
-session can search it. `brain status` prints the path on the box you are
-talking to. The parent takes no action itself; an absent or unknown subcommand
-is a usage error.
+Manages the private Second Brain. There is one Brain. Its canonical vault is a
+Markdown corpus in a Git repository on the host, under
+`${XDG_DATA_HOME:-~/.local/share}/torio/brain/vault`, and each backend's guest
+keeps a replica of it in that identity's own home, owned by that identity and,
+on a backend that keeps a project registry, registered as its own project so
+any session can search it. `torio brain sync` makes a replica and the host
+vault agree; `brain status` prints the path on the box you are talking to. The
+parent takes no action itself; an absent or unknown subcommand is a usage
+error.
 
 | Command | What it does |
 | --- | --- |
 | `torio brain init` | Create the canonical scaffold atomically through private guest staging, make the first local commit, and register the Hermes project. Then install or refresh the global `torio-brain` retrieval skill so other projects can search the Brain. Idempotent for managed state; refuses to touch non-empty data it did not create. Configures no remote and pushes nothing. |
 | `torio brain status` | Report state (`initialized`, `uninitialized`, or drift), the canonical path, native filesystem, ownership and mode, Git worktree state, aggregate counts, Hermes project registration, and skill state. Changes nothing. |
 | `torio brain import <host-directory>` | Import an existing Markdown vault through private host and guest staging, verified by checksum on the guest. Accepts `--into SUBDIR` to land the import as one new contained subtree, and `--dry-run` to preflight without transferring anything. |
+| `torio brain sync` | Reconcile this backend's replica with the vault on the host, both ways, by carrying Git bundles over the same one-shot transport `brain import` uses. Unsaved work in the guest vault is committed first. Neither vault gains a network remote. A merge that cannot be made automatically stops that direction, leaves it as it was, and names the host vault where you resolve it with Git. Counts are reported; note names and content are not. |
 
 **Output never contains note names or note content** — not in success output, not
 in `error.details`. Every command reports bounded aggregate metadata only: file
@@ -25,22 +29,18 @@ hardlinks, special files, and executables. Existing data is **never** overwritte
 Sessions that were already open when `init` ran will not see the retrieval skill:
 Hermes caches a skill's prompt per backend process, so restart them.
 
-### Getting the Brain back out {#brain-export}
+### The vault on your host {#brain-export}
 
-Torio brings data in and does not take it out. There is no `torio brain export`.
-Copying the Brain to your host is an explicit thing you do:
+`torio brain sync` puts the vault on your host, at
+`${XDG_DATA_HOME:-~/.local/share}/torio/brain/vault`, and keeps it and this
+box's replica reconciled. It is a Git repository holding Markdown, so it is
+readable, greppable and backup-able with the tools you already have, and it is
+where a merge conflict is resolved.
 
-```bash
-limactl copy <instance>:<vault-path>/ <host-destination>/
-```
-
-`brain status` prints that line filled in for the box it just read, because the
-instance and the vault path are both the backend's — a copied-out example
-naming another backend's box is a command that either fails or copies the wrong
-vault.
-
-That is your command, not a Torio feature: nothing verifies the result, and
-Torio does not call it a backup.
+There is still no `torio brain export`. What sync carries is a Git bundle read
+once and removed, in both directions, and neither vault ever gains a network
+remote. Backing the host vault up is your decision and your command; Torio
+reconciles the copies and makes no claim beyond that.
 
 ### On a backend that keeps no registry or no skills {#brain-backends}
 

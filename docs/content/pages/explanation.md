@@ -126,8 +126,11 @@ staging. There is no matching export, and that asymmetry is intentional: an
 export command would be a supported, verified-looking path for Brain content to
 leave the boundary, and every guarantee it implied would have to hold.
 
-Copying the Brain back to your host is a `limactl copy` you run yourself. Torio
-does not verify it and does not call it a backup.
+The vault reaches your host through `torio brain sync`, which reconciles this
+box's replica with the one canonical vault under
+`${XDG_DATA_HOME:-~/.local/share}/torio/brain/vault`. It carries Git bundles
+over the same one-shot transport the import uses, so neither vault gains a
+network remote. Backing that host vault up is your decision and your command.
 
 ## How this documentation avoids drifting {#single-source}
 

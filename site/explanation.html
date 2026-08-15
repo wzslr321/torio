@@ -84,7 +84,7 @@
 <p>The boundary stays in one place regardless of tooling. The <a href="how-to.html#editor">how-to guide</a> covers Neovim, Remote-SSH, and terminal agents.</p>
 <h2 id="data-direction">Data comes in and does not go out</h2>
 <p><code>torio brain import</code> brings a Markdown vault onto the guest through verified staging. There is no matching export, and that asymmetry is intentional: an export command would be a supported, verified-looking path for Brain content to leave the boundary, and every guarantee it implied would have to hold.</p>
-<p>Copying the Brain back to your host is a <code>limactl copy</code> you run yourself. Torio does not verify it and does not call it a backup.</p>
+<p>The vault reaches your host through <code>torio brain sync</code>, which reconciles this box's replica with the one canonical vault under <code>${XDG_DATA_HOME:-~/.local/share}/torio/brain/vault</code>. It carries Git bundles over the same one-shot transport the import uses, so neither vault gains a network remote. Backing that host vault up is your decision and your command.</p>
 <h2 id="single-source">How this documentation avoids drifting</h2>
 <p>The site and runbook are generated from <code>docs/content/</code>. Shared sections are included from one file, and validation fails when committed output differs from its source.</p>
       </div>

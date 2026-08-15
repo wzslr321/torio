@@ -52,15 +52,28 @@ func (s *brainScreen) update(r *root, msg tea.Msg) tea.Cmd {
 		return nil
 
 	case tea.KeyMsg:
-		if msg.String() == "i" && r.deps.BrainInit != nil {
-			d := r.deps
-			return r.run("creating the Second Brain", true, d.BrainInit)
+		d := r.deps
+		switch msg.String() {
+		case "i":
+			if d.BrainInit != nil {
+				return r.run("creating the Second Brain", true, d.BrainInit)
+			}
+		case "y":
+			if d.BrainSync != nil {
+				// Long: it commits, bundles, carries and merges (ADR-0025).
+				return r.run("reconciling the Second Brain", true, d.BrainSync)
+			}
 		}
 	}
 	return nil
 }
 
-func (s *brainScreen) keys() string { return "i create" }
+func (s *brainScreen) keys(r *root) string {
+	if r.deps.BrainSync == nil {
+		return "i create"
+	}
+	return "i create · y sync"
+}
 
 func (s *brainScreen) view(r *root, w int) string {
 	switch {
@@ -84,6 +97,15 @@ func (s *brainScreen) view(r *root, w int) string {
 	b.WriteString(line(rep.ProjectRegistered, "registered as a project", ternary(rep.ProjectRegistered, "yes", "no")))
 	b.WriteString(line(rep.SkillState != brain.SkillDrift, "retrieval skill", string(rep.SkillState)))
 	b.WriteString(line(true, "contents", fmt.Sprintf("%d notes, %d attachments", rep.MarkdownFiles, rep.AttachmentFiles)))
+	// Where this box stands relative to the one Brain. Being out of step is not
+	// a fault, so it is never marked as one: it is what `y` is for (ADR-0025).
+	if r.deps.BrainSync != nil {
+		replica := "never reconciled"
+		if rep.HubRefKnown {
+			replica = fmt.Sprintf("%d ahead, %d behind the host vault", rep.AheadOfHub, rep.BehindHub)
+		}
+		b.WriteString(line(true, "replica", replica))
+	}
 
 	if len(rep.Issues) > 0 {
 		b.WriteString("\n" + styAmber.Render("issues") + "\n")

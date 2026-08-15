@@ -139,6 +139,7 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 			return err
 		},
 		VMStart: adapter.Start,
+		VMStop:  adapter.Stop,
 
 		Bootstrap: func(ctx context.Context, verifyOnly bool) (lima.BootstrapReport, error) {
 			o := opts
@@ -172,6 +173,10 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 		},
 
 		BrainStatus: brainSvc.Status,
+		BrainSync: func(ctx context.Context) error {
+			_, err := brainSvc.Sync(ctx)
+			return err
+		},
 		BrainInit: func(ctx context.Context) error {
 			_, err := brainSvc.Init(ctx)
 			return err
@@ -179,18 +184,53 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 
 		ProjectList: projectSvc.List,
 		ProjectAdd: func(ctx context.Context, id, remote string) (*projects.DeployKey, error) {
-			report, err := projectSvc.Add(ctx, projects.AddRequest{ID: id, DisplayName: id, Remote: remote})
+			// No remote means the id is already on record and this backend's
+			// guest is the one lacking the checkout. The remote and the display
+			// name both come from the record, the way the one-argument
+			// `project add` takes them: retyping either would attach a
+			// different repository, or be refused as a conflict, under a name
+			// that already means something.
+			name := id
+			if remote == "" {
+				known, err := findRegistered(projectSvc, id)
+				if err != nil {
+					return nil, err
+				}
+				remote, name = known.Remote, known.DisplayName
+			}
+			report, err := projectSvc.Add(ctx, projects.AddRequest{ID: id, DisplayName: name, Remote: remote})
 			if err != nil {
 				return report.DeployKey, err
 			}
 			return nil, nil
 		},
-		ProjectUse: func(ctx context.Context, id string) error {
-			_, err := projectSvc.Use(ctx, id)
-			return err
+		ProjectShow: func(ctx context.Context, id string) (projects.ShowReport, error) {
+			return projectSvc.Show(ctx, id)
 		},
 		ProjectRemove: func(ctx context.Context, id string) error {
 			_, err := projectSvc.Remove(ctx, id)
+			return err
+		},
+		ProjectMaterialize: func(ctx context.Context, id string) (*projects.DeployKey, error) {
+			// The one-argument `add`: the remote and the display name come off
+			// the record, so opening a project on a second backend attaches
+			// nothing new and renames nothing.
+			known, err := findRegistered(projectSvc, id)
+			if err != nil {
+				return nil, err
+			}
+			report, err := projectSvc.Add(ctx, projects.AddRequest{
+				ID:          id,
+				DisplayName: known.DisplayName,
+				Remote:      known.Remote,
+			})
+			if err != nil {
+				return report.DeployKey, err
+			}
+			return nil, nil
+		},
+		ProjectSetRemote: func(ctx context.Context, id, remote string) error {
+			_, err := projectSvc.SetRemote(ctx, id, remote)
 			return err
 		},
 
@@ -202,14 +242,42 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 		Rebind:   a.rebindDeps,
 	}
 
+	// Selecting an active project is an operation on a backend's own registry.
+	// A backend that keeps none has nothing to select, so the seam stays nil
+	// and the screen stops offering the key rather than offering one that
+	// always fails (ADR-0009).
+	if a.backend.Registry() != nil {
+		d.ProjectUse = func(ctx context.Context, id string) error {
+			_, err := projectSvc.Use(ctx, id)
+			return err
+		}
+	}
+
 	// A session the backend does not declare stays nil, so the screens report a
 	// capability the backend lacks rather than offering an action that fails.
 	if session != nil {
 		d.LoginSpec = func() (execx.InteractiveCommand, error) {
 			return lima.BackendLoginSpec(session.LoginArgv)
 		}
-		d.AgentSpec = a.newAgentSpec
-		d.ShellSpec = a.newShellSpec
+		// Each session seam is the command's own sequence: preflight the
+		// project, then build the argv from the path the preflight verified.
+		// `project agent` and `project shell` do exactly this, so a checkout
+		// that drifted refuses here with the reason and the remedy rather than
+		// reaching the guest helper and coming back as an exit status.
+		d.AgentSpec = func(ctx context.Context, id string) (execx.InteractiveCommand, error) {
+			session, err := projectSvc.EnterPreflight(ctx, id)
+			if err != nil {
+				return execx.InteractiveCommand{}, err
+			}
+			return a.newAgentSpec(session.Project.Path)
+		}
+		d.ShellSpec = func(ctx context.Context, id string) (execx.InteractiveCommand, error) {
+			session, err := projectSvc.ShellPreflight(ctx, id)
+			if err != nil {
+				return execx.InteractiveCommand{}, err
+			}
+			return a.newShellSpec(session.Project.Path)
+		}
 	}
 	return d, nil
 }

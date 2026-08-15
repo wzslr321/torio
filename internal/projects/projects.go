@@ -165,6 +165,23 @@ type RemoveReport struct {
 	Notes        []string
 }
 
+// SetRemoteReport is the outcome of correcting one recorded remote (ADR-0023).
+//
+// The record is the part that always moves. The checkout is repointed only
+// where its origin still matched the remote being replaced, because Torio does
+// not repoint a working tree it cannot vouch for, and Notes says which of those
+// happened.
+type SetRemoteReport struct {
+	Project Project
+	// PreviousRemote is what the record held before this correction.
+	PreviousRemote string
+	// CheckoutRepointed reports that the guest checkout's origin was moved to
+	// the corrected remote. False covers every reason it was not: no checkout,
+	// a box that is not running, or an origin that matched neither remote.
+	CheckoutRepointed bool
+	Notes             []string
+}
+
 // CheckoutStatus is the derived state of the guest checkout. It carries only
 // booleans and metadata — never a file name, a diff, or raw Git output.
 type CheckoutStatus struct {
@@ -202,6 +219,11 @@ func (c CheckoutStatus) compliant() bool {
 		c.SharedPermissions
 }
 
+// issueCheckoutAbsent is the one marker a caller acts on rather than only
+// reports: it is the single drift that can be answered by materializing the
+// checkout the record already describes (ADR-0024).
+const issueCheckoutAbsent = "checkout_absent"
+
 // issues names the failed invariants as stable, payload-free markers.
 func (c CheckoutStatus) issues() []string {
 	var out []string
@@ -209,7 +231,7 @@ func (c CheckoutStatus) issues() []string {
 	case c.Symlink:
 		out = append(out, "path_is_symlink")
 	case !c.PathExists:
-		out = append(out, "checkout_absent")
+		out = append(out, issueCheckoutAbsent)
 	case !c.Directory:
 		out = append(out, "path_is_not_a_directory")
 	}

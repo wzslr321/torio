@@ -67,6 +67,10 @@ type Deps struct {
 	VMStatus func(context.Context) (lima.Status, error)
 	VMInit   func(context.Context, VMInitOptions) error
 	VMStart  func(context.Context) error
+	// VMStop stops this box. Starting one was always in the hub and stopping it
+	// was not, which sent the operator to the command line for the one thing
+	// they do at the end of a day.
+	VMStop func(context.Context) error
 
 	// Bootstrap verifies and, unless verifyOnly, repairs. The hub calls it both
 	// ways: verifying to learn where setup stands, repairing when the operator
@@ -85,6 +89,10 @@ type Deps struct {
 	ServeRestart func(context.Context) error
 	ServeLogs    func(context.Context, int) (string, error)
 
+	// BrainSync reconciles this box's replica of the one Second Brain with the
+	// copy on the host (ADR-0025). A nil seam is a build that cannot.
+	BrainSync func(ctx context.Context) error
+
 	BrainStatus func(context.Context) (brain.StatusReport, error)
 	BrainInit   func(context.Context) error
 
@@ -96,6 +104,10 @@ type Deps struct {
 	ProjectAdd    func(ctx context.Context, id, remote string) (*projects.DeployKey, error)
 	ProjectUse    func(ctx context.Context, id string) error
 	ProjectRemove func(ctx context.Context, id string) error
+	// ProjectShow is `project show` for one project: what the guest holds and
+	// the markers naming what drifted. The hub lists projects, so the hub is
+	// where a broken one is noticed, and reading why had meant leaving it.
+	ProjectShow func(ctx context.Context, id string) (projects.ShowReport, error)
 
 	// Poll is the cross-box status poll the dashboard renders.
 	Poll func(context.Context) (status.Report, error)
@@ -111,9 +123,29 @@ type Deps struct {
 	// The interactive handoffs. Each returns the argv of a real session; the
 	// hub releases the terminal to it and takes it back when the session ends.
 	// A nil field is a session this backend does not have.
+	//
+	// The two project sessions take a project id rather than a path, because
+	// resolving the path is part of the preflight the command surface runs
+	// before it opens either of them: what is verified and what is opened have
+	// to be the same checkout. The hub passes the id it was told to open and
+	// the seam does the rest, so neither surface can drift into opening a
+	// session the other would have refused (ADR-0019).
 	LoginSpec func() (execx.InteractiveCommand, error)
-	AgentSpec func(projectPath string) (execx.InteractiveCommand, error)
-	ShellSpec func(projectPath string) (execx.InteractiveCommand, error)
+	AgentSpec func(ctx context.Context, id string) (execx.InteractiveCommand, error)
+	ShellSpec func(ctx context.Context, id string) (execx.InteractiveCommand, error)
+
+	// ProjectMaterialize makes the checkout a registered project describes, on
+	// the guest this hub is bound to (ADR-0024). It is the one-argument `add`:
+	// the remote comes from the record, so opening a project on a second
+	// backend attaches nothing new. A failed materialization may leave a deploy
+	// key for the operator to authorize, exactly as a failed add does.
+	ProjectMaterialize func(ctx context.Context, id string) (*projects.DeployKey, error)
+
+	// ProjectSetRemote corrects the remote of a project already on record
+	// (ADR-0023). It is here because the hub lists the records, so the hub is
+	// where a wrong one is seen; sending the operator to a command to fix what
+	// the screen is showing them is the dead end this removes.
+	ProjectSetRemote func(ctx context.Context, id, remote string) error
 }
 
 // Run opens the hub and blocks until the operator quits.

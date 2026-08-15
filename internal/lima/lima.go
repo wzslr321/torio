@@ -25,11 +25,12 @@ import (
 // is that the operator chooses which one, so a test run and a day's work do not
 // share a Brain.
 //
-// It is a variable rather than a constant for exactly one reason: internal/cli
-// assigns it once during startup, from a value internal/config has already
-// validated, before any command runs and before anything touches a VM. Nothing
-// else may write it. Read it freely — by the time any command executes it is
-// fixed for the life of the process.
+// It is a variable rather than a constant because internal/cli assigns it from
+// a value internal/config has already validated, before anything touches a VM.
+// There are two sanctioned writers and no others: startup, before any command
+// runs, and the hub's rebind seam, which re-runs that same startup resolution
+// once per binding while no operation is in flight (ADR-0021). Read it freely —
+// within one command, and within one hub binding, it does not move.
 //
 // A status poll reads several instances (ADR-0017) and is the one caller that
 // addresses a box this name does not name. It does so through ForInstance,

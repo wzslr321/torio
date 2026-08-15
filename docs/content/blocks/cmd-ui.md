@@ -22,10 +22,16 @@ quits.
   exits **3** (`NOT_A_TERMINAL`). Bare `torio` in the same situation keeps its
   usage error (exit 2), unchanged, so scripts and CI jobs read what they always
   have.
+- The project screen opens a session on Enter, an operator shell on `s`, a
+  detail panel on `v`, and the remote correction on `e`. The dashboard stops the
+  bound box on `x`, and asks first. The Brain tab reconciles this box's replica
+  with the host vault on `y`.
 - `--verbose` has no effect while the hub owns the screen. Run the equivalent
   command for diagnostics.
 - It opens on the instance and backend this invocation resolved. `b` rebinds
   it to another backend without quitting: the hub re-resolves the instance the
   same way `--backend` does, discards everything on screen, and re-reads the
-  new box from nothing. Each backend keeps its own project registry, so a
-  project appears on the other side only after it is added there too.
+  new box from nothing. The project registry is shared, so the same projects
+  are listed on either side. The checkouts are not shared, so opening a project
+  the new box has never held materializes its checkout first, from the remote on
+  record, and then opens the session.

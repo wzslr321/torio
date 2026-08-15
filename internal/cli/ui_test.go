@@ -4,8 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/wzslr321/torio/internal/backend/claudecode"
+	"github.com/wzslr321/torio/internal/execx"
+	"github.com/wzslr321/torio/internal/lima"
+	"github.com/wzslr321/torio/internal/projects"
+	"github.com/wzslr321/torio/internal/serve"
 )
 
 // hubApp builds an invocation whose terminal answer and hub launch are both
@@ -182,5 +189,220 @@ func TestTerminalCheckDefaultsToProductionWiring(t *testing.T) {
 	// check must answer false here. A true would mean it is not really asking.
 	if a.isTerminal() {
 		t.Error("the default terminal check reports a terminal in a test process")
+	}
+}
+
+// hubSeamApp builds an invocation whose hub seams are wired the way production
+// wires them, over fakes for everything that would reach a box. It exists so a
+// test can call one hub seam and see which manager calls it makes.
+func hubSeamApp(t *testing.T, service projectService) *app {
+	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	return &app{
+		stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, build: testBuild(),
+		// A backend that declares an interactive session, because these are the
+		// seams that open one. Hermes runs a service instead and declares none.
+		backend:            claudecode.New(),
+		lookupOperatorUser: func() (string, error) { return "testop", nil },
+		newLima:            func() *lima.Adapter { return lima.New(&fakeLimaRunner{}) },
+		newServe:           func() *serve.Adapter { return serve.New(lima.New(&fakeLimaRunner{}), claudecode.New()) },
+		newBrain: func(*lima.Adapter, lima.BootstrapOptions) brainService {
+			return &fakeBrainService{}
+		},
+		newProjects: func(*lima.Adapter, lima.BootstrapOptions) projectService {
+			return service
+		},
+	}
+}
+
+// The hub opens a session through the same preflight the command surface runs.
+// Without it the hub reaches the guest helper with a path nothing verified, and
+// a checkout that is not there answers with a bare exit status the operator
+// cannot act on (ADR-0019: the hub is a second way to reach the operations,
+// never a second implementation of them).
+func TestHubAgentSessionPreflightsBeforeItResolvesTheArgv(t *testing.T) {
+	service := &fakeProjectService{
+		enterSession: projects.EnterSession{EnterSpec: projects.EnterSpec{Project: sampleProject()}},
+	}
+	var built string
+	a := hubSeamApp(t, service)
+	a.newAgentSpec = func(path string) (execx.InteractiveCommand, error) {
+		built = path
+		return execx.InteractiveCommand{Name: "ssh"}, nil
+	}
+
+	d, err := a.tuiDeps()
+	if err != nil {
+		t.Fatalf("wiring the hub failed: %v", err)
+	}
+	if d.AgentSpec == nil {
+		t.Fatal("the hub was given no agent session seam")
+	}
+	if _, err := d.AgentSpec(context.Background(), "torio"); err != nil {
+		t.Fatalf("opening the session failed: %v", err)
+	}
+
+	if service.enterID != "torio" {
+		t.Errorf("preflight ran for %q, want the project the operator picked", service.enterID)
+	}
+	if built != sampleProject().Path {
+		t.Errorf("argv built for %q, want the path the preflight verified", built)
+	}
+}
+
+// A preflight that refuses is the whole point: the operator reads what drifted
+// and what fixes it, and no terminal is ever handed to a session that cannot
+// work.
+func TestHubAgentSessionStopsAtAFailedPreflight(t *testing.T) {
+	service := &fakeProjectService{enterErr: errors.New("checkout_absent")}
+	built := false
+	a := hubSeamApp(t, service)
+	a.newAgentSpec = func(string) (execx.InteractiveCommand, error) {
+		built = true
+		return execx.InteractiveCommand{Name: "ssh"}, nil
+	}
+
+	d, err := a.tuiDeps()
+	if err != nil {
+		t.Fatalf("wiring the hub failed: %v", err)
+	}
+	if _, err := d.AgentSpec(context.Background(), "torio"); err == nil {
+		t.Fatal("a failed preflight still produced a session")
+	}
+	if built {
+		t.Error("the argv was built after the preflight refused")
+	}
+}
+
+// The shell seam holds to the same rule, and its preflight is the one that also
+// proves the operator has an agent to forward.
+func TestHubShellSessionPreflightsBeforeItResolvesTheArgv(t *testing.T) {
+	service := &fakeProjectService{
+		shellSession: projects.ShellSession{ShellSpec: projects.ShellSpec{Project: sampleProject()}},
+	}
+	var built string
+	a := hubSeamApp(t, service)
+	a.newShellSpec = func(path string) (execx.InteractiveCommand, error) {
+		built = path
+		return execx.InteractiveCommand{Name: "ssh"}, nil
+	}
+
+	d, err := a.tuiDeps()
+	if err != nil {
+		t.Fatalf("wiring the hub failed: %v", err)
+	}
+	if _, err := d.ShellSpec(context.Background(), "torio"); err != nil {
+		t.Fatalf("opening the shell failed: %v", err)
+	}
+	if service.shellID != "torio" {
+		t.Errorf("preflight ran for %q, want the project the operator picked", service.shellID)
+	}
+	if built != sampleProject().Path {
+		t.Errorf("argv built for %q, want the path the preflight verified", built)
+	}
+}
+
+// The hub's add form says the remote is optional for a project this backend
+// already knows, and this is what makes that true: the id alone completes from
+// the shared registry, exactly as the one-argument `project add` does. Both the
+// remote and the display name come from the record, because an add that
+// renamed the project on the way through would be refused as a conflict.
+func TestHubAddWithoutARemoteCompletesFromTheRegistry(t *testing.T) {
+	service := &fakeProjectService{
+		listOut: []projects.Project{{
+			ID:          "lean-triage",
+			DisplayName: "Lean Triage",
+			Remote:      "git@github.com:leancodepl/lean-triage.git",
+		}},
+	}
+	a := hubSeamApp(t, service)
+
+	d, err := a.tuiDeps()
+	if err != nil {
+		t.Fatalf("wiring the hub failed: %v", err)
+	}
+	if _, err := d.ProjectAdd(context.Background(), "lean-triage", ""); err != nil {
+		t.Fatalf("materializing a registered project failed: %v", err)
+	}
+
+	if got, want := service.addReq.Remote, "git@github.com:leancodepl/lean-triage.git"; got != want {
+		t.Errorf("add used remote %q, want the one on record %q", got, want)
+	}
+	if got, want := service.addReq.DisplayName, "Lean Triage"; got != want {
+		t.Errorf("add used display name %q, want the one on record %q", got, want)
+	}
+}
+
+// An id with nothing on record has no remote to complete from, and saying so
+// is better than sending an empty remote into validation.
+func TestHubAddWithoutARemoteRefusesAnUnregisteredID(t *testing.T) {
+	service := &fakeProjectService{}
+	a := hubSeamApp(t, service)
+
+	d, err := a.tuiDeps()
+	if err != nil {
+		t.Fatalf("wiring the hub failed: %v", err)
+	}
+	_, err = d.ProjectAdd(context.Background(), "nothing", "")
+	if err == nil {
+		t.Fatal("an unregistered id was added with no remote")
+	}
+	if !strings.Contains(err.Error(), "not registered") {
+		t.Errorf("error = %q, want it to say there is nothing on record", err.Error())
+	}
+	if service.addReq.ID != "" {
+		t.Error("the add ran despite having no remote to run with")
+	}
+}
+
+// A remote the operator typed is still theirs, and the display name defaults to
+// the id the way it always has.
+func TestHubAddWithARemoteIsUnchanged(t *testing.T) {
+	service := &fakeProjectService{}
+	a := hubSeamApp(t, service)
+
+	d, err := a.tuiDeps()
+	if err != nil {
+		t.Fatalf("wiring the hub failed: %v", err)
+	}
+	if _, err := d.ProjectAdd(context.Background(), "demo", "https://example.test/demo.git"); err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	if got, want := service.addReq.Remote, "https://example.test/demo.git"; got != want {
+		t.Errorf("add used remote %q, want %q", got, want)
+	}
+	if got, want := service.addReq.DisplayName, "demo"; got != want {
+		t.Errorf("add used display name %q, want %q", got, want)
+	}
+}
+
+// `project use` selects the active project in a backend's own registry. A
+// backend that keeps no registry has nothing to select, so the hub is given no
+// seam and the screen stops offering the key (ADR-0009: an absent capability is
+// reported as a state, never offered as an action that fails).
+func TestHubHasNoUseSeamOnABackendWithNoRegistry(t *testing.T) {
+	a := hubSeamApp(t, &fakeProjectService{})
+
+	d, err := a.tuiDeps()
+	if err != nil {
+		t.Fatalf("wiring the hub failed: %v", err)
+	}
+	if d.ProjectUse != nil {
+		t.Error("the hub was given a use seam on a backend that keeps no registry")
+	}
+}
+
+// On the backend that does keep one, the seam is there.
+func TestHubHasAUseSeamOnABackendWithARegistry(t *testing.T) {
+	a := hubSeamApp(t, &fakeProjectService{})
+	a.backend = lima.Hermes()
+	a.newServe = func() *serve.Adapter { return serve.New(lima.New(&fakeLimaRunner{}), lima.Hermes()) }
+
+	d, err := a.tuiDeps()
+	if err != nil {
+		t.Fatalf("wiring the hub failed: %v", err)
+	}
+	if d.ProjectUse == nil {
+		t.Error("the hub was given no use seam on a backend that keeps a registry")
 	}
 }

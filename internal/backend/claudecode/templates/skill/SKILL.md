@@ -6,7 +6,9 @@ description: Read the user's private Second Brain vault at /home/claude/brain â€
 # Second Brain retrieval
 
 The user keeps one private Markdown vault at the fixed absolute path
-`/home/claude/brain`. It is the same vault in every project and every session.
+`/home/claude/brain`. It is the same vault in every project and every session on this
+machine, and this machine's copy of one vault the operator keeps: what they
+reconcile with `torio brain sync` is written here too.
 Torio manages it; this skill is how you read it.
 
 Retrieval is targeted: search for the few notes that answer the question, then
