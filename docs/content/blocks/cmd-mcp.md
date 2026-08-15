@@ -2,7 +2,9 @@
 
 Installs and verifies the MCP custody boundary and carries traffic through it.
 The parent command takes no action itself; an absent or unknown subcommand is a
-usage error.
+usage error. The hub's MCP tab offers the same three operations: the status
+rendered, `i` for install, and `l` for login with the service picked from the
+verified grant.
 
 | Command | What it does |
 | --- | --- |

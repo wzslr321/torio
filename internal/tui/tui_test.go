@@ -1823,3 +1823,161 @@ func TestBrainTabOffersNoImportWithoutTheSeam(t *testing.T) {
 		t.Errorf("footer = %q, want no import key", r.brain.keys(r))
 	}
 }
+
+// The MCP boundary had three commands and no screen, which sent the operator
+// away for provisioning, for login, and even for reading whether the boundary
+// holds. The sixth tab is `mcp status` rendered: the checks, the identity
+// separation they establish, and the grant.
+func TestMCPTabProvesTheBoundary(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.MCPStatus = func(context.Context) (lima.MCPBrokerReport, error) {
+		return lima.MCPBrokerReport{
+			Instance:  "torio",
+			AgentUser: "hermes",
+			Checks:    []lima.CheckResult{{Name: "broker_user", OK: true, Detail: "present"}},
+			Policy: lima.PolicyGrant{Digest: "abc123", Services: []lima.PolicyService{
+				{Name: "linear", UpstreamEndpoint: "https://mcp.linear.app/sse", Tools: 3, WriteTools: 1},
+			}},
+		}, nil
+	}
+	d.MCPInstall = func(context.Context) (lima.MCPBrokerInstallReport, error) {
+		return lima.MCPBrokerInstallReport{}, nil
+	}
+	d.MCPLoginSpec = func(string) (execx.InteractiveCommand, error) {
+		return execx.InteractiveCommand{Name: "ssh"}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenMCP)
+	drain(t, r, r.mcp.load(d))
+
+	view := r.View()
+	for _, want := range []string{"broker_user", "linear", "3 tool(s)", "abc123"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view lacks %q:\n%s", want, view)
+		}
+	}
+	if !strings.Contains(r.mcp.keys(r), "i install") || !strings.Contains(r.mcp.keys(r), "l login") {
+		t.Errorf("footer = %q, want install and login offered", r.mcp.keys(r))
+	}
+}
+
+// `6` reaches the tab like any other number key.
+func TestNumberSixSwitchesToTheMCPTab(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.MCPStatus = func(context.Context) (lima.MCPBrokerReport, error) {
+		return lima.MCPBrokerReport{}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+
+	press(t, r, "6")
+
+	if r.active != screenMCP {
+		t.Fatalf("active screen = %v, want the MCP tab", r.active)
+	}
+}
+
+// `i` provisions the boundary, and the note carries the one thing left to do
+// when the backend only just joined the client group: a running process does
+// not gain a group under itself.
+func TestMCPTabInstallReportsTheRestart(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.MCPStatus = func(context.Context) (lima.MCPBrokerReport, error) {
+		return lima.MCPBrokerReport{}, errors.New("never provisioned")
+	}
+	d.MCPInstall = func(context.Context) (lima.MCPBrokerInstallReport, error) {
+		return lima.MCPBrokerInstallReport{Changed: true, RestartRequired: true}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenMCP)
+	drain(t, r, r.mcp.load(d))
+
+	press(t, r, "i")
+
+	if !strings.Contains(r.note, "restart") {
+		t.Errorf("note = %q, want the restart named", r.note)
+	}
+}
+
+// `l` picks a service from the grant — the same names `mcp login <service>`
+// takes — opens the login session, and on its end runs the activation the
+// command runs, so the broker starts when the last service is signed in.
+func TestMCPTabLoginPicksAServiceAndActivates(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.MCPStatus = func(context.Context) (lima.MCPBrokerReport, error) {
+		return lima.MCPBrokerReport{Policy: lima.PolicyGrant{Services: []lima.PolicyService{
+			{Name: "atlassian"}, {Name: "linear"},
+		}}}, nil
+	}
+	handed := ""
+	d.MCPLoginSpec = func(service string) (execx.InteractiveCommand, error) {
+		handed = service
+		return execx.InteractiveCommand{Name: "ssh"}, nil
+	}
+	activated := 0
+	d.MCPActivate = func(context.Context) (lima.MCPBrokerActivationReport, error) {
+		activated++
+		return lima.MCPBrokerActivationReport{Activated: true}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenMCP)
+	drain(t, r, r.mcp.load(d))
+
+	press(t, r, "l")
+	if view := r.View(); !strings.Contains(view, "atlassian") || !strings.Contains(view, "linear") {
+		t.Fatalf("the picker does not offer the grant's services:\n%s", view)
+	}
+	press(t, r, "j")
+	_, cmd := r.Update(key("enter"))
+	if cmd == nil {
+		t.Fatal("enter produced no session")
+	}
+	msg := cmd()
+	if spec, ok := msg.(specMsg); !ok || spec.err != nil {
+		t.Fatalf("enter produced %T (%v), want a resolved session", msg, msg)
+	}
+	if handed != "linear" {
+		t.Fatalf("session opened for %q, want the service the operator picked", handed)
+	}
+
+	drain(t, r, func() tea.Msg { return execDoneMsg{} })
+
+	if activated != 1 {
+		t.Fatalf("activation ran %d times, want once after the session", activated)
+	}
+	if !strings.Contains(r.note, "broker") {
+		t.Errorf("note = %q, want the activation outcome", r.note)
+	}
+}
+
+// A login session that ends non-zero does not activate: the credential was not
+// stored, and activation would report a half-truth over the real failure.
+func TestMCPTabDoesNotActivateAfterAFailedLogin(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.MCPStatus = func(context.Context) (lima.MCPBrokerReport, error) {
+		return lima.MCPBrokerReport{Policy: lima.PolicyGrant{Services: []lima.PolicyService{{Name: "linear"}}}}, nil
+	}
+	d.MCPLoginSpec = func(string) (execx.InteractiveCommand, error) {
+		return execx.InteractiveCommand{Name: "ssh"}, nil
+	}
+	d.MCPActivate = func(context.Context) (lima.MCPBrokerActivationReport, error) {
+		t.Fatal("a failed session still ran activation")
+		return lima.MCPBrokerActivationReport{}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenMCP)
+	drain(t, r, r.mcp.load(d))
+
+	press(t, r, "l")
+	_, _ = r.Update(key("enter"))
+	drain(t, r, func() tea.Msg { return execDoneMsg{err: errors.New("exit status 1")} })
+}
