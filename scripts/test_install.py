@@ -33,9 +33,11 @@ class InstallerTests(unittest.TestCase):
         self.assets = self.root / "assets"
         self.prefix = self.root / "prefix"
         self.bindir = self.root / "bin"
+        self.linkdir = self.root / "linkdir"
         self.assets.mkdir()
         self.prefix.mkdir()
         self.bindir.mkdir()
+        self.linkdir.mkdir()
         self._write_uname_stub("Darwin", "arm64")
         # Build a tiny fake binary and package it.
         binary = self.root / "torio-bin"
@@ -202,6 +204,88 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertIn("--dry-run", proc.stdout)
         self.assertIn("--base-url URL", proc.stdout)
+        self.assertIn("--channel", proc.stdout)
+
+    def _install_dev(self, *extra: str) -> subprocess.CompletedProcess[str]:
+        """Install from the dev channel without naming a prefix.
+
+        The prefix is the behaviour under test: a dev build that landed in the
+        stable one would overwrite the guest payloads a stable install placed
+        there, and their names are fixed by lima.Profile, so the two cannot
+        share a directory.
+        """
+        return run(
+            [
+                "bash",
+                str(INSTALL_SH),
+                "--channel",
+                "dev",
+                "--version",
+                "9.9.9",
+                "--base-url",
+                str(self.assets),
+                "--link-dir",
+                str(self.linkdir),
+                *extra,
+            ],
+            env=self._env(),
+        )
+
+    def test_dev_channel_installs_beside_a_stable_install(self):
+        stable = self._install()
+        self.assertEqual(stable.returncode, 0, stable.stderr)
+        stable_bytes = (self.prefix / "torio-mcp-broker-linux-arm64").read_bytes()
+
+        proc = self._install_dev()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+        home = Path(self._env()["HOME"])
+        dev_prefix = home / ".local" / "share" / "torio-dev" / "bin"
+        for name in ("torio", "torio-mcp-broker-linux-arm64", "torio-mcp-connect-linux-arm64"):
+            self.assertTrue((dev_prefix / name).is_file(), dev_prefix / name)
+        # The stable prefix keeps every file it had, and gains no dev one.
+        self.assertEqual(
+            (self.prefix / "torio-mcp-broker-linux-arm64").read_bytes(), stable_bytes
+        )
+        self.assertFalse((self.prefix / "torio-dev").exists())
+
+    def test_dev_channel_links_the_command_the_operator_types(self):
+        proc = self._install_dev()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        link = self.linkdir / "torio-dev"
+        self.assertTrue(link.is_symlink(), "torio-dev must be a link, not a copy")
+        # Resolving to the dev prefix is what lets `mcp install` find the guest
+        # payloads: it takes the directory of the resolved executable.
+        home = Path(self._env()["HOME"])
+        self.assertEqual(
+            link.resolve(),
+            (home / ".local" / "share" / "torio-dev" / "bin" / "torio").resolve(),
+        )
+        self.assertFalse((self.linkdir / "torio").exists(), "must not shadow stable torio")
+
+    def test_dev_channel_relink_is_idempotent(self):
+        self.assertEqual(self._install_dev().returncode, 0)
+        self.assertEqual(self._install_dev().returncode, 0)
+        self.assertTrue((self.linkdir / "torio-dev").is_symlink())
+
+    def test_no_link_leaves_the_link_directory_alone(self):
+        proc = self._install_dev("--no-link")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertFalse((self.linkdir / "torio-dev").exists())
+
+    def test_dev_channel_reads_assets_from_the_moving_tag(self):
+        """Dev assets hang off one tag that moves, not off a version tag."""
+        proc = self._source_lib(
+            "parse_args --channel dev; require_platform; asset_urls 9.9.9-dev.4.gabc1234"
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("wzslr321/torio/releases/download/dev/", proc.stdout)
+        self.assertIn("torio_9.9.9-dev.4.gabc1234_darwin_arm64.tar.gz", proc.stdout)
+
+    def test_rejects_an_unknown_channel(self):
+        proc = self._install("--channel", "nightly")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("channel", proc.stderr)
 
     def _source_lib(self, script: str, env_extra: dict[str, str] | None = None):
         """Run a snippet with install.sh sourced, so its functions can be called

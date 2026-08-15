@@ -21,13 +21,33 @@ set -euo pipefail
 REPO_DEFAULT="${TORIO_REPO:-wzslr321/torio}"
 PREFIX_DEFAULT="${HOME}/.local/bin"
 VERSION=""
-PREFIX="$PREFIX_DEFAULT"
+PREFIX=""
 DRY_RUN=0
 BASE_URL="" # override for tests, e.g. file:///tmp/assets
 
+# The dev channel is one release on a tag that moves to every commit that
+# reached main, so there is no version to name and no stable release to wait
+# for. It is published as a prerelease, which is what keeps `releases/latest`
+# (and therefore the stable install below) pointing at the last real release.
+#
+# A dev build gets its own prefix rather than sharing the stable one. The two
+# guest payloads are named by lima.Profile and cannot vary, so a second install
+# in the same directory would overwrite the payloads a stable install put there
+# and leave a host binary beside payloads built from another commit. The
+# operator-facing command is a link named torio-dev; `mcp install` resolves the
+# link before taking the directory it copies payloads from, so a linked dev
+# binary finds its own.
+CHANNEL="stable"
+DEV_TAG="dev"
+DEV_PREFIX_DEFAULT="${HOME}/.local/share/torio-dev/bin"
+DEV_LINK_NAME="torio-dev"
+LINK_DIR="$PREFIX_DEFAULT"
+LINK=1
+
 usage() {
   cat <<'EOF'
-Usage: install.sh [--version X.Y.Z] [--prefix DIR] [--base-url URL] [--dry-run]
+Usage: install.sh [--channel stable|dev] [--version X.Y.Z] [--prefix DIR]
+                  [--base-url URL] [--link-dir DIR] [--no-link] [--dry-run]
 
 Installs Torio for this machine (Darwin/arm64 or Linux/x86_64) into a
 user-writable prefix (default: ~/.local/bin).
@@ -35,13 +55,22 @@ Verifies SHA256SUMS before copying the binary. Does not use sudo and does not
 modify shell startup files.
 
 Options:
+  --channel NAME    stable (default) installs a release as `torio`. dev installs
+                    the build of the latest commit on main as `torio-dev`, into
+                    its own prefix, so both can be installed at once.
   --version X.Y.Z   Install this version (without leading v). Default: latest stable release.
-  --prefix DIR      Install directory (default: ~/.local/bin)
+  --prefix DIR      Install directory (default: ~/.local/bin; dev channel:
+                    ~/.local/share/torio-dev/bin)
   --base-url URL    Read the assets and SHA256SUMS from here instead of the
                     release download URL. Accepts file:// for assets already on
                     disk. Requires --version.
+  --link-dir DIR    Where the dev channel links torio-dev (default: ~/.local/bin)
+  --no-link         Install the dev channel without linking torio-dev
   --dry-run         Resolve, download to a temp dir, verify checksums; do not install
   -h, --help        Show help
+
+A dev build is not a release. It carries whatever reached main, has passed the
+pull-request gate and nothing more, and its checksums are verified the same way.
 
 Environment:
   TORIO_REPO        owner/name of the repository holding the assets.
@@ -110,6 +139,23 @@ parse_args() {
         PREFIX="$2"
         shift 2
         ;;
+      --channel)
+        [[ $# -ge 2 ]] || die "--channel requires an argument"
+        case "$2" in
+          stable|dev) CHANNEL="$2" ;;
+          *) die "unknown channel: $2 (want stable or dev)" ;;
+        esac
+        shift 2
+        ;;
+      --link-dir)
+        [[ $# -ge 2 ]] || die "--link-dir requires an argument"
+        LINK_DIR="$2"
+        shift 2
+        ;;
+      --no-link)
+        LINK=0
+        shift
+        ;;
       --dry-run)
         DRY_RUN=1
         shift
@@ -134,6 +180,18 @@ parse_args() {
   done
 }
 
+# The prefix and the link directory depend on the channel, so they are resolved
+# after the arguments are parsed rather than at assignment: an explicit --prefix
+# must win over the channel default, whatever order the two were given in.
+apply_channel_defaults() {
+  if [[ -z "$PREFIX" ]]; then
+    case "$CHANNEL" in
+      dev) PREFIX="$DEV_PREFIX_DEFAULT" ;;
+      *) PREFIX="$PREFIX_DEFAULT" ;;
+    esac
+  fi
+}
+
 resolve_version() {
   if [[ -n "$VERSION" ]]; then
     printf '%s\n' "$VERSION"
@@ -141,6 +199,21 @@ resolve_version() {
   fi
   if [[ -n "$BASE_URL" ]]; then
     die "--version is required when using --base-url"
+  fi
+  if [[ "$CHANNEL" == "dev" ]]; then
+    # The dev release is a prerelease, so `releases/latest` never names it and
+    # the tag has to be read directly. Its version is not knowable from the tag
+    # (the tag does not move with a version, the version moves with the commit),
+    # so it is read back off the asset this host would install.
+    local dev_payload dev_version
+    dev_payload="$(curl -fsSL "https://api.github.com/repos/${REPO_DEFAULT}/releases/tags/${DEV_TAG}")" \
+      || die "failed to fetch the ${DEV_TAG} release metadata for ${REPO_DEFAULT}; there may be no dev build published yet"
+    dev_version="$(printf '%s\n' "$dev_payload" \
+      | sed -n 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"torio_\(.*\)_'"${PLATFORM}"'\.tar\.gz".*/\1/p' \
+      | head -n1)"
+    [[ -n "$dev_version" ]] || die "the ${DEV_TAG} release has no ${PLATFORM} archive"
+    printf '%s\n' "$dev_version"
+    return
   fi
   # No python3 dependency: parse GitHub Releases JSON with sed.
   local payload tag
@@ -178,7 +251,12 @@ asset_urls() {
     printf '%s\n' "${base}/SHA256SUMS"
     return
   fi
+  # Stable assets hang off the version tag they were cut from. Dev assets hang
+  # off one tag that moves, so the version is in the file name only.
   local tag="v${version}"
+  if [[ "$CHANNEL" == "dev" ]]; then
+    tag="$DEV_TAG"
+  fi
   local base="https://github.com/${REPO_DEFAULT}/releases/download/${tag}"
   printf '%s\n' "${base}/${name}"
   printf '%s\n' "${base}/SHA256SUMS"
@@ -229,8 +307,22 @@ install_from_archive() {
   log "installed ${prefix}/${relay}"
 }
 
+# Publish the dev build under the name an operator types. The link is replaced
+# through a staged name, for the same reason the binaries are: a link that was
+# removed and not yet recreated is a window in which `torio-dev` does not
+# resolve at all.
+link_dev_command() {
+  local prefix="$1" dir="$2"
+  mkdir -p "$dir"
+  local staged="${dir}/.${DEV_LINK_NAME}.new.$$"
+  ln -sfn "${prefix}/torio" "$staged"
+  mv -f "$staged" "${dir}/${DEV_LINK_NAME}"
+  log "linked ${dir}/${DEV_LINK_NAME} -> ${prefix}/torio"
+}
+
 main() {
   parse_args "$@"
+  apply_channel_defaults
   require_platform
   require_tools
 
@@ -263,9 +355,14 @@ main() {
   fi
 
   install_from_archive "$archive" "$PREFIX"
+  local path_dir="$PREFIX"
+  if [[ "$CHANNEL" == "dev" && "$LINK" -eq 1 ]]; then
+    link_dev_command "$PREFIX" "$LINK_DIR"
+    path_dir="$LINK_DIR"
+  fi
   printf '%s\n' "${PREFIX}/torio"
   log "Add to PATH if needed:"
-  log "  export PATH=\"${PREFIX}:\$PATH\""
+  log "  export PATH=\"${path_dir}:\$PATH\""
 }
 
 # Allow sourcing for tests: TORIO_INSTALL_LIB=1 skips main.

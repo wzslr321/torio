@@ -159,6 +159,24 @@ dry-run artifact and creates nothing.
 A release that ships an operator-visible break leads its CHANGELOG section with
 the migration, not the feature.
 
+## The dev channel
+
+Every `main` commit whose `ci` run went green is published by
+[`.github/workflows/dev-release.yml`](.github/workflows/dev-release.yml) as one
+prerelease on the `dev` tag, which the workflow moves to that commit. Nothing is
+tagged by hand and no release procedure is involved. The release is replaced on
+each run rather than added to, so it holds exactly one archive per host, and its
+version is the next patch version as a prerelease of itself, for example
+`X.Y.Z-dev.<commits>.g<sha>`. Because it is marked prerelease, `releases/latest`
+keeps naming the last real release and `install.sh` with no `--channel` is
+unaffected.
+
+The dev channel deliberately does not run the release gates. It is the evidence
+a pull request already produced, published; a build that needs the real-VM
+journey or the macOS archive check gets a `workflow_dispatch` rehearsal of
+`release.yml` instead. Testers install it with `scripts/install.sh --channel
+dev` and run it as `torio-dev`.
+
 ## Review checklist
 
 - Does the change stay in scope?

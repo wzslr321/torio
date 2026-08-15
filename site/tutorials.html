@@ -81,6 +81,13 @@ scripts/install.sh --version X.Y.Z       <span class="tok-comment"># or a specif
 <div class="code-block"><pre data-lang="bash"><code>gh release download vX.Y.Z -D /tmp/torio-rel
 scripts/install.sh --version X.Y.Z --base-url file:///tmp/torio-rel</code></pre></div>
 <p>Either route verifies the same checksums. Set <code>TORIO_REPO=owner/name</code> if the assets live somewhere other than the default.</p>
+<h4 id="install-dev">Installing a dev build</h4>
+<p>To try what is on <code>main</code> before it is released:</p>
+<div class="code-block"><pre data-lang="bash"><code>scripts/install.sh --channel dev</code></pre></div>
+<p>This installs the build of the last commit that reached <code>main</code>, into <code>~/.local/share/torio-dev/bin</code>, and links it into <code>~/.local/bin</code> under the name <code>torio-dev</code>. A stable install keeps its own directory and its own name, so both are available at once and neither overwrites the other's guest payloads. Rerun the same command to move to a newer build. <code>--link-dir DIR</code> links it somewhere else, <code>--no-link</code> skips the link.</p>
+<p>A dev build is not a release. It carries whatever reached <code>main</code> and has passed the pull-request gate; the release gates that boot a guest and install the macOS archive on a Mac have not run against it. Checksums are verified exactly as they are for a release, and <code>torio-dev version</code> reports the commit it was built from.</p>
+<p>The two installs are separate binaries, not separate states: <code>torio-dev</code> reads the same configuration and talks to the same boxes as <code>torio</code>. Where that matters, point it at a box of its own:</p>
+<div class="code-block"><pre data-lang="bash"><code>TORIO_INSTANCE=torio-devbox torio-dev vm status</code></pre></div>
 <h4 id="install-source">Building from source instead</h4>
 <p>With a Go toolchain, build the binary and put it on your <code>PATH</code>:</p>
 <div class="code-block"><pre data-lang="bash"><code>go build -o torio ./cmd/torio
