@@ -89,7 +89,10 @@ scripts/install.sh --version X.Y.Z --base-url file:///tmp/torio-rel</code></pre>
 <p>The two installs are separate binaries, not separate states: <code>torio-dev</code> reads the same configuration and talks to the same boxes as <code>torio</code>. Where that matters, point it at a box of its own:</p>
 <div class="code-block"><pre data-lang="bash"><code>TORIO_INSTANCE=torio-devbox torio-dev vm status</code></pre></div>
 <h4 id="install-source">Building from source instead</h4>
-<p>With a Go toolchain, build the binary and put it on your <code>PATH</code>:</p>
+<p>From a checkout, one command builds the working tree and installs it the same way, under a third name:</p>
+<div class="code-block"><pre data-lang="bash"><code>make local</code></pre></div>
+<p>It builds for this host only, installs into <code>~/.local/share/torio-local/bin</code>, and links <code>~/.local/bin/torio-local</code>. Nothing is published and no tag is touched. <code>torio-local version</code> reports the branch, the commit and whether the tree was dirty when it was built, so the binary names what you are testing. Run it again after a change to replace it, and delete the two paths above to be rid of it.</p>
+<p>To place a binary yourself instead, with a Go toolchain:</p>
 <div class="code-block"><pre data-lang="bash"><code>go build -o torio ./cmd/torio
 sudo install -m 755 torio /usr/local/bin/torio</code></pre></div>
 <div class="callout"><p>Prefer not to install system-wide? Any directory already on your <code>PATH</code> works — for example <code>install -m 755 torio ~/.local/bin/torio</code>. If you skip this step entirely, <code>torio</code> will not resolve at all: a freshly built binary is not on your <code>PATH</code> and your shell does not search the current directory, so you would have to prefix every later command with <code>./</code> and run it from the repository root.</p></div>

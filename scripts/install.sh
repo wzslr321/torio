@@ -25,24 +25,46 @@ PREFIX=""
 DRY_RUN=0
 BASE_URL="" # override for tests, e.g. file:///tmp/assets
 
-# The dev channel is one release on a tag that moves to every commit that
-# reached main, so there is no version to name and no stable release to wait
-# for. It is published as a prerelease, which is what keeps `releases/latest`
-# (and therefore the stable install below) pointing at the last real release.
+# Three streams of the same binary, installable at once.
 #
-# A dev build gets its own prefix rather than sharing the stable one. The two
-# guest payloads are named by lima.Profile and cannot vary, so a second install
-# in the same directory would overwrite the payloads a stable install put there
-# and leave a host binary beside payloads built from another commit. The
-# operator-facing command is a link named torio-dev; `mcp install` resolves the
-# link before taking the directory it copies payloads from, so a linked dev
-# binary finds its own.
+#   stable  a release, installed as `torio`
+#   dev     the build of the last commit on main, installed as `torio-dev`.
+#           It is one release on a tag that moves, so there is no version to
+#           name. It is published as a prerelease, which is what keeps
+#           `releases/latest` (and therefore a stable install) pointing at the
+#           last real release.
+#   local   a build of somebody's working tree, installed as `torio-local`.
+#           Nothing publishes it, so its archive is named with --base-url.
+#
+# Each gets its own prefix rather than sharing one. The two guest payloads are
+# named by lima.Profile and cannot vary, so a second install in the same
+# directory would overwrite the payloads the first put there and leave a host
+# binary beside payloads built from another commit. Everything but stable is
+# reached through a link, and `mcp install` resolves the link before taking the
+# directory it copies payloads from, so a linked binary finds its own.
 CHANNEL="stable"
 DEV_TAG="dev"
-DEV_PREFIX_DEFAULT="${HOME}/.local/share/torio-dev/bin"
-DEV_LINK_NAME="torio-dev"
 LINK_DIR="$PREFIX_DEFAULT"
 LINK=1
+
+# The prefix and command name of a non-stable channel. Kept in one place: a
+# channel whose prefix and link name disagreed would install one binary and
+# expose another.
+channel_prefix() {
+  case "$1" in
+    dev) printf '%s\n' "${HOME}/.local/share/torio-dev/bin" ;;
+    local) printf '%s\n' "${HOME}/.local/share/torio-local/bin" ;;
+    *) printf '%s\n' "$PREFIX_DEFAULT" ;;
+  esac
+}
+
+channel_link_name() {
+  case "$1" in
+    dev) printf 'torio-dev\n' ;;
+    local) printf 'torio-local\n' ;;
+    *) printf '\n' ;;
+  esac
+}
 
 usage() {
   cat <<'EOF'
@@ -56,16 +78,19 @@ modify shell startup files.
 
 Options:
   --channel NAME    stable (default) installs a release as `torio`. dev installs
-                    the build of the latest commit on main as `torio-dev`, into
-                    its own prefix, so both can be installed at once.
+                    the build of the latest commit on main as `torio-dev`.
+                    local installs an archive you built yourself, named with
+                    --base-url, as `torio-local`. Each has its own prefix, so
+                    all three can be installed at once. `make local` builds and
+                    installs the local one for you.
   --version X.Y.Z   Install this version (without leading v). Default: latest stable release.
-  --prefix DIR      Install directory (default: ~/.local/bin; dev channel:
-                    ~/.local/share/torio-dev/bin)
+  --prefix DIR      Install directory (default: ~/.local/bin; other channels:
+                    ~/.local/share/torio-<channel>/bin)
   --base-url URL    Read the assets and SHA256SUMS from here instead of the
                     release download URL. Accepts file:// for assets already on
                     disk. Requires --version.
-  --link-dir DIR    Where the dev channel links torio-dev (default: ~/.local/bin)
-  --no-link         Install the dev channel without linking torio-dev
+  --link-dir DIR    Where a non-stable channel is linked (default: ~/.local/bin)
+  --no-link         Install without linking the command
   --dry-run         Resolve, download to a temp dir, verify checksums; do not install
   -h, --help        Show help
 
@@ -142,8 +167,8 @@ parse_args() {
       --channel)
         [[ $# -ge 2 ]] || die "--channel requires an argument"
         case "$2" in
-          stable|dev) CHANNEL="$2" ;;
-          *) die "unknown channel: $2 (want stable or dev)" ;;
+          stable|dev|local) CHANNEL="$2" ;;
+          *) die "unknown channel: $2 (want stable, dev or local)" ;;
         esac
         shift 2
         ;;
@@ -185,10 +210,10 @@ parse_args() {
 # must win over the channel default, whatever order the two were given in.
 apply_channel_defaults() {
   if [[ -z "$PREFIX" ]]; then
-    case "$CHANNEL" in
-      dev) PREFIX="$DEV_PREFIX_DEFAULT" ;;
-      *) PREFIX="$PREFIX_DEFAULT" ;;
-    esac
+    PREFIX="$(channel_prefix "$CHANNEL")"
+  fi
+  if [[ "$CHANNEL" == "local" && -z "$BASE_URL" ]]; then
+    die "--channel local installs an archive you built: name it with --base-url (and --version)"
   fi
 }
 
@@ -307,17 +332,17 @@ install_from_archive() {
   log "installed ${prefix}/${relay}"
 }
 
-# Publish the dev build under the name an operator types. The link is replaced
+# Publish the build under the name an operator types. The link is replaced
 # through a staged name, for the same reason the binaries are: a link that was
-# removed and not yet recreated is a window in which `torio-dev` does not
+# removed and not yet recreated is a window in which the command does not
 # resolve at all.
-link_dev_command() {
-  local prefix="$1" dir="$2"
+link_command() {
+  local prefix="$1" dir="$2" name="$3"
   mkdir -p "$dir"
-  local staged="${dir}/.${DEV_LINK_NAME}.new.$$"
+  local staged="${dir}/.${name}.new.$$"
   ln -sfn "${prefix}/torio" "$staged"
-  mv -f "$staged" "${dir}/${DEV_LINK_NAME}"
-  log "linked ${dir}/${DEV_LINK_NAME} -> ${prefix}/torio"
+  mv -f "$staged" "${dir}/${name}"
+  log "linked ${dir}/${name} -> ${prefix}/torio"
 }
 
 main() {
@@ -355,9 +380,10 @@ main() {
   fi
 
   install_from_archive "$archive" "$PREFIX"
-  local path_dir="$PREFIX"
-  if [[ "$CHANNEL" == "dev" && "$LINK" -eq 1 ]]; then
-    link_dev_command "$PREFIX" "$LINK_DIR"
+  local path_dir="$PREFIX" link_name
+  link_name="$(channel_link_name "$CHANNEL")"
+  if [[ -n "$link_name" && "$LINK" -eq 1 ]]; then
+    link_command "$PREFIX" "$LINK_DIR" "$link_name"
     path_dir="$LINK_DIR"
   fi
   printf '%s\n' "${PREFIX}/torio"

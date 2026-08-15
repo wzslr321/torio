@@ -25,6 +25,12 @@
   a guest and install the macOS archive have not run against a dev build, and
   the installer, the release notes and the docs each say so. A prerelease is not
   named by `releases/latest`, so installing without `--channel` is unchanged.
+- **`make local`.** Builds the working tree for this host and installs it as
+  `torio-local` through the same installer, so a branch can be tried on a real
+  machine without publishing anything. The version it reports carries the
+  branch, the commit and whether the tree was dirty. A release, a dev build and
+  a working-tree build can be installed at the same time; each keeps its own
+  directory and its own name.
 
 ## 0.3.4 - 2026-08-10
 

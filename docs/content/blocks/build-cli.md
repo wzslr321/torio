@@ -60,7 +60,21 @@ TORIO_INSTANCE=torio-devbox torio-dev vm status
 
 ### Building from source instead {#install-source}
 
-With a Go toolchain, build the binary and put it on your `PATH`:
+From a checkout, one command builds the working tree and installs it the same
+way, under a third name:
+
+```bash
+make local
+```
+
+It builds for this host only, installs into `~/.local/share/torio-local/bin`,
+and links `~/.local/bin/torio-local`. Nothing is published and no tag is
+touched. `torio-local version` reports the branch, the commit and whether the
+tree was dirty when it was built, so the binary names what you are testing. Run
+it again after a change to replace it, and delete the two paths above to be rid
+of it.
+
+To place a binary yourself instead, with a Go toolchain:
 
 ```bash
 go build -o torio ./cmd/torio

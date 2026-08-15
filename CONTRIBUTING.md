@@ -177,6 +177,13 @@ journey or the macOS archive check gets a `workflow_dispatch` rehearsal of
 `release.yml` instead. Testers install it with `scripts/install.sh --channel
 dev` and run it as `torio-dev`.
 
+To test the branch in front of you rather than one of those, run `make local`.
+It builds this working tree for this host, installs it through the same
+installer, and links it as `torio-local`, so a working-tree build, a dev build
+and a release can all be present without overwriting each other. Evidence for
+unmerged work comes from that binary or from the test suites, never from
+`torio-dev`, which is built from another commit.
+
 ## Review checklist
 
 - Does the change stay in scope?

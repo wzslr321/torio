@@ -282,6 +282,47 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("wzslr321/torio/releases/download/dev/", proc.stdout)
         self.assertIn("torio_9.9.9-dev.4.gabc1234_darwin_arm64.tar.gz", proc.stdout)
 
+    def test_local_channel_installs_under_its_own_name(self):
+        """A build of the working tree is a third stream, not a dev build.
+
+        It gets its own prefix for the reason the dev one does, and its own
+        name so an operator running all three can tell which binary answered.
+        """
+        proc = run(
+            [
+                "bash",
+                str(INSTALL_SH),
+                "--channel",
+                "local",
+                "--version",
+                "9.9.9",
+                "--base-url",
+                str(self.assets),
+                "--link-dir",
+                str(self.linkdir),
+            ],
+            env=self._env(),
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        home = Path(self._env()["HOME"])
+        prefix = home / ".local" / "share" / "torio-local" / "bin"
+        self.assertTrue((prefix / "torio").is_file())
+        self.assertTrue((prefix / "torio-mcp-broker-linux-arm64").is_file())
+        link = self.linkdir / "torio-local"
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(link.resolve(), (prefix / "torio").resolve())
+        self.assertFalse((self.linkdir / "torio-dev").exists())
+
+    def test_local_channel_needs_assets_on_disk(self):
+        """There is no local release to resolve, so the caller must say where
+        the archive it just built is."""
+        proc = run(
+            ["bash", str(INSTALL_SH), "--channel", "local"],
+            env=self._env(),
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("--base-url", proc.stderr)
+
     def test_rejects_an_unknown_channel(self):
         proc = self._install("--channel", "nightly")
         self.assertNotEqual(proc.returncode, 0)
