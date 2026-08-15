@@ -173,10 +173,7 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 		},
 
 		BrainStatus: brainSvc.Status,
-		BrainSync: func(ctx context.Context) error {
-			_, err := brainSvc.Sync(ctx)
-			return err
-		},
+		BrainSync:   brainSvc.Sync,
 		BrainInit: func(ctx context.Context) error {
 			_, err := brainSvc.Init(ctx)
 			return err

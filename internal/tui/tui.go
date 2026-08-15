@@ -90,8 +90,11 @@ type Deps struct {
 	ServeLogs    func(context.Context, int) (string, error)
 
 	// BrainSync reconciles this box's replica of the one Second Brain with the
-	// copy on the host (ADR-0025). A nil seam is a build that cannot.
-	BrainSync func(ctx context.Context) error
+	// copy on the host (ADR-0025). It returns what moved, in counts, because a
+	// rebind runs it on the operator's behalf and has to say what it did
+	// (ADR-0026); counts are all a report may carry. A nil seam is a build
+	// that cannot.
+	BrainSync func(ctx context.Context) (brain.SyncReport, error)
 
 	BrainStatus func(context.Context) (brain.StatusReport, error)
 	BrainInit   func(context.Context) error
