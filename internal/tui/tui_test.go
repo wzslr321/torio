@@ -1329,3 +1329,141 @@ func TestBrainTabOffersNoSyncWithoutTheSeam(t *testing.T) {
 		t.Errorf("footer = %q, want no sync key", r.brain.keys(r))
 	}
 }
+
+// Starting a box is offered in the hub and stopping it was not, so the one
+// operation an operator runs at the end of a day sent them back to the command
+// line. It is asked for before it happens: a box carries the running agent
+// sessions, and stopping one is not what a mistyped key should do.
+func TestDashboardStopsTheBoxAfterConfirming(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	stopped := 0
+	d.VMStop = func(context.Context) error {
+		stopped++
+		return nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenDashboard)
+
+	press(t, r, "x")
+	if stopped != 0 {
+		t.Fatal("the box was stopped without asking")
+	}
+	if !strings.Contains(r.dash.keys(r), "y stop") {
+		t.Errorf("footer = %q, want the confirmation offered", r.dash.keys(r))
+	}
+
+	press(t, r, "y")
+	if stopped != 1 {
+		t.Errorf("stop ran %d times, want 1", stopped)
+	}
+}
+
+// Declining leaves the box alone.
+func TestDashboardKeepsTheBoxWhenTheStopIsDeclined(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	stopped := 0
+	d.VMStop = func(context.Context) error {
+		stopped++
+		return nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenDashboard)
+
+	press(t, r, "x")
+	press(t, r, "n")
+
+	if stopped != 0 {
+		t.Error("the box was stopped after the operator declined")
+	}
+	if strings.Contains(r.dash.keys(r), "y stop") {
+		t.Errorf("footer = %q, want the confirmation closed", r.dash.keys(r))
+	}
+}
+
+// A box that is not running has nothing to stop.
+func TestDashboardOffersNoStopForABoxThatIsNotRunning(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateStopped}
+	d := f.deps()
+	d.VMStop = func(context.Context) error { return nil }
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenDashboard)
+
+	press(t, r, "x")
+
+	if r.dash.confirmStop {
+		t.Error("a stopped box was offered a stop")
+	}
+	if strings.Contains(r.dash.keys(r), "x stop") {
+		t.Errorf("footer = %q, want no stop key for a box that is not running", r.dash.keys(r))
+	}
+}
+
+// The hub lists projects but could not say what was wrong with one, so an
+// operator who saw a session refuse had to leave the hub to find out why. The
+// panel is `project show`: what the guest holds, and the markers naming what
+// drifted.
+func TestProjectsShowsWhatIsWrongWithOneProject(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "lean-triage", Path: "/w/lean-triage"}},
+	}
+	d := f.deps()
+	asked := ""
+	d.ProjectShow = func(_ context.Context, id string) (projects.ShowReport, error) {
+		asked = id
+		return projects.ShowReport{
+			Project:  projects.Project{ID: "lean-triage", Remote: "git@github.com:leancodepl/lean-triage.git"},
+			Checkout: projects.CheckoutStatus{PathExists: true, Repository: true},
+			Issues:   []string{"origin_mismatch", "worktree_dirty"},
+		}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "v")
+
+	if asked != "lean-triage" {
+		t.Errorf("asked about %q, want the selected project", asked)
+	}
+	view := r.View()
+	for _, want := range []string{"origin_mismatch", "worktree_dirty"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("panel does not name %q:\n%s", want, view)
+		}
+	}
+	// esc closes it, the way every other panel in the hub closes.
+	press(t, r, "esc")
+	if r.projects.showID != "" {
+		t.Error("the panel stayed open after esc")
+	}
+}
+
+// A build with no seam does not offer the key.
+func TestProjectsOffersNoDetailWithoutTheSeam(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
+	}
+	d := f.deps()
+	d.ProjectShow = nil
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "v")
+
+	if r.projects.showID != "" {
+		t.Error("a detail panel opened with no seam to fill it")
+	}
+	if strings.Contains(r.projects.keys(r), "v show") {
+		t.Errorf("footer = %q, want no detail key", r.projects.keys(r))
+	}
+}

@@ -850,7 +850,7 @@ func (r *root) screenKeys() string {
 	case screenSetup:
 		return r.setup.keys(r)
 	case screenDashboard:
-		return r.dash.keys()
+		return r.dash.keys(r)
 	case screenProjects:
 		return r.projects.keys(r)
 	case screenBrain:

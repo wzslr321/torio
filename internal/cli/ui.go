@@ -139,6 +139,7 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 			return err
 		},
 		VMStart: adapter.Start,
+		VMStop:  adapter.Stop,
 
 		Bootstrap: func(ctx context.Context, verifyOnly bool) (lima.BootstrapReport, error) {
 			o := opts
@@ -202,6 +203,9 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 				return report.DeployKey, err
 			}
 			return nil, nil
+		},
+		ProjectShow: func(ctx context.Context, id string) (projects.ShowReport, error) {
+			return projectSvc.Show(ctx, id)
 		},
 		ProjectRemove: func(ctx context.Context, id string) error {
 			_, err := projectSvc.Remove(ctx, id)

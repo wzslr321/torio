@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/wzslr321/torio/internal/lima"
 	"github.com/wzslr321/torio/internal/redact"
 	"github.com/wzslr321/torio/internal/status"
 	"github.com/wzslr321/torio/internal/tui/wizard"
@@ -26,6 +27,8 @@ type dashScreen struct {
 	loaded bool
 	failed string
 	cursor int
+	// confirmStop is the guard in front of stopping this box.
+	confirmStop bool
 }
 
 func (s *dashScreen) load(d Deps) tea.Cmd {
@@ -57,7 +60,25 @@ func (s *dashScreen) update(r *root, msg tea.Msg) tea.Cmd {
 		}
 		return nil
 	case tea.KeyMsg:
+		if s.confirmStop {
+			switch msg.String() {
+			case "y":
+				s.confirmStop = false
+				d := r.deps
+				return r.run("stopping "+r.deps.Instance, true, d.VMStop)
+			case "n", "esc":
+				s.confirmStop = false
+			}
+			return nil
+		}
 		switch msg.String() {
+		case "x":
+			// Only a running box has anything to stop, and stopping one takes
+			// the agent sessions it is carrying with it, so it is asked for
+			// rather than done on a keypress.
+			if r.deps.VMStop != nil && r.facts.Box == lima.StateRunning {
+				s.confirmStop = true
+			}
 		case "up", "k":
 			if s.cursor > 0 {
 				s.cursor--
@@ -71,7 +92,15 @@ func (s *dashScreen) update(r *root, msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-func (s *dashScreen) keys() string { return "↑/↓ box · w wizard" }
+func (s *dashScreen) keys(r *root) string {
+	if s.confirmStop {
+		return "y stop · n keep"
+	}
+	if r.deps.VMStop != nil && r.facts.Box == lima.StateRunning {
+		return "↑/↓ box · w wizard · x stop"
+	}
+	return "↑/↓ box · w wizard"
+}
 
 func (s *dashScreen) view(r *root, w int) string {
 	var b strings.Builder

@@ -20,6 +20,12 @@ type projectsMsg struct {
 	err  error
 }
 
+// showMsg is one project's detail arriving for the detail panel.
+type showMsg struct {
+	report projects.ShowReport
+	err    error
+}
+
 // connectMsg is the gateway's state arriving for the connect panel.
 type connectMsg struct {
 	report serve.StatusReport
@@ -44,6 +50,13 @@ type projectsScreen struct {
 	// than whatever the cursor is on when it is submitted.
 	editing bool
 	editID  string
+
+	// showID is the project the detail panel is open for, empty when closed,
+	// with showRep and showErr the answer it is waiting on.
+	showID     string
+	showRep    projects.ShowReport
+	showErr    string
+	showLoaded bool
 
 	// connectID is the project the gateway panel is open for, empty when
 	// closed. The panel is the Enter answer on a backend whose way into a
@@ -160,6 +173,15 @@ func (s *projectsScreen) update(r *root, msg tea.Msg) tea.Cmd {
 		}
 		return nil
 
+	case showMsg:
+		s.showLoaded = true
+		s.showRep = msg.report
+		s.showErr = ""
+		if msg.err != nil {
+			s.showErr = redact.String(msg.err.Error())
+		}
+		return nil
+
 	case connectMsg:
 		s.connectLoaded = true
 		s.connectRep = msg.report
@@ -175,6 +197,12 @@ func (s *projectsScreen) update(r *root, msg tea.Msg) tea.Cmd {
 		}
 		if s.editing {
 			return s.updateEdit(r, msg)
+		}
+		if s.showID != "" {
+			if k := msg.String(); k == "esc" || k == "enter" || k == "q" {
+				s.showID = ""
+			}
+			return nil
 		}
 		if s.connectID != "" {
 			return s.updateConnect(msg)
@@ -268,6 +296,12 @@ func (s *projectsScreen) updateList(r *root, msg tea.KeyMsg) tea.Cmd {
 		if _, ok := s.selected(); ok {
 			s.confirm = true
 		}
+	case "v":
+		p, ok := s.selected()
+		if !ok || d.ProjectShow == nil {
+			return nil
+		}
+		return s.openShow(r, p)
 	case "e":
 		p, ok := s.selected()
 		if !ok || d.ProjectSetRemote == nil {
@@ -350,6 +384,22 @@ type materializeError struct {
 func (e *materializeError) Error() string { return e.err.Error() }
 func (e *materializeError) Unwrap() error { return e.err }
 
+// openShow opens the detail panel and asks what the guest holds. The ask is a
+// read, so it takes no busy lock: the panel says it is asking until the answer
+// lands, exactly as the gateway panel does.
+func (s *projectsScreen) openShow(r *root, p projects.Project) tea.Cmd {
+	s.showID = p.ID
+	s.showLoaded = false
+	s.showErr = ""
+	d := r.deps
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(d.parentContext(), longOr(d.Timeout))
+		defer cancel()
+		rep, err := d.ProjectShow(ctx, p.ID)
+		return showMsg{report: rep, err: err}
+	}
+}
+
 // openConnect opens the gateway panel for one project and asks the service
 // how it is doing. The ask is a read, not an operation: it takes no busy lock,
 // and the panel says it is asking until the answer lands.
@@ -382,7 +432,13 @@ func (s *projectsScreen) keys(r *root) string {
 	case s.confirm:
 		return "y remove · n keep"
 	}
+	if s.showID != "" {
+		return "esc close"
+	}
 	parts := []string{"a add"}
+	if r.deps.ProjectShow != nil {
+		parts = append(parts, "v show")
+	}
 	if r.deps.ProjectSetRemote != nil {
 		parts = append(parts, "e remote")
 	}
@@ -400,6 +456,9 @@ func (s *projectsScreen) keys(r *root) string {
 func (s *projectsScreen) view(r *root, w int) string {
 	var b strings.Builder
 
+	if s.showID != "" {
+		return s.viewShow()
+	}
 	if s.connectID != "" {
 		return s.viewConnect(r)
 	}
@@ -492,6 +551,47 @@ func plural(n int, one, many string) string {
 // is in, the forward the operator opens, and where Hermes Desktop points. The
 // command lines are rendered unstyled so a terminal selection picks up no
 // decoration.
+// viewShow renders what the guest holds for one project. It names markers and
+// counts, never a file inside the checkout: `project show` returns no file
+// names, no diffs and no raw Git output, and the hub is not a second answer.
+func (s *projectsScreen) viewShow() string {
+	var b strings.Builder
+	b.WriteString(styStrong.Render(s.showID) + "\n\n")
+	switch {
+	case s.showErr != "":
+		b.WriteString(styAmber.Render("could not be read: ") + styText.Render(s.showErr) + "\n")
+		return b.String()
+	case !s.showLoaded:
+		b.WriteString(styMuted.Render("Asking the guest…") + "\n")
+		return b.String()
+	}
+
+	rep := s.showRep
+	c := rep.Checkout
+	if rep.Project.Remote != "" {
+		b.WriteString(styMuted.Render(rep.Project.Remote) + "\n")
+	}
+	if rep.Project.Path != "" {
+		b.WriteString(styMuted.Render(rep.Project.Path) + "\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(line(c.PathExists, "checkout", ternary(c.PathExists, "present", "absent")))
+	b.WriteString(line(c.Repository, "git repository", ternary(c.Repository, "yes", "no")))
+	b.WriteString(line(c.OriginMatches, "origin matches the record", ternary(c.OriginMatches, "yes", "no")))
+	b.WriteString(line(c.Clean, "worktree", ternary(c.Clean, "clean", "has uncommitted work")))
+	b.WriteString(line(c.SharedPermissions, "shared access", ternary(c.SharedPermissions, "yes", "no")))
+
+	if len(rep.Issues) == 0 {
+		b.WriteString("\n" + styMuted.Render("no issues") + "\n")
+		return b.String()
+	}
+	b.WriteString("\n" + styAmber.Render("issues") + "\n")
+	for _, issue := range rep.Issues {
+		b.WriteString(styMuted.Render("  "+issue) + "\n")
+	}
+	return b.String()
+}
+
 func (s *projectsScreen) viewConnect(r *root) string {
 	d := r.deps
 	var b strings.Builder

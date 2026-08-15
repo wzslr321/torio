@@ -67,6 +67,10 @@ type Deps struct {
 	VMStatus func(context.Context) (lima.Status, error)
 	VMInit   func(context.Context, VMInitOptions) error
 	VMStart  func(context.Context) error
+	// VMStop stops this box. Starting one was always in the hub and stopping it
+	// was not, which sent the operator to the command line for the one thing
+	// they do at the end of a day.
+	VMStop func(context.Context) error
 
 	// Bootstrap verifies and, unless verifyOnly, repairs. The hub calls it both
 	// ways: verifying to learn where setup stands, repairing when the operator
@@ -100,6 +104,10 @@ type Deps struct {
 	ProjectAdd    func(ctx context.Context, id, remote string) (*projects.DeployKey, error)
 	ProjectUse    func(ctx context.Context, id string) error
 	ProjectRemove func(ctx context.Context, id string) error
+	// ProjectShow is `project show` for one project: what the guest holds and
+	// the markers naming what drifted. The hub lists projects, so the hub is
+	// where a broken one is noticed, and reading why had meant leaving it.
+	ProjectShow func(ctx context.Context, id string) (projects.ShowReport, error)
 
 	// Poll is the cross-box status poll the dashboard renders.
 	Poll func(context.Context) (status.Report, error)

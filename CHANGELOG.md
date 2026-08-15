@@ -63,6 +63,12 @@
   correction on `e`, prefilled with what the record holds
   ([ADR-0023](docs/adr/0023-recorded-remotes-are-resolvable-from-a-guest.md)).
 
+- **More of the surface reaches the hub.** The dashboard stops the bound box on
+  `x`, asking first, because stopping a box takes the agent sessions it is
+  carrying with it. The project screen opens a detail panel on `v`, which is
+  `project show`: what the guest holds and the markers naming what drifted,
+  without leaving the hub to find out why a session refused.
+
 ### Fixed
 
 - **A host the guest cannot resolve is named as one.** A remote whose host only
