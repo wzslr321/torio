@@ -107,7 +107,15 @@ jobs:
             printf 'Install it beside a stable install, as `torio-dev`:\n\n'
             printf '```bash\nscripts/install.sh --channel dev\n```\n'
           } > "$notes"
-          git tag -fa dev -m "Torio dev channel" "$COMMIT"
+          # An annotated tag records who moved it, and therefore needs a
+          # tagger. A runner has no git identity, and the one git derives from
+          # the machine account has an empty name, which it refuses to write
+          # ("empty ident name not allowed"). The identity is given to this one
+          # command rather than written into the checkout's config: nothing
+          # else here commits, and a global setting would outlive its reason.
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              tag -fa dev -m "Torio dev channel: ${VERSION}" "$COMMIT"
           git push --force origin refs/tags/dev
           gh release delete dev --yes || true
           gh release create dev \
