@@ -23,9 +23,9 @@ func newUICmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "ui",
 		Short: "Open the interactive hub",
-		Long: "Open the setup, status, project, Brain, and service hub. Bare `torio` opens " +
-			"the same hub on a terminal. The hub emits no JSON; use the individual commands " +
-			"for machine-readable output.",
+		Long: "Open the setup, status, project, Brain, service, and MCP hub. Bare `torio` " +
+			"opens the same hub on a terminal. The hub emits no JSON; use the individual " +
+			"commands for machine-readable output.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if a.jsonOut {
@@ -240,6 +240,19 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 
 		Poll: func(ctx context.Context) (status.Report, error) {
 			return a.newPoller().Poll(ctx)
+		},
+
+		// The MCP seams are the commands' own calls on the commands' own
+		// adapter functions, credential-free on every path (ADR-0004).
+		MCPStatus: func(ctx context.Context) (lima.MCPBrokerReport, error) {
+			return a.verifyMCP(ctx, adapter, identity)
+		},
+		MCPInstall: func(ctx context.Context) (lima.MCPBrokerInstallReport, error) {
+			return a.installMCP(ctx, adapter, identity)
+		},
+		MCPLoginSpec: a.newMCPLoginSpec,
+		MCPActivate: func(ctx context.Context) (lima.MCPBrokerActivationReport, error) {
+			return a.activateMCP(ctx, adapter, identity)
 		},
 
 		// The same composed text `status setup <surface>` prints, from the

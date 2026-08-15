@@ -29,9 +29,10 @@ const (
 	screenProjects
 	screenBrain
 	screenServe
+	screenMCP
 )
 
-var screenOrder = []screenID{screenSetup, screenDashboard, screenProjects, screenBrain, screenServe}
+var screenOrder = []screenID{screenSetup, screenDashboard, screenProjects, screenBrain, screenServe, screenMCP}
 
 func (s screenID) title() string {
 	switch s {
@@ -45,6 +46,8 @@ func (s screenID) title() string {
 		return "Brain"
 	case screenServe:
 		return "Serve"
+	case screenMCP:
+		return "MCP"
 	default:
 		return "?"
 	}
@@ -166,6 +169,14 @@ type root struct {
 	projects projectsScreen
 	brain    brainScreen
 	serve    serveScreen
+	mcp      mcpScreen
+
+	// afterSession is run when an interactive session ends cleanly, set by the
+	// handoff that needs a completion — the MCP login's activation. It is one
+	// field rather than a message payload because execDoneMsg crosses the
+	// bubbletea runtime, and a closure there would outlive a rebind that
+	// invalidated every seam it closed over; the rebind path clears this.
+	afterSession func() tea.Cmd
 }
 
 func newRoot(d Deps) *root {
@@ -591,6 +602,8 @@ func (r *root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		r.projects = projectsScreen{}
 		r.brain = brainScreen{}
 		r.serve = newServeScreen()
+		r.mcp = mcpScreen{}
+		r.afterSession = nil
 		r.note = "rebound to " + msg.name
 		if brainNote != "" {
 			r.note += " · " + brainNote
@@ -620,16 +633,22 @@ func (r *root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case execDoneMsg:
 		r.busy = ""
+		follow := r.afterSession
+		r.afterSession = nil
 		if msg.err != nil {
 			// A session ending non-zero is an outcome, not a hub failure, but
 			// the operator cannot act on an exit status alone: the hub
 			// repainted over whatever the session said on its way out. The
 			// banner persists until it is dismissed, and carries the end of
-			// that output under it.
+			// that output under it. A completion never runs here: what it
+			// would complete did not happen.
 			r.errText = "session ended: " + redact.String(msg.err.Error())
 			r.errDetail = strings.TrimRight(redact.String(msg.detail), "\n")
-		} else {
-			r.note = "session ended"
+			return r, r.probeFacts()
+		}
+		r.note = "session ended"
+		if follow != nil {
+			return r, tea.Batch(r.probeFacts(), follow())
 		}
 		return r, r.probeFacts()
 
@@ -655,6 +674,9 @@ func (r *root) afterChange() tea.Cmd {
 	}
 	if r.active == screenBrain {
 		cmds = append(cmds, r.brain.load(r.deps))
+	}
+	if r.active == screenMCP {
+		cmds = append(cmds, r.mcp.load(r.deps))
 	}
 	return tea.Batch(cmds...)
 }
@@ -689,7 +711,7 @@ func (r *root) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "shift+tab":
 		r.switchTo(screenOrder[(int(r.active)-1+len(screenOrder))%len(screenOrder)])
 		return r, r.enter()
-	case "1", "2", "3", "4", "5":
+	case "1", "2", "3", "4", "5", "6":
 		idx := int(msg.String()[0] - '1')
 		if idx < len(screenOrder) {
 			r.switchTo(screenOrder[idx])
@@ -738,6 +760,8 @@ func (r *root) enter() tea.Cmd {
 		return r.brain.load(r.deps)
 	case screenServe:
 		return r.serve.load(r.deps)
+	case screenMCP:
+		return r.mcp.load(r.deps)
 	default:
 		if !r.probed && !r.probing {
 			return r.probeFacts()
@@ -765,6 +789,8 @@ func (r *root) delegate(msg tea.Msg) tea.Cmd {
 		return r.brain.update(r, msg)
 	case screenServe:
 		return r.serve.update(r, msg)
+	case screenMCP:
+		return r.mcp.update(r, msg)
 	}
 	return nil
 }
@@ -864,6 +890,8 @@ func (r *root) body(w int) string {
 		b.WriteString(r.brain.view(r, w))
 	case r.active == screenServe:
 		b.WriteString(r.serve.view(r, w))
+	case r.active == screenMCP:
+		b.WriteString(r.mcp.view(r, w))
 	}
 
 	switch {
@@ -934,6 +962,8 @@ func (r *root) screenKeys() string {
 		return r.brain.keys(r)
 	case screenServe:
 		return r.serve.keys()
+	case screenMCP:
+		return r.mcp.keys(r)
 	}
 	return ""
 }

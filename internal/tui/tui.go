@@ -119,6 +119,17 @@ type Deps struct {
 	// where a broken one is noticed, and reading why had meant leaving it.
 	ProjectShow func(ctx context.Context, id string) (projects.ShowReport, error)
 
+	// The MCP boundary (ADR-0004), as the commands see it. MCPStatus proves
+	// and reports; MCPInstall provisions; MCPLoginSpec is the interactive
+	// OAuth session for one policy service, and MCPActivate is what the login
+	// command runs when that session ends — enabling the broker once every
+	// service holds a private session. Torio sees no credential on any of
+	// these paths.
+	MCPStatus    func(context.Context) (lima.MCPBrokerReport, error)
+	MCPInstall   func(context.Context) (lima.MCPBrokerInstallReport, error)
+	MCPLoginSpec func(service string) (execx.InteractiveCommand, error)
+	MCPActivate  func(context.Context) (lima.MCPBrokerActivationReport, error)
+
 	// Poll is the cross-box status poll the dashboard renders.
 	Poll func(context.Context) (status.Report, error)
 
