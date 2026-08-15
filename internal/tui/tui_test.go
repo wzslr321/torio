@@ -88,8 +88,8 @@ func (f *fakeDeps) deps() Deps {
 		BrainInit:   func(context.Context) error { return f.record("brain-init") },
 
 		ProjectList: func() ([]projects.Project, error) { return f.projectList, nil },
-		ProjectAdd: func(_ context.Context, id, _ string) (*projects.DeployKey, error) {
-			if err := f.record("project-add:" + id); err != nil {
+		ProjectAdd: func(_ context.Context, req ProjectAddRequest) (*projects.DeployKey, error) {
+			if err := f.record("project-add:" + req.ID); err != nil {
 				return f.deployKey, err
 			}
 			return nil, nil
@@ -316,6 +316,12 @@ func TestFailedAddShowsTheDeployKey(t *testing.T) {
 	press(t, r, "a")
 	press(t, r, "p")
 	press(t, r, "1")
+	// A deploy key belongs to a remote, so this is the attach shape that can
+	// stop on one: a project with no remote never reaches an authorization.
+	press(t, r, "tab")
+	for _, ch := range "git@github.com:you/p1.git" {
+		press(t, r, string(ch))
+	}
 	press(t, r, "enter")
 
 	view := r.View()
@@ -1249,9 +1255,9 @@ func TestProjectsCorrectsARemoteFromTheHub(t *testing.T) {
 	}
 	d := f.deps()
 	gotID, gotRemote := "", ""
-	d.ProjectSetRemote = func(_ context.Context, id, remote string) error {
+	d.ProjectSetRemote = func(_ context.Context, id, remote string) (*projects.DeployKey, error) {
 		gotID, gotRemote = id, remote
-		return nil
+		return nil, nil
 	}
 	r := newRoot(d)
 	drain(t, r, r.probeFacts())
@@ -1980,4 +1986,198 @@ func TestMCPTabDoesNotActivateAfterAFailedLogin(t *testing.T) {
 	press(t, r, "l")
 	_, _ = r.Update(key("enter"))
 	drain(t, r, func() tea.Msg { return execDoneMsg{err: errors.New("exit status 1")} })
+}
+
+// A project needs no remote (ADR-0027). The form takes a bundle as its third
+// field, and an id with neither a remote nor a bundle asks before making an
+// empty repository: a mistyped id must not quietly become a new project.
+func TestAddFormConfirmsBeforeCreatingALocalProject(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	var got ProjectAddRequest
+	d.ProjectAdd = func(_ context.Context, req ProjectAddRequest) (*projects.DeployKey, error) {
+		got = req
+		return nil, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "a")
+	for _, ch := range "notes" {
+		press(t, r, string(ch))
+	}
+	press(t, r, "enter")
+
+	if got.ID != "" {
+		t.Fatalf("an unconfirmed local project was created: %+v", got)
+	}
+	if view := r.View(); !strings.Contains(view, "no remote") {
+		t.Fatalf("the confirmation does not say what it is about:\n%s", view)
+	}
+	press(t, r, "enter")
+
+	if got.ID != "notes" || !got.Local {
+		t.Fatalf("add request = %+v, want a confirmed local project", got)
+	}
+}
+
+// Escaping the confirmation goes back to the form with what was typed intact,
+// so a stray enter costs nothing.
+func TestAddFormConfirmationCanBeDeclined(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	created := 0
+	d.ProjectAdd = func(context.Context, ProjectAddRequest) (*projects.DeployKey, error) {
+		created++
+		return nil, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "a")
+	for _, ch := range "notes" {
+		press(t, r, string(ch))
+	}
+	press(t, r, "enter")
+	press(t, r, "esc")
+
+	if created != 0 {
+		t.Fatalf("a declined confirmation still created %d project(s)", created)
+	}
+	if view := r.View(); !strings.Contains(view, "notes") {
+		t.Errorf("the typed id was lost:\n%s", view)
+	}
+}
+
+// A bundle is an explicit source, so it needs no confirmation: the operator
+// named a file, which is the decision the confirmation exists to obtain.
+func TestAddFormCarriesABundleWithoutConfirming(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	var got ProjectAddRequest
+	d.ProjectAdd = func(_ context.Context, req ProjectAddRequest) (*projects.DeployKey, error) {
+		got = req
+		return nil, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "a")
+	for _, ch := range "marketing" {
+		press(t, r, string(ch))
+	}
+	press(t, r, "tab")
+	press(t, r, "tab")
+	for _, ch := range "/tmp/m.bundle" {
+		press(t, r, string(ch))
+	}
+	press(t, r, "enter")
+
+	if got.ID != "marketing" || got.Bundle != "/tmp/m.bundle" {
+		t.Fatalf("add request = %+v, want the bundle carried", got)
+	}
+	if got.Local {
+		t.Errorf("a bundle attach was marked local: %+v", got)
+	}
+}
+
+// An id the registry already knows keeps its meaning: enter materializes it
+// from the remote on record, with nothing to confirm.
+func TestAddFormStillMaterializesAKnownProject(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "torio", Remote: "git@github.com:you/torio.git"}},
+	}
+	d := f.deps()
+	var got ProjectAddRequest
+	d.ProjectAdd = func(_ context.Context, req ProjectAddRequest) (*projects.DeployKey, error) {
+		got = req
+		return nil, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "a")
+	for _, ch := range "torio" {
+		press(t, r, string(ch))
+	}
+	press(t, r, "enter")
+
+	if got.ID != "torio" || got.Local {
+		t.Fatalf("add request = %+v, want the known project materialized", got)
+	}
+}
+
+// Promoting a local project can stop on an authorization, and the key that
+// makes it actionable has to reach the screen the operator is on.
+func TestSetRemoteShowsTheDeployKeyItStoppedOn(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "notes"}},
+	}
+	d := f.deps()
+	d.ProjectSetRemote = func(context.Context, string, string) (*projects.DeployKey, error) {
+		return &projects.DeployKey{
+			PublicKey: "ssh-ed25519 AAAAC3Fake torio-deploy-notes",
+			Host:      "github.com",
+			Generated: true,
+		}, errors.New("the guest cannot read the remote yet")
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "e")
+	for _, ch := range "git@github.com:you/notes.git" {
+		press(t, r, string(ch))
+	}
+	press(t, r, "enter")
+
+	if !strings.Contains(r.errDetail, "ssh-ed25519 AAAAC3Fake torio-deploy-notes") {
+		t.Errorf("errDetail = %q, want the key to authorize", r.errDetail)
+	}
+}
+
+// Enter on a local project the bound guest does not hold cannot be answered by
+// materializing (ADR-0027). The hub's job is to carry the refusal, with both
+// ways forward in it, rather than to leave an operator at a bare failure.
+func TestEnterOnALocalProjectCarriesTheRefusal(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "notes", Path: "/w/notes"}},
+	}
+	d := f.deps()
+	d.AgentSpec = func(context.Context, string) (execx.InteractiveCommand, error) {
+		return execx.InteractiveCommand{}, &projects.Error{
+			Op: "enter", Kind: projects.KindVerification,
+			Err:    errors.New("checkout_absent"),
+			Issues: []string{"checkout_absent"},
+		}
+	}
+	d.ProjectMaterialize = func(context.Context, string) (*projects.DeployKey, error) {
+		return nil, errors.New("project \"notes\" is local: it has no remote on record, so there is nothing to " +
+			"clone it from here. Carry it in with `torio project add notes --from-bundle <file>`, or give it a " +
+			"remote with `torio project set-remote notes <remote>`")
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "enter")
+
+	for _, want := range []string{"--from-bundle", "set-remote"} {
+		if !strings.Contains(r.errText, want) {
+			t.Errorf("errText = %q, want it to name %q", r.errText, want)
+		}
+	}
 }

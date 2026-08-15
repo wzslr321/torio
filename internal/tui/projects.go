@@ -43,6 +43,12 @@ type projectsScreen struct {
 	focus   int
 	fields  []textinput.Model
 	confirm bool
+	// confirmLocal is the guard in front of making a project that has no
+	// remote (ADR-0027). An id with no remote and no bundle is ambiguous by
+	// nature — it is also what materializing an already-registered project
+	// looks like — so the one reading that creates something asks first, and a
+	// mistyped id gets a question rather than an empty repository.
+	confirmLocal bool
 
 	// editing is the remote correction, open on one project at a time. It
 	// reuses fields because it is a form like the addition, and keeps the id
@@ -84,22 +90,24 @@ func (s *projectsScreen) load(d Deps) tea.Cmd {
 }
 
 func (s *projectsScreen) openForm() {
-	s.fields = make([]textinput.Model, 2)
-	for i, ph := range []string{"my-app", "git@github.com:you/my-app.git"} {
+	s.fields = make([]textinput.Model, 3)
+	for i, ph := range []string{"my-app", "git@github.com:you/my-app.git", "/path/to/my-app.bundle"} {
 		ti := textinput.New()
 		ti.Placeholder = ph
 		ti.Prompt = ""
-		ti.CharLimit = 200
-		ti.Width = 40
+		ti.CharLimit = 400
+		ti.Width = 44
 		s.fields[i] = ti
 	}
 	s.focus = 0
 	s.fields[0].Focus()
 	s.adding = true
+	s.confirmLocal = false
 }
 
 func (s *projectsScreen) closeForm() {
 	s.adding = false
+	s.confirmLocal = false
 	s.fields = nil
 }
 
@@ -142,8 +150,15 @@ func (s *projectsScreen) updateEdit(r *root, msg tea.KeyMsg) tea.Cmd {
 		}
 		s.closeEdit()
 		d := r.deps
-		return r.run("correcting the remote of "+id, true, func(ctx context.Context) error {
-			return d.ProjectSetRemote(ctx, id, remote)
+		// Detailed for the same reason `add` is: giving a project its first
+		// remote can stop on an authorization, and the key that makes the
+		// refusal actionable has to reach the screen (ADR-0027).
+		return r.runDetailed("recording the remote of "+id, true, func(ctx context.Context) (string, error) {
+			key, err := d.ProjectSetRemote(ctx, id, remote)
+			if err != nil && key != nil {
+				return deployKeyDetail(key), err
+			}
+			return "", err
 		})
 	}
 	var cmd tea.Cmd
@@ -224,6 +239,18 @@ func (s *projectsScreen) updateConnect(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (s *projectsScreen) updateForm(r *root, msg tea.KeyMsg) tea.Cmd {
+	if s.confirmLocal {
+		switch msg.String() {
+		case "enter":
+			s.confirmLocal = false
+			return s.submitForm(r, true)
+		case "esc":
+			// Back to the form with everything typed still in it: a stray
+			// enter should cost nothing.
+			s.confirmLocal = false
+		}
+		return nil
+	}
 	switch msg.String() {
 	case "esc":
 		s.closeForm()
@@ -240,24 +267,59 @@ func (s *projectsScreen) updateForm(r *root, msg tea.KeyMsg) tea.Cmd {
 		return nil
 	case "enter":
 		id := strings.TrimSpace(s.fields[0].Value())
-		remote := strings.TrimSpace(s.fields[1].Value())
 		if id == "" {
 			r.errText = "a project needs an id"
 			return nil
 		}
-		s.closeForm()
-		d := r.deps
-		return r.runDetailed("adding "+id, true, func(ctx context.Context) (string, error) {
-			key, err := d.ProjectAdd(ctx, id, remote)
-			if err != nil && key != nil {
-				return deployKeyDetail(key), err
-			}
-			return "", err
-		})
+		// An id alone means one of two things, and only one of them creates
+		// something. A project the registry already knows is materialized from
+		// the remote on record; anything else would be a new project with no
+		// remote, which is asked for rather than assumed.
+		if s.wouldCreateLocal(id) {
+			s.confirmLocal = true
+			return nil
+		}
+		return s.submitForm(r, false)
 	}
 	var cmd tea.Cmd
 	s.fields[s.focus], cmd = s.fields[s.focus].Update(msg)
 	return cmd
+}
+
+// wouldCreateLocal reports whether submitting the form as it stands would make
+// a project that has no remote.
+func (s *projectsScreen) wouldCreateLocal(id string) bool {
+	if strings.TrimSpace(s.fields[1].Value()) != "" || strings.TrimSpace(s.fields[2].Value()) != "" {
+		return false
+	}
+	for _, p := range s.list {
+		if p.ID == id {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *projectsScreen) submitForm(r *root, local bool) tea.Cmd {
+	req := ProjectAddRequest{
+		ID:     strings.TrimSpace(s.fields[0].Value()),
+		Remote: strings.TrimSpace(s.fields[1].Value()),
+		Bundle: strings.TrimSpace(s.fields[2].Value()),
+		Local:  local,
+	}
+	s.closeForm()
+	d := r.deps
+	label := "adding " + req.ID
+	if req.Bundle != "" {
+		label = "carrying " + req.ID + " in"
+	}
+	return r.runDetailed(label, true, func(ctx context.Context) (string, error) {
+		key, err := d.ProjectAdd(ctx, req)
+		if err != nil && key != nil {
+			return deployKeyDetail(key), err
+		}
+		return "", err
+	})
 }
 
 func (s *projectsScreen) updateConfirm(r *root, msg tea.KeyMsg) tea.Cmd {
@@ -423,6 +485,8 @@ func (s *projectsScreen) openConnect(r *root, p projects.Project) tea.Cmd {
 // are live.
 func (s *projectsScreen) keys(r *root) string {
 	switch {
+	case s.confirmLocal:
+		return "enter create · esc back"
 	case s.adding:
 		return "enter add · tab field · esc cancel"
 	case s.editing:
@@ -464,9 +528,22 @@ func (s *projectsScreen) view(r *root, w int) string {
 	}
 
 	if s.adding {
+		if s.confirmLocal {
+			id := strings.TrimSpace(s.fields[0].Value())
+			b.WriteString(styStrong.Render("Create "+id+" with no remote?") + "\n\n")
+			b.WriteString(styText.Render(
+				"An empty repository is made in this box. The project is local: it lives here,\n"+
+					"and it is not on any forge.") + "\n\n")
+			b.WriteString(styMuted.Render(
+				"Give it a remote later with e, or carry it to another box with a bundle.") + "\n\n")
+			b.WriteString(styBtn.Render("Create") + styDim.Render("  enter create · esc back"))
+			return b.String()
+		}
 		b.WriteString(styStrong.Render("Add a project") + "\n")
-		b.WriteString(styMuted.Render("The remote is optional for a project this backend already knows.") + "\n\n")
-		for i, label := range []string{"id", "remote"} {
+		b.WriteString(styMuted.Render(
+			"The remote is optional: leave it empty for a project this backend already knows, "+
+				"or for one that has no remote at all.") + "\n\n")
+		for i, label := range []string{"id", "remote", "bundle"} {
 			marker := "  "
 			if i == s.focus {
 				marker = styWorking.Render("▸ ")

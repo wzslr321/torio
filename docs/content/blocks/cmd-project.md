@@ -5,11 +5,11 @@ takes no action itself; an absent or unknown subcommand is a usage error.
 
 | Command | What it does |
 | --- | --- |
-| `torio project add <name> [remote]` | Clone the exact remote into the derived workspace path, or verify and adopt a checkout already there; give the operator and the backend identity shared access; register the project where the backend keeps a registry, before recording it. `--id SLUG` picks an id other than `<name>`; `--use` makes it active on success. With the id alone and no remote, materializes an already registered project in the selected backend's guest, using the remote on record. |
+| `torio project add <name> [remote]` | Clone the exact remote into the derived workspace path, or verify and adopt a checkout already there; give the operator and the backend identity shared access; register the project where the backend keeps a registry, before recording it. `--id SLUG` picks an id other than `<name>`; `--use` makes it active on success. With the id alone and no remote, materializes an already registered project in the selected backend's guest, using the remote on record. `--local` makes an empty repository instead, for a project that has no remote at all; `--from-bundle FILE` attaches from a Git bundle on this machine (`git bundle create FILE --all`), carried in over the same one-shot transport `brain import` uses. Neither reaches a network, and neither needs a deploy key. |
 | `torio project list` | List the registered projects. Reads config only, runs nothing on the guest, and works with the VM stopped. |
 | `torio project show <id>` | Report the shared entry, checkout state, and backend registry state where one is declared. Reports drift without repairing it, and returns no filenames, diffs, or raw Git output. |
 | `torio project use <id>` | Make a project active in the backend registry. A backend with no registry refuses the command. |
-| `torio project set-remote <id> <remote>` | Replace the remote of a project already on record. The registry is shared, so the correction applies to every backend. The checkout on the selected backend's guest is repointed when its origin still holds the remote being replaced; any other origin is reported and left alone. The id and display name do not change. |
+| `torio project set-remote <id> <remote>` | Replace the remote of a project already on record. The registry is shared, so the correction applies to every backend. The checkout on the selected backend's guest is repointed when its origin still holds the remote being replaced; any other origin is reported and left alone. The id and display name do not change. It is also how a local project gets its first remote: the guest must be able to read it, so this is where a deploy key is provisioned for a private one. A remote cannot be removed — other guests' checkouts still point at it. |
 | `torio project remove <id>` | Archive the backend registry entry where declared, then drop the shared entry. The checkout and deploy key are retained and reported. |
 | `torio project enter <id>` | Open an ordinary interactive terminal in the checkout with SSH agent forwarding disabled. A registered project with no checkout on this backend's guest is materialized from the remote on record first. Interactive, so it does not support `--json`. |
 | `torio project agent <id>` | Start the configured backend inside the checkout, running as the backend identity rather than as you. A registered project with no checkout on this backend's guest is materialized from the remote on record first. No SSH agent is forwarded and the connection is never multiplexed, so it cannot inherit an operator write connection. The guest's own read route remains available. Interactive; `--json` is a usage error. A backend that declares no interactive session has nothing to open. |
@@ -30,10 +30,21 @@ guest from the remote already on record — a separate step rather than somethin
 checkouts are independent working trees; what passes between them is what you
 push.
 
+**A project needs no remote.** `--local` records a project with none: it is an
+empty repository in the guest that made it, and it is on no forge. `--from-bundle`
+records the same kind of project from a repository that already exists on your
+machine. Both are listed on every backend, because the registry is shared, and
+opening one on a guest that does not hold it says so rather than guessing —
+carry it there with another bundle, or give it a remote. Where the local
+checkout has no origin, that is agreement; an origin appearing on one is
+ordinary drift.
+
 **Torio stores no host Git credential.** A remote the guest cannot read without
 prompting fails closed. For an SSH remote, `add` generates a deploy key on the
-guest and prints the public half. Add it to that repository with write access
-off, then run the command again. Torio cannot verify the forge setting.
+guest and prints the public half — as does `set-remote` when it gives a local
+project its first remote, which is the moment a key first has a remote to
+authorize against. Add it to that repository with write access off, then run the
+command again. Torio cannot verify the forge setting.
 
 `add` resets, cleans, and deletes nothing on the guest, so a rerun after a
 failure finishes the work rather than starting over.

@@ -23,7 +23,9 @@ quits.
   usage error (exit 2), unchanged, so scripts and CI jobs read what they always
   have.
 - The project screen opens a session on Enter, an operator shell on `s`, a
-  detail panel on `v`, and the remote correction on `e`. The dashboard stops the
+  detail panel on `v`, and the remote correction on `e`. Its add form takes an
+  id, an optional remote and an optional bundle; an id with neither, on a
+  project the registry does not know, asks before making one that has no remote. The dashboard stops the
   bound box on `x`, and asks first, and opens a shell inside it on `s`, which is
   `vm shell`. `t` on the dashboard shows the status-line recipe for a tmux bar
   or a zsh prompt — the text `status setup` prints, shown and never written.

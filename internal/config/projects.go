@@ -106,7 +106,10 @@ func (f File) WithProject(p Project, opts AddOptions) (_ File, err error) {
 		if existing.ID == p.ID {
 			return File{}, fmt.Errorf("%w: %q", ErrDuplicateProjectID, p.ID)
 		}
-		if !opts.AllowDuplicateRemote && existing.Remote == p.Remote {
+		// Two local projects each have no remote, which is not two projects
+		// sharing one: the rule exists because a second workspace on one remote
+		// silently shadows the first, and an absent remote shadows nothing.
+		if !opts.AllowDuplicateRemote && p.Remote != "" && existing.Remote == p.Remote {
 			// The conflicting remote is not echoed; the owning project is enough
 			// to act on and cannot carry secret-shaped material.
 			return File{}, fmt.Errorf("%w: project %q", ErrDuplicateRemote, existing.ID)
@@ -141,7 +144,9 @@ func (f File) WithUpdatedRemote(id, remote string, opts AddOptions) (_ File, err
 	found := false
 	for _, p := range f.Projects {
 		if p.ID != id {
-			if !opts.AllowDuplicateRemote && p.Remote == remote {
+			// As in WithProject: an absent remote is not a remote two projects
+			// can share, so it never collides.
+			if !opts.AllowDuplicateRemote && remote != "" && p.Remote == remote {
 				return File{}, fmt.Errorf("%w: project %q", ErrDuplicateRemote, p.ID)
 			}
 			updated = append(updated, p)
@@ -280,6 +285,8 @@ func validateDisplayName(name string) error {
 // with, and refuses everything that could carry a credential, address the local
 // filesystem, or be re-read as an argument by Git:
 //
+//   - the empty string — the project is local, living only in the guest it was
+//     made in, with no remote to record (ADR-0027);
 //   - https://host[:port]/path — no userinfo at all, since HTTPS userinfo is
 //     exactly where a token or password would be embedded;
 //   - ssh://[user@]host[:port]/path — a username is non-secret transport and is
@@ -288,11 +295,15 @@ func validateDisplayName(name string) error {
 //
 // Query and fragment are rejected on every form (they can carry tokens),
 // percent-encoding is rejected (it hides the above), and a local path or
-// file:// URL is not a remote at all.
+// file:// URL is not a remote at all. The absence of a remote and a remote
+// naming the local filesystem are different things: the first says there is
+// nothing to reach, the second names something only one machine can reach, and
+// only the first is a project.
 func validateRemote(remote string) error {
+	if remote == "" {
+		return nil
+	}
 	switch {
-	case remote == "":
-		return errors.New("is required")
 	case len(remote) > maxRemoteLen:
 		return fmt.Errorf("is longer than %d bytes", maxRemoteLen)
 	case !utf8.ValidString(remote):

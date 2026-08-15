@@ -26,6 +26,25 @@ import (
 	"github.com/wzslr321/torio/internal/status"
 )
 
+// ProjectAddRequest is the attach the add form asks for.
+//
+// It is a struct rather than a list of arguments because the three ways a
+// project comes into being — cloned from a remote, carried in as a bundle,
+// initialized empty — are mutually exclusive, and a caller passing two of them
+// should be visible at the call site rather than hidden in argument order
+// (ADR-0027).
+type ProjectAddRequest struct {
+	ID string
+	// Remote is the address to clone from. Empty with neither of the two below
+	// means the id is already on record and this guest is the one lacking the
+	// checkout.
+	Remote string
+	// Bundle is a Git bundle on the host to attach from.
+	Bundle string
+	// Local asks for an empty repository and a record with no remote.
+	Local bool
+}
+
 // VMInitOptions is the shape of `vm init` the hub collects in a form.
 type VMInitOptions struct {
 	CPUs   int
@@ -111,7 +130,7 @@ type Deps struct {
 	// when there is one (ADR-0018). The command surface prints that key; the
 	// hub has to render it too, or its failure banner instructs the operator
 	// to add a key they cannot see.
-	ProjectAdd    func(ctx context.Context, id, remote string) (*projects.DeployKey, error)
+	ProjectAdd    func(ctx context.Context, req ProjectAddRequest) (*projects.DeployKey, error)
 	ProjectUse    func(ctx context.Context, id string) error
 	ProjectRemove func(ctx context.Context, id string) error
 	// ProjectShow is `project show` for one project: what the guest holds and
@@ -179,7 +198,11 @@ type Deps struct {
 	// (ADR-0023). It is here because the hub lists the records, so the hub is
 	// where a wrong one is seen; sending the operator to a command to fix what
 	// the screen is showing them is the dead end this removes.
-	ProjectSetRemote func(ctx context.Context, id, remote string) error
+	//
+	// It is also how a local project gets a remote, and that is why it returns
+	// a deploy key: the promotion is the moment the guest first has to read the
+	// remote, so it is the moment the key first means anything (ADR-0027).
+	ProjectSetRemote func(ctx context.Context, id, remote string) (*projects.DeployKey, error)
 }
 
 // Run opens the hub and blocks until the operator quits.

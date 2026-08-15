@@ -86,8 +86,19 @@ type AddRequest struct {
 	ID string
 	// DisplayName is the human label.
 	DisplayName string
-	// Remote is the Git remote to attach.
+	// Remote is the Git remote to attach. Empty means the project is local: it
+	// lives in the guest that makes it and there is nothing to clone from
+	// (ADR-0027). An empty remote takes one of the two decisions below; it is
+	// never inferred, because a mistyped id must not quietly become a new
+	// empty repository.
 	Remote string
+	// Local asks for an empty repository, initialized in the guest.
+	Local bool
+	// BundlePath is a Git bundle on the host to attach from, carried into the
+	// guest over the one-shot transport and cloned from there. It is how a
+	// repository that exists only on the operator's disk gets in, and how a
+	// local project reaches a second box.
+	BundlePath string
 	// Use activates the project in Hermes after a successful add.
 	Use bool
 	// AllowDuplicateRemote carries the explicit operator decision to register a
@@ -105,6 +116,10 @@ type AddReport struct {
 	Cloned bool
 	// Adopted reports that this run verified and kept an existing checkout.
 	Adopted bool
+	// Initialized reports that this run made an empty repository for a local
+	// project. It is distinct from Cloned because nothing arrived: the
+	// repository has no commit until the operator makes one.
+	Initialized bool
 	// RegistryDeclared reports that the backend keeps a project registry at
 	// all. When it is false the two fields below are meaningless rather than
 	// false-and-alarming: nothing was registered because there was nowhere to
@@ -176,10 +191,16 @@ type SetRemoteReport struct {
 	// PreviousRemote is what the record held before this correction.
 	PreviousRemote string
 	// CheckoutRepointed reports that the guest checkout's origin was moved to
+	// the corrected remote, or attached where there was none.
 	// the corrected remote. False covers every reason it was not: no checkout,
 	// a box that is not running, or an origin that matched neither remote.
 	CheckoutRepointed bool
-	Notes             []string
+	// DeployKey is the public half of a key the guest holds, carried when
+	// promoting a local project to a remoted one failed on an authorization
+	// only a human can give (ADR-0027). It is the same fail-closed shape `add`
+	// has, at the moment a remote first exists to authorize against.
+	DeployKey *DeployKey
+	Notes     []string
 }
 
 // CheckoutStatus is the derived state of the guest checkout. It carries only
@@ -195,8 +216,13 @@ type CheckoutStatus struct {
 	// exactly the derived path — not a subdirectory of some other repository.
 	Repository bool
 	// OriginMatches reports that remote.origin.url is byte-identical to the
-	// registered remote.
+	// registered remote — which, for a local project, means both are absent.
 	OriginMatches bool
+	// HasOrigin reports that the checkout has an origin at all. It is separate
+	// from OriginMatches because attaching one and moving one are different
+	// acts, and which is needed is a fact about the tree rather than about the
+	// record it is being compared against (ADR-0027).
+	HasOrigin bool
 	// FullClone reports that the repository is not shallow.
 	FullClone bool
 	// Clean reports an empty `git status --porcelain`, untracked files included.
