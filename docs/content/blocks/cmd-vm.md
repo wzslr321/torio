@@ -12,3 +12,4 @@ or unknown subcommand is a usage error.
 | `torio vm stop` | Stop the VM. Graceful and idempotent; never uses `--force`, never removes the VM or its data, and requires a `Stopped` post-state. |
 | `torio vm bootstrap` | Reconcile and verify the existing target for Hermes. Installs the pinned Hermes Agent when the launcher is missing; verifies operator membership in `torio-projects`. Idempotent on a reconciled target. Accepts `--timeout` and `--json`. |
 | `torio vm ssh -- COMMAND…` | Run a command inside the VM. Does not open an interactive shell, forward stdin or a TTY, migrate data, start a chat, or copy credentials. |
+| `torio vm shell` | Open the Lima login identity's own shell inside the box, also on `s` on the hub's dashboard. No SSH agent is forwarded and no multiplexed connection is reused, so the session cannot ride or become a push-capable one. Interactive; `--json` is a usage error. |

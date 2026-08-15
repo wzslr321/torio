@@ -43,6 +43,11 @@
   was, and names the host vault, where it is resolved with ordinary Git.
   `brain status` now reports how far the replica is from the hub
   ([ADR-0025](docs/adr/0025-one-second-brain-with-the-host-as-its-hub.md)).
+- **`torio vm shell`.** Opens the Lima login identity's own shell inside the
+  box — the box as a place to stand, where `vm ssh -- COMMAND` runs one command
+  and comes back. The hub offers the same session on `s` on the dashboard. No
+  SSH agent is forwarded and no multiplexed connection is reused, so the shell
+  cannot ride or become a push-capable session.
 - **A rebind reconciles the Second Brain on both sides of the move.** Pressing
   `b` and picking another backend syncs the Brain of the box being left before
   the binding changes and the Brain of the box arrived at right after, so the

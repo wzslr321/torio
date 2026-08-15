@@ -70,6 +70,7 @@ func newVMCmd(a *app) *cobra.Command {
 	vm.AddCommand(newVMStopCmd(a))
 	vm.AddCommand(newVMBootstrapCmd(a))
 	vm.AddCommand(newVMSSHCmd(a))
+	vm.AddCommand(newVMShellCmd(a))
 	return vm
 }
 
@@ -340,6 +341,38 @@ func newVMSSHCmd(a *app) *cobra.Command {
 				return mapLimaError("vm.ssh", err)
 			}
 			return a.emitVMSSH(res)
+		},
+	}
+}
+
+// newVMShellCmd opens the Lima login identity's own shell inside the box.
+//
+// `vm ssh` runs one command and comes back; this is the box as a place to
+// stand. The transport forwards no SSH agent and reuses no connection, so the
+// shell cannot ride or become a push-capable session; what the login identity
+// may do inside is its own affair, unchanged from `limactl shell`.
+func newVMShellCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "shell",
+		Short: "Open an interactive shell inside the Torio VM",
+		Long: "Open the Lima login identity's own shell inside the box. No SSH agent is " +
+			"forwarded and no multiplexed connection is reused. `vm ssh -- COMMAND` stays " +
+			"the way to run one command and read its result.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if a.jsonOut {
+				return usageError("vm shell is interactive; --json is not supported")
+			}
+			spec, err := a.newVMShellSpec()
+			if err != nil {
+				return mapLimaError("vm.shell", err)
+			}
+			// Bound by the command's own context, not the operation timeout:
+			// Torio does not decide how long an operator stays in a shell.
+			if err := a.newInteractive().RunInteractive(cmd.Context(), spec); err != nil {
+				return mapInteractiveSessionError("vm.shell", "VM shell session", err)
+			}
+			return nil
 		},
 	}
 }

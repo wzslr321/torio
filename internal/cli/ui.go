@@ -140,6 +140,9 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 		},
 		VMStart: adapter.Start,
 		VMStop:  adapter.Stop,
+		// The same session `vm shell` opens, from the same seam, so the two
+		// surfaces cannot drift about what a box shell is.
+		VMShellSpec: a.newVMShellSpec,
 
 		Bootstrap: func(ctx context.Context, verifyOnly bool) (lima.BootstrapReport, error) {
 			o := opts

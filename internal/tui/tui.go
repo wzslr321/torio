@@ -137,6 +137,11 @@ type Deps struct {
 	AgentSpec func(ctx context.Context, id string) (execx.InteractiveCommand, error)
 	ShellSpec func(ctx context.Context, id string) (execx.InteractiveCommand, error)
 
+	// VMShellSpec is the login identity's own shell inside the bound box: what
+	// `torio vm shell` opens. It takes nothing, because there is no
+	// caller-shaped value in that session at all.
+	VMShellSpec func() (execx.InteractiveCommand, error)
+
 	// ProjectMaterialize makes the checkout a registered project describes, on
 	// the guest this hub is bound to (ADR-0024). It is the one-argument `add`:
 	// the remote comes from the record, so opening a project on a second

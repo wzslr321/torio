@@ -94,6 +94,7 @@ type app struct {
 	newAgentPushSpec func(projectPath, hostSocket, guestSocket string) (execx.InteractiveCommand, error)
 	newInteractive   func() execx.InteractiveRunner
 	newMCPLoginSpec  func(service string) (execx.InteractiveCommand, error)
+	newVMShellSpec   func() (execx.InteractiveCommand, error)
 	installMCP       func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerInstallReport, error)
 	verifyMCP        func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerReport, error)
 	activateMCP      func(context.Context, *lima.Adapter, backend.Identity) (lima.MCPBrokerActivationReport, error)
@@ -203,6 +204,9 @@ func runWithApp(ctx context.Context, a *app, args []string) int {
 	}
 	if a.newMCPLoginSpec == nil {
 		a.newMCPLoginSpec = lima.MCPLoginSpec
+	}
+	if a.newVMShellSpec == nil {
+		a.newVMShellSpec = lima.VMShellSpec
 	}
 	if a.installMCP == nil {
 		a.installMCP = defaultInstallMCP

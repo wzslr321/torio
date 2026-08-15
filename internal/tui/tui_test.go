@@ -1612,3 +1612,60 @@ func TestProjectsOffersNoDetailWithoutTheSeam(t *testing.T) {
 		t.Errorf("footer = %q, want no detail key", r.projects.keys(r))
 	}
 }
+
+// The box itself is a place an operator sometimes has to stand — reading logs,
+// checking a unit — and the hub sent them away to do it. `s` on the dashboard
+// opens the login identity's shell inside the bound box, the same session
+// `torio vm shell` opens.
+func TestDashboardOpensAShellIntoTheBox(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	opened := false
+	d.VMShellSpec = func() (execx.InteractiveCommand, error) {
+		opened = true
+		return execx.InteractiveCommand{Name: "ssh"}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenDashboard)
+
+	_, cmd := r.Update(key("s"))
+	if cmd == nil {
+		t.Fatal("s produced no work")
+	}
+	msg := cmd()
+	spec, ok := msg.(specMsg)
+	if !ok {
+		t.Fatalf("s produced %T, want a resolved session", msg)
+	}
+	if spec.err != nil {
+		t.Fatalf("resolving the shell failed: %v", spec.err)
+	}
+	if !opened {
+		t.Error("the shell seam was never asked")
+	}
+	if !strings.Contains(r.dash.keys(r), "s shell") {
+		t.Errorf("footer = %q, want the shell key offered", r.dash.keys(r))
+	}
+}
+
+// A stopped box has no shell to open, and a build without the seam has no key.
+func TestDashboardOffersNoShellIntoAStoppedBox(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateStopped}
+	d := f.deps()
+	d.VMShellSpec = func() (execx.InteractiveCommand, error) {
+		t.Fatal("a stopped box was asked for a shell")
+		return execx.InteractiveCommand{}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenDashboard)
+
+	_, cmd := r.Update(key("s"))
+	if cmd != nil {
+		t.Fatal("s produced work on a stopped box")
+	}
+	if strings.Contains(r.dash.keys(r), "s shell") {
+		t.Errorf("footer = %q, want no shell key", r.dash.keys(r))
+	}
+}
