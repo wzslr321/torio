@@ -26,6 +26,9 @@ const (
 	// here instead of passing against itself.
 	testKeyPath   = lima.HermesHome + "/.ssh/torio/" + testID
 	testKeyConfig = testKeyPath + ".gitconfig"
+	// testBundleStaging is where a carried bundle lands, spelled out for the
+	// same reason as the key paths above.
+	testBundleStaging = lima.HermesHome + "/" + bundleStagingDirName
 	// testPublicKey is the public half the guest double reports. A public key is
 	// not a credential: it is the half an operator is meant to publish.
 	testPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeFakeFakeFakeFakeFakeFakeFakeFakeFake torio-deploy-" + testID
@@ -163,9 +166,26 @@ type fakeGuest struct {
 	// Per-user global safe.directory entries.
 	safeDirs map[string][]string
 
+	// The bundle attach: what was carried, whether the carry failed, and
+	// whether a bundle is sitting in staging for the clone to read.
+	copies        []fakeCopy
+	copyErr       error
+	bundleArrived bool
+	// bundleReadable is whether the carried bundle has been handed to the
+	// agent. The transport writes as the login identity, so a bundle that
+	// arrived is not yet a bundle the agent can open.
+	bundleReadable bool
+
 	failContains map[string]int
 	truncateOn   string
 	calls        []fakeCall
+}
+
+// fakeCopy is one host→guest transfer the manager asked for.
+type fakeCopy struct {
+	host  string
+	guest string
+	home  string
 }
 
 // readyFake is a bootstrap-verified guest with a reachable remote, no checkout
@@ -208,6 +228,19 @@ func (f *fakeGuest) Bootstrap(context.Context, lima.BootstrapOptions) (lima.Boot
 		return lima.BootstrapReport{}, f.bootstrapErr
 	}
 	return lima.BootstrapReport{Instance: lima.InstanceName}, nil
+}
+
+// CopyToGuest records the one carry a bundle attach makes. The real transport
+// is rsync as the login identity; what a test can assert is that the manager
+// asked for the right directories, within the identity's own home, and that a
+// failure crosses the boundary as one.
+func (f *fakeGuest) CopyToGuest(_ context.Context, hostDir, guestDir, guestHome string) error {
+	f.copies = append(f.copies, fakeCopy{host: hostDir, guest: guestDir, home: guestHome})
+	if f.copyErr != nil {
+		return f.copyErr
+	}
+	f.bundleArrived = true
+	return nil
 }
 
 func (f *fakeGuest) SSH(_ context.Context, argv []string) (execx.Result, error) {
@@ -263,7 +296,52 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 	case strings.Contains(joined, "git config --global includeIf.gitdir:"+testPath+"/.path"):
 		return okResult(""), nil
 
-	// --- correcting the recorded remote ---
+	// --- local projects: an empty repository, or one carried in ---
+	case strings.Contains(joined, "git init --initial-branch=main "+testPath):
+		f.pathExists = true
+		f.isRepo = true
+		f.origin = ""
+		f.owner = lima.HermesUser
+		f.group = lima.HermesUser
+		f.mode = "755"
+		return okResult(""), nil
+	case strings.Contains(joined, "id -un"):
+		return okResult(testOwner + "\n"), nil
+	case strings.Contains(joined, "rm -rf -- "+testBundleStaging):
+		f.bundleArrived, f.bundleReadable = false, false
+		return okResult(""), nil
+	case strings.Contains(joined, "install -d -o "+testOwner+" -g "+sharedGroup+" -m 2770 "+testBundleStaging):
+		return okResult(""), nil
+	case strings.Contains(joined, "chown -R "+lima.HermesUser+":"+lima.HermesUser+" "+testBundleStaging):
+		f.bundleReadable = true
+		return okResult(""), nil
+	case strings.Contains(joined, "chmod -R u=rwX,g=,o= "+testBundleStaging):
+		return okResult(""), nil
+	case strings.Contains(joined, "git clone --quiet -- "+testBundleStaging+"/project.bundle "+testPath):
+		// A bundle that arrived but was never handed to the agent is a file it
+		// cannot read, which is what Git reports as a missing repository. This
+		// is the real-box failure the adopt step exists to prevent.
+		if !f.bundleArrived || !f.bundleReadable {
+			return exitResult(128, "", "fatal: repository not found"), nil
+		}
+		f.pathExists = true
+		f.isRepo = true
+		// A clone from a bundle records the bundle path as its origin, which is
+		// exactly what the attach has to remove.
+		f.origin = testBundleStaging + "/project.bundle"
+		f.owner = lima.HermesUser
+		f.group = lima.HermesUser
+		f.mode = "755"
+		return okResult(""), nil
+	case strings.Contains(joined, "git -C "+testPath+" remote remove origin"):
+		f.origin = ""
+		return okResult(""), nil
+
+	// --- correcting the recorded remote, or attaching one to a local project ---
+	case strings.Contains(joined, "git -C "+testPath+" remote add origin "):
+		_, url, _ := strings.Cut(joined, "remote add origin ")
+		f.origin = strings.TrimSpace(url)
+		return okResult(""), nil
 	case strings.Contains(joined, "git -C "+testPath+" remote set-url origin "):
 		_, url, _ := strings.Cut(joined, "remote set-url origin ")
 		f.origin = strings.TrimSpace(url)

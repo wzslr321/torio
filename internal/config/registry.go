@@ -11,10 +11,20 @@ import (
 	"strings"
 )
 
-// RegistrySchemaVersion is the only supported version of the project registry
-// document. Like the config document, an unknown version is rejected rather
-// than migrated.
-const RegistrySchemaVersion = "1"
+// RegistrySchemaVersion is the version this build writes. Like the config
+// document, an unknown version is rejected rather than migrated.
+//
+// Version 2 admits a project with no remote (ADR-0027). The bump exists for
+// the older binary's benefit, not this one's: a V1 validator refuses an empty
+// remote outright, so without a version it would report a registry holding one
+// local project as an invalid document rather than as one written by a Torio
+// it does not know.
+const RegistrySchemaVersion = "2"
+
+// readableRegistryVersions are the versions this build can read. A registry
+// written before local projects existed is still exactly right, so it is read
+// as it is; the next write stamps the current version.
+var readableRegistryVersions = []string{"1", "2"}
 
 // registryJSON is the wire form of the registry document. Unknown fields are
 // rejected at every level, so the schema fails closed — including a project
@@ -210,9 +220,9 @@ func parseRegistry(data []byte) (_ []Project, err error) {
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return nil, fmt.Errorf("invalid JSON: %w", err)
 	}
-	if probe.SchemaVersion != RegistrySchemaVersion {
-		return nil, fmt.Errorf("schema_version %q is not supported (want %q)",
-			probe.SchemaVersion, RegistrySchemaVersion)
+	if !slices.Contains(readableRegistryVersions, probe.SchemaVersion) {
+		return nil, fmt.Errorf("schema_version %q is not supported (want one of %s)",
+			probe.SchemaVersion, strings.Join(readableRegistryVersions, ", "))
 	}
 
 	var raw registryJSON

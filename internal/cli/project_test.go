@@ -1263,3 +1263,145 @@ func TestMaterializingGetsTheLongBoundRatherThanTheOperationTimeout(t *testing.T
 		t.Errorf("materialization deadline is %s away, want the long bound rather than the 5s operation timeout", remaining)
 	}
 }
+
+// `--local` is the explicit decision to make a project that has no remote
+// (ADR-0027). It reads nothing off the registry: an id that is not on record is
+// the ordinary case here, and treating an absent record as an error would make
+// the flag unusable for the only thing it is for.
+func TestProjectAddLocalRequestsAProjectWithNoRemote(t *testing.T) {
+	service := &fakeProjectService{addReport: projects.AddReport{
+		Project:     projects.Project{ID: "notes", DisplayName: "notes", Path: lima.HermesWorkspacePath + "/notes"},
+		Initialized: true,
+		Registered:  true,
+	}}
+	code, stdout, stderr := runProjectCLI(t, []string{"project", "add", "notes", "--local"}, service)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	want := projects.AddRequest{ID: "notes", DisplayName: "notes", Local: true}
+	if !reflect.DeepEqual(service.addReq, want) {
+		t.Fatalf("add request = %+v, want %+v", service.addReq, want)
+	}
+	if !strings.Contains(stdout, "initialized") {
+		t.Errorf("output does not report what was made: %q", stdout)
+	}
+	if !strings.Contains(stdout, "(none — local project)") {
+		t.Errorf("output does not say the project has no remote: %q", stdout)
+	}
+}
+
+// A bundle attaches a repository that is not on record yet — that is how one
+// arrives — so an unknown id is not the usage error it is for a bare add.
+func TestProjectAddFromBundleCarriesTheHostPath(t *testing.T) {
+	service := &fakeProjectService{
+		listErr: errors.New("registry unreadable"),
+		addReport: projects.AddReport{
+			Project:    projects.Project{ID: "marketing", DisplayName: "marketing"},
+			Cloned:     true,
+			Registered: true,
+		},
+	}
+	code, _, stderr := runProjectCLI(t,
+		[]string{"project", "add", "marketing", "--from-bundle", "/tmp/marketing.bundle"}, service)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	want := projects.AddRequest{ID: "marketing", DisplayName: "marketing", BundlePath: "/tmp/marketing.bundle"}
+	if !reflect.DeepEqual(service.addReq, want) {
+		t.Fatalf("add request = %+v, want %+v", service.addReq, want)
+	}
+}
+
+// A project with a remote on record is cloned from the remote. Attaching a
+// bundle over it would put a second copy of the same repository under one id.
+func TestProjectAddFromBundleRefusesAProjectThatHasARemote(t *testing.T) {
+	service := &fakeProjectService{listOut: []projects.Project{
+		{ID: "torio", DisplayName: "torio", Remote: "git@github.com:wzslr321/torio.git"},
+	}}
+	code, _, stderr := runProjectCLI(t,
+		[]string{"project", "add", "torio", "--from-bundle", "/tmp/torio.bundle"}, service)
+	if code != int(ExitUsage) {
+		t.Fatalf("exit = %d, want usage; stderr=%q", code, stderr)
+	}
+	if service.addReq.ID != "" {
+		t.Errorf("a refused invocation still reached the manager: %+v", service.addReq)
+	}
+}
+
+// Promoting a local project stops on the one act a human has to perform, and
+// the key that makes it actionable is printed where `add` prints it.
+func TestProjectSetRemotePrintsTheDeployKeyOnStderr(t *testing.T) {
+	service := &fakeProjectService{
+		setRemoteReport: projects.SetRemoteReport{
+			Project:   projects.Project{ID: "notes", Remote: "git@github.com:you/notes.git"},
+			DeployKey: &projects.DeployKey{PublicKey: "ssh-ed25519 AAAAC3Fake torio-deploy-notes", Host: "github.com", Generated: true},
+		},
+		setRemoteErr: &projects.Error{Op: "set_remote", Kind: projects.KindAuth, Err: errors.New("the guest cannot read the remote yet")},
+	}
+	code, stdout, stderr := runProjectCLI(t,
+		[]string{"project", "set-remote", "notes", "git@github.com:you/notes.git"}, service)
+	if code != int(ExitPermission) {
+		t.Fatalf("exit = %d, want %d", code, int(ExitPermission))
+	}
+	if !strings.Contains(stderr, "ssh-ed25519 AAAAC3Fake torio-deploy-notes") {
+		t.Errorf("the key an operator must authorize is not on stderr: %q", stderr)
+	}
+	if strings.Contains(stdout, "ssh-ed25519") {
+		t.Errorf("the key reached stdout, where a JSON envelope lives: %q", stdout)
+	}
+}
+
+// A promotion that finished says what it did: the record gained a remote it
+// never had, rather than having one corrected.
+func TestProjectSetRemoteReportsAPromotionAsAnAttachment(t *testing.T) {
+	service := &fakeProjectService{setRemoteReport: projects.SetRemoteReport{
+		Project:           projects.Project{ID: "notes", Remote: "git@github.com:you/notes.git"},
+		PreviousRemote:    "",
+		CheckoutRepointed: true,
+		Notes:             []string{"remote_attached"},
+	}}
+	code, stdout, stderr := runProjectCLI(t,
+		[]string{"project", "set-remote", "notes", "git@github.com:you/notes.git"}, service)
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "remote attached") {
+		t.Errorf("output does not distinguish an attachment from a correction: %q", stdout)
+	}
+	if !strings.Contains(stdout, "(none — the project was local)") {
+		t.Errorf("output does not say what the record held before: %q", stdout)
+	}
+}
+
+// Opening a local project on a guest that does not hold it cannot be answered
+// by materializing: there is no remote to clone from. The refusal is the
+// manager's, and the announcement of a clone that is not going to happen must
+// not precede it.
+func TestProjectEnterOnALocalProjectSaysWhyItCannotMaterialize(t *testing.T) {
+	service := &fakeProjectService{
+		listOut: []projects.Project{{ID: "notes", DisplayName: "notes"}},
+		enterErr: &projects.Error{
+			Op: "enter", Kind: projects.KindVerification,
+			Err:    errors.New("checkout_absent"),
+			Issues: []string{"checkout_absent"},
+		},
+		addErr: &projects.Error{
+			Op: "add", Kind: projects.KindPrecondition,
+			Err: errors.New("project \"notes\" is local: it has no remote on record, so there is nothing to clone it from here. " +
+				"Carry it in with `torio project add notes --from-bundle <file>`, or give it a remote with " +
+				"`torio project set-remote notes <remote>` so every guest can reach it"),
+		},
+	}
+	code, stdout, stderr := runProjectCLI(t, []string{"project", "enter", "notes"}, service)
+	if code == int(ExitOK) {
+		t.Fatalf("a local project opened on a guest that does not hold it; stdout=%q", stdout)
+	}
+	if strings.Contains(stdout, "materializing it from the remote on record") {
+		t.Errorf("a clone that cannot happen was announced: %q", stdout)
+	}
+	for _, want := range []string{"--from-bundle", "set-remote"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr = %q, want it to name %q", stderr, want)
+		}
+	}
+}

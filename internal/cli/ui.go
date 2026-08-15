@@ -187,22 +187,32 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 		},
 
 		ProjectList: projectSvc.List,
-		ProjectAdd: func(ctx context.Context, id, remote string) (*projects.DeployKey, error) {
-			// No remote means the id is already on record and this backend's
-			// guest is the one lacking the checkout. The remote and the display
-			// name both come from the record, the way the one-argument
-			// `project add` takes them: retyping either would attach a
-			// different repository, or be refused as a conflict, under a name
-			// that already means something.
-			name := id
-			if remote == "" {
-				known, err := findRegistered(projectSvc, id)
+		ProjectAdd: func(ctx context.Context, req tui.ProjectAddRequest) (*projects.DeployKey, error) {
+			// An id with no source of its own means the project is already on
+			// record and this backend's guest is the one lacking the checkout.
+			// The remote and the display name both come from the record, the
+			// way the one-argument `project add` takes them: retyping either
+			// would attach a different repository, or be refused as a conflict,
+			// under a name that already means something.
+			//
+			// A local project and a bundle attach are decisions, not lookups:
+			// neither reads the registry, because both create what is not there.
+			name := req.ID
+			remote := req.Remote
+			if remote == "" && !req.Local && req.Bundle == "" {
+				known, err := findRegistered(projectSvc, req.ID)
 				if err != nil {
 					return nil, err
 				}
 				remote, name = known.Remote, known.DisplayName
 			}
-			report, err := projectSvc.Add(ctx, projects.AddRequest{ID: id, DisplayName: name, Remote: remote})
+			report, err := projectSvc.Add(ctx, projects.AddRequest{
+				ID:          req.ID,
+				DisplayName: name,
+				Remote:      remote,
+				Local:       req.Local,
+				BundlePath:  req.Bundle,
+			})
 			if err != nil {
 				return report.DeployKey, err
 			}
@@ -233,9 +243,12 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 			}
 			return nil, nil
 		},
-		ProjectSetRemote: func(ctx context.Context, id, remote string) error {
-			_, err := projectSvc.SetRemote(ctx, id, remote)
-			return err
+		ProjectSetRemote: func(ctx context.Context, id, remote string) (*projects.DeployKey, error) {
+			report, err := projectSvc.SetRemote(ctx, id, remote)
+			if err != nil {
+				return report.DeployKey, err
+			}
+			return nil, nil
 		},
 
 		Poll: func(ctx context.Context) (status.Report, error) {

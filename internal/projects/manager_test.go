@@ -3,6 +3,8 @@ package projects
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -1829,5 +1831,396 @@ func TestCheckoutAbsentIsDistinguishedFromEveryOtherDrift(t *testing.T) {
 		if IsCheckoutAbsentOnly(err) {
 			t.Errorf("IsCheckoutAbsentOnly(%v) = true, want false", err)
 		}
+	}
+}
+
+// A project may be local: it lives in the guest that made it and has no remote
+// to record (ADR-0027). `--local` initializes an empty repository and takes the
+// same permissions, registration and persistence path every attach takes. It
+// reaches no network, and it mints no deploy key: there is nothing to
+// authorize.
+func TestAddLocalInitializesAnEmptyProjectWithoutANetwork(t *testing.T) {
+	g := readyFake()
+	r := emptyRegistry()
+
+	report, err := newTestManager(g, r).Add(context.Background(), AddRequest{
+		ID: testID, DisplayName: testName, Local: true,
+	})
+	if err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+	if !report.Initialized || report.Cloned || report.Adopted {
+		t.Fatalf("report = %#v, want an initialized local project", report)
+	}
+	if report.Project.Remote != "" {
+		t.Errorf("recorded remote = %q, want none", report.Project.Remote)
+	}
+	if !g.saw("git init --initial-branch=main " + testPath) {
+		t.Errorf("no repository was initialized: %v", g.calls)
+	}
+	for _, forbidden := range []string{"ls-remote", "git clone", "ssh-keygen"} {
+		if g.saw(forbidden) {
+			t.Errorf("a local project reached %q", forbidden)
+		}
+	}
+	// The rest of the pipeline is the pipeline: shared access, registration,
+	// and the record written last.
+	for _, fragment := range []string{
+		"chown -R hermes:torio-projects -- " + testPath,
+		"hermes project create " + testName + " " + testPath + " --slug " + testID,
+	} {
+		if !g.saw(fragment) {
+			t.Errorf("missing typed guest argv containing %q", fragment)
+		}
+	}
+	if len(r.saved) != 1 || r.saved[0].Projects[0].Remote != "" {
+		t.Fatalf("persisted registry = %#v, want one entry with no remote", r.saved)
+	}
+}
+
+// A local checkout has no origin, and that is what agreement looks like for it.
+// Reading the absence as drift would make every local project permanently
+// broken to the session preflights.
+func TestLocalCheckoutWithNoOriginIsCompliant(t *testing.T) {
+	g := attachedFake()
+	g.origin = ""
+	r := registryWith(config.Project{ID: testID, DisplayName: testName})
+
+	report, err := newTestManager(g, r).Show(context.Background(), testID)
+	if err != nil {
+		t.Fatalf("Show() error = %v", err)
+	}
+	if !report.Checkout.OriginMatches {
+		t.Errorf("a local checkout with no origin was read as drift: %v", report.Issues)
+	}
+	if len(report.Issues) != 0 {
+		t.Errorf("issues = %v, want none", report.Issues)
+	}
+}
+
+// The converse holds: a record that says local and a tree that has an origin
+// disagree, and that is ordinary drift with the vocabulary it always had.
+func TestLocalRecordWithAnOriginIsDrift(t *testing.T) {
+	g := attachedFake()
+	g.origin = "git@github.com:someone/else.git"
+	r := registryWith(config.Project{ID: testID, DisplayName: testName})
+
+	report, err := newTestManager(g, r).Show(context.Background(), testID)
+	if err != nil {
+		t.Fatalf("Show() error = %v", err)
+	}
+	if !slices.Contains(report.Issues, "origin_mismatch") {
+		t.Errorf("issues = %v, want origin_mismatch", report.Issues)
+	}
+}
+
+// Materializing clones from the remote on record (ADR-0024). A local project
+// has none, so there is nothing to clone from — and the refusal has to name
+// both ways forward rather than leaving the operator at a wall.
+func TestAddRefusesToMaterializeALocalProjectFromNothing(t *testing.T) {
+	g := readyFake()
+	r := registryWith(config.Project{ID: testID, DisplayName: testName})
+
+	_, err := newTestManager(g, r).Add(context.Background(), AddRequest{ID: testID, DisplayName: testName})
+	if err == nil {
+		t.Fatal("Add() materialized a project with no remote")
+	}
+	var perr *Error
+	if !errors.As(err, &perr) || perr.Kind != KindPrecondition {
+		t.Fatalf("error = %v, want a precondition error", err)
+	}
+	for _, want := range []string{"--from-bundle", "set-remote"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to name %q", err.Error(), want)
+		}
+	}
+	if g.saw("git clone") || g.saw("git init") {
+		t.Error("the refusal still touched the guest workspace")
+	}
+}
+
+// A repository that lives only on the operator's disk gets in as a Git bundle:
+// one file, carried over the transport `brain import` already uses, cloned from
+// inside the guest. No network, no remote configured anywhere, and the bundle
+// path the clone recorded as its origin is removed — the project is local, and
+// the record says so.
+func TestAddFromBundleCarriesTheRepositoryInWithoutANetwork(t *testing.T) {
+	g := readyFake()
+	r := emptyRegistry()
+	bundle := writeTestBundle(t)
+
+	report, err := newTestManager(g, r).Add(context.Background(), AddRequest{
+		ID: testID, DisplayName: testName, BundlePath: bundle,
+	})
+	if err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+	if !report.Cloned {
+		t.Fatalf("report = %#v, want the checkout created", report)
+	}
+	if !slices.Contains(report.Notes, "attached_from_bundle") {
+		t.Errorf("notes = %v, want attached_from_bundle", report.Notes)
+	}
+	if len(g.copies) != 1 {
+		t.Fatalf("transfers = %d, want exactly one carry", len(g.copies))
+	}
+	if g.copies[0].guest != testBundleStaging || g.copies[0].home != lima.HermesHome {
+		t.Errorf("carried to %+v, want the identity's own staging", g.copies[0])
+	}
+	for _, fragment := range []string{
+		"install -d -o " + testOwner + " -g " + sharedGroup + " -m 2770 " + testBundleStaging,
+		// What arrives belongs to the transport, so it is handed to the agent
+		// before the clone reads it. Without this the clone fails on a real box
+		// as "repository not found", which is what an unreadable file looks
+		// like to Git.
+		"chown -R " + lima.HermesUser + ":" + lima.HermesUser + " " + testBundleStaging,
+		"chmod -R u=rwX,g=,o= " + testBundleStaging,
+		"git clone --quiet -- " + testBundleStaging + "/project.bundle " + testPath,
+		"git -C " + testPath + " remote remove origin",
+		"rm -rf -- " + testBundleStaging,
+	} {
+		if !g.saw(fragment) {
+			t.Errorf("missing typed guest argv containing %q", fragment)
+		}
+	}
+	if g.saw("ls-remote") || g.saw("ssh-keygen") {
+		t.Error("a bundle attach reached the network or minted a key")
+	}
+	if g.origin != "" {
+		t.Errorf("guest origin = %q, want the bundle path dropped", g.origin)
+	}
+	if len(r.saved) != 1 || r.saved[0].Projects[0].Remote != "" {
+		t.Fatalf("persisted registry = %#v, want one local entry", r.saved)
+	}
+}
+
+// The staged copy is removed whether the attach worked or not: it is a whole
+// repository, and one left in a directory nothing reads is only ever found by
+// running out of disk.
+func TestAddFromBundleCleansStagingAfterAFailedClone(t *testing.T) {
+	g := readyFake()
+	g.setFailure("git clone --quiet -- "+testBundleStaging, 128)
+	bundle := writeTestBundle(t)
+
+	_, err := newTestManager(g, emptyRegistry()).Add(context.Background(), AddRequest{
+		ID: testID, DisplayName: testName, BundlePath: bundle,
+	})
+	if err == nil {
+		t.Fatal("Add() reported success after the clone failed")
+	}
+	if g.count("rm -rf -- "+testBundleStaging) < 2 {
+		t.Errorf("staging was not cleaned after the failure: %v", g.calls)
+	}
+}
+
+// A bundle that is not there, or is not a file, is refused on the host before
+// anything is carried — the guest never sees a transfer that could not work.
+func TestAddFromBundleRefusesAMissingBundleBeforeTouchingTheGuest(t *testing.T) {
+	g := readyFake()
+
+	_, err := newTestManager(g, emptyRegistry()).Add(context.Background(), AddRequest{
+		ID: testID, DisplayName: testName, BundlePath: filepath.Join(t.TempDir(), "absent.bundle"),
+	})
+	if err == nil {
+		t.Fatal("Add() accepted a bundle that is not there")
+	}
+	if len(g.copies) != 0 {
+		t.Errorf("a refused attach still carried something: %+v", g.copies)
+	}
+}
+
+// Two ways in are two different repositories to end up with, and a command
+// handed both would silently pick one.
+func TestAddRefusesMoreThanOneAttachSource(t *testing.T) {
+	for name, req := range map[string]AddRequest{
+		"remote and local":  {ID: testID, DisplayName: testName, Remote: testRemote, Local: true},
+		"remote and bundle": {ID: testID, DisplayName: testName, Remote: testRemote, BundlePath: "/tmp/x.bundle"},
+		"local and bundle":  {ID: testID, DisplayName: testName, Local: true, BundlePath: "/tmp/x.bundle"},
+	} {
+		g := readyFake()
+		if _, err := newTestManager(g, emptyRegistry()).Add(context.Background(), req); err == nil {
+			t.Errorf("%s: Add() accepted two attach sources", name)
+		} else if len(g.calls) != 0 {
+			t.Errorf("%s: a refused attach reached the guest", name)
+		}
+	}
+}
+
+// writeTestBundle is a stand-in for a real Git bundle. Nothing in this package
+// parses one — the clone in the guest is what reads it — so the file only has
+// to exist, be regular, and be the thing the host staging step copies.
+func writeTestBundle(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "demo.bundle")
+	if err := os.WriteFile(path, []byte("# v2 git bundle\n"), 0o600); err != nil {
+		t.Fatalf("write bundle: %v", err)
+	}
+	return path
+}
+
+// Giving a local project a remote is the moment a deploy key becomes relevant,
+// and the moment it is minted (ADR-0027). Until then there was nothing to
+// authorize; the key is the last step of the promotion, not a toll on creating
+// a project at all.
+func TestSetRemotePromotesALocalProjectAndMintsTheKey(t *testing.T) {
+	g := attachedFake()
+	g.origin = ""
+	g.remoteReadable = false
+	r := registryWith(config.Project{ID: testID, DisplayName: testName})
+
+	report, err := newTestManager(g, r).SetRemote(context.Background(), testID, testRemote)
+	if err == nil {
+		t.Fatal("SetRemote() attached a remote the guest cannot read")
+	}
+	var perr *Error
+	if !errors.As(err, &perr) || perr.Kind != KindAuth {
+		t.Fatalf("error = %v, want an auth failure carrying the key", err)
+	}
+	if report.DeployKey == nil || !report.DeployKey.Generated {
+		t.Fatalf("deploy key = %#v, want one generated for the promotion", report.DeployKey)
+	}
+	if report.DeployKey.PublicKey != testPublicKey {
+		t.Errorf("public key = %q, want the guest's own", report.DeployKey.PublicKey)
+	}
+	// The record moved first and stays moved: the operator asked for the remote,
+	// and the rerun that finishes this is the same command.
+	if len(r.saved) != 1 || r.saved[0].Projects[0].Remote != testRemote {
+		t.Fatalf("persisted registry = %#v, want the remote recorded", r.saved)
+	}
+	if g.saw("remote add origin") {
+		t.Error("the origin was attached before the remote could be read")
+	}
+}
+
+// Once the key is authorized the same command finishes: the checkout gains the
+// origin the record now carries, and the identity gains the Git configuration
+// that lets its own fetches use the key.
+func TestSetRemoteFinishesThePromotionOnceTheKeyIsAuthorized(t *testing.T) {
+	g := attachedFake()
+	g.origin = ""
+	g.remoteReadable = false
+	g.deployKeyExists = true
+	g.keyAuthorized = true
+	r := registryWith(config.Project{ID: testID, DisplayName: testName})
+
+	report, err := newTestManager(g, r).SetRemote(context.Background(), testID, testRemote)
+	if err != nil {
+		t.Fatalf("SetRemote() error = %v", err)
+	}
+	if !report.CheckoutRepointed {
+		t.Fatalf("report = %#v, want the checkout carrying the new remote", report)
+	}
+	if !slices.Contains(report.Notes, "remote_attached") {
+		t.Errorf("notes = %v, want remote_attached", report.Notes)
+	}
+	for _, fragment := range []string{
+		"git -C " + testPath + " remote add origin " + testRemote,
+		"git config -f " + testKeyConfig + " core.sshCommand",
+		"git config --global includeIf.gitdir:" + testPath + "/.path",
+	} {
+		if !g.saw(fragment) {
+			t.Errorf("missing typed guest argv containing %q", fragment)
+		}
+	}
+	if g.saw("remote set-url origin") {
+		t.Error("a checkout with no origin was repointed instead of given one")
+	}
+}
+
+// A promotion whose guest cannot be reached still records the remote, and says
+// the checkout was left alone — the same shape a correction has.
+func TestSetRemotePromotionSurvivesAnUnavailableGuest(t *testing.T) {
+	g := attachedFake()
+	g.origin = ""
+	g.bootstrapErr = errors.New("instance is stopped")
+	r := registryWith(config.Project{ID: testID, DisplayName: testName})
+
+	report, err := newTestManager(g, r).SetRemote(context.Background(), testID, testRemote)
+	if err != nil {
+		t.Fatalf("SetRemote() error = %v", err)
+	}
+	if !slices.Contains(report.Notes, "checkout_untouched_guest_unavailable") {
+		t.Errorf("notes = %v, want the guest reported unavailable", report.Notes)
+	}
+	if len(r.saved) != 1 || r.saved[0].Projects[0].Remote != testRemote {
+		t.Fatalf("persisted registry = %#v, want the remote recorded anyway", r.saved)
+	}
+}
+
+// Demotion is not a correction. Removing a remote would strand every other
+// guest's checkout of the project, which still points at it, so the command
+// that exists to fix an address refuses to delete one.
+func TestSetRemoteRefusesToRemoveARemote(t *testing.T) {
+	g := attachedFake()
+	r := registryWith(config.Project{ID: testID, DisplayName: testName, Remote: testRemote})
+
+	_, err := newTestManager(g, r).SetRemote(context.Background(), testID, "")
+	if err == nil {
+		t.Fatal("SetRemote() removed a remote")
+	}
+	var perr *Error
+	if !errors.As(err, &perr) || perr.Kind != KindInvalidConfig {
+		t.Fatalf("error = %v, want an invalid-config refusal", err)
+	}
+	if len(r.saved) != 0 {
+		t.Errorf("the record was rewritten by a refused demotion: %#v", r.saved)
+	}
+}
+
+// The carried bundle is handed to the agent before anything reads it.
+//
+// This is a real-box failure, not a hypothetical: `limactl copy` writes as the
+// guest login identity and carries the host file's private mode with it, so the
+// bundle lands owned by somebody else and readable by nobody else. Git reports
+// a file it cannot open as a missing repository, so the attach failed with
+// "repository not found" on a bundle that was plainly there.
+func TestAddFromBundleHandsTheCarriedFileToTheAgentBeforeCloning(t *testing.T) {
+	g := readyFake()
+	// The carry works and the adopt does not, which is exactly the shape the
+	// real box had before the adopt step existed.
+	g.setFailure("chown -R "+lima.HermesUser, 1)
+	bundle := writeTestBundle(t)
+
+	_, err := newTestManager(g, emptyRegistry()).Add(context.Background(), AddRequest{
+		ID: testID, DisplayName: testName, BundlePath: bundle,
+	})
+	if err == nil {
+		t.Fatal("Add() cloned from a bundle the agent cannot read")
+	}
+	if g.saw("git clone --quiet -- " + testBundleStaging) {
+		t.Error("the clone ran before the bundle was readable by the identity running it")
+	}
+}
+
+// The rerun that finishes a promotion is the same command (ADR-0018), and that
+// has to hold when the first run already moved the record.
+//
+// Found on a real box: the first attempt recorded the remote and stopped on the
+// key, and the second attempt read the record as already-corrected, saw a
+// checkout with no origin, and reported it as an origin pointing elsewhere —
+// leaving a project that could never be finished. What decides the shape is the
+// checkout, which either has an origin or does not, never the record it is
+// being compared against.
+func TestSetRemoteFinishesAPromotionTheRecordAlreadyMoved(t *testing.T) {
+	g := attachedFake()
+	g.origin = ""
+	g.remoteReadable = false
+	g.deployKeyExists = true
+	g.keyAuthorized = true
+	// The record already holds the remote: this is the rerun.
+	r := registryWith(config.Project{ID: testID, DisplayName: testName, Remote: testRemote})
+
+	report, err := newTestManager(g, r).SetRemote(context.Background(), testID, testRemote)
+	if err != nil {
+		t.Fatalf("SetRemote() error = %v", err)
+	}
+	if !report.CheckoutRepointed {
+		t.Fatalf("report = %#v, want the promotion finished", report)
+	}
+	if !slices.Contains(report.Notes, "remote_attached") {
+		t.Errorf("notes = %v, want the origin attached rather than reported as differing", report.Notes)
+	}
+	if g.origin != testRemote {
+		t.Errorf("guest origin = %q, want the remote attached", g.origin)
 	}
 }

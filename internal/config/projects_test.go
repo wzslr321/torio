@@ -114,7 +114,6 @@ func TestFileValidateAcceptsSupportedRemoteForms(t *testing.T) {
 // filesystem, or smuggle control characters into a Git argv is refused.
 func TestFileValidateRejectsUnsupportedRemote(t *testing.T) {
 	for _, remote := range []string{
-		"", // empty
 		"https://user:pass@github.com/owner/repo.git",             // password in userinfo
 		"https://token@github.com/owner/repo.git",                 // token in userinfo
 		"ssh://git:pass@github.com/owner/repo.git",                // password in userinfo
@@ -367,7 +366,110 @@ func TestWithUpdatedRemoteValidatesTheReplacement(t *testing.T) {
 	if _, err := f.WithUpdatedRemote("demo", "https://user:token@example.test/x.git", AddOptions{}); err == nil {
 		t.Fatal("a remote carrying a credential was accepted")
 	}
-	if _, err := f.WithUpdatedRemote("demo", "", AddOptions{}); err == nil {
-		t.Fatal("an empty remote was accepted")
+	// The empty remote is a valid record (ADR-0027), so config accepts it here:
+	// this layer is mechanism. Whether a remoted project may be turned back into
+	// a local one is a decision, and it lives with the command that would make
+	// it, where TestSetRemoteRefusesToRemoveARemote refuses it.
+	if _, err := f.WithUpdatedRemote("demo", "", AddOptions{}); err != nil {
+		t.Fatalf("config refused a mechanically valid record: %v", err)
+	}
+}
+
+// A project may have no remote at all: it is local, living only in the guest it
+// was made in (ADR-0027). The empty string is the one value that means that, and
+// it is the only local-looking value config accepts — a filesystem path is still
+// refused, because a path is a remote that names the wrong machine.
+func TestFileValidateAcceptsAProjectWithNoRemote(t *testing.T) {
+	p := sampleProject()
+	p.Remote = ""
+
+	if err := v2(p).Validate(); err != nil {
+		t.Fatalf("a project with no remote must be accepted: %v", err)
+	}
+}
+
+// Two local projects do not share a remote; they each have none. Reading the
+// absence as a collision would let one local project exist per registry.
+func TestWithProjectAcceptsASecondProjectWithNoRemote(t *testing.T) {
+	first := sampleProject()
+	first.ID, first.Remote = "notes", ""
+	second := sampleProject()
+	second.ID, second.Remote = "scratch", ""
+
+	f, err := v2(first).WithProject(second, AddOptions{})
+	if err != nil {
+		t.Fatalf("WithProject: a second local project was refused: %v", err)
+	}
+	if len(f.Projects) != 2 {
+		t.Fatalf("projects = %d, want both recorded", len(f.Projects))
+	}
+}
+
+// The duplicate-remote rule still holds for remotes that exist: sharing one is
+// the mistake it always was, and having none is not sharing.
+func TestWithProjectStillRefusesADuplicateRealRemote(t *testing.T) {
+	first := sampleProject()
+	first.ID, first.Remote = "one", "git@github.com:you/thing.git"
+	second := sampleProject()
+	second.ID, second.Remote = "two", "git@github.com:you/thing.git"
+
+	if _, err := v2(first).WithProject(second, AddOptions{}); !errors.Is(err, ErrDuplicateRemote) {
+		t.Fatalf("error = %v, want ErrDuplicateRemote", err)
+	}
+}
+
+// Promotion is an update to the empty remote's record, and the absence on the
+// other records must not read as a collision with the remote arriving here.
+func TestWithUpdatedRemotePromotesALocalProjectPastOtherLocalOnes(t *testing.T) {
+	first := sampleProject()
+	first.ID, first.Remote = "notes", ""
+	second := sampleProject()
+	second.ID, second.Remote = "scratch", ""
+	start, err := v2(first).WithProject(second, AddOptions{})
+	if err != nil {
+		t.Fatalf("WithProject: %v", err)
+	}
+
+	out, err := start.WithUpdatedRemote("scratch", "git@github.com:you/scratch.git", AddOptions{})
+	if err != nil {
+		t.Fatalf("WithUpdatedRemote: %v", err)
+	}
+	for _, p := range out.Projects {
+		if p.ID == "scratch" && p.Remote != "git@github.com:you/scratch.git" {
+			t.Fatalf("remote = %q, want the promotion recorded", p.Remote)
+		}
+		if p.ID == "notes" && p.Remote != "" {
+			t.Fatalf("the other local project moved: %q", p.Remote)
+		}
+	}
+}
+
+// A registry that can hold a project with no remote is a registry an older
+// Torio would mis-read: its validator refuses an empty remote outright, so it
+// would report the whole document as invalid rather than as newer than it
+// knows. The version says so instead, and both versions stay readable here
+// because a registry written before this change is still exactly right.
+func TestRegistryReadsBothSchemaVersions(t *testing.T) {
+	for _, version := range []string{"1", "2"} {
+		doc := `{"schema_version":"` + version + `","projects":[` +
+			`{"id":"demo","display_name":"Demo","remote":"git@github.com:owner/demo.git"}]}`
+		got, err := parseRegistry([]byte(doc))
+		if err != nil {
+			t.Fatalf("schema_version %q was refused: %v", version, err)
+		}
+		if len(got) != 1 || got[0].ID != "demo" {
+			t.Fatalf("schema_version %q parsed to %+v", version, got)
+		}
+	}
+	if _, err := parseRegistry([]byte(`{"schema_version":"3","projects":[]}`)); err == nil {
+		t.Fatal("a registry newer than this build was accepted")
+	}
+}
+
+// What is written is the current version, so a registry this build touches
+// carries the version that admits a local project.
+func TestRegistryWritesTheCurrentSchemaVersion(t *testing.T) {
+	if RegistrySchemaVersion != "2" {
+		t.Fatalf("RegistrySchemaVersion = %q, want 2 now that a remote is optional", RegistrySchemaVersion)
 	}
 }

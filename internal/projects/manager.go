@@ -24,6 +24,10 @@ import (
 type Guest interface {
 	Bootstrap(ctx context.Context, opts lima.BootstrapOptions) (lima.BootstrapReport, error)
 	SSH(ctx context.Context, command []string) (execx.Result, error)
+	// CopyToGuest carries one directory in, one shot, bounded. It is here for
+	// the bundle attach (ADR-0027): a repository that has no remote arrives as
+	// a file or it does not arrive at all.
+	CopyToGuest(ctx context.Context, hostSourceDir, guestDestinationDir, guestHome string) error
 }
 
 var _ Guest = (*lima.Adapter)(nil)
@@ -124,6 +128,9 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 		// has no reason to care, this boundary does.
 		return report, &Error{Op: op, Kind: KindInvalidConfig, Err: errors.New("display name must not start with '-'")}
 	}
+	if err := requireOneAttachSource(req); err != nil {
+		return report, &Error{Op: op, Kind: KindInvalidConfig, Err: err}
+	}
 	workspace, err := derivePath(m.identity().WorkspacePath, req.ID)
 	if err != nil {
 		return report, &Error{Op: op, Kind: KindInvalidConfig, Err: err}
@@ -161,45 +168,94 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 		return report, &Error{Op: op, Kind: KindConflict, Err: fmt.Errorf("workspace path for %q exists and is not a directory", req.ID)}
 	}
 
-	keyPath, key, err := m.ensureRemoteReadable(ctx, op, req.ID, entry.Remote)
-	if key != nil {
-		report.DeployKey = key
-		if key.Generated {
-			report.Notes = append(report.Notes, "deploy_key_generated")
-		} else {
-			report.Notes = append(report.Notes, "deploy_key_pending_authorization")
+	// How the checkout comes to exist. A recorded remote is cloned from, which
+	// is the path this command has always taken. A project with no remote is
+	// local (ADR-0027): it is initialized empty, or carried in as a bundle, and
+	// which of the two is an explicit decision rather than something inferred
+	// from an absence.
+	var keyPath string
+	switch {
+	case entry.Remote != "":
+		var key *DeployKey
+		keyPath, key, err = m.ensureRemoteReadable(ctx, op, req.ID, entry.Remote)
+		if key != nil {
+			report.DeployKey = key
+			if key.Generated {
+				report.Notes = append(report.Notes, "deploy_key_generated")
+			} else {
+				report.Notes = append(report.Notes, "deploy_key_pending_authorization")
+			}
 		}
-	}
-	if err != nil {
-		return report, err
-	}
-	if keyPath != "" {
-		report.Notes = append(report.Notes, "deploy_key_used")
-	}
+		if err != nil {
+			return report, err
+		}
+		if keyPath != "" {
+			report.Notes = append(report.Notes, "deploy_key_used")
+		}
 
-	if !status.PathExists {
-		// --quiet for the same reason the preflight above asks only for HEAD,
-		// though this one is a latent case rather than an observed failure:
-		// clone progress is unbounded chatter on stderr, nothing here reads it,
-		// and it grows with repository size and network time. Raising the
-		// retained-output bound would be the wrong repair — it exists so a
-		// runaway child cannot exhaust memory, and no bound covers every
-		// repository.
-		if err := m.mustRun(ctx, op, KindGit, "clone the remote",
-			m.gitExec(keyPath, "clone", "--quiet", "--", entry.Remote, workspace)); err != nil {
+		if !status.PathExists {
+			// --quiet for the same reason the preflight above asks only for HEAD,
+			// though this one is a latent case rather than an observed failure:
+			// clone progress is unbounded chatter on stderr, nothing here reads it,
+			// and it grows with repository size and network time. Raising the
+			// retained-output bound would be the wrong repair — it exists so a
+			// runaway child cannot exhaust memory, and no bound covers every
+			// repository.
+			if err := m.mustRun(ctx, op, KindGit, "clone the remote",
+				m.gitExec(keyPath, "clone", "--quiet", "--", entry.Remote, workspace)); err != nil {
+				return report, err
+			}
+			report.Cloned = true
+		} else {
+			// An existing checkout is adopted only when it already is the repository
+			// we would have cloned, and only when nothing would be lost by using it.
+			// Ownership and permission bits are reconciled below — they are additive
+			// and reversible — but content, history and the worktree never are:
+			// Torio does not reset, clean or delete anything here.
+			if err := requireAdoptable(op, req.ID, status); err != nil {
+				return report, err
+			}
+			report.Adopted = true
+		}
+
+	case req.BundlePath != "":
+		if status.PathExists {
+			// A bundle is a whole repository arriving. Cloning it over a
+			// checkout that is already there would be the destructive act this
+			// command refuses everywhere else, so an existing tree is adopted
+			// on its own terms or refused on them.
+			if err := requireAdoptable(op, req.ID, status); err != nil {
+				return report, err
+			}
+			report.Adopted = true
+			report.Notes = append(report.Notes, "bundle_unused_checkout_present")
+			break
+		}
+		if err := m.attachFromBundle(ctx, op, req.BundlePath, workspace); err != nil {
 			return report, err
 		}
 		report.Cloned = true
-	} else {
-		// An existing checkout is adopted only when it already is the repository
-		// we would have cloned, and only when nothing would be lost by using it.
-		// Ownership and permission bits are reconciled below — they are additive
-		// and reversible — but content, history and the worktree never are:
-		// Torio does not reset, clean or delete anything here.
-		if err := requireAdoptable(op, req.ID, status); err != nil {
+		report.Notes = append(report.Notes, "attached_from_bundle")
+
+	case req.Local:
+		if status.PathExists {
+			if err := requireAdoptable(op, req.ID, status); err != nil {
+				return report, err
+			}
+			report.Adopted = true
+			break
+		}
+		// No first commit: an empty repository is what was asked for, and the
+		// first thing in a project's history belongs to whoever starts it.
+		if err := m.mustRun(ctx, op, KindGit, "initialize the repository",
+			guestexec.UserExecAs(m.identity().GuestUser, "git", "init", "--initial-branch=main", workspace)); err != nil {
 			return report, err
 		}
-		report.Adopted = true
+		report.Initialized = true
+		report.Notes = append(report.Notes, "initialized_local")
+
+	default:
+		return report, localProjectNeedsASourceError(op, req.ID)
 	}
 
 	if err := m.ensureSharedPermissions(ctx, op, workspace); err != nil {
@@ -372,6 +428,15 @@ func (m *Manager) SetRemote(ctx context.Context, id, remote string) (SetRemoteRe
 	if err != nil {
 		return report, err
 	}
+	if remote == "" {
+		// A record may hold no remote, but not by having one taken away here.
+		// Every other guest's checkout of this project still points at the
+		// remote, and forgetting it centrally would strand them all with no
+		// way to say what they are pointing at (ADR-0027).
+		return report, &Error{Op: op, Kind: KindInvalidConfig, Err: errors.New(
+			"a remote cannot be removed: other guests' checkouts still point at it. " +
+				"Correct it to another remote, or forget the project with `torio project remove <id>`")}
+	}
 	report.PreviousRemote = entry.Remote
 	corrected := entry
 	corrected.Remote = remote
@@ -405,21 +470,70 @@ func (m *Manager) SetRemote(ctx context.Context, id, remote string) (SetRemoteRe
 		report.Notes = append(report.Notes, "checkout_untouched_guest_unavailable")
 		return report, nil
 	}
+	// Which act this is, decided by the tree rather than by the record.
+	//
+	// A checkout with no origin is being given one; a checkout that already
+	// holds the remote being replaced is being moved; anything else is somebody
+	// else's decision and is left alone. Reading this off the record instead
+	// breaks the rerun: the first attempt at a promotion records the remote
+	// before it can fail on an authorization, so the second attempt would see
+	// an already-corrected record and report the origin-less checkout as
+	// pointing elsewhere. Found by running it.
+	promoting := !checkout.HasOrigin
 	switch {
 	case !checkout.PathExists || !checkout.Repository:
 		report.Notes = append(report.Notes, "checkout_absent")
 		return report, nil
-	case !checkout.OriginMatches:
+	case !promoting && !checkout.OriginMatches:
 		report.Notes = append(report.Notes, "checkout_origin_differs")
 		return report, nil
+	}
+
+	// A project that had no remote is being given one, which is the moment the
+	// guest first needs to be able to read it — and the moment a deploy key
+	// first means anything (ADR-0027). It is the same fail-closed shape `add`
+	// has: the record is already corrected, so the rerun that finishes this is
+	// the same command, once the key is authorized.
+	keyPath := ""
+	if promoting {
+		var key *DeployKey
+		keyPath, key, err = m.ensureRemoteReadable(ctx, op, id, remote)
+		if key != nil {
+			report.DeployKey = key
+			if key.Generated {
+				report.Notes = append(report.Notes, "deploy_key_generated")
+			} else {
+				report.Notes = append(report.Notes, "deploy_key_pending_authorization")
+			}
+		}
+		if err != nil {
+			return report, err
+		}
+		if keyPath != "" {
+			report.Notes = append(report.Notes, "deploy_key_used")
+		}
 	}
 
 	// Plainly as the agent identity, without the transport environment the
 	// clone and the readability preflight carry: setting a URL rewrites the
 	// checkout's own configuration and reaches no remote.
-	if err := m.mustRun(ctx, op, KindGit, "repoint the checkout origin",
-		guestexec.UserExecAs(m.identity().GuestUser, "git", "-C", workspace, "remote", "set-url", "origin", remote)); err != nil {
+	//
+	// `set-url` needs an origin to move; a promoted local checkout has none, so
+	// this is the one place the two shapes differ.
+	originArgs := []string{"remote", "set-url", "origin", remote}
+	if promoting {
+		originArgs = []string{"remote", "add", "origin", remote}
+	}
+	if err := m.mustRun(ctx, op, KindGit, "attach the checkout origin",
+		guestexec.UserExecAs(m.identity().GuestUser, append([]string{"git", "-C", workspace}, originArgs...)...)); err != nil {
 		return report, err
+	}
+	if keyPath != "" {
+		// The include is scoped to this checkout, so a fetch the identity runs
+		// on its own reaches the remote the way this run did.
+		if err := m.provisionGuestGitAccess(ctx, op, id, workspace); err != nil {
+			return report, err
+		}
 	}
 	final, err := m.inspectCheckout(ctx, op, workspace, remote)
 	if err != nil {
@@ -430,7 +544,11 @@ func (m *Manager) SetRemote(ctx context.Context, id, remote string) (SetRemoteRe
 			"the checkout for %q still does not carry the corrected remote", id)}
 	}
 	report.CheckoutRepointed = true
-	report.Notes = append(report.Notes, "checkout_repointed")
+	if promoting {
+		report.Notes = append(report.Notes, "remote_attached")
+	} else {
+		report.Notes = append(report.Notes, "checkout_repointed")
+	}
 	return report, nil
 }
 
@@ -826,6 +944,40 @@ func unresolvedHostError(op, remote string) error {
 		host)}
 }
 
+// requireOneAttachSource refuses an attach that names more than one way in.
+//
+// A remote, a bundle and an empty repository are three different repositories
+// to end up with, and a command given two of them would silently pick one. The
+// operator asked for something specific either way; which one is not for Torio
+// to decide.
+func requireOneAttachSource(req AddRequest) error {
+	switch {
+	case req.Remote != "" && req.Local:
+		return errors.New("a project is either local or attached to a remote, not both")
+	case req.Remote != "" && req.BundlePath != "":
+		return errors.New("a remote is cloned from the remote; a bundle attaches a project that has none")
+	case req.Local && req.BundlePath != "":
+		return errors.New("a bundle carries a repository in; an empty one is initialized instead")
+	default:
+		return nil
+	}
+}
+
+// localProjectNeedsASourceError is the one shape Add cannot answer: a record
+// that says the project is local, on a guest that does not hold it.
+//
+// Materializing clones from the remote on record (ADR-0024), and there is none
+// to clone from. The two ways forward are both real and neither is Torio's to
+// choose: carry the repository in, or give the project a remote so every guest
+// can reach it. Both are named, because a refusal that names no next step is
+// where an operator stops.
+func localProjectNeedsASourceError(op, id string) error {
+	return &Error{Op: op, Kind: KindPrecondition, Err: fmt.Errorf(
+		"project %q is local: it has no remote on record, so there is nothing to clone it from here. "+
+			"Carry it in with `torio project add %s --from-bundle <file>`, or give it a remote with "+
+			"`torio project set-remote %s <remote>` so every guest can reach it", id, id, id)}
+}
+
 // unreadableRemoteError says what the operator has to do next, and says it
 // differently per transport because the two have different answers.
 //
@@ -968,11 +1120,22 @@ func (m *Manager) inspectCheckout(ctx context.Context, op, workspace, remote str
 
 	// The raw stored URL, not the effective one: an insteadOf rewrite must not
 	// be able to make a different remote look like ours.
+	//
+	// A record with no remote is a local project (ADR-0027), and agreement for
+	// one is an origin that is not there. The comparison is the same either
+	// way — what the record says the tree points at — so a local checkout that
+	// has grown an origin is ordinary drift, in the vocabulary drift already
+	// had.
 	origin, err := m.run(ctx, op, guestexec.UserExecAs(m.identity().GuestUser, "git", "-C", workspace, "config", "--get", "remote.origin.url"))
 	if err != nil {
 		return st, err
 	}
-	st.OriginMatches = origin.ExitCode == 0 && strings.TrimSpace(string(origin.Stdout)) == remote
+	recorded := ""
+	if origin.ExitCode == 0 {
+		recorded = strings.TrimSpace(string(origin.Stdout))
+	}
+	st.HasOrigin = recorded != ""
+	st.OriginMatches = recorded == remote
 
 	shallow, err := m.run(ctx, op, guestexec.UserExecAs(m.identity().GuestUser, "git", "-C", workspace, "rev-parse", "--is-shallow-repository"))
 	if err != nil {

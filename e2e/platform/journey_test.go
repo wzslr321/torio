@@ -369,6 +369,38 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 		expectData(retained, map[string]any{"exit_code": float64(0)})
 	}, SpecTimeout(12*time.Minute))
 
+	// A project needs no remote (ADR-0027). This is the whole local shape
+	// against a real guest: an empty repository is made, reads as ordinary —
+	// including the absence of an origin, which is what agreement means for one
+	// — and is forgotten without touching the tree. It reaches no network, so
+	// it costs a few seconds beside the attach above.
+	It("makes and forgets a project that has no remote", Label(guestStage), func(ctx SpecContext) {
+		torio.setContext(ctx)
+		added := torio.mustRun("project-add-local", "project.add",
+			"project", "add", "ci-local", "--local")
+		expectData(added, map[string]any{
+			"id": "ci-local", "initialized": true, "registered": true, "remote": "",
+		})
+		shown := torio.mustRun("project-show-local", "project.show", "project", "show", "ci-local")
+		expectData(shown, map[string]any{
+			"remote":                        "",
+			"checkout.path_exists":          true,
+			"checkout.repository":           true,
+			"checkout.origin_matches":       true,
+			"checkout.shared_permissions":   true,
+			"checkout.no_credential_helper": true,
+			"issues":                        []any{},
+		})
+		// The repository is real and empty: a branch is declared, and no commit
+		// was made on the operator's behalf.
+		head := torio.mustRun("project-local-head", "vm.ssh", "vm", "ssh", "--",
+			"sudo", "-u", profile.user, "--", "git", "-C", profile.workspace+"/ci-local", "symbolic-ref", "HEAD")
+		expectData(head, map[string]any{"exit_code": float64(0), "stdout": "refs/heads/main\n"})
+
+		removed := torio.mustRun("project-remove-local", "project.remove", "project", "remove", "ci-local")
+		expectData(removed, map[string]any{"checkout_retained": true})
+	}, SpecTimeout(6*time.Minute))
+
 	It("stops services and the VM idempotently", Label(guestStage), func(ctx SpecContext) {
 		torio.setContext(ctx)
 		if profile.declaresService {

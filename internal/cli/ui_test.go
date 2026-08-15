@@ -13,6 +13,7 @@ import (
 	"github.com/wzslr321/torio/internal/lima"
 	"github.com/wzslr321/torio/internal/projects"
 	"github.com/wzslr321/torio/internal/serve"
+	"github.com/wzslr321/torio/internal/tui"
 )
 
 // hubApp builds an invocation whose terminal answer and hub launch are both
@@ -321,7 +322,7 @@ func TestHubAddWithoutARemoteCompletesFromTheRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wiring the hub failed: %v", err)
 	}
-	if _, err := d.ProjectAdd(context.Background(), "lean-triage", ""); err != nil {
+	if _, err := d.ProjectAdd(context.Background(), tui.ProjectAddRequest{ID: "lean-triage"}); err != nil {
 		t.Fatalf("materializing a registered project failed: %v", err)
 	}
 
@@ -343,7 +344,7 @@ func TestHubAddWithoutARemoteRefusesAnUnregisteredID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wiring the hub failed: %v", err)
 	}
-	_, err = d.ProjectAdd(context.Background(), "nothing", "")
+	_, err = d.ProjectAdd(context.Background(), tui.ProjectAddRequest{ID: "nothing"})
 	if err == nil {
 		t.Fatal("an unregistered id was added with no remote")
 	}
@@ -365,7 +366,7 @@ func TestHubAddWithARemoteIsUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wiring the hub failed: %v", err)
 	}
-	if _, err := d.ProjectAdd(context.Background(), "demo", "https://example.test/demo.git"); err != nil {
+	if _, err := d.ProjectAdd(context.Background(), tui.ProjectAddRequest{ID: "demo", Remote: "https://example.test/demo.git"}); err != nil {
 		t.Fatalf("add failed: %v", err)
 	}
 	if got, want := service.addReq.Remote, "https://example.test/demo.git"; got != want {

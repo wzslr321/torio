@@ -43,6 +43,22 @@
   was, and names the host vault, where it is resolved with ordinary Git.
   `brain status` now reports how far the replica is from the hub
   ([ADR-0025](docs/adr/0025-one-second-brain-with-the-host-as-its-hub.md)).
+- **A project needs no remote.** `torio project add <name> --local` makes an
+  empty repository in the guest, and `--from-bundle FILE` carries a repository
+  that lives only on this machine in as a Git bundle — over the same one-shot
+  transport `brain import` uses, with no network, no mount and no deploy key.
+  A deploy key belongs to a remote, so it is provisioned when one first exists:
+  `torio project set-remote` on a local project attaches the remote and mints
+  the key then, failing closed with the public half exactly as `add` does. For a
+  local checkout, having no origin is agreement; an origin appearing on one is
+  ordinary drift. The hub's add form takes a bundle as a third field and asks
+  before creating a project with no remote, so a mistyped id is a question
+  rather than an empty repository. Settles #36
+  ([ADR-0027](docs/adr/0027-a-project-needs-no-remote.md)).
+  **Compatibility:** the shared project registry moves to schema version 2 the
+  first time this build writes it. Torio 0.3.5 and earlier refuse a version they
+  do not know, so an older binary reports the registry as unsupported rather
+  than mis-reading it; upgrade every install that shares the registry.
 - **`torio vm shell`.** Opens the Lima login identity's own shell inside the
   box — the box as a place to stand, where `vm ssh -- COMMAND` runs one command
   and comes back. The hub offers the same session on `s` on the dashboard. No

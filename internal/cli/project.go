@@ -66,6 +66,8 @@ func newProjectCmd(a *app) *cobra.Command {
 func newProjectAddCmd(a *app) *cobra.Command {
 	var id string
 	var use bool
+	var local bool
+	var bundle string
 	cmd := &cobra.Command{
 		Use:   "add <name> [remote]",
 		Short: "Clone or adopt a repository and attach it to the selected backend's guest",
@@ -74,12 +76,19 @@ func newProjectAddCmd(a *app) *cobra.Command {
 			"access, register the project if the backend keeps a registry, and only then record " +
 			"it. Nothing on the guest is reset, cleaned or deleted, so a rerun after a failure " +
 			"finishes the work.\n\n" +
+			"A project needs no remote. `--local` makes an empty repository in the guest, and " +
+			"`--from-bundle FILE` carries a repository that lives only on this machine in as a " +
+			"Git bundle (`git bundle create FILE --all`). Neither reaches a network and neither " +
+			"needs a deploy key; give the project a remote later with `torio project set-remote` " +
+			"if it ever gets one.\n\n" +
 			"The registry is shared by every instance, the checkouts are not: a project exists " +
 			"once, in one guest per backend that has materialized it. Rerun with the id alone " +
 			"and no remote, as `torio project add demo --backend claude-code`, to materialize an " +
 			"already registered project in another backend's guest, using the remote already on " +
 			"record. Opening a session on such a project does this for you, so this form is for " +
-			"materializing a checkout before you want to work in it.\n\n" +
+			"materializing a checkout before you want to work in it. A local project has no " +
+			"remote to materialize from, so it is carried to another backend with " +
+			"`--from-bundle` instead.\n\n" +
 			"Without --id the project id is <name> itself, which must be a lowercase slug " +
 			"(letters, digits, inner hyphens); pass --id to choose one explicitly.",
 		Args: cobra.RangeArgs(1, 2),
@@ -96,19 +105,40 @@ func newProjectAddCmd(a *app) *cobra.Command {
 				projectID = name
 			}
 			var remote string
-			if len(args) == 2 {
+			switch {
+			case len(args) == 2:
 				remote = args[1]
-			} else {
+			case local:
+				// The decision is the flag. Nothing is read off the registry:
+				// this is a new project with no remote by request.
+			default:
 				known, err := findRegistered(service, projectID)
 				if err != nil {
-					return err
+					// A bundle attaches a project that need not be on record
+					// yet — it is how one arrives — so an unknown id is only a
+					// usage error when there is nothing to attach from.
+					if bundle == "" {
+						return err
+					}
+				} else {
+					remote, name = known.Remote, known.DisplayName
 				}
-				remote, name = known.Remote, known.DisplayName
 			}
+			// A bundle carries a repository that has no remote. Where the
+			// record holds one, the remote is the way in and the bundle is the
+			// wrong tool; saying so beats attaching a second copy of the same
+			// repository under the same id.
+			if bundle != "" && remote != "" {
+				return usageError("project " + projectID + " has a remote on record; it is cloned from the remote, and --from-bundle attaches a project that has none")
+			}
+			// The materialization timeout is the caller's, but carrying a
+			// bundle and cloning it are the slow shapes here too.
 			report, err := service.Add(ctx, projects.AddRequest{
 				ID:          projectID,
 				DisplayName: name,
 				Remote:      remote,
+				Local:       local,
+				BundlePath:  bundle,
 				Use:         use,
 			})
 			if err != nil {
@@ -131,6 +161,8 @@ func newProjectAddCmd(a *app) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&id, "id", "", "project id (slug) to use instead of <name>")
 	cmd.Flags().BoolVar(&use, "use", false, "make the project active in the backend's registry after a successful add")
+	cmd.Flags().BoolVar(&local, "local", false, "make an empty repository in the guest; the project has no remote")
+	cmd.Flags().StringVar(&bundle, "from-bundle", "", "attach from a Git bundle on this machine (git bundle create FILE --all)")
 	return cmd
 }
 
@@ -312,10 +344,15 @@ func (a *app) materializeCheckout(cmd *cobra.Command, cmdName string, service pr
 	// rather than from the bounded one, so an interrupt still reaches it.
 	ctx, cancel := context.WithTimeout(cmd.Context(), config.MaxTimeout)
 	defer cancel()
-	if _, err := fmt.Fprintf(a.stdout,
-		"%s: no checkout on this backend's guest yet; materializing it from the remote on record\n",
-		id); err != nil {
-		return err
+	// Only where there is a remote to materialize from. A local project has
+	// none (ADR-0027), and announcing a clone that is about to be refused would
+	// put a false statement above the refusal that explains why.
+	if known.Remote != "" {
+		if _, err := fmt.Fprintf(a.stdout,
+			"%s: no checkout on this backend's guest yet; materializing it from the remote on record\n",
+			id); err != nil {
+			return err
+		}
 	}
 	report, err := service.Add(ctx, projects.AddRequest{
 		ID:          id,
@@ -354,6 +391,9 @@ func newProjectSetRemoteCmd(a *app) *cobra.Command {
 			"still holds the remote being replaced; an origin pointing anywhere else is " +
 			"reported and left alone, and checkouts on other guests are corrected the next " +
 			"time a command runs there.\n\n" +
+			"It is also how a local project gets a remote. The guest must be able to read " +
+			"the new remote, so this is where a deploy key is provisioned for a private " +
+			"one — the key belongs to a remote, and a local project had none.\n\n" +
 			"The id and the display name do not change: every derived path, registration " +
 			"and deploy key keeps naming the same project.",
 		Args: cobra.ExactArgs(2),
@@ -368,6 +408,14 @@ func newProjectSetRemoteCmd(a *app) *cobra.Command {
 			if err != nil {
 				cliErr := mapProjectError("project.set_remote", err)
 				cliErr.Details = projectNotesDetails(report.Notes)
+				// A promotion that stopped on an authorization carries the key
+				// that makes it actionable, exactly as `add` does.
+				if key := report.DeployKey; key != nil {
+					cliErr.Details = withDeployKeyDetails(cliErr.Details, key)
+					if !a.jsonOut {
+						a.printDeployKey(key)
+					}
+				}
 				return cliErr
 			}
 			return a.emitProjectSetRemote(report)
@@ -768,7 +816,11 @@ type projectData struct {
 
 type projectAddData struct {
 	projectData
-	Cloned         bool     `json:"cloned"`
+	Cloned bool `json:"cloned"`
+	// Initialized is a local project made here, distinct from cloned because
+	// nothing arrived: the repository has no commit until the operator makes
+	// one (ADR-0027).
+	Initialized    bool     `json:"initialized"`
 	Adopted        bool     `json:"adopted"`
 	HermesCreated  bool     `json:"hermes_created"`
 	HermesRestored bool     `json:"hermes_restored"`
@@ -859,6 +911,7 @@ func (a *app) emitProjectAdd(report projects.AddReport) error {
 		return writeJSON(a.stdout, successEnvelope("project.add", projectAddData{
 			projectData:    projectView(report.Project),
 			Cloned:         report.Cloned,
+			Initialized:    report.Initialized,
 			Adopted:        report.Adopted,
 			HermesCreated:  report.HermesCreated,
 			HermesRestored: report.HermesRestored,
@@ -870,6 +923,8 @@ func (a *app) emitProjectAdd(report projects.AddReport) error {
 	}
 	state := "attached"
 	switch {
+	case report.Initialized:
+		state = "initialized"
 	case report.Cloned:
 		state = "cloned"
 	case report.Adopted:
@@ -882,7 +937,7 @@ func (a *app) emitProjectAdd(report projects.AddReport) error {
 		"%s: %s\n"+
 			"  path:   %s\n"+
 			"  remote: %s\n",
-		report.Project.ID, state, report.Project.Path, report.Project.Remote); err != nil {
+		report.Project.ID, state, report.Project.Path, remoteOrLocal(report.Project.Remote)); err != nil {
 		return err
 	}
 	if err := a.printNotes(report.Notes); err != nil {
@@ -904,7 +959,7 @@ func (a *app) emitProjectList(list []projects.Project) error {
 	if len(list) == 0 {
 		_, err := fmt.Fprint(a.stdout,
 			"no projects registered\n"+
-				"next: torio project add <name> <remote>\n")
+				"next: torio project add <name> <remote>, or --local for a project that has none\n")
 		return err
 	}
 	for _, p := range list {
@@ -953,7 +1008,7 @@ func (a *app) emitProjectShow(report projects.ShowReport) error {
 			"%s"+
 			"  issues:    %s\n"+
 			"next: %s\n",
-		report.Project.ID, state, report.Project.Path, report.Project.Remote,
+		report.Project.ID, state, report.Project.Path, remoteOrLocal(report.Project.Remote),
 		report.Checkout.PathExists, report.Checkout.Repository, report.Checkout.OriginMatches,
 		report.Checkout.Clean, report.Checkout.SharedPermissions,
 		report.Checkout.Owner, report.Checkout.Group, report.Checkout.Mode,
@@ -1002,6 +1057,8 @@ func (a *app) emitProjectSetRemote(report projects.SetRemoteReport) error {
 	// only "corrected" would have to guess which of the two they got.
 	checkout := "checkout left as it is"
 	switch {
+	case slices.Contains(report.Notes, "remote_attached"):
+		checkout = "checkout given the remote as its origin"
 	case report.CheckoutRepointed:
 		checkout = "checkout origin repointed"
 	case slices.Contains(report.Notes, "checkout_absent"):
@@ -1011,13 +1068,30 @@ func (a *app) emitProjectSetRemote(report projects.SetRemoteReport) error {
 	case slices.Contains(report.Notes, "checkout_untouched_guest_unavailable"):
 		checkout = "guest not reachable, so the checkout was not touched"
 	}
+	// A project that had no remote is gaining one rather than having one
+	// corrected, and "was: " followed by nothing reads as a bug. The note is
+	// what says which happened, because a rerun that finishes a promotion finds
+	// the record already holding the remote.
+	headline, was := "remote corrected", report.PreviousRemote
+	if slices.Contains(report.Notes, "remote_attached") {
+		headline = "remote attached"
+		switch was {
+		case "":
+			was = "(none — the project was local)"
+		case report.Project.Remote:
+			// A rerun that finished a promotion the first attempt recorded.
+			// Printing the same address twice with no explanation reads as a
+			// bug in the command rather than as the history it is.
+			was = "(already on record from the earlier attempt)"
+		}
+	}
 	if _, err := fmt.Fprintf(a.stdout,
-		"%s: remote corrected (%s)\n"+
+		"%s: %s (%s)\n"+
 			"  was: %s\n"+
 			"  now: %s\n"+
-			"  the registry is shared, so every backend reads the corrected remote\n"+
+			"  the registry is shared, so every backend reads the recorded remote\n"+
 			"next: %s\n",
-		report.Project.ID, checkout, report.PreviousRemote, report.Project.Remote, next); err != nil {
+		report.Project.ID, headline, checkout, was, report.Project.Remote, next); err != nil {
 		return err
 	}
 	return nil
@@ -1131,6 +1205,20 @@ func hermesState(h projects.HermesStatus) string {
 	default:
 		return "registered"
 	}
+}
+
+// remoteOrLocal renders a record's remote for a human. An empty field is a
+// project that has none (ADR-0027), and a blank space beside "remote:" reads as
+// something Torio failed to print rather than as the fact it is.
+//
+// The JSON envelopes carry the empty string as it is: a reader distinguishes
+// absence from a value without prose, and inventing one there would make the
+// document say something the record does not.
+func remoteOrLocal(remote string) string {
+	if remote == "" {
+		return "(none — local project)"
+	}
+	return remote
 }
 
 // notes normalizes a marker slice so the envelope always carries an array.

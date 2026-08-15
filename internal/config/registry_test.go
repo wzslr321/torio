@@ -197,7 +197,7 @@ func TestWriteRegistryWritesModePrivate(t *testing.T) {
 // list".
 func TestLoadRegistryRejectsMalformedDocuments(t *testing.T) {
 	for name, body := range map[string]string{
-		"unknown schema":       `{"schema_version":"2","projects":[]}`,
+		"unknown schema":       `{"schema_version":"3","projects":[]}`,
 		"missing schema":       `{"projects":[]}`,
 		"unknown field":        `{"schema_version":"1","projects":[],"backend":"hermes"}`,
 		"smuggled path":        `{"schema_version":"1","projects":[{"id":"a","display_name":"A","remote":"git@h:a.git","path":"/etc"}]}`,
