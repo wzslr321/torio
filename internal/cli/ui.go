@@ -203,6 +203,24 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 			_, err := projectSvc.Remove(ctx, id)
 			return err
 		},
+		ProjectMaterialize: func(ctx context.Context, id string) (*projects.DeployKey, error) {
+			// The one-argument `add`: the remote and the display name come off
+			// the record, so opening a project on a second backend attaches
+			// nothing new and renames nothing.
+			known, err := findRegistered(projectSvc, id)
+			if err != nil {
+				return nil, err
+			}
+			report, err := projectSvc.Add(ctx, projects.AddRequest{
+				ID:          id,
+				DisplayName: known.DisplayName,
+				Remote:      known.Remote,
+			})
+			if err != nil {
+				return report.DeployKey, err
+			}
+			return nil, nil
+		},
 		ProjectSetRemote: func(ctx context.Context, id, remote string) error {
 			_, err := projectSvc.SetRemote(ctx, id, remote)
 			return err

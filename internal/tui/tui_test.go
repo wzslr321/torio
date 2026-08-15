@@ -1166,3 +1166,124 @@ func TestProjectsOffersNoRemoteCorrectionWithoutTheSeam(t *testing.T) {
 		t.Error("the footer offers a key the build cannot answer")
 	}
 }
+
+// The whole point of switching backends in the hub: press enter on a project
+// this guest has never held, and it is made and opened. Before this the hub
+// handed the operator an error naming a command to go and run, which is the
+// dead end the rebind was supposed to remove (ADR-0024).
+func TestProjectsMaterializesAnAbsentCheckoutThenOpensTheSession(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "lean-triage", Path: "/w/lean-triage"}},
+	}
+	d := f.deps()
+	materialized := ""
+	opened := 0
+	d.ProjectMaterialize = func(_ context.Context, id string) (*projects.DeployKey, error) {
+		materialized = id
+		return nil, nil
+	}
+	d.AgentSpec = func(context.Context, string) (execx.InteractiveCommand, error) {
+		opened++
+		if materialized == "" {
+			return execx.InteractiveCommand{}, &projects.Error{
+				Op:     "enter",
+				Kind:   projects.KindVerification,
+				Issues: []string{"checkout_absent"},
+				Err:    errors.New("checkout_absent"),
+			}
+		}
+		return execx.InteractiveCommand{Name: "ssh"}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "enter")
+
+	if materialized != "lean-triage" {
+		t.Errorf("materialized %q, want the project the operator opened", materialized)
+	}
+	if opened != 2 {
+		t.Errorf("the session was resolved %d times, want a retry after the checkout was made", opened)
+	}
+	if r.errText != "" {
+		t.Errorf("error text = %q, want none once the checkout was made", r.errText)
+	}
+}
+
+// A materialization that fails closed on an authorization leaves the operator
+// the key to authorize, and never retries into the same refusal.
+func TestProjectsShowsTheDeployKeyWhenMaterializingFails(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "lean-triage", Path: "/w/lean-triage"}},
+	}
+	d := f.deps()
+	opened := 0
+	d.ProjectMaterialize = func(context.Context, string) (*projects.DeployKey, error) {
+		return &projects.DeployKey{
+			PublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample torio-deploy-lean-triage",
+			Host:      "github.com",
+		}, errors.New("the guest cannot read the remote yet")
+	}
+	d.AgentSpec = func(context.Context, string) (execx.InteractiveCommand, error) {
+		opened++
+		return execx.InteractiveCommand{}, &projects.Error{
+			Op:     "enter",
+			Kind:   projects.KindVerification,
+			Issues: []string{"checkout_absent"},
+			Err:    errors.New("checkout_absent"),
+		}
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "enter")
+
+	if opened != 1 {
+		t.Errorf("the session was resolved %d times, want no retry after the refusal", opened)
+	}
+	if !strings.Contains(r.errDetail, "ssh-ed25519") {
+		t.Errorf("detail = %q, want the deploy key to authorize", r.errDetail)
+	}
+}
+
+// Drift that is not an absent checkout is a working tree, and the hub refuses
+// it the way it always did rather than cloning over it.
+func TestProjectsDoesNotMaterializeOverDriftItMustNotTouch(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "lean-triage", Path: "/w/lean-triage"}},
+	}
+	d := f.deps()
+	called := false
+	d.ProjectMaterialize = func(context.Context, string) (*projects.DeployKey, error) {
+		called = true
+		return nil, nil
+	}
+	d.AgentSpec = func(context.Context, string) (execx.InteractiveCommand, error) {
+		return execx.InteractiveCommand{}, &projects.Error{
+			Op:     "enter",
+			Kind:   projects.KindVerification,
+			Issues: []string{"origin_mismatch"},
+			Err:    errors.New("origin_mismatch"),
+		}
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "enter")
+
+	if called {
+		t.Error("a checkout the hub must not touch was cloned over")
+	}
+	if !strings.Contains(r.errText, "origin_mismatch") {
+		t.Errorf("error text = %q, want the drift reported", r.errText)
+	}
+}

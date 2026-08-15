@@ -1800,3 +1800,34 @@ func TestSetRemoteRefusesARemoteCarryingACredential(t *testing.T) {
 		t.Errorf("registry writes = %d, want none", len(r.saved))
 	}
 }
+
+// Opening a session on a project whose only drift is a checkout that is not
+// there is answerable: the entry is registered, so the remote is on record and
+// the checkout can be made. Every other drift is not, so the two have to be
+// told apart by something firmer than reading the message (ADR-0024).
+func TestCheckoutAbsentIsDistinguishedFromEveryOtherDrift(t *testing.T) {
+	absent := sessionDriftError(enterOp, testID, CheckoutStatus{})
+	if !IsCheckoutAbsentOnly(absent) {
+		t.Errorf("an absent checkout was not recognized: %v", absent)
+	}
+
+	// A checkout that exists and points somewhere else is a tree Torio must not
+	// touch, and cloning over it is exactly the destructive act it refuses.
+	diverged := sessionDriftError(enterOp, testID, CheckoutStatus{
+		PathExists: true, Directory: true, Repository: true, FullClone: true,
+		Clean: true, NoCredentialHelper: true, SharedPermissions: true,
+	})
+	if IsCheckoutAbsentOnly(diverged) {
+		t.Errorf("a checkout pointing elsewhere was treated as merely absent: %v", diverged)
+	}
+
+	for _, err := range []error{
+		nil,
+		errors.New("something else"),
+		&Error{Op: enterOp, Kind: KindPrecondition, Err: errors.New("VM is not running")},
+	} {
+		if IsCheckoutAbsentOnly(err) {
+			t.Errorf("IsCheckoutAbsentOnly(%v) = true, want false", err)
+		}
+	}
+}

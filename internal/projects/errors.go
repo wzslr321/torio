@@ -56,6 +56,12 @@ type Error struct {
 	Op   string
 	Kind ErrorKind
 	Err  error
+	// Issues names the stable markers a verification failure found, in the
+	// order CheckoutStatus reports them. It is carried as data rather than left
+	// in the message because a caller has to be able to tell one drift from
+	// another without reading prose: an absent checkout is answerable and every
+	// other drift is a tree only a human may touch (ADR-0024).
+	Issues []string
 }
 
 func (e *Error) Error() string {
@@ -85,4 +91,19 @@ func fromGuestErr(op string, err error) *Error {
 // commandError reports a failed guest command by action and exit code only.
 func commandError(op string, kind ErrorKind, action string, exitCode int) *Error {
 	return &Error{Op: op, Kind: kind, Err: fmt.Errorf("%s exited %d", action, exitCode)}
+}
+
+// IsCheckoutAbsentOnly reports whether err is a session drift whose single
+// cause is that no checkout is there.
+//
+// It is deliberately exact. A checkout that exists and disagrees with the
+// record, or one whose permissions drifted, is a tree Torio will not touch, and
+// treating either as "absent" would clone over an operator's work. Only the
+// state that nothing exists yet can be answered by making it exist.
+func IsCheckoutAbsentOnly(err error) bool {
+	var perr *Error
+	if !errors.As(err, &perr) || perr.Kind != KindVerification {
+		return false
+	}
+	return len(perr.Issues) == 1 && perr.Issues[0] == issueCheckoutAbsent
 }

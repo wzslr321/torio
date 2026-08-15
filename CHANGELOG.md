@@ -32,6 +32,17 @@
   a working-tree build can be installed at the same time; each keeps its own
   directory and its own name.
 
+- **Opening a session materializes the checkout it needs.** The registry is
+  shared by every instance and the checkouts are not, so a project attached
+  under one backend is registered and absent under the next. Pressing enter on
+  it in the hub, or running `torio project agent`, `enter` or `shell`, now
+  clones it from the remote on record and then opens the session, instead of
+  reporting drift and naming a command to go and run. Only a checkout that is
+  simply not there is made this way: a checkout that exists and disagrees with
+  the record is a working tree, and it is refused as before. The clone reaches a
+  remote, so it still stops with the deploy key to authorize where the guest may
+  not read one
+  ([ADR-0024](docs/adr/0024-a-session-materializes-the-checkout-it-needs.md)).
 - **`torio project set-remote <id> <remote>`.** Corrects the remote of a project
   already on record, without removing the entry, the checkouts other guests
   hold, or the deploy keys those guests had authorized. The registry is shared,

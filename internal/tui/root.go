@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -525,6 +526,13 @@ func (r *root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			r.busy = ""
 			r.errText = fmt.Sprintf("%s: %s", msg.label, redact.String(msg.err.Error()))
+			// A materialization that failed closed left the key that makes the
+			// failure actionable. Naming the refusal without showing it would
+			// tell the operator to authorize something they cannot see.
+			var mErr *materializeError
+			if errors.As(msg.err, &mErr) && mErr.key != nil {
+				r.errDetail = deployKeyDetail(mErr.key)
+			}
 			return r, nil
 		}
 		cmd, err := execSession(r.deps.parentContext(), msg.spec)

@@ -122,6 +122,13 @@ type Deps struct {
 	AgentSpec func(ctx context.Context, id string) (execx.InteractiveCommand, error)
 	ShellSpec func(ctx context.Context, id string) (execx.InteractiveCommand, error)
 
+	// ProjectMaterialize makes the checkout a registered project describes, on
+	// the guest this hub is bound to (ADR-0024). It is the one-argument `add`:
+	// the remote comes from the record, so opening a project on a second
+	// backend attaches nothing new. A failed materialization may leave a deploy
+	// key for the operator to authorize, exactly as a failed add does.
+	ProjectMaterialize func(ctx context.Context, id string) (*projects.DeployKey, error)
+
 	// ProjectSetRemote corrects the remote of a project already on record
 	// (ADR-0023). It is here because the hub lists the records, so the hub is
 	// where a wrong one is seen; sending the operator to a command to fix what

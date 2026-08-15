@@ -690,11 +690,13 @@ func shellDriftError(id string, checkout CheckoutStatus) error {
 // would leave the operator to work out which of the shapes of `add` reconciles
 // a checkout rather than attaching a second repository.
 func sessionDriftError(op, id string, checkout CheckoutStatus) error {
+	issues := checkout.issues()
 	return &Error{
-		Op:   op,
-		Kind: KindVerification,
+		Op:     op,
+		Kind:   KindVerification,
+		Issues: issues,
 		Err: fmt.Errorf("the checkout for %q is not in a state a session can be opened in (%s); re-run `torio project add %s` to reconcile it",
-			id, strings.Join(checkout.issues(), ", "), id),
+			id, strings.Join(issues, ", "), id),
 	}
 }
 

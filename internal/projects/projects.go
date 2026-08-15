@@ -219,6 +219,11 @@ func (c CheckoutStatus) compliant() bool {
 		c.SharedPermissions
 }
 
+// issueCheckoutAbsent is the one marker a caller acts on rather than only
+// reports: it is the single drift that can be answered by materializing the
+// checkout the record already describes (ADR-0024).
+const issueCheckoutAbsent = "checkout_absent"
+
 // issues names the failed invariants as stable, payload-free markers.
 func (c CheckoutStatus) issues() []string {
 	var out []string
@@ -226,7 +231,7 @@ func (c CheckoutStatus) issues() []string {
 	case c.Symlink:
 		out = append(out, "path_is_symlink")
 	case !c.PathExists:
-		out = append(out, "checkout_absent")
+		out = append(out, issueCheckoutAbsent)
 	case !c.Directory:
 		out = append(out, "path_is_not_a_directory")
 	}

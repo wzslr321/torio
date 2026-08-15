@@ -289,9 +289,7 @@ func (s *projectsScreen) updateList(r *root, msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		if d.AgentSpec != nil {
-			return r.handoff("agent session in "+p.ID, func(ctx context.Context) (execx.InteractiveCommand, error) {
-				return d.AgentSpec(ctx, p.ID)
-			})
+			return s.openSession(r, p, "agent session in "+p.ID, d.AgentSpec)
 		}
 		// No session declared. When the backend runs a service instead, its
 		// way into a project is the gateway, and Enter owes the operator that
@@ -310,12 +308,47 @@ func (s *projectsScreen) updateList(r *root, msg tea.KeyMsg) tea.Cmd {
 			r.errText = "this backend opens no shell in a checkout"
 			return nil
 		}
-		return r.handoff("shell in "+p.ID, func(ctx context.Context) (execx.InteractiveCommand, error) {
-			return d.ShellSpec(ctx, p.ID)
-		})
+		return s.openSession(r, p, "shell in "+p.ID, d.ShellSpec)
 	}
 	return nil
 }
+
+// openSession resolves one project session and hands the terminal to it.
+//
+// The resolution runs the same preflight the command surface runs, so it can
+// refuse. One refusal is answerable here: a project the registry holds and this
+// guest has no checkout for is the ordinary state of a project the operator has
+// not opened on this backend yet, and the record already says where to get it.
+// The hub makes it, says so while it does, and resolves once more (ADR-0024).
+//
+// Every other refusal stands. A checkout that exists and disagrees with the
+// record is a working tree, and cloning over one is the destructive act Torio
+// refuses everywhere else.
+func (s *projectsScreen) openSession(r *root, p projects.Project, label string, spec func(context.Context, string) (execx.InteractiveCommand, error)) tea.Cmd {
+	return r.handoff(label, func(ctx context.Context) (execx.InteractiveCommand, error) {
+		cmd, err := spec(ctx, p.ID)
+		if err == nil || !projects.IsCheckoutAbsentOnly(err) || r.deps.ProjectMaterialize == nil {
+			return cmd, err
+		}
+		if key, mErr := r.deps.ProjectMaterialize(ctx, p.ID); mErr != nil {
+			return execx.InteractiveCommand{}, &materializeError{err: mErr, key: key}
+		}
+		// Exactly one retry. A second refusal is a refusal, and a loop that
+		// kept answering it would clone in circles.
+		return spec(ctx, p.ID)
+	})
+}
+
+// materializeError carries a failed materialization and the deploy key it left
+// for the operator to authorize, so the banner can show what makes the failure
+// actionable rather than only naming it.
+type materializeError struct {
+	err error
+	key *projects.DeployKey
+}
+
+func (e *materializeError) Error() string { return e.err.Error() }
+func (e *materializeError) Unwrap() error { return e.err }
 
 // openConnect opens the gateway panel for one project and asks the service
 // how it is doing. The ask is a read, not an operation: it takes no busy lock,

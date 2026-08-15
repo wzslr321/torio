@@ -28,5 +28,6 @@ quits.
   it to another backend without quitting: the hub re-resolves the instance the
   same way `--backend` does, discards everything on screen, and re-reads the
   new box from nothing. The project registry is shared, so the same projects
-  are listed on either side. The checkouts are not shared: a project opens on
-  the other side once `torio project add <id>` has materialized it there.
+  are listed on either side. The checkouts are not shared, so opening a project
+  the new box has never held materializes its checkout first, from the remote on
+  record, and then opens the session.

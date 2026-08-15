@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wzslr321/torio/internal/backend/claudecode"
 	"github.com/wzslr321/torio/internal/execx"
@@ -47,12 +48,18 @@ type fakeProjectService struct {
 	removeErr    error
 
 	enterID      string
+	enterCalls   int
 	enterSession projects.EnterSession
 	enterErr     error
+	enterErrOnce error
 
 	shellID      string
 	shellSession projects.ShellSession
 	shellErr     error
+
+	// onAdd observes the context an addition runs under, so a test can pin how
+	// long the work is allowed to take.
+	onAdd func(context.Context)
 
 	setRemoteID     string
 	setRemoteURL    string
@@ -64,8 +71,11 @@ type fakeProjectService struct {
 	serviceEnvCalls int
 }
 
-func (f *fakeProjectService) Add(_ context.Context, req projects.AddRequest) (projects.AddReport, error) {
+func (f *fakeProjectService) Add(ctx context.Context, req projects.AddRequest) (projects.AddReport, error) {
 	f.addReq = req
+	if f.onAdd != nil {
+		f.onAdd(ctx)
+	}
 	return f.addReport, f.addErr
 }
 
@@ -93,6 +103,13 @@ func (f *fakeProjectService) SetRemote(_ context.Context, id, remote string) (pr
 
 func (f *fakeProjectService) EnterPreflight(_ context.Context, id string) (projects.EnterSession, error) {
 	f.enterID = id
+	f.enterCalls++
+	// enterErrOnce models a checkout that is absent until something makes it:
+	// the first preflight refuses, and the one after the materialization does
+	// not, which is the whole sequence under test.
+	if f.enterErrOnce != nil && f.enterCalls == 1 {
+		return projects.EnterSession{}, f.enterErrOnce
+	}
 	return f.enterSession, f.enterErr
 }
 
@@ -1093,5 +1110,156 @@ func TestProjectSetRemoteRequiresBothArguments(t *testing.T) {
 		if code != int(ExitUsage) {
 			t.Errorf("%v: exit = %d, want %d", args, code, ExitUsage)
 		}
+	}
+}
+
+// The registry is shared and the checkouts are not, so switching backend and
+// opening a project finds nothing there. Materializing it is the step that was
+// missing, and it is the same one-argument `add` the operator would have run:
+// the remote comes from the record, so nothing is retyped and nothing new is
+// attached (ADR-0024).
+func TestProjectAgentMaterializesAnAbsentCheckoutThenOpens(t *testing.T) {
+	service := &fakeProjectService{
+		enterSession: enterSession(),
+		enterErrOnce: &projects.Error{
+			Op:     "enter",
+			Kind:   projects.KindVerification,
+			Issues: []string{"checkout_absent"},
+			Err:    errors.New("the checkout for \"torio\" is not in a state a session can be opened in (checkout_absent)"),
+		},
+		listOut: []projects.Project{sampleProject()},
+	}
+	runner := &fakeInteractiveRunner{}
+
+	code, stdout, stderr := runProjectCLI(t, []string{"--backend", "claude-code", "project", "agent", "torio"}, service,
+		func(a *app) {
+			a.newInteractive = func() execx.InteractiveRunner { return runner }
+			a.newAgentSpec = func(string) (execx.InteractiveCommand, error) {
+				return execx.InteractiveCommand{Name: "ssh"}, nil
+			}
+		})
+
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q stdout=%q", code, stderr, stdout)
+	}
+	if got, want := service.addReq.ID, "torio"; got != want {
+		t.Errorf("materialized %q, want %q", got, want)
+	}
+	if got, want := service.addReq.Remote, sampleProject().Remote; got != want {
+		t.Errorf("materialized with remote %q, want the one on record %q", got, want)
+	}
+	if service.enterCalls != 2 {
+		t.Errorf("preflight ran %d times, want it re-run after the checkout was made", service.enterCalls)
+	}
+	if len(runner.cmds) != 1 {
+		t.Errorf("interactive sessions opened = %d, want 1", len(runner.cmds))
+	}
+	if !strings.Contains(stdout, "materializing") {
+		t.Errorf("stdout = %q, want it to say the checkout is being made", stdout)
+	}
+}
+
+// Any other drift is a working tree, and Torio does not clone over one. The
+// session refuses exactly as it did before.
+func TestProjectAgentDoesNotMaterializeOverDriftItMustNotTouch(t *testing.T) {
+	service := &fakeProjectService{
+		enterErr: &projects.Error{
+			Op:     "enter",
+			Kind:   projects.KindVerification,
+			Issues: []string{"origin_mismatch", "worktree_dirty"},
+			Err:    errors.New("the checkout for \"torio\" is not in a state a session can be opened in"),
+		},
+	}
+	runner := &fakeInteractiveRunner{}
+
+	code, _, _ := runProjectCLI(t, []string{"--backend", "claude-code", "project", "agent", "torio"}, service,
+		func(a *app) { a.newInteractive = func() execx.InteractiveRunner { return runner } })
+
+	if code != int(ExitVerification) {
+		t.Fatalf("exit = %d, want %d", code, ExitVerification)
+	}
+	if service.addReq.ID != "" {
+		t.Error("a checkout Torio must not touch was cloned over")
+	}
+	if len(runner.cmds) != 0 {
+		t.Error("a session was opened on a drifted checkout")
+	}
+}
+
+// Materializing reaches a remote, so it can fail closed on an authorization the
+// operator still has to give. The deploy key is what makes that actionable, and
+// it is printed here exactly as `project add` prints it.
+func TestProjectAgentReportsTheDeployKeyWhenMaterializingFails(t *testing.T) {
+	service := &fakeProjectService{
+		enterErrOnce: &projects.Error{
+			Op:     "enter",
+			Kind:   projects.KindVerification,
+			Issues: []string{"checkout_absent"},
+			Err:    errors.New("checkout_absent"),
+		},
+		listOut: []projects.Project{sampleProject()},
+		addErr:  &projects.Error{Op: "add", Kind: projects.KindAuth, Err: errors.New("the guest cannot read the remote yet")},
+		addReport: projects.AddReport{DeployKey: &projects.DeployKey{
+			PublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample torio-deploy-torio",
+			Host:      "github.com",
+		}},
+	}
+	runner := &fakeInteractiveRunner{}
+
+	code, _, stderr := runProjectCLI(t, []string{"--backend", "claude-code", "project", "agent", "torio"}, service,
+		func(a *app) { a.newInteractive = func() execx.InteractiveRunner { return runner } })
+
+	if code != int(ExitPermission) {
+		t.Fatalf("exit = %d, want %d", code, ExitPermission)
+	}
+	// The key goes to stderr, where `project add` puts it: stdout carries the
+	// envelope, and a human block on it would corrupt one.
+	if !strings.Contains(stderr, "ssh-ed25519") {
+		t.Errorf("stderr = %q, want the deploy key to authorize", stderr)
+	}
+	if len(runner.cmds) != 0 {
+		t.Error("a session was opened after materializing failed")
+	}
+}
+
+// Cloning is minutes of work and the operator did not choose to start it: they
+// asked to open a project. Bounding the clone by the ordinary per-operation
+// timeout makes the first open of any sizeable repository fail on the clock,
+// so the materialization gets the policy maximum instead (ADR-0024).
+func TestMaterializingGetsTheLongBoundRatherThanTheOperationTimeout(t *testing.T) {
+	var addDeadline time.Time
+	service := &fakeProjectService{
+		enterSession: enterSession(),
+		enterErrOnce: &projects.Error{
+			Op:     "enter",
+			Kind:   projects.KindVerification,
+			Issues: []string{"checkout_absent"},
+			Err:    errors.New("checkout_absent"),
+		},
+		listOut: []projects.Project{sampleProject()},
+		onAdd: func(ctx context.Context) {
+			addDeadline, _ = ctx.Deadline()
+		},
+	}
+	runner := &fakeInteractiveRunner{}
+
+	code, _, stderr := runProjectCLI(t,
+		[]string{"--timeout", "5s", "--backend", "claude-code", "project", "agent", "torio"}, service,
+		func(a *app) {
+			a.newInteractive = func() execx.InteractiveRunner { return runner }
+			a.newAgentSpec = func(string) (execx.InteractiveCommand, error) {
+				return execx.InteractiveCommand{Name: "ssh"}, nil
+			}
+		})
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	if addDeadline.IsZero() {
+		t.Fatal("the materialization ran with no deadline at all")
+	}
+	// Comfortably past the 5s the invocation asked for, and no further than the
+	// policy maximum allows.
+	if remaining := time.Until(addDeadline); remaining <= time.Minute {
+		t.Errorf("materialization deadline is %s away, want the long bound rather than the 5s operation timeout", remaining)
 	}
 }
