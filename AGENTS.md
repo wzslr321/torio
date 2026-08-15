@@ -197,6 +197,40 @@ No production code before a failing test. A spike may create throwaway code in
 `spikes/` only, and spike code never graduates into `internal/` unchanged — it is
 rewritten test-first or removed.
 
+### Which binary you are testing
+
+Three build streams exist. Each has its own prefix and its own command name, so
+all three can be installed at once and a machine never has to choose:
+
+| Command | What it is | How it gets there |
+| --- | --- | --- |
+| `torio` | a release | `scripts/install.sh` |
+| `torio-dev` | the last `main` commit whose `ci` run went green | `scripts/install.sh --channel dev` |
+| `torio-local` | this working tree, as it is right now | `make local` |
+
+- Evidence for unmerged work MUST come from `make local` or from the test
+  suites. `torio` and `torio-dev` are built from other commits and prove nothing
+  about the branch under review. Record which of the three produced the binary
+  a result came from (section 8).
+- Never install a working-tree build over `~/.local/bin/torio`. The guest
+  payload names are fixed by `lima.Profile`, so a second install in one prefix
+  overwrites payloads that belong to another build and leaves a host binary
+  beside payloads from a different commit. `make local` and `--channel dev`
+  place themselves correctly; a hand-copied binary does not.
+- A dev build has passed the pull-request gate and nothing else. The release
+  gates that boot a guest and install the macOS archive on a Mac have not run
+  against it. Do not present a dev build as a release, and do not treat a green
+  dev channel as release evidence.
+- The three are separate binaries, not separate states: all of them read the
+  same config and talk to the same boxes. Give a test build a box of its own
+  with `TORIO_INSTANCE` rather than assuming isolation.
+- Publishing is not yours. CI publishes the dev channel from a commit that is
+  already on `main`; a release is a human tag push
+  ([CONTRIBUTING.md](CONTRIBUTING.md), "Cutting a release"). An agent MUST NOT
+  push a tag, move the `dev` tag, or create a release. This automation is the
+  repository's, not the product's: section 4's prohibition on autonomous
+  release is about what the `torio` binary does, and it stands unamended.
+
 ## 8. Evidence requirement
 
 Do not claim "it works" on the strength of documentation. Record the actual

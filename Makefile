@@ -1,4 +1,4 @@
-.PHONY: freeze-check validate nvim-smoke e2e platform-e2e brain-evals fmt fmt-check vet lint docs docs-check package-release
+.PHONY: freeze-check validate nvim-smoke e2e platform-e2e brain-evals fmt fmt-check vet lint docs docs-check package-release local
 
 export PYTHONDONTWRITEBYTECODE := 1
 
@@ -111,3 +111,31 @@ package-release:
 			--relay-binary "dist/torio-mcp-connect-linux-$$goarch" \
 			--license LICENSE --out dist; \
 	done
+
+# Build this working tree and install it as `torio-local`, beside whatever
+# stable or dev build is already on the machine. Nothing is published and no
+# tag is touched: the archive is built into dist/ and installed from there,
+# through the same installer a release goes through, so a locally tested binary
+# was placed the same way the one a user gets is.
+#
+# Only the host is built. Cross-building the other supported host would double
+# the wait for an archive this never installs.
+#
+# The version is a prerelease of the next patch version carrying the branch, the
+# commit, and whether the tree was dirty, so `torio-local version` names what is
+# being tested. Non-alphanumerics in the branch fold to `-`: a SemVer prerelease
+# identifier admits nothing else, and package_release.py rejects the rest.
+local:
+	@set -eu; \
+	command -v go >/dev/null 2>&1 || (echo "a Go toolchain is required" >&2; exit 2); \
+	base="$$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo v0.0.0)"; \
+	base="$${base#v}"; \
+	major="$${base%%.*}"; rest="$${base#*.}"; minor="$${rest%%.*}"; patch="$${rest#*.}"; \
+	patch="$${patch%%[!0-9]*}"; \
+	branch="$$(git rev-parse --abbrev-ref HEAD | tr -c '[:alnum:]' '-' | sed 's/-*$$//')"; \
+	dirty=""; \
+	[ -z "$$(git status --porcelain)" ] || dirty=".dirty"; \
+	version="$$major.$$minor.$$((patch + 1))-local.$$branch.g$$(git rev-parse --short HEAD)$$dirty"; \
+	rm -f dist/torio_*-local.*.tar.gz; \
+	$(MAKE) package-release VERSION="$$version" PLATFORMS="$$(go env GOOS)/$$(go env GOARCH)"; \
+	scripts/install.sh --channel local --version "$$version" --base-url "file://$(CURDIR)/dist"

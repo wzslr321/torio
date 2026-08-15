@@ -17,6 +17,20 @@
 - Signing a Codex box in asks for a device code, so a box with no browser needs
   no forwarded port to receive a credential. An API key remains available through
   `codex login --with-api-key`, which reads the key from standard input.
+- **A dev channel.** Every `main` commit whose `ci` run went green is published
+  as a prerelease on the `dev` tag, and `scripts/install.sh --channel dev`
+  installs it beside a stable install, as `torio-dev`. The two get separate
+  directories because the guest payload names are fixed and cannot be shared.
+  Checksums are verified as they are for a release; the release gates that boot
+  a guest and install the macOS archive have not run against a dev build, and
+  the installer, the release notes and the docs each say so. A prerelease is not
+  named by `releases/latest`, so installing without `--channel` is unchanged.
+- **`make local`.** Builds the working tree for this host and installs it as
+  `torio-local` through the same installer, so a branch can be tried on a real
+  machine without publishing anything. The version it reports carries the
+  branch, the commit and whether the tree was dirty. A release, a dev build and
+  a working-tree build can be installed at the same time; each keeps its own
+  directory and its own name.
 
 ## 0.3.4 - 2026-08-10
 

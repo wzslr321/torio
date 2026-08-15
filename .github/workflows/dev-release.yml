@@ -1,0 +1,119 @@
+name: dev-release
+
+# The dev channel: one release on a tag that moves to whatever is on main.
+#
+# It hangs off a completed `ci` run rather than off `push: main` so a dev build
+# proves the same gate a pull request proved, and proves it once. It does not
+# run the release gates: `release.yml` boots a real guest on Linux and installs
+# the darwin archive on a hosted Mac, which bills at ten times the Linux rate
+# and is worth paying a handful of times a year, not on every merge. A dev build
+# is therefore a build that passed the pull-request gate and nothing more, and
+# the installer and the release notes both say so.
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Two merges in quick succession would otherwise race for one tag and one
+# release, and the loser could publish the older commit last.
+concurrency:
+  group: dev-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish the dev channel
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # Full history and tags: the version is derived from the last release
+          # tag and the commit count, and neither is available in a shallow
+          # clone.
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+          check-latest: false
+
+      # A dev version is a SemVer prerelease of the version that has not been
+      # released yet, so it sorts above the last release and below the next one,
+      # and `torio version` reads as what it is. package_release.py accepts it:
+      # its version rule allows a dotted or dashed suffix, and no build metadata
+      # is used because that rule does not allow `+`.
+      - name: Resolve version
+        id: meta
+        run: |
+          set -euo pipefail
+          base="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo v0.0.0)"
+          base="${base#v}"
+          IFS=. read -r major minor patch <<<"$base"
+          patch="${patch%%[!0-9]*}"
+          commit="$(git rev-parse HEAD)"
+          version="${major}.${minor}.$((patch + 1))-dev.$(git rev-list --count HEAD).g$(git rev-parse --short HEAD)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "publishing $version from $commit"
+
+      # The same target a release uses, so the dev archive a tester installs is
+      # built and packaged by the one code path, not by a second one that could
+      # drift from it.
+      - name: Build and package every supported host
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          make package-release VERSION="${VERSION}"
+          cat dist/SHA256SUMS
+
+      # The tag is moved before the release is written so the release is never
+      # attached to the commit it is replacing.
+      #
+      # The release is replaced rather than added to. Dev archives carry their
+      # version in the file name, so uploading into the existing release would
+      # leave every previous build's assets behind, and the installer reads the
+      # version back off an asset name: with several present it would have to
+      # guess which build it is installing. Replacing it leaves exactly one
+      # archive per host. The channel is absent for the seconds in between,
+      # which an installer reports as no dev build published yet.
+      - name: Publish the dev release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          COMMIT: ${{ steps.meta.outputs.commit }}
+        run: |
+          set -euo pipefail
+          # The notes are written to a file rather than passed inline: they
+          # contain a fenced command block, and YAML indentation would land
+          # inside it.
+          notes="${RUNNER_TEMP}/dev-notes.md"
+          {
+            printf 'Build of %s on main, version %s.\n\n' "$COMMIT" "$VERSION"
+            printf 'This is not a release. It carries whatever reached main and has\n'
+            printf 'passed the pull-request gate. It has not run the release gates: no\n'
+            printf 'guest is booted for it, and the darwin archive is not installed on a\n'
+            printf 'Mac before it is published. Its checksums are verified by the\n'
+            printf "installer the same way a release's are.\n\n"
+            printf 'Install it beside a stable install, as `torio-dev`:\n\n'
+            printf '```bash\nscripts/install.sh --channel dev\n```\n'
+          } > "$notes"
+          git tag -fa dev -m "Torio dev channel" "$COMMIT"
+          git push --force origin refs/tags/dev
+          gh release delete dev --yes || true
+          gh release create dev \
+            --prerelease \
+            --title "Torio dev channel" \
+            --notes-file "$notes" \
+            "dist/torio_${VERSION}_darwin_arm64.tar.gz" \
+            "dist/torio_${VERSION}_linux_amd64.tar.gz" \
+            dist/SHA256SUMS

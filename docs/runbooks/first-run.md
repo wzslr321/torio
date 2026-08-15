@@ -67,9 +67,51 @@ scripts/install.sh --version X.Y.Z --base-url file:///tmp/torio-rel
 Either route verifies the same checksums. Set `TORIO_REPO=owner/name` if the
 assets live somewhere other than the default.
 
+### Installing a dev build
+
+To try what is on `main` before it is released:
+
+```bash
+scripts/install.sh --channel dev
+```
+
+This installs the build of the last commit that reached `main`, into
+`~/.local/share/torio-dev/bin`, and links it into `~/.local/bin` under the name
+`torio-dev`. A stable install keeps its own directory and its own name, so both
+are available at once and neither overwrites the other's guest payloads. Rerun
+the same command to move to a newer build. `--link-dir DIR` links it somewhere
+else, `--no-link` skips the link.
+
+A dev build is not a release. It carries whatever reached `main` and has passed
+the pull-request gate; the release gates that boot a guest and install the macOS
+archive on a Mac have not run against it. Checksums are verified exactly as they
+are for a release, and `torio-dev version` reports the commit it was built from.
+
+The two installs are separate binaries, not separate states: `torio-dev` reads
+the same configuration and talks to the same boxes as `torio`. Where that
+matters, point it at a box of its own:
+
+```bash
+TORIO_INSTANCE=torio-devbox torio-dev vm status
+```
+
 ### Building from source instead
 
-With a Go toolchain, build the binary and put it on your `PATH`:
+From a checkout, one command builds the working tree and installs it the same
+way, under a third name:
+
+```bash
+make local
+```
+
+It builds for this host only, installs into `~/.local/share/torio-local/bin`,
+and links `~/.local/bin/torio-local`. Nothing is published and no tag is
+touched. `torio-local version` reports the branch, the commit and whether the
+tree was dirty when it was built, so the binary names what you are testing. Run
+it again after a change to replace it, and delete the two paths above to be rid
+of it.
+
+To place a binary yourself instead, with a Go toolchain:
 
 ```bash
 go build -o torio ./cmd/torio
