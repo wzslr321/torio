@@ -10,6 +10,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/wzslr321/torio/internal/backend"
+	"github.com/wzslr321/torio/internal/brain"
 	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
@@ -180,6 +181,9 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 		BrainInit: func(ctx context.Context) error {
 			_, err := brainSvc.Init(ctx)
 			return err
+		},
+		BrainImport: func(ctx context.Context, source, into string, dryRun bool) (brain.TransferReport, error) {
+			return brainSvc.Import(ctx, brain.ImportOptions{Source: source, Into: into, DryRun: dryRun})
 		},
 
 		ProjectList: projectSvc.List,

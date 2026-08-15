@@ -1723,3 +1723,103 @@ func TestDashboardOffersNoStatusLineRecipeWithoutTheSeam(t *testing.T) {
 		t.Errorf("footer = %q, want no recipe key", r.dash.keys(r))
 	}
 }
+
+// Importing a vault was the one Brain operation with no hub answer. `m` opens
+// a form for the host directory and an optional contained subtree, runs the
+// preflight first — the same `--dry-run` the command offers — and shows what
+// would move before anything does; the second enter is the import.
+func TestBrainTabImportsAVaultThroughItsPreflight(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	var dryRuns []bool
+	d.BrainImport = func(_ context.Context, source, into string, dryRun bool) (brain.TransferReport, error) {
+		if source != "/tmp/notes" || into != "inbox" {
+			t.Fatalf("source = %q, into = %q", source, into)
+		}
+		dryRuns = append(dryRuns, dryRun)
+		return brain.TransferReport{DryRun: dryRun, Files: 3, Markdown: 2, Attachments: 1, Bytes: 42}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenBrain)
+	drain(t, r, r.brain.load(d))
+
+	if !strings.Contains(r.brain.keys(r), "m import") {
+		t.Fatalf("footer = %q, want the import key offered", r.brain.keys(r))
+	}
+	press(t, r, "m")
+	for _, ch := range "/tmp/notes" {
+		press(t, r, string(ch))
+	}
+	press(t, r, "tab")
+	for _, ch := range "inbox" {
+		press(t, r, string(ch))
+	}
+	press(t, r, "enter")
+
+	if len(dryRuns) != 1 || !dryRuns[0] {
+		t.Fatalf("first enter ran %v, want exactly one preflight", dryRuns)
+	}
+	view := r.View()
+	if !strings.Contains(view, "3 file") {
+		t.Errorf("the preflight's counts are not on screen:\n%s", view)
+	}
+	if !strings.Contains(view, "enter import") {
+		t.Errorf("the preflight does not offer the import:\n%s", view)
+	}
+
+	press(t, r, "enter")
+	if len(dryRuns) != 2 || dryRuns[1] {
+		t.Fatalf("second enter ran %v, want the real import after the preflight", dryRuns)
+	}
+	if !strings.Contains(r.note, "finished") {
+		t.Errorf("note = %q, want the import's outcome", r.note)
+	}
+}
+
+// Esc after the preflight walks away without importing; nothing has moved.
+func TestBrainImportPreflightCanBeDeclined(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	imports := 0
+	d.BrainImport = func(_ context.Context, _, _ string, dryRun bool) (brain.TransferReport, error) {
+		if !dryRun {
+			imports++
+		}
+		return brain.TransferReport{DryRun: dryRun, Files: 1}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenBrain)
+	drain(t, r, r.brain.load(d))
+
+	press(t, r, "m")
+	for _, ch := range "/tmp/n" {
+		press(t, r, string(ch))
+	}
+	press(t, r, "enter")
+	press(t, r, "esc")
+
+	if imports != 0 {
+		t.Fatalf("declining the preflight still imported %d time(s)", imports)
+	}
+	if view := r.View(); strings.Contains(view, "enter import") {
+		t.Errorf("the preflight panel survived esc:\n%s", view)
+	}
+}
+
+// A build without the seam offers no key.
+func TestBrainTabOffersNoImportWithoutTheSeam(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.BrainImport = nil
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenBrain)
+
+	press(t, r, "m")
+
+	if strings.Contains(r.brain.keys(r), "m import") {
+		t.Errorf("footer = %q, want no import key", r.brain.keys(r))
+	}
+}

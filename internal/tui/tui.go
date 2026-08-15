@@ -99,6 +99,13 @@ type Deps struct {
 	BrainStatus func(context.Context) (brain.StatusReport, error)
 	BrainInit   func(context.Context) error
 
+	// BrainImport is `brain import`: a host directory carried into the vault
+	// through the verified one-shot transport. dryRun is the same preflight
+	// the command's --dry-run runs; the hub always preflights first and shows
+	// what would move before anything does. The report carries counts and a
+	// digest, never a note name (the Brain's privacy boundary).
+	BrainImport func(ctx context.Context, source, into string, dryRun bool) (brain.TransferReport, error)
+
 	ProjectList func() ([]projects.Project, error)
 	// ProjectAdd returns the deploy key a failed add left the guest holding,
 	// when there is one (ADR-0018). The command surface prints that key; the
