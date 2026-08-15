@@ -99,6 +99,13 @@ type Deps struct {
 	BrainStatus func(context.Context) (brain.StatusReport, error)
 	BrainInit   func(context.Context) error
 
+	// BrainImport is `brain import`: a host directory carried into the vault
+	// through the verified one-shot transport. dryRun is the same preflight
+	// the command's --dry-run runs; the hub always preflights first and shows
+	// what would move before anything does. The report carries counts and a
+	// digest, never a note name (the Brain's privacy boundary).
+	BrainImport func(ctx context.Context, source, into string, dryRun bool) (brain.TransferReport, error)
+
 	ProjectList func() ([]projects.Project, error)
 	// ProjectAdd returns the deploy key a failed add left the guest holding,
 	// when there is one (ADR-0018). The command surface prints that key; the
@@ -112,8 +119,27 @@ type Deps struct {
 	// where a broken one is noticed, and reading why had meant leaving it.
 	ProjectShow func(ctx context.Context, id string) (projects.ShowReport, error)
 
+	// The MCP boundary (ADR-0004), as the commands see it. MCPStatus proves
+	// and reports; MCPInstall provisions; MCPLoginSpec is the interactive
+	// OAuth session for one policy service, and MCPActivate is what the login
+	// command runs when that session ends — enabling the broker once every
+	// service holds a private session. Torio sees no credential on any of
+	// these paths.
+	MCPStatus    func(context.Context) (lima.MCPBrokerReport, error)
+	MCPInstall   func(context.Context) (lima.MCPBrokerInstallReport, error)
+	MCPLoginSpec func(service string) (execx.InteractiveCommand, error)
+	MCPActivate  func(context.Context) (lima.MCPBrokerActivationReport, error)
+
 	// Poll is the cross-box status poll the dashboard renders.
 	Poll func(context.Context) (status.Report, error)
+
+	// StatusSetup is the recipe that puts the ambient status line on one
+	// surface — what `status setup <surface>` prints. The hub shows it and
+	// writes nothing, the same line the command holds about a dotfile that is
+	// the operator's. StatusSurfaces is the command's own list of surfaces, in
+	// its order, so the two pickers cannot disagree about what exists.
+	StatusSetup    func(surface string) (string, error)
+	StatusSurfaces []string
 
 	// Backends is every backend this build can bind, for the rebind chooser
 	// (ADR-0021). Rebind re-runs the resolution dispatch ran for this
@@ -136,6 +162,11 @@ type Deps struct {
 	LoginSpec func() (execx.InteractiveCommand, error)
 	AgentSpec func(ctx context.Context, id string) (execx.InteractiveCommand, error)
 	ShellSpec func(ctx context.Context, id string) (execx.InteractiveCommand, error)
+
+	// VMShellSpec is the login identity's own shell inside the bound box: what
+	// `torio vm shell` opens. It takes nothing, because there is no
+	// caller-shaped value in that session at all.
+	VMShellSpec func() (execx.InteractiveCommand, error)
 
 	// ProjectMaterialize makes the checkout a registered project describes, on
 	// the guest this hub is bound to (ADR-0024). It is the one-argument `add`:

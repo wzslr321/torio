@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
 	"github.com/wzslr321/torio/internal/redact"
 	"github.com/wzslr321/torio/internal/status"
@@ -29,6 +30,14 @@ type dashScreen struct {
 	cursor int
 	// confirmStop is the guard in front of stopping this box.
 	confirmStop bool
+
+	// The status-line panel: first the surface picker, then the recipe
+	// `status setup` prints for the surface picked. The hub shows the text and
+	// writes nothing — the dotfile it belongs in is the operator's.
+	recipePick    bool
+	recipeCursor  int
+	recipeSurface string
+	recipe        string
 }
 
 func (s *dashScreen) load(d Deps) tea.Cmd {
@@ -71,13 +80,60 @@ func (s *dashScreen) update(r *root, msg tea.Msg) tea.Cmd {
 			}
 			return nil
 		}
+		if s.recipe != "" {
+			if msg.String() == "esc" {
+				s.recipe, s.recipeSurface = "", ""
+			}
+			return nil
+		}
+		if s.recipePick {
+			switch msg.String() {
+			case "esc":
+				s.recipePick = false
+			case "up", "k":
+				if s.recipeCursor > 0 {
+					s.recipeCursor--
+				}
+			case "down", "j":
+				if s.recipeCursor < len(r.deps.StatusSurfaces)-1 {
+					s.recipeCursor++
+				}
+			case "enter":
+				s.recipePick = false
+				surface := r.deps.StatusSurfaces[s.recipeCursor]
+				// Synchronous on purpose: the recipe is composed text, not a
+				// probe, so there is nothing to wait on and no spinner to hold.
+				text, err := r.deps.StatusSetup(surface)
+				if err != nil {
+					r.errText = redact.String(err.Error())
+					return nil
+				}
+				s.recipeSurface, s.recipe = surface, text
+			}
+			return nil
+		}
 		switch msg.String() {
+		case "t":
+			// The recipe that puts the ambient status line on a surface, shown
+			// and never written: the dotfile it belongs in is the operator's.
+			if r.deps.StatusSetup != nil && len(r.deps.StatusSurfaces) > 0 {
+				s.recipePick = true
+				s.recipeCursor = 0
+			}
 		case "x":
 			// Only a running box has anything to stop, and stopping one takes
 			// the agent sessions it is carrying with it, so it is asked for
 			// rather than done on a keypress.
 			if r.deps.VMStop != nil && r.facts.Box == lima.StateRunning {
 				s.confirmStop = true
+			}
+		case "s":
+			// The login identity's own shell inside the bound box, the same
+			// session `torio vm shell` opens. Only a running box has one.
+			if r.deps.VMShellSpec != nil && r.facts.Box == lima.StateRunning {
+				return r.handoff("shell into "+r.deps.Instance, func(context.Context) (execx.InteractiveCommand, error) {
+					return r.deps.VMShellSpec()
+				})
 			}
 		case "up", "k":
 			if s.cursor > 0 {
@@ -96,13 +152,50 @@ func (s *dashScreen) keys(r *root) string {
 	if s.confirmStop {
 		return "y stop · n keep"
 	}
-	if r.deps.VMStop != nil && r.facts.Box == lima.StateRunning {
-		return "↑/↓ box · w wizard · x stop"
+	if s.recipe != "" {
+		return "esc close"
 	}
-	return "↑/↓ box · w wizard"
+	if s.recipePick {
+		return "↑/↓ pick · enter show · esc close"
+	}
+	parts := []string{"↑/↓ box", "w wizard"}
+	if r.facts.Box == lima.StateRunning {
+		if r.deps.VMShellSpec != nil {
+			parts = append(parts, "s shell")
+		}
+		if r.deps.VMStop != nil {
+			parts = append(parts, "x stop")
+		}
+	}
+	if r.deps.StatusSetup != nil && len(r.deps.StatusSurfaces) > 0 {
+		parts = append(parts, "t status line")
+	}
+	return strings.Join(parts, " · ")
 }
 
 func (s *dashScreen) view(r *root, w int) string {
+	if s.recipe != "" {
+		// The recipe body is rendered unstyled so a terminal selection of it
+		// picks up no decoration; its own comment lines name the file it
+		// belongs in and the command that reloads it.
+		return styStrong.Render("Status line on "+s.recipeSurface) + "  " +
+			styMuted.Render("same as: torio status setup "+s.recipeSurface) +
+			"\n\n" + s.recipe
+	}
+	if s.recipePick {
+		var b strings.Builder
+		b.WriteString(styStrong.Render("Put the status line on a surface") + "\n")
+		b.WriteString(styMuted.Render("The recipe is shown, never written; the dotfile is yours.") + "\n\n")
+		for i, surface := range r.deps.StatusSurfaces {
+			if i == s.recipeCursor {
+				b.WriteString(styWorking.Render("▸ ") + styText.Render(surface) + "\n")
+				continue
+			}
+			b.WriteString("  " + styText.Render(surface) + "\n")
+		}
+		return strings.TrimRight(b.String(), "\n")
+	}
+
 	var b strings.Builder
 
 	if banner := attentionBanner(s.report); banner != "" {

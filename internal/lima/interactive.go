@@ -259,6 +259,49 @@ func ProjectEnterSpec(workspaceRoot, projectPath string) (execx.InteractiveComma
 	}, nil
 }
 
+// vmShellOp names the box-shell operation in errors.
+const vmShellOp = "vm_shell"
+
+// VMShellSpec builds an interactive SSH command that opens the Lima login
+// identity's own shell inside the box.
+//
+// There is no remote command: sshd runs the login shell, which is what `vm
+// ssh` cannot give (its argv is a command to run, typed at a shell the
+// operator already has). No caller-shaped value appears anywhere in the argv,
+// so no root-owned guest helper is needed — a helper exists to stop a
+// host-composed value from becoming a remote command, and here there is none.
+//
+// The transport is the no-agent shape: no forwarding, no multiplexing, so a
+// box shell cannot ride or become a push-capable connection. The login
+// identity's own sudo is untouched; this opens nothing the operator's
+// `limactl shell` does not already open.
+func VMShellSpec() (execx.InteractiveCommand, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return execx.InteractiveCommand{}, &Error{Op: vmShellOp, Kind: KindNotFound, Err: err}
+	}
+	sshConfig := filepath.Join(home, ".lima", InstanceName, "ssh.config")
+	if _, statErr := os.Stat(sshConfig); statErr != nil {
+		return execx.InteractiveCommand{}, &Error{
+			Op:   vmShellOp,
+			Kind: KindNotFound,
+			Err:  fmt.Errorf("no lima ssh config at %s; run `torio vm start` first", sshConfig),
+		}
+	}
+	return execx.InteractiveCommand{
+		Name: "ssh",
+		Args: []string{
+			"-F", sshConfig,
+			"-o", "ControlMaster=no",
+			"-o", "ControlPath=none",
+			"-o", "ForwardAgent=no",
+			"-a",
+			"-t",
+			sshHostAlias(),
+		},
+	}, nil
+}
+
 // backendLoginOp names the login-session operation in errors.
 const backendLoginOp = "backend_login"
 

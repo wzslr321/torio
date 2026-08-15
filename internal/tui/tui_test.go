@@ -1612,3 +1612,372 @@ func TestProjectsOffersNoDetailWithoutTheSeam(t *testing.T) {
 		t.Errorf("footer = %q, want no detail key", r.projects.keys(r))
 	}
 }
+
+// The box itself is a place an operator sometimes has to stand — reading logs,
+// checking a unit — and the hub sent them away to do it. `s` on the dashboard
+// opens the login identity's shell inside the bound box, the same session
+// `torio vm shell` opens.
+func TestDashboardOpensAShellIntoTheBox(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	opened := false
+	d.VMShellSpec = func() (execx.InteractiveCommand, error) {
+		opened = true
+		return execx.InteractiveCommand{Name: "ssh"}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenDashboard)
+
+	_, cmd := r.Update(key("s"))
+	if cmd == nil {
+		t.Fatal("s produced no work")
+	}
+	msg := cmd()
+	spec, ok := msg.(specMsg)
+	if !ok {
+		t.Fatalf("s produced %T, want a resolved session", msg)
+	}
+	if spec.err != nil {
+		t.Fatalf("resolving the shell failed: %v", spec.err)
+	}
+	if !opened {
+		t.Error("the shell seam was never asked")
+	}
+	if !strings.Contains(r.dash.keys(r), "s shell") {
+		t.Errorf("footer = %q, want the shell key offered", r.dash.keys(r))
+	}
+}
+
+// A stopped box has no shell to open, and a build without the seam has no key.
+func TestDashboardOffersNoShellIntoAStoppedBox(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateStopped}
+	d := f.deps()
+	d.VMShellSpec = func() (execx.InteractiveCommand, error) {
+		t.Fatal("a stopped box was asked for a shell")
+		return execx.InteractiveCommand{}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenDashboard)
+
+	_, cmd := r.Update(key("s"))
+	if cmd != nil {
+		t.Fatal("s produced work on a stopped box")
+	}
+	if strings.Contains(r.dash.keys(r), "s shell") {
+		t.Errorf("footer = %q, want no shell key", r.dash.keys(r))
+	}
+}
+
+// The ambient status line had a printing command and no place in the hub, so
+// the surface that shows cross-box status could not say how to put that status
+// on a tmux bar or a zsh prompt. `t` on the dashboard picks a surface and shows
+// the same recipe `status setup` prints, naming the file it belongs in; the hub
+// still writes nothing.
+func TestDashboardShowsTheStatusLineRecipe(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.StatusSurfaces = []string{"tmux", "zsh"}
+	d.StatusSetup = func(surface string) (string, error) {
+		if surface != "zsh" {
+			t.Fatalf("surface = %q, want zsh", surface)
+		}
+		return "# Torio ambient status. Add to ~/.zshrc, then: exec zsh\nadd-zsh-hook precmd torio_status_prompt\n", nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenDashboard)
+
+	if !strings.Contains(r.dash.keys(r), "t status line") {
+		t.Fatalf("footer = %q, want the recipe key offered", r.dash.keys(r))
+	}
+	press(t, r, "t")
+	if view := r.View(); !strings.Contains(view, "tmux") || !strings.Contains(view, "zsh") {
+		t.Fatalf("the surface picker does not offer both surfaces:\n%s", view)
+	}
+	press(t, r, "j")
+	press(t, r, "enter")
+	view := r.View()
+	if !strings.Contains(view, "add-zsh-hook precmd torio_status_prompt") {
+		t.Errorf("the recipe is not on screen:\n%s", view)
+	}
+	if !strings.Contains(view, "torio status setup zsh") {
+		t.Errorf("the panel does not name the command that prints the recipe cleanly:\n%s", view)
+	}
+	press(t, r, "esc")
+	if view := r.View(); strings.Contains(view, "add-zsh-hook") {
+		t.Error("esc did not close the recipe panel")
+	}
+}
+
+// A build without the seam offers no key for it.
+func TestDashboardOffersNoStatusLineRecipeWithoutTheSeam(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	r := settled(t, f)
+	r.switchTo(screenDashboard)
+
+	press(t, r, "t")
+
+	if strings.Contains(r.dash.keys(r), "t status line") {
+		t.Errorf("footer = %q, want no recipe key", r.dash.keys(r))
+	}
+}
+
+// Importing a vault was the one Brain operation with no hub answer. `m` opens
+// a form for the host directory and an optional contained subtree, runs the
+// preflight first — the same `--dry-run` the command offers — and shows what
+// would move before anything does; the second enter is the import.
+func TestBrainTabImportsAVaultThroughItsPreflight(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	var dryRuns []bool
+	d.BrainImport = func(_ context.Context, source, into string, dryRun bool) (brain.TransferReport, error) {
+		if source != "/tmp/notes" || into != "inbox" {
+			t.Fatalf("source = %q, into = %q", source, into)
+		}
+		dryRuns = append(dryRuns, dryRun)
+		return brain.TransferReport{DryRun: dryRun, Files: 3, Markdown: 2, Attachments: 1, Bytes: 42}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenBrain)
+	drain(t, r, r.brain.load(d))
+
+	if !strings.Contains(r.brain.keys(r), "m import") {
+		t.Fatalf("footer = %q, want the import key offered", r.brain.keys(r))
+	}
+	press(t, r, "m")
+	for _, ch := range "/tmp/notes" {
+		press(t, r, string(ch))
+	}
+	press(t, r, "tab")
+	for _, ch := range "inbox" {
+		press(t, r, string(ch))
+	}
+	press(t, r, "enter")
+
+	if len(dryRuns) != 1 || !dryRuns[0] {
+		t.Fatalf("first enter ran %v, want exactly one preflight", dryRuns)
+	}
+	view := r.View()
+	if !strings.Contains(view, "3 file") {
+		t.Errorf("the preflight's counts are not on screen:\n%s", view)
+	}
+	if !strings.Contains(view, "enter import") {
+		t.Errorf("the preflight does not offer the import:\n%s", view)
+	}
+
+	press(t, r, "enter")
+	if len(dryRuns) != 2 || dryRuns[1] {
+		t.Fatalf("second enter ran %v, want the real import after the preflight", dryRuns)
+	}
+	if !strings.Contains(r.note, "finished") {
+		t.Errorf("note = %q, want the import's outcome", r.note)
+	}
+}
+
+// Esc after the preflight walks away without importing; nothing has moved.
+func TestBrainImportPreflightCanBeDeclined(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	imports := 0
+	d.BrainImport = func(_ context.Context, _, _ string, dryRun bool) (brain.TransferReport, error) {
+		if !dryRun {
+			imports++
+		}
+		return brain.TransferReport{DryRun: dryRun, Files: 1}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenBrain)
+	drain(t, r, r.brain.load(d))
+
+	press(t, r, "m")
+	for _, ch := range "/tmp/n" {
+		press(t, r, string(ch))
+	}
+	press(t, r, "enter")
+	press(t, r, "esc")
+
+	if imports != 0 {
+		t.Fatalf("declining the preflight still imported %d time(s)", imports)
+	}
+	if view := r.View(); strings.Contains(view, "enter import") {
+		t.Errorf("the preflight panel survived esc:\n%s", view)
+	}
+}
+
+// A build without the seam offers no key.
+func TestBrainTabOffersNoImportWithoutTheSeam(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.BrainImport = nil
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenBrain)
+
+	press(t, r, "m")
+
+	if strings.Contains(r.brain.keys(r), "m import") {
+		t.Errorf("footer = %q, want no import key", r.brain.keys(r))
+	}
+}
+
+// The MCP boundary had three commands and no screen, which sent the operator
+// away for provisioning, for login, and even for reading whether the boundary
+// holds. The sixth tab is `mcp status` rendered: the checks, the identity
+// separation they establish, and the grant.
+func TestMCPTabProvesTheBoundary(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.MCPStatus = func(context.Context) (lima.MCPBrokerReport, error) {
+		return lima.MCPBrokerReport{
+			Instance:  "torio",
+			AgentUser: "hermes",
+			Checks:    []lima.CheckResult{{Name: "broker_user", OK: true, Detail: "present"}},
+			Policy: lima.PolicyGrant{Digest: "abc123", Services: []lima.PolicyService{
+				{Name: "linear", UpstreamEndpoint: "https://mcp.linear.app/sse", Tools: 3, WriteTools: 1},
+			}},
+		}, nil
+	}
+	d.MCPInstall = func(context.Context) (lima.MCPBrokerInstallReport, error) {
+		return lima.MCPBrokerInstallReport{}, nil
+	}
+	d.MCPLoginSpec = func(string) (execx.InteractiveCommand, error) {
+		return execx.InteractiveCommand{Name: "ssh"}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenMCP)
+	drain(t, r, r.mcp.load(d))
+
+	view := r.View()
+	for _, want := range []string{"broker_user", "linear", "3 tool(s)", "abc123"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view lacks %q:\n%s", want, view)
+		}
+	}
+	if !strings.Contains(r.mcp.keys(r), "i install") || !strings.Contains(r.mcp.keys(r), "l login") {
+		t.Errorf("footer = %q, want install and login offered", r.mcp.keys(r))
+	}
+}
+
+// `6` reaches the tab like any other number key.
+func TestNumberSixSwitchesToTheMCPTab(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.MCPStatus = func(context.Context) (lima.MCPBrokerReport, error) {
+		return lima.MCPBrokerReport{}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+
+	press(t, r, "6")
+
+	if r.active != screenMCP {
+		t.Fatalf("active screen = %v, want the MCP tab", r.active)
+	}
+}
+
+// `i` provisions the boundary, and the note carries the one thing left to do
+// when the backend only just joined the client group: a running process does
+// not gain a group under itself.
+func TestMCPTabInstallReportsTheRestart(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.MCPStatus = func(context.Context) (lima.MCPBrokerReport, error) {
+		return lima.MCPBrokerReport{}, errors.New("never provisioned")
+	}
+	d.MCPInstall = func(context.Context) (lima.MCPBrokerInstallReport, error) {
+		return lima.MCPBrokerInstallReport{Changed: true, RestartRequired: true}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenMCP)
+	drain(t, r, r.mcp.load(d))
+
+	press(t, r, "i")
+
+	if !strings.Contains(r.note, "restart") {
+		t.Errorf("note = %q, want the restart named", r.note)
+	}
+}
+
+// `l` picks a service from the grant — the same names `mcp login <service>`
+// takes — opens the login session, and on its end runs the activation the
+// command runs, so the broker starts when the last service is signed in.
+func TestMCPTabLoginPicksAServiceAndActivates(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.MCPStatus = func(context.Context) (lima.MCPBrokerReport, error) {
+		return lima.MCPBrokerReport{Policy: lima.PolicyGrant{Services: []lima.PolicyService{
+			{Name: "atlassian"}, {Name: "linear"},
+		}}}, nil
+	}
+	handed := ""
+	d.MCPLoginSpec = func(service string) (execx.InteractiveCommand, error) {
+		handed = service
+		return execx.InteractiveCommand{Name: "ssh"}, nil
+	}
+	activated := 0
+	d.MCPActivate = func(context.Context) (lima.MCPBrokerActivationReport, error) {
+		activated++
+		return lima.MCPBrokerActivationReport{Activated: true}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenMCP)
+	drain(t, r, r.mcp.load(d))
+
+	press(t, r, "l")
+	if view := r.View(); !strings.Contains(view, "atlassian") || !strings.Contains(view, "linear") {
+		t.Fatalf("the picker does not offer the grant's services:\n%s", view)
+	}
+	press(t, r, "j")
+	_, cmd := r.Update(key("enter"))
+	if cmd == nil {
+		t.Fatal("enter produced no session")
+	}
+	msg := cmd()
+	if spec, ok := msg.(specMsg); !ok || spec.err != nil {
+		t.Fatalf("enter produced %T (%v), want a resolved session", msg, msg)
+	}
+	if handed != "linear" {
+		t.Fatalf("session opened for %q, want the service the operator picked", handed)
+	}
+
+	drain(t, r, func() tea.Msg { return execDoneMsg{} })
+
+	if activated != 1 {
+		t.Fatalf("activation ran %d times, want once after the session", activated)
+	}
+	if !strings.Contains(r.note, "broker") {
+		t.Errorf("note = %q, want the activation outcome", r.note)
+	}
+}
+
+// A login session that ends non-zero does not activate: the credential was not
+// stored, and activation would report a half-truth over the real failure.
+func TestMCPTabDoesNotActivateAfterAFailedLogin(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.MCPStatus = func(context.Context) (lima.MCPBrokerReport, error) {
+		return lima.MCPBrokerReport{Policy: lima.PolicyGrant{Services: []lima.PolicyService{{Name: "linear"}}}}, nil
+	}
+	d.MCPLoginSpec = func(string) (execx.InteractiveCommand, error) {
+		return execx.InteractiveCommand{Name: "ssh"}, nil
+	}
+	d.MCPActivate = func(context.Context) (lima.MCPBrokerActivationReport, error) {
+		t.Fatal("a failed session still ran activation")
+		return lima.MCPBrokerActivationReport{}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenMCP)
+	drain(t, r, r.mcp.load(d))
+
+	press(t, r, "l")
+	_, _ = r.Update(key("enter"))
+	drain(t, r, func() tea.Msg { return execDoneMsg{err: errors.New("exit status 1")} })
+}

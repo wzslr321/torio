@@ -362,3 +362,50 @@ func TestOperatorShellSpecAcceptsWellFormedProjectIDs(t *testing.T) {
 		}
 	}
 }
+
+// TestVMShellSpecOpensALoginShellWithoutForwardingOrACommand pins the shape of
+// an operator shell into the box itself: the no-agent transport, a TTY, and no
+// remote command at all, so sshd opens the login identity's own shell. There is
+// no caller-shaped value anywhere in the argv, which is why no guest helper is
+// needed — a helper exists to stop a host-composed value from becoming a
+// remote command, and here there is none.
+func TestVMShellSpecOpensALoginShellWithoutForwardingOrACommand(t *testing.T) {
+	home := limaSSHConfigHost(t)
+
+	spec, err := VMShellSpec()
+	if err != nil {
+		t.Fatalf("VMShellSpec: unexpected error: %v", err)
+	}
+	if spec.Name != "ssh" {
+		t.Errorf("Name = %q, want %q", spec.Name, "ssh")
+	}
+	want := []string{
+		"-F", filepath.Join(home, ".lima", InstanceName, "ssh.config"),
+		"-o", "ControlMaster=no",
+		"-o", "ControlPath=none",
+		"-o", "ForwardAgent=no",
+		"-a",
+		"-t",
+		"lima-" + InstanceName,
+	}
+	if !equalArgs(spec.Args, want) {
+		t.Fatalf("argv = %v, want %v", spec.Args, want)
+	}
+	if spec.Env != nil {
+		t.Errorf("Env = %v, want nil so the operator's terminal and locale pass through", spec.Env)
+	}
+}
+
+// TestVMShellSpecFailsClosedWithoutTheBox names the remedy: a box that was
+// never started has no ssh config, and the answer is the command that makes one.
+func TestVMShellSpecFailsClosedWithoutTheBox(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	_, err := VMShellSpec()
+	if err == nil {
+		t.Fatal("VMShellSpec opened a session with no lima ssh config")
+	}
+	if !strings.Contains(err.Error(), "torio vm start") {
+		t.Errorf("error = %v, want it to name `torio vm start`", err)
+	}
+}

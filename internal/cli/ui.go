@@ -10,6 +10,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/wzslr321/torio/internal/backend"
+	"github.com/wzslr321/torio/internal/brain"
 	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
@@ -22,9 +23,9 @@ func newUICmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "ui",
 		Short: "Open the interactive hub",
-		Long: "Open the setup, status, project, Brain, and service hub. Bare `torio` opens " +
-			"the same hub on a terminal. The hub emits no JSON; use the individual commands " +
-			"for machine-readable output.",
+		Long: "Open the setup, status, project, Brain, service, and MCP hub. Bare `torio` " +
+			"opens the same hub on a terminal. The hub emits no JSON; use the individual " +
+			"commands for machine-readable output.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if a.jsonOut {
@@ -140,6 +141,9 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 		},
 		VMStart: adapter.Start,
 		VMStop:  adapter.Stop,
+		// The same session `vm shell` opens, from the same seam, so the two
+		// surfaces cannot drift about what a box shell is.
+		VMShellSpec: a.newVMShellSpec,
 
 		Bootstrap: func(ctx context.Context, verifyOnly bool) (lima.BootstrapReport, error) {
 			o := opts
@@ -177,6 +181,9 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 		BrainInit: func(ctx context.Context) error {
 			_, err := brainSvc.Init(ctx)
 			return err
+		},
+		BrainImport: func(ctx context.Context, source, into string, dryRun bool) (brain.TransferReport, error) {
+			return brainSvc.Import(ctx, brain.ImportOptions{Source: source, Into: into, DryRun: dryRun})
 		},
 
 		ProjectList: projectSvc.List,
@@ -234,6 +241,26 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 		Poll: func(ctx context.Context) (status.Report, error) {
 			return a.newPoller().Poll(ctx)
 		},
+
+		// The MCP seams are the commands' own calls on the commands' own
+		// adapter functions, credential-free on every path (ADR-0004).
+		MCPStatus: func(ctx context.Context) (lima.MCPBrokerReport, error) {
+			return a.verifyMCP(ctx, adapter, identity)
+		},
+		MCPInstall: func(ctx context.Context) (lima.MCPBrokerInstallReport, error) {
+			return a.installMCP(ctx, adapter, identity)
+		},
+		MCPLoginSpec: a.newMCPLoginSpec,
+		MCPActivate: func(ctx context.Context) (lima.MCPBrokerActivationReport, error) {
+			return a.activateMCP(ctx, adapter, identity)
+		},
+
+		// The same composed text `status setup <surface>` prints, from the
+		// same functions, so the two surfaces cannot show different recipes.
+		StatusSetup: func(surface string) (string, error) {
+			return statusSetupSnippet(surface, shellQuote(a.executable()))
+		},
+		StatusSurfaces: statusSurfaces,
 
 		Backends: backend.Names(),
 		Rebind:   a.rebindDeps,
