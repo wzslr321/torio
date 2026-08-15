@@ -730,3 +730,46 @@ func TestVMUnknownSubcommandIsUsageWithJSONEnvelope(t *testing.T) {
 		t.Errorf("ok = %v, want false", env["ok"])
 	}
 }
+
+// `vm shell` is the box itself as a place to stand: an interactive login shell,
+// which `vm ssh` deliberately is not (its argv is a command to run). The spec
+// comes from a seam, the runner is handed the terminal, and the session is
+// bound by the command's own context rather than the operation timeout —
+// Torio does not decide how long an operator stays in a shell.
+func TestVMShellRunsTheInteractiveSpec(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var stdout, stderr bytes.Buffer
+	runner := &fakeInteractiveRunner{}
+	want := execx.InteractiveCommand{Name: "ssh", Args: []string{"-t", "lima-torio"}}
+	a := &app{
+		stdout: &stdout, stderr: &stderr, build: testBuild(),
+		newLima:        func() *lima.Adapter { return lima.New(&fakeLimaRunner{}) },
+		newVMShellSpec: func() (execx.InteractiveCommand, error) { return want, nil },
+		newInteractive: func() execx.InteractiveRunner { return runner },
+	}
+	if code := runWithApp(context.Background(), a, []string{"vm", "shell"}); code != int(ExitOK) {
+		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+	}
+	if len(runner.cmds) != 1 || runner.cmds[0].Name != want.Name {
+		t.Fatalf("interactive commands = %+v, want %+v", runner.cmds, want)
+	}
+}
+
+// A shell has no JSON to emit; asking for one is a usage error before any
+// session opens.
+func TestVMShellRefusesJSON(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var stdout, stderr bytes.Buffer
+	runner := &fakeInteractiveRunner{}
+	a := &app{
+		stdout: &stdout, stderr: &stderr, build: testBuild(),
+		newLima:        func() *lima.Adapter { return lima.New(&fakeLimaRunner{}) },
+		newInteractive: func() execx.InteractiveRunner { return runner },
+	}
+	if code := runWithApp(context.Background(), a, []string{"vm", "shell", "--json"}); code != int(ExitUsage) {
+		t.Fatalf("exit = %d, want usage", code)
+	}
+	if len(runner.cmds) != 0 {
+		t.Fatalf("a refused invocation still opened a session: %+v", runner.cmds)
+	}
+}

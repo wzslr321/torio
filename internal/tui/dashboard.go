@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
 	"github.com/wzslr321/torio/internal/redact"
 	"github.com/wzslr321/torio/internal/status"
@@ -79,6 +80,14 @@ func (s *dashScreen) update(r *root, msg tea.Msg) tea.Cmd {
 			if r.deps.VMStop != nil && r.facts.Box == lima.StateRunning {
 				s.confirmStop = true
 			}
+		case "s":
+			// The login identity's own shell inside the bound box, the same
+			// session `torio vm shell` opens. Only a running box has one.
+			if r.deps.VMShellSpec != nil && r.facts.Box == lima.StateRunning {
+				return r.handoff("shell into "+r.deps.Instance, func(context.Context) (execx.InteractiveCommand, error) {
+					return r.deps.VMShellSpec()
+				})
+			}
 		case "up", "k":
 			if s.cursor > 0 {
 				s.cursor--
@@ -96,10 +105,16 @@ func (s *dashScreen) keys(r *root) string {
 	if s.confirmStop {
 		return "y stop · n keep"
 	}
-	if r.deps.VMStop != nil && r.facts.Box == lima.StateRunning {
-		return "↑/↓ box · w wizard · x stop"
+	parts := []string{"↑/↓ box", "w wizard"}
+	if r.facts.Box == lima.StateRunning {
+		if r.deps.VMShellSpec != nil {
+			parts = append(parts, "s shell")
+		}
+		if r.deps.VMStop != nil {
+			parts = append(parts, "x stop")
+		}
 	}
-	return "↑/↓ box · w wizard"
+	return strings.Join(parts, " · ")
 }
 
 func (s *dashScreen) view(r *root, w int) string {
