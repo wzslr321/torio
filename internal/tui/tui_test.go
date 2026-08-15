@@ -1669,3 +1669,57 @@ func TestDashboardOffersNoShellIntoAStoppedBox(t *testing.T) {
 		t.Errorf("footer = %q, want no shell key", r.dash.keys(r))
 	}
 }
+
+// The ambient status line had a printing command and no place in the hub, so
+// the surface that shows cross-box status could not say how to put that status
+// on a tmux bar or a zsh prompt. `t` on the dashboard picks a surface and shows
+// the same recipe `status setup` prints, naming the file it belongs in; the hub
+// still writes nothing.
+func TestDashboardShowsTheStatusLineRecipe(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	d := f.deps()
+	d.StatusSurfaces = []string{"tmux", "zsh"}
+	d.StatusSetup = func(surface string) (string, error) {
+		if surface != "zsh" {
+			t.Fatalf("surface = %q, want zsh", surface)
+		}
+		return "# Torio ambient status. Add to ~/.zshrc, then: exec zsh\nadd-zsh-hook precmd torio_status_prompt\n", nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenDashboard)
+
+	if !strings.Contains(r.dash.keys(r), "t status line") {
+		t.Fatalf("footer = %q, want the recipe key offered", r.dash.keys(r))
+	}
+	press(t, r, "t")
+	if view := r.View(); !strings.Contains(view, "tmux") || !strings.Contains(view, "zsh") {
+		t.Fatalf("the surface picker does not offer both surfaces:\n%s", view)
+	}
+	press(t, r, "j")
+	press(t, r, "enter")
+	view := r.View()
+	if !strings.Contains(view, "add-zsh-hook precmd torio_status_prompt") {
+		t.Errorf("the recipe is not on screen:\n%s", view)
+	}
+	if !strings.Contains(view, "torio status setup zsh") {
+		t.Errorf("the panel does not name the command that prints the recipe cleanly:\n%s", view)
+	}
+	press(t, r, "esc")
+	if view := r.View(); strings.Contains(view, "add-zsh-hook") {
+		t.Error("esc did not close the recipe panel")
+	}
+}
+
+// A build without the seam offers no key for it.
+func TestDashboardOffersNoStatusLineRecipeWithoutTheSeam(t *testing.T) {
+	f := &fakeDeps{boxState: lima.StateRunning}
+	r := settled(t, f)
+	r.switchTo(screenDashboard)
+
+	press(t, r, "t")
+
+	if strings.Contains(r.dash.keys(r), "t status line") {
+		t.Errorf("footer = %q, want no recipe key", r.dash.keys(r))
+	}
+}

@@ -115,6 +115,14 @@ type Deps struct {
 	// Poll is the cross-box status poll the dashboard renders.
 	Poll func(context.Context) (status.Report, error)
 
+	// StatusSetup is the recipe that puts the ambient status line on one
+	// surface — what `status setup <surface>` prints. The hub shows it and
+	// writes nothing, the same line the command holds about a dotfile that is
+	// the operator's. StatusSurfaces is the command's own list of surfaces, in
+	// its order, so the two pickers cannot disagree about what exists.
+	StatusSetup    func(surface string) (string, error)
+	StatusSurfaces []string
+
 	// Backends is every backend this build can bind, for the rebind chooser
 	// (ADR-0021). Rebind re-runs the resolution dispatch ran for this
 	// invocation and returns the seams of the new binding; the hub swaps

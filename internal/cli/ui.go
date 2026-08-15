@@ -238,6 +238,13 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 			return a.newPoller().Poll(ctx)
 		},
 
+		// The same composed text `status setup <surface>` prints, from the
+		// same functions, so the two surfaces cannot show different recipes.
+		StatusSetup: func(surface string) (string, error) {
+			return statusSetupSnippet(surface, shellQuote(a.executable()))
+		},
+		StatusSurfaces: statusSurfaces,
+
 		Backends: backend.Names(),
 		Rebind:   a.rebindDeps,
 	}

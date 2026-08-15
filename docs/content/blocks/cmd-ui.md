@@ -25,8 +25,9 @@ quits.
 - The project screen opens a session on Enter, an operator shell on `s`, a
   detail panel on `v`, and the remote correction on `e`. The dashboard stops the
   bound box on `x`, and asks first, and opens a shell inside it on `s`, which is
-  `vm shell`. The Brain tab reconciles this box's replica with the host vault
-  on `y`.
+  `vm shell`. `t` on the dashboard shows the status-line recipe for a tmux bar
+  or a zsh prompt — the text `status setup` prints, shown and never written.
+  The Brain tab reconciles this box's replica with the host vault on `y`.
 - `--verbose` has no effect while the hub owns the screen. Run the equivalent
   command for diagnostics.
 - It opens on the instance and backend this invocation resolved. `b` rebinds
