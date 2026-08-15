@@ -149,7 +149,9 @@ The hub's dashboard shows the same poll and the next setup step for the selected
 box. Press `r` to refresh it.
 
 Work happens in the checkouts: from Desktop, from your own editor, or from
-`torio project enter <id>`, which the hub's project screen also opens. Edit,
+`torio project enter <id>`. The hub's project screen opens the backend's own
+agent session on the selected project, the way `torio project agent <id>`
+does. Edit,
 run checks that read rather than write, review `git diff`. When you decide
 something should leave the VM:
 

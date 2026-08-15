@@ -224,8 +224,8 @@ func (s *projectsScreen) updateList(r *root, msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		if d.AgentSpec != nil {
-			return r.handoff("agent session in "+p.ID, func() (execx.InteractiveCommand, error) {
-				return d.AgentSpec(p.Path)
+			return r.handoff("agent session in "+p.ID, func(ctx context.Context) (execx.InteractiveCommand, error) {
+				return d.AgentSpec(ctx, p.ID)
 			})
 		}
 		// No session declared. When the backend runs a service instead, its
@@ -245,8 +245,8 @@ func (s *projectsScreen) updateList(r *root, msg tea.KeyMsg) tea.Cmd {
 			r.errText = "this backend opens no shell in a checkout"
 			return nil
 		}
-		return r.handoff("shell in "+p.ID, func() (execx.InteractiveCommand, error) {
-			return d.ShellSpec(p.Path)
+		return r.handoff("shell in "+p.ID, func(ctx context.Context) (execx.InteractiveCommand, error) {
+			return d.ShellSpec(ctx, p.ID)
 		})
 	}
 	return nil
@@ -269,9 +269,10 @@ func (s *projectsScreen) openConnect(r *root, p projects.Project) tea.Cmd {
 }
 
 // keys names only what the keys do on this backend. A hub bound to a backend
-// with no session must not offer "enter agent" and "s shell": both would be
-// keys that do nothing, and the footer is the one place the hub says which
-// keys are live.
+// with no session must not offer "enter agent" and "s shell", and one bound to
+// a backend that keeps no registry must not offer "u use": each would be a key
+// that does nothing, and the footer is the one place the hub says which keys
+// are live.
 func (s *projectsScreen) keys(r *root) string {
 	switch {
 	case s.adding:
@@ -280,11 +281,17 @@ func (s *projectsScreen) keys(r *root) string {
 		return "esc close"
 	case s.confirm:
 		return "y remove · n keep"
-	case r.deps.AgentSpec == nil:
-		return "a add · u use · enter open · d remove"
-	default:
-		return "a add · u use · enter agent · s shell · d remove"
 	}
+	parts := []string{"a add"}
+	if r.deps.ProjectUse != nil {
+		parts = append(parts, "u use")
+	}
+	if r.deps.AgentSpec == nil {
+		parts = append(parts, "enter open")
+	} else {
+		parts = append(parts, "enter agent", "s shell")
+	}
+	return strings.Join(append(parts, "d remove"), " · ")
 }
 
 func (s *projectsScreen) view(r *root, w int) string {

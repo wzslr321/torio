@@ -897,8 +897,12 @@ func showNextStep(report projects.ShowReport) string {
 		}
 		return "torio project enter " + report.Project.ID
 	}
-	return fmt.Sprintf("torio project add %q %s --id %s",
-		report.Project.DisplayName, report.Project.Remote, report.Project.ID)
+	// The one-argument form: `show` resolved this project from the registry, so
+	// the remote and the display name are both on record and `add` completes
+	// itself from them. Asking the operator to retype a remote Torio already
+	// holds invites a different repository under a name that already means
+	// something.
+	return "torio project add " + report.Project.ID
 }
 
 func checkoutView(c projects.CheckoutStatus) projectCheckoutData {

@@ -602,12 +602,17 @@ func shellDriftError(id string, checkout CheckoutStatus) error {
 	return sessionDriftError(shellOp, id, checkout)
 }
 
+// The remedy names the project, because the one-argument form is the one that
+// applies here: the entry is registered, so `add` completes the remote from the
+// record and materializes the checkout this guest is missing. The bare verb
+// would leave the operator to work out which of the shapes of `add` reconciles
+// a checkout rather than attaching a second repository.
 func sessionDriftError(op, id string, checkout CheckoutStatus) error {
 	return &Error{
 		Op:   op,
 		Kind: KindVerification,
-		Err: fmt.Errorf("the checkout for %q is not in a state a session can be opened in (%s); re-run `torio project add` to reconcile it",
-			id, strings.Join(checkout.issues(), ", ")),
+		Err: fmt.Errorf("the checkout for %q is not in a state a session can be opened in (%s); re-run `torio project add %s` to reconcile it",
+			id, strings.Join(checkout.issues(), ", "), id),
 	}
 }
 

@@ -544,8 +544,8 @@ func TestProjectsHandsOverToADeclaredAgentSession(t *testing.T) {
 	}
 	d := f.deps()
 	handed := ""
-	d.AgentSpec = func(path string) (execx.InteractiveCommand, error) {
-		handed = path
+	d.AgentSpec = func(_ context.Context, id string) (execx.InteractiveCommand, error) {
+		handed = id
 		return execx.InteractiveCommand{Name: "limactl", Args: []string{"shell"}}, nil
 	}
 	r := newRoot(d)
@@ -565,8 +565,8 @@ func TestProjectsHandsOverToADeclaredAgentSession(t *testing.T) {
 	if spec.err != nil {
 		t.Fatalf("resolving the session failed: %v", spec.err)
 	}
-	if handed != "/w/torio" {
-		t.Errorf("session opened in %q, want the project path", handed)
+	if handed != "torio" {
+		t.Errorf("session opened for %q, want the project the operator picked", handed)
 	}
 }
 
@@ -928,5 +928,163 @@ func TestNoSetupStepIsNamedBeforeTheGuestAnswers(t *testing.T) {
 
 	if view := r.View(); strings.Contains(view, "Bootstrap the guest") {
 		t.Errorf("a setup step was named from unproven facts:\n%s", view)
+	}
+}
+
+// The seam that opens a session is also the seam that preflights it, so a
+// checkout a session cannot be opened in comes back as the reason and the
+// remedy, on screen, and no terminal is handed over. Before this the hub
+// reached the guest helper with an unverified path and the operator was left
+// reading a bare exit status the repaint had already eaten.
+func TestProjectsReportsAFailedSessionPreflightAndOpensNothing(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
+	}
+	d := f.deps()
+	d.AgentSpec = func(context.Context, string) (execx.InteractiveCommand, error) {
+		return execx.InteractiveCommand{}, errors.New(
+			"the checkout for \"torio\" is not in a state a session can be opened in (checkout_absent); " +
+				"re-run `torio project add torio` to reconcile it")
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	_, cmd := r.Update(key("enter"))
+	if cmd == nil {
+		t.Fatal("enter produced no work")
+	}
+	msg := cmd()
+	spec, ok := msg.(specMsg)
+	if !ok {
+		t.Fatalf("enter produced %T, want a resolution result", msg)
+	}
+	if spec.err == nil {
+		t.Fatal("the refused preflight produced a session")
+	}
+	r.Update(spec)
+	if !strings.Contains(r.errText, "checkout_absent") {
+		t.Errorf("error text = %q, want it to name what drifted", r.errText)
+	}
+	if !strings.Contains(r.errText, "torio project add torio") {
+		t.Errorf("error text = %q, want it to name the remedy", r.errText)
+	}
+	if r.busy != "" {
+		t.Errorf("busy = %q, want the operation released", r.busy)
+	}
+}
+
+// The footer is the one place the hub says which keys are live, so it must not
+// name a key the backend has nothing to answer with.
+func TestProjectsFooterOmitsUseWhereThereIsNoRegistry(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
+	}
+	d := f.deps()
+	d.ProjectUse = nil
+	r := newRoot(d)
+	r.switchTo(screenProjects)
+
+	if got := r.projects.keys(r); strings.Contains(got, "u use") {
+		t.Errorf("footer = %q, want no use key on a backend that keeps no registry", got)
+	}
+}
+
+// Where the registry exists the key stays offered.
+func TestProjectsFooterKeepsUseWhereThereIsARegistry(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
+	}
+	d := f.deps()
+	d.ProjectUse = func(context.Context, string) error { return nil }
+	r := newRoot(d)
+	r.switchTo(screenProjects)
+
+	if got := r.projects.keys(r); !strings.Contains(got, "u use") {
+		t.Errorf("footer = %q, want the use key on a backend that keeps a registry", got)
+	}
+}
+
+// The tail is bounded because a session can print without limit and the hub
+// only needs the end of it: the last thing a helper said before it exited is
+// what names the reason.
+func TestSessionTailKeepsOnlyTheEnd(t *testing.T) {
+	tail := &tailBuffer{max: 8}
+
+	if _, err := tail.Write([]byte("0123456789abcdef")); err != nil {
+		t.Fatalf("writing the tail failed: %v", err)
+	}
+	if got, want := tail.String(), "89abcdef"; got != want {
+		t.Errorf("tail = %q, want the last %d bytes, %q", got, tail.max, want)
+	}
+
+	if _, err := tail.Write([]byte("XY")); err != nil {
+		t.Fatalf("writing the tail failed: %v", err)
+	}
+	if got, want := tail.String(), "abcdefXY"; got != want {
+		t.Errorf("tail = %q, want %q after the second write", got, want)
+	}
+}
+
+// A session still gets the operator's real terminal; the tail is a copy taken
+// on the way past, never a replacement for it.
+func TestSessionProcessCopiesStderrWithoutTakingIt(t *testing.T) {
+	c, tail, err := sessionProcess(context.Background(), execx.InteractiveCommand{Name: "true"})
+	if err != nil {
+		t.Fatalf("building the session process failed: %v", err)
+	}
+	if c.Stderr == nil {
+		t.Fatal("the session was given no stderr")
+	}
+	if _, err := c.Stderr.Write([]byte("torio-agent-session: project directory does not exist\n")); err != nil {
+		t.Fatalf("writing to the session stderr failed: %v", err)
+	}
+	if !strings.Contains(tail.String(), "project directory does not exist") {
+		t.Errorf("tail = %q, want it to hold what the session said", tail.String())
+	}
+}
+
+// A session that ends non-zero leaves the operator looking at a repainted
+// screen, so whatever it said on the way out has to come back with the failure.
+// Before this the hub showed the exit status alone, which named nothing.
+func TestSessionFailureShowsWhatTheSessionSaid(t *testing.T) {
+	r := newRoot((&fakeDeps{boxState: lima.StateRunning}).deps())
+	r.busy = "agent session in torio"
+
+	r.Update(execDoneMsg{
+		err:    errors.New("exit status 64"),
+		detail: "torio-agent-session: project directory does not exist",
+	})
+
+	if !strings.Contains(r.errText, "exit status 64") {
+		t.Errorf("error text = %q, want the exit status", r.errText)
+	}
+	if !strings.Contains(r.errDetail, "project directory does not exist") {
+		t.Errorf("detail = %q, want what the session said before it exited", r.errDetail)
+	}
+	if r.busy != "" {
+		t.Errorf("busy = %q, want the operation released", r.busy)
+	}
+}
+
+// A session that ended cleanly is not a failure and leaves no banner behind.
+func TestCleanSessionEndLeavesNoError(t *testing.T) {
+	r := newRoot((&fakeDeps{boxState: lima.StateRunning}).deps())
+	r.busy = "agent session in torio"
+
+	r.Update(execDoneMsg{detail: "torio: agent session in torio, running as codex."})
+
+	if r.errText != "" {
+		t.Errorf("error text = %q, want none after a clean session", r.errText)
+	}
+	if r.errDetail != "" {
+		t.Errorf("detail = %q, want none after a clean session", r.errDetail)
+	}
+	if !strings.Contains(r.note, "session ended") {
+		t.Errorf("note = %q, want it to say the session ended", r.note)
 	}
 }

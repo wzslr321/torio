@@ -424,8 +424,12 @@ func TestProjectShowHumanReportsDriftAndItsNextStep(t *testing.T) {
 		wantNext string
 	}{
 		{"dirty worktree", []string{"worktree_dirty"}, "next: torio project enter torio"},
-		{"absent checkout", []string{"checkout_absent"}, `next: torio project add "Torio" git@github.com:wzslr321/torio.git --id torio`},
-		{"hermes only", []string{"hermes_project_archived"}, `next: torio project add "Torio" git@github.com:wzslr321/torio.git --id torio`},
+		// `show` resolved this project from the registry, so the remote is on
+		// record and the one-argument form is the one that reconciles it. The
+		// three-argument form would ask the operator to retype a remote Torio
+		// already holds, and a mistyped one attaches a different repository.
+		{"absent checkout", []string{"checkout_absent"}, "next: torio project add torio"},
+		{"hermes only", []string{"hermes_project_archived"}, "next: torio project add torio"},
 		{"none", nil, "next: torio project enter torio"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1604,3 +1604,49 @@ func TestReviewContextIsNotAPrecondition(t *testing.T) {
 		}
 	}
 }
+
+// The remedy has to be a command the operator can run. `torio project add` on
+// its own is not: it needs at least an id, and the one-argument form is exactly
+// the form that materializes an already-registered project from the remote on
+// record. Naming the generic verb leaves the operator to work out which of the
+// three shapes of `add` applies to a checkout that is simply not there.
+func TestSessionDriftErrorNamesTheCommandThatFixesIt(t *testing.T) {
+	err := sessionDriftError(enterOp, "lean-triage", CheckoutStatus{})
+
+	msg := err.Error()
+	if !strings.Contains(msg, "checkout_absent") {
+		t.Errorf("message = %q, want it to name what drifted", msg)
+	}
+	if !strings.Contains(msg, "torio project add lean-triage") {
+		t.Errorf("message = %q, want the remedy to name the project", msg)
+	}
+}
+
+// The registry is shared by every instance and the checkouts are not, so a
+// project attached on one backend is registered but absent on the next one.
+// Rerunning `add` for that id is what materializes it there, and it must clone
+// rather than treat the existing record as work already done. This is the state
+// an operator reaches by switching backends and opening a project, and the one
+// the hub's own materialize path depends on.
+func TestAddMaterializesARegisteredProjectWithAbsentCheckout(t *testing.T) {
+	g := readyFake()
+	r := registryWith(testProject())
+
+	report, err := newTestManager(g, r).Add(context.Background(), addRequest())
+	if err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	if !report.Cloned || report.Adopted {
+		t.Fatalf("report = %#v, want a cloned checkout", report)
+	}
+	if !g.saw("git clone") {
+		t.Fatalf("the absent checkout was not cloned: %v", g.calls)
+	}
+	// The record already said everything the entry says, so there is nothing
+	// to write. A rewrite here would mean the shared registry is touched every
+	// time a second guest materializes a project it already holds.
+	if len(r.saved) != 0 {
+		t.Fatalf("materializing rewrote the shared registry: %#v", r.saved)
+	}
+}

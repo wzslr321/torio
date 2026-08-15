@@ -3,7 +3,11 @@ package tui
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -85,7 +89,15 @@ type specMsg struct {
 }
 
 // execDoneMsg is the operator coming back from an interactive session.
-type execDoneMsg struct{ err error }
+//
+// detail is the end of what the session wrote to standard error. The hub
+// repaints the whole screen on the way back, so a helper that refused and
+// exited has already had its reason erased by the time the operator can read
+// it; carrying the tail back is what keeps the reason on screen.
+type execDoneMsg struct {
+	err    error
+	detail string
+}
 
 // rebindMsg is a finished rebind (ADR-0021): the seams of the new binding, or
 // the error that left the old one in place.
@@ -345,16 +357,75 @@ func (r *root) rebind(name string) tea.Cmd {
 }
 
 // handoff resolves an interactive session and gives it the terminal.
-func (r *root) handoff(label string, build func() (execx.InteractiveCommand, error)) tea.Cmd {
+//
+// Resolving is bounded work like any other operation, because it is the
+// preflight the command surface runs: it reaches the guest to prove the
+// checkout is one a session can be opened in. The session itself is not bounded
+// by that context, which is why only the resolution runs under it.
+func (r *root) handoff(label string, build func(context.Context) (execx.InteractiveCommand, error)) tea.Cmd {
 	if r.busy != "" || build == nil {
 		return nil
 	}
 	r.busy = label
 	r.busyStart = time.Now()
+	r.errText = ""
+	r.errDetail = ""
+	r.note = ""
 	return func() tea.Msg {
-		spec, err := build()
+		ctx, cancel := r.opContext(true)
+		defer cancel()
+		spec, err := build(ctx)
 		return specMsg{label: label, spec: spec, err: err}
 	}
+}
+
+// sessionTailBytes is how much of a session's standard error the hub keeps.
+// It is the size of a refusal and its remedy, not of a transcript: the tail
+// exists to name why a session ended, and a session that ran and printed is
+// read on the terminal while it runs.
+const sessionTailBytes = 2048
+
+// tailBuffer keeps the last sessionTailBytes written to it and discards the
+// rest. It is written by the child's copy goroutine and read on the ui loop
+// after the child exits, so it holds a lock.
+type tailBuffer struct {
+	mu  sync.Mutex
+	max int
+	buf []byte
+}
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.buf = append(t.buf, p...)
+	if over := len(t.buf) - t.max; over > 0 {
+		t.buf = t.buf[over:]
+	}
+	return len(p), nil
+}
+
+func (t *tailBuffer) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return string(t.buf)
+}
+
+// sessionProcess builds the process one interactive session runs in, and the
+// tail that keeps the end of what it said.
+//
+// The session keeps the operator's real standard error: the tail is a copy
+// taken on the way past, so nothing the operator would have seen is withheld
+// or delayed. Only standard error is copied. Standard output is where a
+// full-screen agent draws, and holding two kilobytes of escape sequences would
+// buy nothing.
+func sessionProcess(ctx context.Context, spec execx.InteractiveCommand) (*exec.Cmd, *tailBuffer, error) {
+	c, err := execx.InteractiveProcess(ctx, spec)
+	if err != nil {
+		return nil, nil, err
+	}
+	tail := &tailBuffer{max: sessionTailBytes}
+	c.Stderr = io.MultiWriter(os.Stderr, tail)
+	return c, tail, nil
 }
 
 // execSession releases the terminal to a real session and takes it back when
@@ -362,11 +433,13 @@ func (r *root) handoff(label string, build func() (execx.InteractiveCommand, err
 // the session rather than the hub, which is the behaviour the equivalent
 // command already has.
 func execSession(ctx context.Context, spec execx.InteractiveCommand) (tea.Cmd, error) {
-	c, err := execx.InteractiveProcess(ctx, spec)
+	c, tail, err := sessionProcess(ctx, spec)
 	if err != nil {
 		return nil, err
 	}
-	return tea.ExecProcess(c, func(err error) tea.Msg { return execDoneMsg{err: err} }), nil
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return execDoneMsg{err: err, detail: tail.String()}
+	}), nil
 }
 
 func (r *root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -465,9 +538,13 @@ func (r *root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case execDoneMsg:
 		r.busy = ""
 		if msg.err != nil {
-			// A session ending non-zero is an outcome, not a hub failure: the
-			// operator saw the session's own output on the way past.
-			r.note = "session ended: " + redact.String(msg.err.Error())
+			// A session ending non-zero is an outcome, not a hub failure, but
+			// the operator cannot act on an exit status alone: the hub
+			// repainted over whatever the session said on its way out. The
+			// banner persists until it is dismissed, and carries the end of
+			// that output under it.
+			r.errText = "session ended: " + redact.String(msg.err.Error())
+			r.errDetail = strings.TrimRight(redact.String(msg.detail), "\n")
 		} else {
 			r.note = "session ended"
 		}

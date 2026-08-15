@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/tui/wizard"
 )
 
@@ -137,7 +138,11 @@ func (s *setupScreen) act(r *root) tea.Cmd {
 		})
 
 	case wizard.StepBackendLogin:
-		return r.handoff("backend login", d.LoginSpec)
+		// The login argv is the backend's own constant and reaches nothing to
+		// build, so it takes the context without using it.
+		return r.handoff("backend login", func(context.Context) (execx.InteractiveCommand, error) {
+			return d.LoginSpec()
+		})
 
 	case wizard.StepServeInstall:
 		return r.run("installing the service", true, d.ServeInstall)

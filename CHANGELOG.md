@@ -32,6 +32,26 @@
   a working-tree build can be installed at the same time; each keeps its own
   directory and its own name.
 
+### Fixed
+
+- **The hub preflights a session before it opens one.** Opening an agent session
+  or a shell from the project screen now runs the same checks
+  `torio project agent` and `torio project shell` run, so a checkout that is not
+  on this backend's guest is named as such, with the command that reconciles it.
+  It previously reached the guest helper with a path nothing had verified and
+  came back as a bare exit status, which the repaint had already erased the
+  reason for.
+- A session that ends non-zero keeps the end of what it wrote on screen, under a
+  banner that stays until it is dismissed.
+- The hub's add form accepts the id alone, as it always said it did. The remote
+  and the display name come from the shared registry, which is what materializes
+  an already-registered project in another backend's guest.
+- The project screen stops offering `u use` on a backend that keeps no registry.
+  It had no registry to select in and the key always failed.
+- Drift and `project show` name `torio project add <id>`, the form that
+  reconciles a registered project from the remote on record, rather than a bare
+  verb or a form that asks for a remote Torio already holds.
+
 ## 0.3.4 - 2026-08-10
 
 ### Added

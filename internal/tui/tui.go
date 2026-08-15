@@ -111,9 +111,16 @@ type Deps struct {
 	// The interactive handoffs. Each returns the argv of a real session; the
 	// hub releases the terminal to it and takes it back when the session ends.
 	// A nil field is a session this backend does not have.
+	//
+	// The two project sessions take a project id rather than a path, because
+	// resolving the path is part of the preflight the command surface runs
+	// before it opens either of them: what is verified and what is opened have
+	// to be the same checkout. The hub passes the id it was told to open and
+	// the seam does the rest, so neither surface can drift into opening a
+	// session the other would have refused (ADR-0019).
 	LoginSpec func() (execx.InteractiveCommand, error)
-	AgentSpec func(projectPath string) (execx.InteractiveCommand, error)
-	ShellSpec func(projectPath string) (execx.InteractiveCommand, error)
+	AgentSpec func(ctx context.Context, id string) (execx.InteractiveCommand, error)
+	ShellSpec func(ctx context.Context, id string) (execx.InteractiveCommand, error)
 }
 
 // Run opens the hub and blocks until the operator quits.
