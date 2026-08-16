@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 0.3.5 - 2026-08-16
+
+### Migration
+
+This release removes the Hermes backend. What you do depends on which box you
+have:
+
+- **A box running `claude-code` or `codex`** needs nothing. It already lives at
+  `torio-<backend>`, and every command reaches it as before.
+- **A box running Hermes**, including any created before the config document
+  carried a `backend` field, is refused with an error naming the removal. Torio
+  does not migrate it, because a guest built for the `hermes` identity is not a
+  guest `claude-code` can drive. Build a new one with
+  `torio vm init --backend claude-code`, then `torio project add <id>` for each
+  project you want there — the registry is shared, so the remote is already on
+  record. The old guest is untouched and still reachable with
+  `limactl shell torio` if you want to copy anything out of it.
+- **Settings in the root `~/.config/torio/config.json`** are no longer read:
+  that document belonged to the removed backend's instance. Move them to
+  `~/.config/torio/instances/torio-claude-code/config.json`.
+- **A script reading `--json`** loses the fields listed below rather than
+  reading `false` for ever.
+
 ### Removed
 
 - **BREAKING: the Hermes backend is gone**, and with it `torio serve`, the
@@ -30,7 +53,7 @@
 
 ### Added
 
-- **Codex CLI as the third backend.** `torio vm init --backend codex` builds a
+- **Codex CLI as a backend.** `torio vm init --backend codex` builds a
   box that runs Codex as its own guest identity, with the same custody the other
   process backend has: no sudo, an exact group set, and a pinned binary the agent
   cannot rewrite. The archive is proven against a digest committed in this
@@ -158,8 +181,6 @@
 - The hub's add form accepts the id alone, as it always said it did. The remote
   and the display name come from the shared registry, which is what materializes
   an already-registered project in another backend's guest.
-- The project screen stops offering `u use` on a backend that keeps no registry.
-  It had no registry to select in and the key always failed.
 - Drift and `project show` name `torio project add <id>`, the form that
   reconciles a registered project from the remote on record, rather than a bare
   verb or a form that asks for a remote Torio already holds.
