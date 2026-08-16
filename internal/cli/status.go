@@ -148,14 +148,13 @@ func (a *app) resolveBoxBackend(instance string) status.Resolution {
 	if name == "" {
 		// TORIO_INSTANCE names a box directly. Its spelling carries no backend
 		// declaration even when it happens to begin with Torio's derived prefix.
-		// An absent declaration therefore keeps ADR-0009's Hermes default.
 		if strings.TrimSpace(os.Getenv(config.InstanceEnvKey)) != instance {
 			name = backendForDerivedInstance(instance)
 		}
 		if name == "" {
-			// ADR-0009 defines an absent declaration as Hermes for every
-			// instance, including one TORIO_INSTANCE named directly. The
-			// derived name is only a stronger hint where one exists.
+			// Nothing declared and nothing derivable. The default backend is
+			// the answer, and a box that predates the declaration resolves to
+			// the removed one through Lookup below.
 			name = backend.DefaultName
 		}
 	}
@@ -168,10 +167,14 @@ func (a *app) resolveBoxBackend(instance string) status.Resolution {
 
 // backendForDerivedInstance reverses the name derivation. It answers only for
 // names Torio itself would have produced; anything else is empty and the
-// caller applies ADR-0009's default backend.
+// caller applies the default backend.
+//
+// Bare DefaultInstance derives the removed backend, not the default one: that
+// name belonged to the agent Torio no longer implements, and answering with a
+// live backend would describe a box as running something it never ran.
 func backendForDerivedInstance(instance string) string {
 	if instance == config.DefaultInstance {
-		return backend.DefaultName
+		return backend.RemovedName
 	}
 	if name, ok := strings.CutPrefix(instance, config.InstancePrefix); ok {
 		return name

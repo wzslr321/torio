@@ -17,7 +17,6 @@ func TestReconcileMCPClientConfigUsesBackendSpecificRootOfTrust(t *testing.T) {
 		wantPath string
 		calls    int
 	}{
-		{"hermes agent-owned drift detector", Hermes().Identity(), "/home/hermes/hermes-agent/venv/bin/python", HermesConfigPath, 1},
 		{"claude root-owned managed config", backend.Identity{Name: "claude-code", GuestUser: "claude", Home: "/home/claude"}, "/usr/bin/python3", ClaudeManagedMCPPath, 2},
 	}
 	for _, tc := range cases {

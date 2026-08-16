@@ -3,7 +3,6 @@ package lima
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 )
 
@@ -34,31 +33,35 @@ func brokerProbeArgs(command ...string) []string {
 func okBrokerScript() []scriptedResponse {
 	return []scriptedResponse{
 		{result: stdoutResult("997\n")}, // id -u torio-mcp
-		{result: stdoutResult("torio-mcp:x:997:997::/home/torio-mcp:/usr/sbin/nologin\n")}, // getent passwd
-		{result: stdoutResult("torio-mcp\n")},                                              // primary group
-		{result: stdoutResult("torio-mcp torio-mcp-clients\n")},                            // all broker groups
-		{result: stdoutResult(sudoDeniedFixture)},                                          // no sudo grants
-		{result: stdoutResult("1000\n")},                                                   // id -u hermes
-		{result: stdoutResult("torio-mcp-clients:x:995:hermes\n")},                         // getent group
-		{result: stdoutResult("hermes torio-projects torio-mcp-clients\n")},                // id -nG hermes (client)
-		{result: stdoutResult("hermes torio-projects torio-mcp-clients\n")},                // id -nG hermes (not owner)
-		{result: stdoutResult(sudoDeniedFixture)},                                          // no hermes sudo grants
-		{result: stdoutResult("directory\ndirectory\n")},                                   // stat -c %F home: present
-		{result: stdoutResult("torio-mcp:torio-mcp 700\n")},                                // stat -c %U:%G %a home
-		{result: exitResult(1, "directory\n", "stat: cannot statx '...': No such file")},   // stat mcp-tokens: absent
-		{result: stdoutResult("directory\ndirectory\n")},                                   // stat %F policy dir
-		{result: stdoutResult("root:root 755\n")},                                          // stat %U:%G %a policy dir
-		{result: stdoutResult("atlassian.json root root 644 f\n")},                         // find policy documents
-		{result: stdoutResult(validGuestPolicy)},                                           // read and parse policy document
-		{result: stdoutResult("directory\nregular file\n")},                                // stat %F hermes config.yaml
-		{result: stdoutResult(relayOnlyConfig)},                                            // cat config.yaml
-		{result: stdoutResult("directory\ndirectory\n")},                                   // runtime is present
-		{result: stdoutResult("directory root:root 755\nregular file root:root 644\n")},    // unit metadata
-		{result: stdoutResult("enabled\n")},                                                // unit enabled
-		{result: stdoutResult("active\n")},                                                 // unit active
-		{result: stdoutResult(string(mcpBrokerUnit()))},                                    // exact unit content
-		{result: stdoutResult(effectiveUnitOutput())},                                      // effective unit
-		{result: stdoutResult("directory\ndirectory\n")},                                   // stat %F socket dir
+		{result: stdoutResult("torio-mcp:x:997:997::/home/torio-mcp:/usr/sbin/nologin\n")},        // getent passwd
+		{result: stdoutResult("torio-mcp\n")},                                                     // primary group
+		{result: stdoutResult("torio-mcp torio-mcp-clients\n")},                                   // all broker groups
+		{result: stdoutResult(sudoDeniedFixture)},                                                 // no sudo grants
+		{result: stdoutResult("1000\n")},                                                          // id -u the agent
+		{result: stdoutResult("torio-mcp-clients:x:995:claude\n")},                                // getent group
+		{result: stdoutResult("claude torio-projects torio-mcp-clients\n")},                       // id -nG agent (client)
+		{result: stdoutResult("claude torio-projects torio-mcp-clients\n")},                       // id -nG agent (not owner)
+		{result: stdoutResult(sudoDeniedFixture)},                                                 // no agent sudo grants
+		{result: stdoutResult("directory\ndirectory\n")},                                          // stat -c %F home: present
+		{result: stdoutResult("torio-mcp:torio-mcp 700\n")},                                       // stat -c %U:%G %a home
+		{result: stdoutResult("directory\ndirectory\n")},                                          // stat %F policy dir
+		{result: stdoutResult("root:root 755\n")},                                                 // stat %U:%G %a policy dir
+		{result: stdoutResult("atlassian.json root root 644 f\n")},                                // find policy documents
+		{result: stdoutResult(validGuestPolicy)},                                                  // read and parse policy document
+		{result: stdoutResult("regular file root:root 644\n")},                                    // stat managed settings
+		{result: stdoutResult(`{"allowManagedMcpServersOnly":true}`)},                             // cat managed settings
+		{result: stdoutResult("regular file root:root 644\n")},                                    // stat managed MCP
+		{result: stdoutResult(managedRelayConfig)},                                                // cat managed MCP
+		{result: exitResult(1, "directory\n", "agent config absent")},                             // agent-owned config
+		{result: stdoutResult("directory root:root 755\ndirectory torio-mcp:torio-mcp 700\n")},    // private OAuth dir
+		{result: stdoutResult("directory root:root 755\nregular file torio-mcp:torio-mcp 600\n")}, // atlassian session
+		{result: stdoutResult("directory\ndirectory\n")},                                          // runtime is present
+		{result: stdoutResult("directory root:root 755\nregular file root:root 644\n")},           // unit metadata
+		{result: stdoutResult("enabled\n")},                                                       // unit enabled
+		{result: stdoutResult("active\n")},                                                        // unit active
+		{result: stdoutResult(string(mcpBrokerUnit()))},                                           // exact unit content
+		{result: stdoutResult(effectiveUnitOutput())},                                             // effective unit
+		{result: stdoutResult("directory\ndirectory\n")},                                          // stat %F socket dir
 		{result: stdoutResult("torio-mcp:torio-mcp-clients 750\n")},
 		{result: stdoutResult("atlassian.sock torio-mcp torio-mcp-clients 660\n")},
 		{result: stdoutResult("u_str LISTEN 0 4096 /run/torio-mcp/atlassian.sock 9 * 0\n")},
@@ -66,25 +69,22 @@ func okBrokerScript() []scriptedResponse {
 	}
 }
 
-// relayOnlyConfig is a Hermes config whose every MCP server goes through the
-// broker relay — the shape ADR-0004 §3 prescribes.
-const relayOnlyConfig = `model:
-  provider: custom
-mcp_servers:
-  atlassian:
-    command: /usr/local/bin/torio-mcp-connect
-    args: ["atlassian"]
-`
+// managedRelayConfig is a root-owned managed MCP document whose every server
+// goes through the broker relay — the shape ADR-0004 §3 prescribes.
+const managedRelayConfig = `{"mcpServers":{"atlassian":{"type":"stdio","command":"/usr/local/bin/torio-mcp-connect","args":["atlassian"],"env":{}}}}`
 
 const validGuestPolicy = `{"schema_version":"1","service":"atlassian","upstream_endpoint":"https://api.atlassian.com/v1/mcp","tools":[{"name":"getJiraIssue","writes":false}]}`
 
-func TestVerifyMCPBrokerHappyPath(t *testing.T) {
+// TestVerifyMCPBrokerProbesCustodyInOrder pins the argv and the order of the
+// custody half of the boundary — the identities, their groups, their absence of
+// sudo, and the broker's home. That prefix is the same on every backend, which
+// is why it is pinned here rather than beside one backend's own config checks.
+func TestVerifyMCPBrokerProbesCustodyInOrder(t *testing.T) {
+	agent := testAgentIdentity()
 	fr := &fakeRunner{script: okBrokerScript()}
-	a := New(fr)
 
-	rep, err := a.VerifyMCPBroker(context.Background())
-	if err != nil {
-		t.Fatalf("VerifyMCPBroker: unexpected error: %v", err)
+	if _, err := New(fr).VerifyMCPBrokerFor(context.Background(), agent); err != nil {
+		t.Fatalf("VerifyMCPBrokerFor: unexpected error: %v", err)
 	}
 
 	wantArgs := [][]string{
@@ -93,47 +93,24 @@ func TestVerifyMCPBrokerHappyPath(t *testing.T) {
 		brokerProbeArgs("id", "-gn", TorioMCPUser),
 		brokerProbeArgs("id", "-nG", TorioMCPUser),
 		brokerProbeArgs(sudoProbeArgv(TorioMCPUser)...),
-		brokerProbeArgs("id", "-u", HermesUser),
+		brokerProbeArgs("id", "-u", agent.GuestUser),
 		brokerProbeArgs("getent", "group", TorioMCPClientsGroup),
-		brokerProbeArgs("id", "-nG", HermesUser),
-		brokerProbeArgs("id", "-nG", HermesUser),
-		brokerProbeArgs(sudoProbeArgv(HermesUser)...),
+		brokerProbeArgs("id", "-nG", agent.GuestUser),
+		brokerProbeArgs("id", "-nG", agent.GuestUser),
+		brokerProbeArgs(sudoProbeArgv(agent.GuestUser)...),
 		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", statControlPath, TorioMCPHome),
 		brokerProbeArgs("sudo", "-n", "stat", "-c", "%U:%G %a", TorioMCPHome),
-		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", statControlPath, HermesMCPTokensPath),
 		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", statControlPath, TorioMCPPolicyDir),
 		brokerProbeArgs("sudo", "-n", "stat", "-c", "%U:%G %a", TorioMCPPolicyDir),
 		brokerProbeArgs("sudo", "-n", "find", TorioMCPPolicyDir, "-mindepth", "1", "-maxdepth", "1", "-printf", `%f %u %g %m %y\n`),
 		brokerProbeArgs("sudo", "-n", "cat", "--", TorioMCPPolicyDir+"/atlassian.json"),
-		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", statControlPath, HermesConfigPath),
-		brokerProbeArgs("sudo", "-n", "cat", HermesConfigPath),
-		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", statControlPath, TorioMCPSocketDir),
-		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F %U:%G %a", "/etc/systemd/system", TorioMCPBrokerUnitPath),
-		brokerProbeArgs("sudo", "-n", "systemctl", "is-enabled", TorioMCPBrokerUnitName),
-		brokerProbeArgs("sudo", "-n", "systemctl", "is-active", TorioMCPBrokerUnitName),
-		brokerProbeArgs("sudo", "-n", "cat", TorioMCPBrokerUnitPath),
-		brokerProbeArgs(mcpBrokerEffectiveUnitShowArgs()...),
-		brokerProbeArgs("sudo", "-n", "stat", "-c", "%F", statControlPath, TorioMCPSocketDir),
-		brokerProbeArgs("sudo", "-n", "stat", "-c", "%U:%G %a", TorioMCPSocketDir),
-		brokerProbeArgs("sudo", "-n", "find", TorioMCPSocketDir, "-mindepth", "1", "-maxdepth", "1", "-type", "s", "-printf", `%f %u %g %m\n`),
-		brokerProbeArgs("sudo", "-n", "ss", "-lxH"),
-		brokerProbeArgs("sudo", "-n", "cat", torioMCPPolicyDigestPath),
 	}
-	if fr.callCount() != len(wantArgs) {
-		t.Fatalf("probe count = %d, want %d", fr.callCount(), len(wantArgs))
+	if fr.callCount() < len(wantArgs) {
+		t.Fatalf("probe count = %d, want at least %d", fr.callCount(), len(wantArgs))
 	}
 	for i, want := range wantArgs {
 		if got := fr.callArgs(i); !equalArgs(got, want) {
 			t.Errorf("probe %d argv = %v, want %v", i, got, want)
-		}
-	}
-
-	if len(rep.Checks) == 0 {
-		t.Fatal("report recorded no checks")
-	}
-	for _, c := range rep.Checks {
-		if !c.OK {
-			t.Errorf("check %q failed on the happy path: %s", c.Name, c.Detail)
 		}
 	}
 }
@@ -147,7 +124,7 @@ func TestVerifyMCPBrokerMissingUser(t *testing.T) {
 	fr := &fakeRunner{script: []scriptedResponse{{result: exitResult(1, "", "no such user")}}}
 	a := New(fr)
 
-	rep, err := a.VerifyMCPBroker(context.Background())
+	rep, err := a.VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err == nil {
 		t.Fatal("missing torio-mcp user: expected a failure, got nil")
 	}
@@ -172,29 +149,29 @@ func TestVerifyBrokerUserRejectsPrivilegedSupplementaryGroup(t *testing.T) {
 	}}
 	rep := &MCPBrokerReport{}
 
-	if err := New(fr).verifyBrokerUserFor(context.Background(), rep, HermesUser); err == nil {
+	if err := New(fr).verifyBrokerUserFor(context.Background(), rep, testUser); err == nil {
 		t.Fatal("broker identity with docker authority was accepted")
 	}
 }
 
-func TestVerifyHermesCustodyRejectsDockerMembership(t *testing.T) {
+func TestVerifyAgentCustodyRejectsDockerMembership(t *testing.T) {
 	fr := &fakeRunner{script: []scriptedResponse{
-		{result: stdoutResult("hermes torio-projects torio-mcp-clients docker\n")},
+		{result: stdoutResult("claude torio-projects torio-mcp-clients docker\n")},
 	}}
 	rep := &MCPBrokerReport{}
-	if err := New(fr).verifyAgentNotBrokerOwner(context.Background(), rep, HermesUser); err == nil {
-		t.Fatal("hermes with docker authority was accepted as unable to read broker credentials")
+	if err := New(fr).verifyAgentNotBrokerOwner(context.Background(), rep, testUser); err == nil {
+		t.Fatal("an agent with docker authority was accepted as unable to read broker credentials")
 	}
 }
 
-func TestVerifyHermesCustodyRejectsSudoAuthority(t *testing.T) {
+func TestVerifyAgentCustodyRejectsSudoAuthority(t *testing.T) {
 	fr := &fakeRunner{script: []scriptedResponse{
-		{result: stdoutResult("hermes torio-projects torio-mcp-clients\n")},
-		{result: stdoutResult("User hermes may run the following commands\n")},
+		{result: stdoutResult("claude torio-projects torio-mcp-clients\n")},
+		{result: stdoutResult("User claude may run the following commands\n")},
 	}}
 	rep := &MCPBrokerReport{}
-	if err := New(fr).verifyAgentNotBrokerOwner(context.Background(), rep, HermesUser); err == nil {
-		t.Fatal("hermes with sudo authority was accepted as unable to read broker credentials")
+	if err := New(fr).verifyAgentNotBrokerOwner(context.Background(), rep, testUser); err == nil {
+		t.Fatal("an agent with sudo authority was accepted as unable to read broker credentials")
 	}
 }
 
@@ -212,7 +189,7 @@ func TestVerifyBrokerUserRejectsPrivilegedNumericIdentity(t *testing.T) {
 			script := okBrokerScript()
 			script[0] = scriptedResponse{result: stdoutResult(tt.uid)}
 			script[1] = scriptedResponse{result: stdoutResult(tt.passwd)}
-			rep, err := New(&fakeRunner{script: script}).VerifyMCPBroker(context.Background())
+			rep, err := New(&fakeRunner{script: script}).VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 			if err == nil {
 				t.Fatal("privileged numeric broker identity was accepted")
 			}
@@ -221,7 +198,7 @@ func TestVerifyBrokerUserRejectsPrivilegedNumericIdentity(t *testing.T) {
 	}
 }
 
-func TestVerifyBrokerUserRejectsTheHermesUID(t *testing.T) {
+func TestVerifyBrokerUserRejectsTheAgentUID(t *testing.T) {
 	fr := &fakeRunner{script: []scriptedResponse{
 		{result: stdoutResult("997\n")},
 		{result: stdoutResult("torio-mcp:x:997:997::/home/torio-mcp:/usr/sbin/nologin\n")},
@@ -231,8 +208,8 @@ func TestVerifyBrokerUserRejectsTheHermesUID(t *testing.T) {
 		{result: stdoutResult("997\n")},
 	}}
 	rep := &MCPBrokerReport{}
-	if err := New(fr).verifyBrokerUserFor(context.Background(), rep, HermesUser); err == nil {
-		t.Fatal("broker identity sharing the Hermes numeric uid was accepted")
+	if err := New(fr).verifyBrokerUserFor(context.Background(), rep, testUser); err == nil {
+		t.Fatal("broker identity sharing the agent numeric uid was accepted")
 	}
 }
 
@@ -241,13 +218,13 @@ func TestVerifyBrokerUserRejectsTheHermesUID(t *testing.T) {
 // classify as verification failure, so it reaches the operator as drift.
 func TestVerifyMCPBrokerBrokenBoundaryIsDrift(t *testing.T) {
 	script := okBrokerScript()
-	script[8] = scriptedResponse{result: stdoutResult("hermes torio-mcp\n")}
+	script[8] = scriptedResponse{result: stdoutResult("claude torio-mcp\n")}
 	fr := &fakeRunner{script: script}
 	a := New(fr)
 
-	_, err := a.VerifyMCPBroker(context.Background())
+	_, err := a.VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err == nil {
-		t.Fatal("hermes in the torio-mcp group: expected a failure, got nil")
+		t.Fatal("the agent in the torio-mcp group: expected a failure, got nil")
 	}
 	var lerr *Error
 	if !errors.As(err, &lerr) {
@@ -258,36 +235,36 @@ func TestVerifyMCPBrokerBrokenBoundaryIsDrift(t *testing.T) {
 	}
 }
 
-// TestVerifyMCPBrokerHermesNotClient covers the boundary from the other side: an
-// installed broker that hermes cannot reach is a broken install, not a safe one.
-func TestVerifyMCPBrokerHermesNotClient(t *testing.T) {
+// TestVerifyMCPBrokerAgentNotClient covers the boundary from the other side: an
+// installed broker the agent cannot reach is a broken install, not a safe one.
+func TestVerifyMCPBrokerAgentNotClient(t *testing.T) {
 	script := okBrokerScript()
-	script[7] = scriptedResponse{result: stdoutResult("hermes torio-projects\n")}
+	script[7] = scriptedResponse{result: stdoutResult("claude torio-projects\n")}
 	fr := &fakeRunner{script: script}
 	a := New(fr)
 
-	rep, err := a.VerifyMCPBroker(context.Background())
+	rep, err := a.VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err == nil {
-		t.Fatal("hermes outside torio-mcp-clients: expected a verification failure, got nil")
+		t.Fatal("the agent outside torio-mcp-clients: expected a verification failure, got nil")
 	}
-	assertFailedCheck(t, rep, "hermes_broker_client")
+	assertFailedCheck(t, rep, "claude_broker_client")
 }
 
-// TestVerifyMCPBrokerHermesOwnsBrokerIdentity is the custody invariant of
-// ADR-0004. If hermes lands in the torio-mcp group the broker's home and its
+// TestVerifyMCPBrokerAgentOwnsBrokerIdentity is the custody invariant of
+// ADR-0004. If the agent lands in the torio-mcp group the broker's home and its
 // tokens become readable by the identity the agent has a shell as, and the whole
 // decision is void — so this must fail closed, loudly.
-func TestVerifyMCPBrokerHermesOwnsBrokerIdentity(t *testing.T) {
+func TestVerifyMCPBrokerAgentOwnsBrokerIdentity(t *testing.T) {
 	script := okBrokerScript()
-	script[8] = scriptedResponse{result: stdoutResult("hermes torio-projects torio-mcp-clients torio-mcp\n")}
+	script[8] = scriptedResponse{result: stdoutResult("claude torio-projects torio-mcp-clients torio-mcp\n")}
 	fr := &fakeRunner{script: script}
 	a := New(fr)
 
-	rep, err := a.VerifyMCPBroker(context.Background())
+	rep, err := a.VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err == nil {
-		t.Fatal("hermes in the torio-mcp group: expected a verification failure, got nil")
+		t.Fatal("the agent in the torio-mcp group: expected a verification failure, got nil")
 	}
-	assertFailedCheck(t, rep, "hermes_not_broker_owner")
+	assertFailedCheck(t, rep, "claude_not_broker_owner")
 }
 
 func TestVerifyMCPBrokerHomeIsGroupReadable(t *testing.T) {
@@ -296,81 +273,11 @@ func TestVerifyMCPBrokerHomeIsGroupReadable(t *testing.T) {
 	fr := &fakeRunner{script: script}
 	a := New(fr)
 
-	rep, err := a.VerifyMCPBroker(context.Background())
+	rep, err := a.VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err == nil {
 		t.Fatal("group-readable broker home: expected a verification failure, got nil")
 	}
 	assertFailedCheck(t, rep, "path:"+TorioMCPHome)
-}
-
-// TestVerifyMCPBrokerLeftoverTokens is the drift check that catches somebody
-// running `hermes mcp add` directly on a managed guest: credentials reappear
-// under the agent's own identity, which is exactly what ADR-0004 removes.
-func TestVerifyMCPBrokerLeftoverTokens(t *testing.T) {
-	script := okBrokerScript()
-	script[12] = scriptedResponse{result: stdoutResult("directory\ndirectory\n")}
-	script = insertAt(script, 13, scriptedResponse{result: stdoutResult("xx")})
-	fr := &fakeRunner{script: script}
-	a := New(fr)
-
-	rep, err := a.VerifyMCPBroker(context.Background())
-	if err == nil {
-		t.Fatal("leftover MCP tokens under HERMES_HOME: expected a verification failure, got nil")
-	}
-	c := assertFailedCheck(t, rep, "hermes_mcp_tokens")
-
-	// The count is the finding; the names are not. A service name is a weak
-	// secret at best and the surrounding contract already forbids leaking guest
-	// filenames, so the detail must carry a number and nothing else.
-	if !strings.Contains(c.Detail, "2") {
-		t.Errorf("detail %q does not report how many credential files were found", c.Detail)
-	}
-	for _, leak := range []string{".json", "atlassian", "/home/"} {
-		if strings.Contains(c.Detail, leak) {
-			t.Errorf("detail %q leaks %q; the check reports a count, never names or paths", c.Detail, leak)
-		}
-	}
-}
-
-// TestVerifyMCPBrokerEmptyTokensDirIsClean distinguishes "the directory exists
-// but holds nothing" from "somebody put credentials back". Hermes creates the
-// directory on its own, so its mere presence cannot be the finding.
-func TestVerifyMCPBrokerEmptyTokensDirIsClean(t *testing.T) {
-	script := okBrokerScript()
-	script[12] = scriptedResponse{result: stdoutResult("directory\ndirectory\n")}
-	script = insertAt(script, 13, scriptedResponse{result: stdoutResult("")})
-	fr := &fakeRunner{script: script}
-	a := New(fr)
-
-	rep, err := a.VerifyMCPBroker(context.Background())
-	if err != nil {
-		t.Fatalf("empty mcp-tokens directory: unexpected error: %v", err)
-	}
-	for _, c := range rep.Checks {
-		if c.Name == "hermes_mcp_tokens" && !c.OK {
-			t.Errorf("empty mcp-tokens directory reported as drift: %s", c.Detail)
-		}
-	}
-}
-
-// TestVerifyMCPBrokerTokenProbeUnusableIsNotAbsence is the same fail-open shape
-// as the socket probe, on the check that matters most: this one is the only
-// thing that notices a credential put back under the agent's own identity.
-//
-// The comment this replaces reasoned "as root the only ordinary reason stat
-// fails is that the path is not there" — but running as root is exactly what a
-// failed `sudo -n` has not established. One sudoers change and the check goes
-// green on a guest with live tokens sitting under $HERMES_HOME.
-func TestVerifyMCPBrokerTokenProbeUnusableIsNotAbsence(t *testing.T) {
-	script := okBrokerScript()
-	script[12] = scriptedResponse{result: exitResult(1, "", "sudo: a password is required")}
-	fr := &fakeRunner{script: script}
-
-	rep, err := New(fr).VerifyMCPBroker(context.Background())
-	if err == nil {
-		t.Fatal("unusable root probe accepted as an empty token store; expected the check to fail closed")
-	}
-	assertFailedCheck(t, rep, "hermes_mcp_tokens")
 }
 
 // assertFailedCheck asserts that name is the check the report failed on, and
@@ -394,9 +301,3 @@ func assertFailedCheck(t *testing.T, rep MCPBrokerReport, name string) CheckResu
 // in a fixed order, so a test that needs an extra reply must place it where the
 // adapter will ask for it — appending to the end silently feeds it to a later
 // check instead.
-func insertAt(script []scriptedResponse, i int, extra ...scriptedResponse) []scriptedResponse {
-	out := make([]scriptedResponse, 0, len(script)+len(extra))
-	out = append(out, script[:i]...)
-	out = append(out, extra...)
-	return append(out, script[i:]...)
-}

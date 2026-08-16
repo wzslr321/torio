@@ -13,7 +13,7 @@ torio project shell my-service
 
 This forwards your host's SSH agent into an interactive session in the checkout.
 The capability lives exactly as long as the session does and leaves with you
-when you exit. Inside it you are the `hermes` identity, in the project
+when you exit. Inside it you are the agent identity, in the project
 directory, with your agent available to Git:
 
 ```bash

@@ -7,8 +7,8 @@
 Agents need context. Credentials need a boundary.
 
 One Go binary over [Lima](https://lima-vm.io) creates a Linux VM on your macOS
-or Linux workstation, runs an agent backend inside it (Hermes as a guest
-service, or Claude Code per session), attaches the repositories you name, and
+or Linux workstation, runs a coding agent inside it (Claude Code or Codex,
+per session), attaches the repositories you name, and
 keeps a private Markdown vault the agent can search. Host Git and provider
 credentials are not copied into the VM. A private SSH repository is read
 through a guest-generated deploy key that you authorize without write access
@@ -94,13 +94,11 @@ torio vm init                          # pinned Lima template; no --force exists
 torio vm start
 torio vm bootstrap --timeout 10m       # install + verify the guest; drift fails closed
 
-torio serve install --timeout 2m       # render + validate the systemd unit
-torio serve start   --timeout 2m       # up when /api/status answers 200, not before
+torio backend login                    # the agent's own interactive sign-in
 
 torio brain init                       # private Markdown vault, versioned, searchable
-torio serve restart --timeout 2m       # pick up the Brain's retrieval skill
 
-torio project add my-service https://github.com/you/my-service --use
+torio project add my-service https://github.com/you/my-service
 ```
 
 A private repository takes the same command. For an SSH remote, `add` generates
@@ -110,24 +108,13 @@ Where you paste it is what keeps it read-only, and Torio cannot check which you
 did. Torio keeps no copy of the private half, and a remote the guest cannot
 read still fails closed.
 
-The backend binds `127.0.0.1:9119` inside the VM. Torio adds no tunnel
-feature; you open the forward yourself:
-
-```bash
-ssh -F ~/.lima/torio/ssh.config -L 19119:127.0.0.1:9119 -N -f \
-    -o ExitOnForwardFailure=yes lima-torio
-```
-
-Point Hermes Desktop at `http://127.0.0.1:19119`, set the session token, pick
-a provider, and work. The token and provider steps are in
-[`docs/runbooks/first-run.md`](docs/runbooks/first-run.md).
+Nothing listens: the agent is a process you start inside a checkout with
+`torio project agent <id>`, over the VM's own SSH, and it exits with the
+session. Torio opens no tunnel and starts no chat.
 
 ## The daily loop
 
-`torio serve status` is the one command to remember: it reports the systemd
-unit, the loopback endpoint and the Hermes version.
-
-Once you run more than one box, `torio status` is the other one. It polls every
+Once you run more than one box, `torio status` is the command to remember. It polls every
 box Torio owns and gives you a row each: whether it is running, what its agent
 has going, whether anything there is waiting on you, and when it last did work.
 Fields it cannot prove say so, with `?` for a question it could not answer and
@@ -136,7 +123,6 @@ Fields it cannot prove say so, with `?` for a question it could not answer and
 ```console
 $ torio status
 INSTANCE           BOX      BACKEND      SESSION  WAITING           PROGRESS
-torio              running  hermes       —        ?                 24s
 torio-claude-code  running  claude-code  1        yes 3m pid 11673  —
 torio-codex        running  codex        1        no                —
 ```
@@ -197,14 +183,13 @@ a second agent inside one: two identities would contend over the same
 checkouts.
 
 You do not track which VM that is. `--backend` names the agent and Torio finds
-its box: the default one is `torio`, the rest are `torio-<backend>`.
+its box: each is `torio-<backend>`, and `claude-code` is the default.
 
-| | `hermes` (default) | `claude-code` | `codex` |
-| --- | --- | --- | --- |
-| Shape | a guest service on loopback | a per-session process | a per-session process |
-| Reached by | a client through a tunnel you open | `torio project agent <id>` | `torio project agent <id>` |
-| Project registry | yes, driven by Torio | none; a project is a directory | none; a project is a directory |
-| Pinned by | an upstream commit | a version, checksum-verified | a version, digest-verified |
+| | `claude-code` (default) | `codex` |
+| --- | --- | --- |
+| Shape | a per-session process | a per-session process |
+| Reached by | `torio project agent <id>` | `torio project agent <id>` |
+| Pinned by | a version, checksum-verified | a version, digest-verified |
 
 ```bash
 torio vm init --backend claude-code
@@ -236,9 +221,8 @@ torio mcp status --backend claude-code
 
 The backend launches a credential-free stdio relay. OAuth state belongs to the
 separate `torio-mcp` uid, and the broker exposes only tools present in both the
-root-owned grant and upstream discovery. Claude Code's route is root-managed;
-Hermes' agent-owned config remains a drift detector, while the socket and policy
-are the enforcement boundary. See
+root-owned grant and upstream discovery. Both backends' routes are root-managed,
+and the socket and policy are the enforcement boundary. See
 [ADR-0013](docs/adr/0013-mcp-managed-client-config-and-activation.md).
 
 ## The Second Brain

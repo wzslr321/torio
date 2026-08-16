@@ -73,17 +73,9 @@ func TestRequiredPathsKeepTheProfilePrivateAndTheWorkspaceShared(t *testing.T) {
 }
 
 // TestDeclaredCapabilitiesMatchWhatCodexHas pins the declarations the contract
-// reads as answers rather than as gaps. Codex keeps no registry Torio can
-// register a checkout with and runs no service to probe; declaring either would
-// make `serve status` and `project add` invent a failure.
+// reads as answers rather than as gaps.
 func TestDeclaredCapabilitiesMatchWhatCodexHas(t *testing.T) {
 	b := New()
-	if b.Registry() != nil {
-		t.Error("codex declares a project registry it does not keep")
-	}
-	if b.Service() != nil {
-		t.Error("codex declares a guest service it does not run")
-	}
 	checks := b.StatusChecks()
 	if checks.Version != versionCheck || checks.Auth != authCheck || checks.MCPServers != mcpServersCheck {
 		t.Errorf("status checks %+v do not name this package's own checks", checks)

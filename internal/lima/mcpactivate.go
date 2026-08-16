@@ -198,7 +198,7 @@ func validateMCPBackendIdentity(identity backend.Identity) error {
 		return &Error{Op: mcpInstallOp, Kind: KindVerificationFailed, Err: fmt.Errorf("selected backend has no guest identity")}
 	}
 	switch identity.Name {
-	case "hermes", "claude-code", "codex":
+	case "claude-code", "codex":
 		return nil
 	default:
 		return &Error{Op: mcpInstallOp, Kind: KindVerificationFailed, Err: fmt.Errorf("backend %q has no MCP transport contract", identity.Name)}

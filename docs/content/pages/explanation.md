@@ -22,12 +22,10 @@ trusted pins fails closed rather than being recreated — there is no `--force`,
 because the recovery a `--force` would offer is indistinguishable from
 destroying the thing you were trying to keep.
 
-The persistent Hermes backend runs as a user systemd service bound to **guest
-loopback only** — it is not exposed on any public or LAN address. Reaching it
-from the host is therefore a deliberate act: you open an SSH port forward
-yourself. Torio opens no tunnel and starts no chat. Keeping the backend
-loopback-bound and putting you in charge of the forward means network exposure
-is never an accident of running a command.
+Every backend Torio ships is a process, not a daemon: it is reached by opening a
+session inside a checkout as the agent's own identity, and there is nothing
+listening on any address. Torio opens no tunnel and starts no chat. A guest with
+nothing bound means network exposure is never an accident of running a command.
 
 The same reasoning explains the session token. The backend authenticates
 non-public API calls, and because `serve` is headless it never publishes a token

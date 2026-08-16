@@ -10,23 +10,6 @@ import (
 
 const claudeManagedSettingsPath = "/etc/claude-code/managed-settings.json"
 
-func hermesMCPConfigExact(doc string, grant PolicyGrant) error {
-	scan, err := scanMCPServers(doc)
-	if err != nil {
-		return err
-	}
-	if scan.Foreign != 0 || len(scan.Entries) != len(grant.Services) {
-		return fmt.Errorf("configured services do not exactly match policy")
-	}
-	for _, service := range grant.Services {
-		entry, ok := scan.Entries[service.Name]
-		if !ok || entry.Command != TorioMCPRelayPath || len(entry.Args) != 1 || entry.Args[0] != service.Name {
-			return fmt.Errorf("configured service does not use its exact relay argument")
-		}
-	}
-	return nil
-}
-
 type claudeManagedDocument struct {
 	MCPServers map[string]claudeManagedServer `json:"mcpServers"`
 }
@@ -114,8 +97,6 @@ func claudeAgentMCPEmpty(doc string) bool {
 
 func (a *Adapter) verifyBackendMCPConfig(ctx context.Context, rep *MCPBrokerReport, backendName string) error {
 	switch backendName {
-	case "hermes":
-		return a.verifyHermesMCPConfigForPolicy(ctx, rep)
 	case "claude-code":
 		return a.verifyClaudeManagedMCPConfig(ctx, rep)
 	case "codex":
@@ -123,20 +104,6 @@ func (a *Adapter) verifyBackendMCPConfig(ctx context.Context, rep *MCPBrokerRepo
 	default:
 		return a.brokerFailed(rep, "agent_mcp_config", "selected backend has no MCP configuration verifier", "use a supported backend")
 	}
-}
-
-func (a *Adapter) verifyHermesMCPConfigForPolicy(ctx context.Context, rep *MCPBrokerReport) error {
-	const name = hermesMCPServersCheck
-	doc, err := a.readRegularRootFile(ctx, rep, name, HermesConfigPath, "the Hermes configuration")
-	if err != nil {
-		return err
-	}
-	if err := hermesMCPConfigExact(doc, rep.Policy); err != nil {
-		return a.brokerFailed(rep, name, "Hermes MCP entries do not exactly match the root-owned policy",
-			"run `torio mcp install`; this agent-writable file is a drift detector, not the authorization boundary")
-	}
-	rep.record(name, true, fmt.Sprintf("%d entr(ies), exact policy services through relay", len(rep.Policy.Services)))
-	return nil
 }
 
 func (a *Adapter) verifyClaudeManagedMCPConfig(ctx context.Context, rep *MCPBrokerReport) error {
@@ -180,24 +147,6 @@ func (a *Adapter) verifyClaudeManagedMCPConfig(ctx context.Context, rep *MCPBrok
 	}
 	rep.record(name, true, fmt.Sprintf("%d managed entr(ies), exact policy services through relay", len(rep.Policy.Services)))
 	return nil
-}
-
-func (a *Adapter) readRegularRootFile(ctx context.Context, rep *MCPBrokerReport, name, filePath, subject string) (string, error) {
-	st, kind, err := a.statPath(ctx, rep, name, filePath)
-	if err != nil {
-		return "", err
-	}
-	if st != pathPresent || kind != "regular file" {
-		return "", a.brokerFailed(rep, name, subject+" is missing or not a regular file", "run `torio mcp install`")
-	}
-	doc, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "cat", filePath)
-	if err != nil {
-		return "", err
-	}
-	if doc.exit != 0 {
-		return "", a.brokerFailed(rep, name, "could not read "+subject, "inspect the guest configuration")
-	}
-	return doc.out, nil
 }
 
 func (a *Adapter) readTrustedRootFile(ctx context.Context, rep *MCPBrokerReport, name, filePath string) (string, error) {

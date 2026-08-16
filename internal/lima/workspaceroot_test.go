@@ -11,7 +11,7 @@ import (
 const claudeWorkspace = "/home/claude/projects"
 
 // TestSharedHelpersNameNoBackendWorkspace is the regression for a bug that shipped:
-// both shared helpers carried `/home/hermes/projects`, so on any other backend the
+// both shared helpers carried `/home/agent/projects`, so on any other backend the
 // host derived the right path and the guest refused it. `project shell` and
 // `project enter` were unusable on the second backend, and nothing failed until an
 // operator tried to push.
@@ -28,7 +28,7 @@ func TestSharedHelpersNameNoBackendWorkspace(t *testing.T) {
 		if !strings.Contains(script, placeholderWorkspaceRoot) {
 			t.Errorf("%s helper does not take a workspace placeholder", name)
 		}
-		for _, hardcoded := range []string{HermesWorkspacePath, claudeWorkspace} {
+		for _, hardcoded := range []string{testWorkspacePath, claudeWorkspace} {
 			if strings.Contains(script, hardcoded) {
 				t.Errorf("%s helper names %q; a shared helper serves every backend", name, hardcoded)
 			}
@@ -38,7 +38,7 @@ func TestSharedHelpersNameNoBackendWorkspace(t *testing.T) {
 
 func TestProjectHelperSubstitutesTheDeclaredWorkspace(t *testing.T) {
 	for name, root := range map[string]string{
-		"hermes": HermesWorkspacePath,
+		testUser: testWorkspacePath,
 		"claude": claudeWorkspace,
 	} {
 		got, err := projectHelper(embeddedProjectShell, root, "operator shell")
@@ -78,7 +78,7 @@ func TestProjectHelperRefusesAWorkspaceItCannotCarry(t *testing.T) {
 // project rather than the wrong ones, which is a worse failure than the one this
 // replaced.
 func TestProjectHelperRefusesAScriptWithNoPlaceholder(t *testing.T) {
-	if _, err := projectHelper([]byte("#!/bin/bash\nworkspace='/home/hermes/projects'\n"), HermesWorkspacePath, "operator shell"); err == nil {
+	if _, err := projectHelper([]byte("#!/bin/bash\nworkspace='/home/agent/projects'\n"), testWorkspacePath, "operator shell"); err == nil {
 		t.Error("projectHelper() accepted a script with nothing to substitute")
 	}
 }

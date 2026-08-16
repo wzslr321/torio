@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wzslr321/torio/internal/backend"
+	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/redact"
 )
 
@@ -25,9 +27,12 @@ func runVersionWithXDG(t *testing.T, args []string, cfgHome string) (int, string
 	return code, stdout.String(), stderr.String()
 }
 
+// writeCLIConfig writes the document an unflagged invocation reads: the one
+// owned by the instance the default backend derives. Every backend derives its
+// own instance, so there is no document an invocation reads without one.
 func writeCLIConfig(t *testing.T, cfgHome, body string) {
 	t.Helper()
-	dir := filepath.Join(cfgHome, "torio")
+	dir := filepath.Join(cfgHome, "torio", "instances", config.InstancePrefix+backend.DefaultName)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -42,7 +47,7 @@ func writeCLIConfig(t *testing.T, cfgHome, body string) {
 func TestConfigGlobalAcceptedBeforeAndAfterCommand(t *testing.T) {
 	cfgHome := t.TempDir()
 	cfg := filepath.Join(cfgHome, "explicit.json")
-	if err := os.WriteFile(cfg, []byte(`{"schema_version":"2"}`), 0o600); err != nil {
+	if err := os.WriteFile(cfg, []byte(`{"schema_version":"4"}`), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -70,7 +75,7 @@ func TestConfigGlobalAcceptedBeforeAndAfterCommand(t *testing.T) {
 // built-in timeout with the configured value.
 func TestConfigDefaultTimeoutIsConsumed(t *testing.T) {
 	cfgHome := t.TempDir()
-	writeCLIConfig(t, cfgHome, `{"schema_version":"2","default_timeout":"137ms"}`)
+	writeCLIConfig(t, cfgHome, `{"schema_version":"4","default_timeout":"137ms"}`)
 	t.Setenv("XDG_CONFIG_HOME", cfgHome)
 	var stdout, stderr bytes.Buffer
 	a := &app{stdout: &stdout, stderr: &stderr, build: testBuild()}
@@ -87,7 +92,7 @@ func TestConfigDefaultTimeoutIsConsumed(t *testing.T) {
 // the command succeeds.
 func TestExplicitTimeoutOverridesConfig(t *testing.T) {
 	cfgHome := t.TempDir()
-	writeCLIConfig(t, cfgHome, `{"schema_version":"2","default_timeout":"1ns"}`)
+	writeCLIConfig(t, cfgHome, `{"schema_version":"4","default_timeout":"1ns"}`)
 	code, _, stderr := runVersionWithXDG(t, []string{"version", "--timeout", "5s"}, cfgHome)
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0 (explicit --timeout must override config); stderr=%q", code, stderr)
@@ -99,7 +104,7 @@ func TestExplicitTimeoutOverridesConfig(t *testing.T) {
 // error (exit 2), not a silent coercion.
 func TestOverMaxConfigTimeoutIsUsageError(t *testing.T) {
 	cfgHome := t.TempDir()
-	writeCLIConfig(t, cfgHome, `{"schema_version":"2","default_timeout":"999h"}`)
+	writeCLIConfig(t, cfgHome, `{"schema_version":"4","default_timeout":"999h"}`)
 	code, _, _ := runVersionWithXDG(t, []string{"version"}, cfgHome)
 	if code != int(ExitUsage) {
 		t.Fatalf("exit = %d, want %d (over-max config default_timeout)", code, int(ExitUsage))
@@ -143,7 +148,7 @@ func TestConfigSecretShapedValueDoesNotLeak(t *testing.T) {
 		t.Fatalf("canary %q is not recognized by the production redactor; fixture is invalid", canary)
 	}
 	cfgHome := t.TempDir()
-	writeCLIConfig(t, cfgHome, `{"schema_version":"2","default_timeout":"`+canary+`"}`)
+	writeCLIConfig(t, cfgHome, `{"schema_version":"4","default_timeout":"`+canary+`"}`)
 
 	code, _, stderr := runVersionWithXDG(t, []string{"version"}, cfgHome)
 	if code != int(ExitUsage) {
@@ -219,8 +224,8 @@ func TestInsecureConfigPermissionsIsUsageError(t *testing.T) {
 		t.Skip("permission enforcement is Unix-only")
 	}
 	cfgHome := t.TempDir()
-	writeCLIConfig(t, cfgHome, `{"schema_version":"2"}`)
-	if err := os.Chmod(filepath.Join(cfgHome, "torio", "config.json"), 0o644); err != nil {
+	writeCLIConfig(t, cfgHome, `{"schema_version":"4"}`)
+	if err := os.Chmod(filepath.Join(cfgHome, "torio", "instances", config.InstancePrefix+backend.DefaultName, "config.json"), 0o644); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}
 	code, _, _ := runVersionWithXDG(t, []string{"version"}, cfgHome)

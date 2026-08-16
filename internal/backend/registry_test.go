@@ -19,18 +19,14 @@ func (stub) Install(context.Context, StepRunner) error          { return nil }
 func (stub) VerifyVersion(context.Context, StepRunner) error    { return nil }
 func (stub) VerifyGuardrails(context.Context, StepRunner) error { return nil }
 func (stub) ProbeAuth(context.Context, StepRunner) error        { return nil }
-func (stub) Registry() ProjectRegistry                          { return nil }
-func (stub) Service() *ServiceSpec                              { return nil }
 func (stub) Session() *SessionSpec                              { return nil }
 func (stub) Status() *StatusSpec                                { return nil }
 func (stub) ProvisionScript() string                            { return "" }
 func (stub) BrainSkill() BrainSkill                             { return BrainSkill{} }
 func (stub) StatusChecks() StatusChecks                         { return StatusChecks{} }
 
-// TestLookupEmptyNameResolvesTheDefault pins the compatibility rule: a config
-// document written before instances declared a backend names none, and such an
-// instance is running Hermes. Resolving empty to anything else would re-point
-// an existing box at a different agent on upgrade.
+// TestLookupEmptyNameResolvesTheDefault pins that an unnamed backend resolves
+// to the default one rather than failing.
 func TestLookupEmptyNameResolvesTheDefault(t *testing.T) {
 	withRegistry(t, map[string]Backend{DefaultName: stub{DefaultName}})
 
@@ -48,13 +44,13 @@ func TestLookupEmptyNameResolvesTheDefault(t *testing.T) {
 // names a backend this build does not have must stop, not quietly run every
 // command against a different agent than the document says.
 func TestLookupUnknownNameFailsClosedAndNamesTheAlternatives(t *testing.T) {
-	withRegistry(t, map[string]Backend{"hermes": stub{"hermes"}, "claude-code": stub{"claude-code"}})
+	withRegistry(t, map[string]Backend{"codex": stub{"codex"}, "claude-code": stub{"claude-code"}})
 
 	_, err := Lookup("gpt-whatever")
 	if err == nil {
 		t.Fatal("Lookup of an unknown backend returned no error")
 	}
-	for _, want := range []string{"gpt-whatever", "hermes", "claude-code"} {
+	for _, want := range []string{"gpt-whatever", "codex", "claude-code"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error does not mention %q: %v", want, err)
 		}
@@ -65,24 +61,24 @@ func TestLookupUnknownNameFailsClosedAndNamesTheAlternatives(t *testing.T) {
 // name is a programmer error caught at startup, not a race over which one an
 // instance gets.
 func TestRegisterRejectsADuplicateName(t *testing.T) {
-	withRegistry(t, map[string]Backend{"hermes": stub{"hermes"}})
+	withRegistry(t, map[string]Backend{"codex": stub{"codex"}})
 
 	defer func() {
 		if recover() == nil {
 			t.Fatal("registering a duplicate name did not panic")
 		}
 	}()
-	Register(stub{"hermes"})
+	Register(stub{"codex"})
 }
 
 // TestNamesListsTheRegisteredBackendsSorted pins the set the hub's rebind
 // chooser offers (ADR-0021): exactly what Lookup accepts, in an order that
 // does not depend on map iteration.
 func TestNamesListsTheRegisteredBackendsSorted(t *testing.T) {
-	withRegistry(t, map[string]Backend{"hermes": stub{"hermes"}, "claude-code": stub{"claude-code"}})
+	withRegistry(t, map[string]Backend{"codex": stub{"codex"}, "claude-code": stub{"claude-code"}})
 
 	got := Names()
-	want := []string{"claude-code", "hermes"}
+	want := []string{"claude-code", "codex"}
 	if len(got) != len(want) {
 		t.Fatalf("Names() = %v, want %v", got, want)
 	}
@@ -105,4 +101,22 @@ func withRegistry(t *testing.T, entries map[string]Backend) {
 		registry = saved
 		mu.Unlock()
 	})
+}
+
+// TestLookupNamesTheRemovedBackend proves a box that still declares the removed
+// backend — including every document written before the backend field existed,
+// which declares nothing at all — is told what happened and what to do, rather
+// than being handed a generic list that does not contain the name it asked for.
+func TestLookupNamesTheRemovedBackend(t *testing.T) {
+	withRegistry(t, map[string]Backend{DefaultName: stub{DefaultName}})
+
+	_, err := Lookup(RemovedName)
+	if err == nil {
+		t.Fatal("Lookup of the removed backend returned no error")
+	}
+	for _, want := range []string{RemovedName, "removed", DefaultName} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not mention %q: %v", want, err)
+		}
+	}
 }

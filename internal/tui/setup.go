@@ -144,12 +144,6 @@ func (s *setupScreen) act(r *root) tea.Cmd {
 			return d.LoginSpec()
 		})
 
-	case wizard.StepServeInstall:
-		return r.run("installing the service", true, d.ServeInstall)
-
-	case wizard.StepServeStart:
-		return r.run("starting the service", true, d.ServeStart)
-
 	case wizard.StepBrainInit:
 		return r.run("creating the Second Brain", true, d.BrainInit)
 
@@ -247,11 +241,7 @@ func (s *setupScreen) detail(r *root, w int) string {
 
 	switch step {
 	case wizard.StepDone:
-		if r.deps.ServiceDeclared {
-			b.WriteString("\n" + styMuted.Render(wrap(
-				"One thing is left that Torio cannot verify for you: forward the guest endpoint to your host and give the service its session token. The first-run runbook has both.",
-				detailWidth(w))))
-		}
+		// Nothing is left for the operator to wire up by hand.
 	case wizard.StepBoxUnusable:
 		// No action offered on purpose: nothing the hub could run repairs it.
 	default:
@@ -270,10 +260,6 @@ func actionLabel(step wizard.Step) string {
 		return "Bootstrap"
 	case wizard.StepBackendLogin:
 		return "Log in"
-	case wizard.StepServeInstall:
-		return "Install"
-	case wizard.StepServeStart:
-		return "Start service"
 	case wizard.StepBrainInit:
 		return "Create brain"
 	case wizard.StepProjectAdd:

@@ -41,8 +41,8 @@ func TestInitCreatesAbsentInstance(t *testing.T) {
 				if strings.Contains(text, "forwardAgent: true") {
 					t.Fatalf("template must not enable forwardAgent")
 				}
-				if strings.Contains(text, "usermod -aG docker hermes") {
-					t.Fatalf("template must not grant hermes docker group")
+				if strings.Contains(text, "usermod -aG docker "+testUser) {
+					t.Fatalf("template must not grant the agent docker group")
 				}
 				if !strings.Contains(text, testProfile.ImageDigest) {
 					t.Fatalf("template missing promoted image digest")
@@ -59,7 +59,7 @@ func TestInitCreatesAbsentInstance(t *testing.T) {
 	}}
 	a := New(fr)
 
-	res, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator"})
+	res, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator", Backend: newTestBackend()})
 	if err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestInitCreatePostListEmptyFailsClosed(t *testing.T) {
 	}}
 	a := New(fr)
 
-	_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator"})
+	_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator", Backend: newTestBackend()})
 	var lerr *Error
 	if !errors.As(err, &lerr) || lerr.Kind != KindPostconditionFailed {
 		t.Fatalf("want KindPostconditionFailed, got %v", err)
@@ -124,7 +124,7 @@ func TestInitCreatePostListIncompatibleFailsClosed(t *testing.T) {
 			}}
 			a := New(fr)
 
-			_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator"})
+			_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator", Backend: newTestBackend()})
 			var lerr *Error
 			if !errors.As(err, &lerr) || lerr.Kind != KindPostconditionFailed {
 				t.Fatalf("want KindPostconditionFailed, got %v", err)
@@ -161,7 +161,7 @@ func TestInitAlreadyCompatibleIsIdempotent(t *testing.T) {
 	}}
 	a := New(fr)
 
-	res, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator"})
+	res, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator", Backend: newTestBackend()})
 	if err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestInitExistingIncompatibleFailsClosed(t *testing.T) {
 	}}
 	a := New(fr)
 
-	_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator"})
+	_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator", Backend: newTestBackend()})
 	var lerr *Error
 	if !errors.As(err, &lerr) {
 		t.Fatalf("error is not *lima.Error: %v", err)
@@ -201,7 +201,7 @@ func TestInitIncompatibleForwardAgentFailsClosed(t *testing.T) {
 	}}
 	a := New(fr)
 
-	_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator"})
+	_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator", Backend: newTestBackend()})
 	var lerr *Error
 	if !errors.As(err, &lerr) || lerr.Kind != KindIncompatible {
 		t.Fatalf("want KindIncompatible, got %v", err)
@@ -214,7 +214,7 @@ func TestInitIncompatibleImageDigestFailsClosed(t *testing.T) {
 	}}
 	a := New(fr)
 
-	_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator"})
+	_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator", Backend: newTestBackend()})
 	var lerr *Error
 	if !errors.As(err, &lerr) || lerr.Kind != KindIncompatible {
 		t.Fatalf("want KindIncompatible, got %v", err)
@@ -227,7 +227,7 @@ func TestInitMalformedListOutput(t *testing.T) {
 	}}
 	a := New(fr)
 
-	_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator"})
+	_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator", Backend: newTestBackend()})
 	var lerr *Error
 	if !errors.As(err, &lerr) || lerr.Kind != KindMalformedOutput {
 		t.Fatalf("want KindMalformedOutput, got %v", err)
@@ -240,7 +240,7 @@ func TestInitBinaryMissing(t *testing.T) {
 	}}
 	a := New(fr)
 
-	_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator"})
+	_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator", Backend: newTestBackend()})
 	var lerr *Error
 	if !errors.As(err, &lerr) || lerr.Kind != KindBinaryUnavailable {
 		t.Fatalf("want KindBinaryUnavailable, got %v", err)
@@ -253,7 +253,7 @@ func TestInitTimeout(t *testing.T) {
 	}}
 	a := New(fr)
 
-	_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator"})
+	_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator", Backend: newTestBackend()})
 	var lerr *Error
 	if !errors.As(err, &lerr) || lerr.Kind != KindTimeout {
 		t.Fatalf("want KindTimeout, got %v", err)
@@ -271,7 +271,7 @@ func TestInitCreateFailureCleansTemplate(t *testing.T) {
 	}}
 	a := New(fr)
 
-	_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator"})
+	_, err := a.Init(context.Background(), InitOptions{OperatorUser: "operator", Backend: newTestBackend()})
 	var lerr *Error
 	if !errors.As(err, &lerr) || lerr.Kind != KindCommandFailed {
 		t.Fatalf("want KindCommandFailed, got %v", err)
@@ -299,7 +299,7 @@ func TestInitTemplateHasNoMountsAndPinnedImage(t *testing.T) {
 		t.Fatalf("operator not substituted: %s", body)
 	}
 	if strings.Contains(body, "docker.io") || strings.Contains(body, "usermod -aG docker") {
-		t.Fatalf("template must not install/rootful-docker hermes")
+		t.Fatalf("template must not install/rootful-docker the agent")
 	}
 }
 
@@ -341,7 +341,7 @@ func TestInitInterruptedCreateLeavesNoTemplate(t *testing.T) {
 	}}
 	a := New(fr)
 
-	_, err := a.Init(ctx, InitOptions{OperatorUser: "operator"})
+	_, err := a.Init(ctx, InitOptions{OperatorUser: "operator", Backend: newTestBackend()})
 	var lerr *Error
 	if !errors.As(err, &lerr) || lerr.Kind != KindCancelled {
 		t.Fatalf("want KindCancelled, got %v", err)
@@ -356,6 +356,9 @@ func TestInitInterruptedCreateLeavesNoTemplate(t *testing.T) {
 
 func renderedTemplateForTest(t *testing.T, opts InitOptions) string {
 	t.Helper()
+	if opts.Backend == nil {
+		opts.Backend = newTestBackend()
+	}
 	text, err := renderTemplate(opts, testProfile)
 	if err != nil {
 		t.Fatalf("renderTemplate: %v", err)

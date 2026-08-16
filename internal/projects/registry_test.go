@@ -40,7 +40,7 @@ func writeInstanceConfig(t *testing.T, base, instance, body string) {
 	}
 }
 
-const legacyDocument = `{"schema_version":"3","backend":"hermes","projects":[` +
+const legacyDocument = `{"schema_version":"3","backend":"codex","projects":[` +
 	`{"id":"legacy","display_name":"Legacy","remote":"git@github.com:wzslr321/legacy.git"}]}`
 
 // TestRegistryReadsTheLegacyArrayUntilItIsMigrated pins the upgrade path. An
@@ -152,13 +152,13 @@ func TestTheRegistryDocumentWinsOverTheLegacyArray(t *testing.T) {
 // retyping a remote into a second registry that can drift from the first.
 func TestBothInstancesSeeOneRegistry(t *testing.T) {
 	base, env := configHome(t)
-	writeInstanceConfig(t, base, "", `{"schema_version":"3","backend":"hermes","projects":[]}`)
+	writeInstanceConfig(t, base, "", `{"schema_version":"3","backend":"codex","projects":[]}`)
 	writeInstanceConfig(t, base, "torio-claude-code", `{"schema_version":"3","backend":"claude-code","projects":[]}`)
 
-	hermes := FileRegistry{Options: config.Options{Getenv: env}}
+	legacy := FileRegistry{Options: config.Options{Getenv: env}}
 	claude := FileRegistry{Options: config.Options{Getenv: env, Instance: "torio-claude-code"}}
 
-	current, err := hermes.Load()
+	current, err := legacy.Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestBothInstancesSeeOneRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WithProject: %v", err)
 	}
-	if err := hermes.Save(next); err != nil {
+	if err := legacy.Save(next); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 

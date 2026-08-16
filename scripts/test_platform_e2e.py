@@ -87,7 +87,7 @@ class PlatformE2EContractTests(unittest.TestCase):
         self.assertIn(
             "backend: ${{ fromJSON(inputs.backend != '' "
             "&& format('[\"{0}\"]', inputs.backend) "
-            "|| '[\"hermes\",\"claude-code\",\"codex\"]') }}",
+            "|| '[\"claude-code\",\"codex\"]') }}",
             text,
         )
         # Independent legs: which one broke is the first thing worth knowing.
@@ -301,9 +301,10 @@ class PlatformE2EContractTests(unittest.TestCase):
         text = DIAGNOSTICS.read_text(encoding="utf-8")
         self.assertIn('limactl list --json', text)
         self.assertIn('journalctl -u cloud-final', text)
-        self.assertIn('journalctl --user -u hermes-serve.service', text)
-        self.assertNotIn('/home/hermes/brain', text)
-        self.assertNotIn('/home/hermes/projects', text)
+        self.assertNotIn('/home/claude/brain', text)
+        self.assertNotIn('/home/claude/projects', text)
+        self.assertNotIn('/home/codex/brain', text)
+        self.assertNotIn('/home/codex/projects', text)
 
     def test_outer_diagnostics_record_the_hostagent_socket_path(self) -> None:
         # ha.sock is a socket, so a non-recursive cp of it can never succeed;

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wzslr321/torio/internal/backend/claudecode"
 	"github.com/wzslr321/torio/internal/lima"
 )
 
@@ -62,7 +63,7 @@ func TestImportDryRunPreflightsWithoutTransferringContent(t *testing.T) {
 	if len(g.copies) != 0 {
 		t.Fatalf("dry-run performed content transfer: %#v", g.copies)
 	}
-	if g.saw("git commit") || g.saw("mv -T") || g.saw("hermes project create") {
+	if g.saw("git commit") || g.saw("mv -T") {
 		t.Fatalf("dry-run mutated guest state: %#v", g.calls)
 	}
 }
@@ -126,18 +127,17 @@ func TestImportFirstRunStagesVerifiesAndPromotesOneManagedBrain(t *testing.T) {
 		t.Fatalf("copy source = %q, want private payload staging", g.copies[0].host)
 	}
 	for _, want := range []string{
-		"dd of=/home/hermes/.torio-brain-import-staging/manifest.sha256",
-		"sha256sum --quiet --strict -c /home/hermes/.torio-brain-import-staging/manifest.sha256",
-		"git -C /home/hermes/.torio-brain-candidate init",
-		"git -C /home/hermes/.torio-brain-candidate add -A",
+		"dd of=" + claudecode.Home + "/.torio-brain-import-staging/manifest.sha256",
+		"sha256sum --quiet --strict -c " + claudecode.Home + "/.torio-brain-import-staging/manifest.sha256",
+		"git -C " + claudecode.Home + "/.torio-brain-candidate init",
+		"git -C " + claudecode.Home + "/.torio-brain-candidate add -A",
 		"renameat2",
-		"hermes project create",
 	} {
 		if !g.saw(want) {
 			t.Errorf("Import did not execute %q; calls=%#v", want, g.calls)
 		}
 	}
-	if !g.pathExists || g.empty || !g.gitRepo || !g.registered {
+	if !g.pathExists || g.empty || !g.gitRepo {
 		t.Fatalf("final fake state is not initialized: %#v", g)
 	}
 	if !g.skillPresent {
@@ -174,10 +174,10 @@ func TestImportTransferFailureLeavesExistingBrainAndCleansStaging(t *testing.T) 
 	if err == nil {
 		t.Fatal("Import transfer failure returned nil")
 	}
-	if g.saw("mv -T /home/hermes/.torio-brain-candidate " + Path) {
+	if g.saw("mv -T " + claudecode.Home + "/.torio-brain-candidate " + Path) {
 		t.Fatalf("failed transfer promoted a candidate: %#v", g.calls)
 	}
-	if !g.saw("rm -rf -- /home/hermes/.torio-brain-import-staging") {
+	if !g.saw("rm -rf -- " + claudecode.Home + "/.torio-brain-import-staging") {
 		t.Fatalf("failed transfer did not clean guest staging: %#v", g.calls)
 	}
 	if !g.pathExists || !g.empty {
@@ -199,7 +199,7 @@ func TestImportNonPristineCollisionRefusesBeforeContentTransfer(t *testing.T) {
 	if len(g.copies) != 0 {
 		t.Fatalf("collision transferred content: %#v", g.copies)
 	}
-	if g.saw("renameat2") || g.saw("mv -T /home/hermes/.torio-brain-candidate "+Path) {
+	if g.saw("renameat2") || g.saw("mv -T "+claudecode.Home+"/.torio-brain-candidate "+Path) {
 		t.Fatalf("collision promoted a candidate: %#v", g.calls)
 	}
 	if !g.pathExists || g.empty || !g.gitRepo {
@@ -330,7 +330,7 @@ func TestImportPostExchangeFailureAtomicallyRollsBack(t *testing.T) {
 	if g.count("renameat2") != 2 {
 		t.Fatalf("post-exchange failure performed %d exchanges, want promote + rollback", g.count("renameat2"))
 	}
-	if !g.pathExists || g.empty || !g.gitRepo || !g.registered {
+	if !g.pathExists || g.empty || !g.gitRepo {
 		t.Fatalf("rollback did not preserve initialized Brain state: %#v", g)
 	}
 }
@@ -354,7 +354,7 @@ func TestImportCancellationAfterExchangeUsesFreshRollbackContext(t *testing.T) {
 	if g.count("renameat2") != 2 {
 		t.Fatalf("cancellation performed %d exchanges, want promote + rollback", g.count("renameat2"))
 	}
-	if !g.pathExists || g.empty || !g.gitRepo || !g.registered {
+	if !g.pathExists || g.empty || !g.gitRepo {
 		t.Fatalf("fresh-context rollback did not preserve initialized Brain state: %#v", g)
 	}
 }
@@ -423,16 +423,16 @@ func TestImportMayReplaceOnlyTheExactPristineScaffold(t *testing.T) {
 // made every real `torio brain import` fail before the first byte moved.
 //
 // The payload arrives over `limactl copy`, which is rsync running as the Lima
-// login user. Staging created 0700 hermes:hermes refused it — rsync stopped at
+// login user. Staging created 0700 agent-owned refused it — rsync stopped at
 // "cannot stat destination" — so the destination is grouped in the one guest
-// authority the operator and hermes share, and is group-writable. The staging
+// authority the operator and the agent share, and is group-writable. The staging
 // root above it is not: it holds the manifest that verification checks the
 // payload against, and the side supplying the payload must not be able to
 // rewrite its own reference.
 //
 // The tree then arrives owned by the operator with the host's 0700 directory
-// modes, which hermes cannot enter, so ownership is normalized before the first
-// hermes-side read rather than after it.
+// modes, which the agent cannot enter, so ownership is normalized before the first
+// agent-side read rather than after it.
 func TestImportStagesWherePayloadTransportCanActuallyWrite(t *testing.T) {
 	source := t.TempDir()
 	writeHostTransferFile(t, source, "notes/decision.md", "# Decision", 0o600)
@@ -447,21 +447,21 @@ func TestImportStagesWherePayloadTransportCanActuallyWrite(t *testing.T) {
 	if !g.saw(payloadStaging) {
 		t.Errorf("payload staging is not owned by the copy transport; want %q", payloadStaging)
 	}
-	rootStaging := "install -d -o " + lima.HermesUser + " -g " + lima.TorioProjectsGroup + " -m 0750 " + importStagingPath
+	rootStaging := "install -d -o " + claudecode.User + " -g " + lima.TorioProjectsGroup + " -m 0750 " + importStagingPath
 	if !g.saw(rootStaging) {
 		t.Errorf("staging root is not operator-readable-but-not-writable; want %q", rootStaging)
 	}
 
-	adopt := g.firstIndex("chown -R -- " + lima.HermesUser + ":" + lima.HermesUser + " " + importPayloadPath)
+	adopt := g.firstIndex("chown -R -- " + claudecode.User + ":" + claudecode.User + " " + importPayloadPath)
 	normalize := g.firstIndex("chmod -R u=rwX,g=rX,o= -- " + importPayloadPath)
 	firstRead := g.firstIndex("find " + importPayloadPath)
 	if adopt < 0 || normalize < 0 {
-		t.Fatalf("copied payload was never adopted by hermes: chown=%d chmod=%d", adopt, normalize)
+		t.Fatalf("copied payload was never adopted by the agent: chown=%d chmod=%d", adopt, normalize)
 	}
 	if firstRead < 0 {
 		t.Fatal("payload was never verified on the guest")
 	}
 	if adopt > firstRead || normalize > firstRead {
-		t.Errorf("payload read as hermes at call %d before adoption (chown=%d, chmod=%d)", firstRead, adopt, normalize)
+		t.Errorf("payload read as the agent at call %d before adoption (chown=%d, chmod=%d)", firstRead, adopt, normalize)
 	}
 }

@@ -24,7 +24,6 @@ import (
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
 	"github.com/wzslr321/torio/internal/projects"
-	"github.com/wzslr321/torio/internal/serve"
 )
 
 // app holds the per-invocation wiring shared across the command tree.
@@ -60,11 +59,6 @@ type app struct {
 	// test seam: production defaults to a real execx-backed adapter, tests
 	// inject one wired to a fake runner. It never touches a real VM in tests.
 	newLima func() *lima.Adapter
-
-	// newServe builds the serve-lifecycle adapter for a command run. Same test
-	// seam pattern as newLima: production wires it over the real Lima adapter,
-	// tests inject one backed by a fake guest.
-	newServe func() *serve.Adapter
 
 	// newBrain builds the private Brain manager. Tests inject a service fake;
 	// production wires the manager over the same typed Lima guest boundary.
@@ -127,7 +121,6 @@ type app struct {
 // root, rather than in each implementation's init: importing a backend must not
 // be what decides whether an instance can select it.
 func init() {
-	backend.Register(lima.Hermes())
 	backend.Register(claudecode.New())
 	backend.Register(codex.New())
 }
@@ -144,9 +137,6 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, build Bui
 func runWithApp(ctx context.Context, a *app, args []string) int {
 	if a.newLima == nil {
 		a.newLima = defaultNewLima
-	}
-	if a.newServe == nil {
-		a.newServe = func() *serve.Adapter { return serve.New(a.newLima(), a.backend) }
 	}
 	if a.newBrain == nil {
 		a.newBrain = func(adapter *lima.Adapter, opts lima.BootstrapOptions) brainService {
@@ -369,13 +359,12 @@ func newRootCmd(a *app) *cobra.Command {
 	root.PersistentFlags().DurationVar(&a.timeout, "timeout", config.DefaultTimeout, "bound the operation; cannot exceed the policy maximum")
 	root.PersistentFlags().StringVar(&a.configPath, "config", "", "path to an explicit non-secret config file")
 	root.PersistentFlags().StringVar(&a.backendName, "backend", "",
-		"agent backend this invocation is about; selects the instance that runs it (default hermes)")
+		"agent backend this invocation is about; selects the instance that runs it (default claude-code)")
 
 	root.AddCommand(newVersionCmd(a))
 	root.AddCommand(newUICmd(a))
 	root.AddCommand(newStatusCmd(a))
 	root.AddCommand(newVMCmd(a))
-	root.AddCommand(newServeCmd(a))
 	root.AddCommand(newBrainCmd(a))
 	root.AddCommand(newProjectCmd(a))
 	root.AddCommand(newBackendCmd(a))
@@ -404,7 +393,11 @@ func (a *app) resolveInstance() error {
 			return err
 		}
 	}
-	derived, err := config.InstanceForBackend(a.backendName, backend.DefaultName)
+	name := a.backendName
+	if name == "" {
+		name = backend.DefaultName
+	}
+	derived, err := config.InstanceForBackend(name)
 	if err != nil {
 		return err
 	}
@@ -427,15 +420,25 @@ func (a *app) resolveInstance() error {
 // and that disagreement is exactly the mistake worth stopping: a guest built
 // for one identity driven as another. An absent declaration means the default
 // backend, so it is compared as the default rather than as "unset", or
-// `--backend claude-code` against the Hermes box would read as a match.
+// `--backend claude-code` against a box that declares nothing would read as a match.
 //
 // A document that was never written declares nothing at all, which is the
 // ordinary state of a derived instance before `vm init`. There the flag is the
 // declaration.
+//
+// A document written before the backend field existed declares nothing, and
+// what it meant when it was written was the backend that has since been
+// removed. Such a document resolves to that name so the operator gets the
+// removal error and its way forward, rather than having a box built for one
+// identity silently driven as another. A current document that declares nothing
+// is a box no `vm init` has claimed yet, where the default is the answer.
 func (a *app) resolveBackend() (backend.Backend, error) {
 	declared := a.runtime.File.Backend
 	if declared == "" {
 		declared = backend.DefaultName
+		if a.runtime.ConfigLoaded && a.runtime.DeclaredSchemaVersion != config.ConfigSchemaVersion {
+			declared = backend.RemovedName
+		}
 	}
 	if a.backendName != "" {
 		if a.runtime.ConfigLoaded && declared != a.backendName {

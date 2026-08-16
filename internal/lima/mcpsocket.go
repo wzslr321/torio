@@ -94,7 +94,7 @@ func (a *Adapter) verifyBrokerSockets(ctx context.Context, rep *MCPBrokerReport)
 	// The group is compared, not merely reported. At 0750 the directory's group
 	// is the only thing that lets the agent identity traverse to the socket, so
 	// torio-mcp:torio-mcp 0750 satisfies owner and mode while every connect from
-	// hermes fails — and this check would have said the boundary holds on a guest
+	// the agent identity fails — and this check would have said the boundary holds on a guest
 	// where MCP cannot work at all.
 	if owner != socketOwner || group != socketGroup || !socketDirModes[mode] {
 		return a.brokerFailed(rep, name,

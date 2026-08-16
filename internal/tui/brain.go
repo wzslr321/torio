@@ -271,7 +271,6 @@ func (s *brainScreen) view(r *root, w int) string {
 	b.WriteString(line(rep.PathExists, "vault directory", ternary(rep.PathExists, "present", "absent")))
 	b.WriteString(line(rep.NativeFilesystem, "filesystem", orUnknown(rep.FSType)))
 	b.WriteString(line(rep.GitState == brain.GitClean, "git worktree", string(rep.GitState)))
-	b.WriteString(line(rep.ProjectRegistered, "registered as a project", ternary(rep.ProjectRegistered, "yes", "no")))
 	b.WriteString(line(rep.SkillState != brain.SkillDrift, "retrieval skill", string(rep.SkillState)))
 	b.WriteString(line(true, "contents", fmt.Sprintf("%d notes, %d attachments", rep.MarkdownFiles, rep.AttachmentFiles)))
 	// Where this box stands relative to the one Brain. Being out of step is not

@@ -20,7 +20,6 @@ import (
 // differs between backends belongs in the small per-backend blocks below; what
 // does not differ is asserted once, for every backend that ships.
 const (
-	backendHermes     = "hermes"
 	backendClaudeCode = "claude-code"
 	backendCodex      = "codex"
 )
@@ -29,7 +28,7 @@ func journeyBackend() string {
 	if b := os.Getenv("PLATFORM_E2E_BACKEND"); b != "" {
 		return b
 	}
-	return backendHermes
+	return backendClaudeCode
 }
 
 // backendProfile is what the journey needs to know about the backend under
@@ -127,34 +126,13 @@ func profileFor(name string) backendProfile {
 				"agent_session_helper",
 			},
 		}
-	case backendHermes:
-		return backendProfile{
-			name:                  backendHermes,
-			user:                  "hermes",
-			workspace:             "/home/hermes/projects",
-			vault:                 "/home/hermes/brain",
-			versionCheck:          "hermes_version",
-			versionCommand:        []string{"sudo", "-u", "hermes", "--", "hermes", "--version"},
-			skillFile:             "/home/hermes/.hermes/skills/brain/torio-brain/SKILL.md",
-			declaresRegistry:      true,
-			declaresService:       true,
-			declaresSession:       false,
-			declaresWaitingMarker: false,
-			requiredChecks: []string{
-				"hermes_user",
-				"hermes_torio_projects",
-				"hermes_not_in_docker",
-				"hermes_install",
-				"hermes_shim",
-			},
-		}
 	}
 	// An unknown name is a broken invocation, not a reason to fall back. A
 	// default case here made a typo in a CI matrix run the first backend's
 	// journey twice and report both legs green — the one outcome a two-backend
 	// gate exists to make impossible.
-	Fail(fmt.Sprintf("unknown PLATFORM_E2E_BACKEND %q; known backends are %q, %q and %q",
-		name, backendHermes, backendClaudeCode, backendCodex))
+	Fail(fmt.Sprintf("unknown PLATFORM_E2E_BACKEND %q; known backends are %q and %q",
+		name, backendClaudeCode, backendCodex))
 	return backendProfile{}
 }
 

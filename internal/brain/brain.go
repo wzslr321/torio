@@ -9,75 +9,16 @@ import (
 	"errors"
 
 	"github.com/wzslr321/torio/internal/backend"
-	"github.com/wzslr321/torio/internal/lima"
 )
 
 const (
-	// Path is the canonical V1 Second Brain path.
-	Path = lima.HermesBrainPath
-	// ProjectSlug is the stable Hermes Project identifier.
-	ProjectSlug = "second-brain"
-	// ProjectName is the human-facing Hermes Project name.
-	ProjectName = "Second Brain"
 	// SkillName is the directory name of the global retrieval skill. Every
 	// backend Torio supports discovers skills by walking a root recursively and
 	// reading each SKILL.md, so one installed copy is visible in every session
 	// and every working directory. There is no project-local skills directory.
 	SkillName = backend.BrainSkillName
-	// SkillCategory is the directory the skill is grouped under, and it is a
-	// deliberate choice rather than a tidy-up.
-	//
-	// Hermes has no skill routing: it renders a static, alphabetically ordered
-	// index of `name: description` lines into the stable system prompt, and the
-	// model picks by calling skill_view(name). Two properties of that index
-	// decide how visible a skill is, and Torio was losing on both. Categories
-	// render in sorted order, and a top-level skill is its own category — so
-	// `torio-brain` rendered 21st of 23, second from last. A category may also
-	// carry a DESCRIPTION.md whose text is NOT subject to the 60-character cap
-	// that truncates skill descriptions, and a top-level skill cannot have one.
-	//
-	// The bundled note-taking/obsidian skill sorts 15th and adds 133 uncapped
-	// characters through its category.
-	//
-	// "brain" sorts near the front and gives the skill a category description.
-	// Neither is enforcement — see EnvironmentHint for what carries the rule
-	// when the model does not load this skill at all.
-	SkillCategory = "brain"
-	// SkillCategoryPath is the guest directory for the skill's category.
-	SkillCategoryPath = lima.HermesProfilePath + "/skills/" + SkillCategory
-	// SkillCategoryFilePath holds the category description. Hermes reads the
-	// text from this file's YAML frontmatter `description` key, not its body.
-	SkillCategoryFilePath = SkillCategoryPath + "/DESCRIPTION.md"
-	// SkillPath is the guest directory that holds the retrieval skill.
-	//
-	// Torio writes the file directly rather than going through `hermes skills`
-	// or the skill_manage tool. Both alternatives were rejected: they stamp the
-	// skill `created_by: agent` in the usage record, which is exactly the marker
-	// the skill curator uses to decide what it may prune, and a mandatory V1
-	// product surface must not be prunable. The cost of a direct write is that
-	// the per-process skill prompt cache is not invalidated, so `brain status`
-	// says so instead of pretending the skill is live in open sessions.
-	SkillPath = SkillCategoryPath + "/" + SkillName
-	// SkillFilePath is the only file Torio installs under SkillPath.
-	SkillFilePath = SkillPath + "/SKILL.md"
-	// legacySkillPath is where releases before the category move installed the
-	// skill. Removing it is not tidiness: skill_view collects every candidate
-	// matching a name and, on more than one, refuses outright with "Ambiguous
-	// skill name … Refusing to guess" rather than picking either. Leaving the
-	// old copy behind would therefore break retrieval completely — a worse
-	// outcome than never having moved it.
-	legacySkillPath = lima.HermesProfilePath + "/skills/" + SkillName
 
-	stagingPath = lima.HermesHome + "/.torio-brain-staging"
-	// skillStagingPath is deliberately outside the skill discovery root so a
-	// half-written payload can never be walked as a skill.
-	skillStagingPath = lima.HermesHome + "/.torio-brain-skill-staging"
-	lockPath         = lima.HermesHome + "/.torio-brain-init.lock"
-	// syncStagingPath is where a bundle is written on its way out and read on
-	// its way in (ADR-0025). Like every other staging directory it sits in the
-	// owning identity's home.
-	syncStagingPath = lima.HermesHome + "/.torio-brain-sync-staging"
-	staleLockAge    = "10"
+	staleLockAge = "10"
 
 	// issueSkillDrift is the machine-readable issue string for a retrieval skill
 	// that does not match what Torio ships. Named once so the writer and the
@@ -155,7 +96,7 @@ const (
 )
 
 // SkillState is the on-disk state of the global retrieval skill. Torio can only
-// verify the guest file; it cannot observe whether a running Hermes backend has
+// verify the guest file; it cannot observe whether a running backend has
 // already loaded it, so callers must treat "installed" as "present and
 // verified", not as "active in every open session".
 type SkillState string
@@ -175,24 +116,22 @@ const (
 // StatusReport contains only derived metadata and aggregate counts. It never
 // contains note names, relative paths, note content, or raw guest output.
 type StatusReport struct {
-	State             State
-	Path              string
-	PathExists        bool
-	PathSecure        bool
-	NativeFilesystem  bool
-	FSType            string
-	Owner             string
-	Group             string
-	Mode              string
-	ManagedScaffold   bool
-	GitState          GitState
-	GitHasRemote      bool
-	MarkdownFiles     int
-	AttachmentFiles   int
-	TotalBytes        int64
-	ProjectRegistered bool
-	ProjectConflict   bool
-	SkillState        SkillState
+	State            State
+	Path             string
+	PathExists       bool
+	PathSecure       bool
+	NativeFilesystem bool
+	FSType           string
+	Owner            string
+	Group            string
+	Mode             string
+	ManagedScaffold  bool
+	GitState         GitState
+	GitHasRemote     bool
+	MarkdownFiles    int
+	AttachmentFiles  int
+	TotalBytes       int64
+	SkillState       SkillState
 	// SkillPath is the guest file the retrieval skill is installed at, empty
 	// when the backend declares none. It is reported rather than derived by the
 	// caller because the path is the backend's, and an operator told to look at
@@ -215,7 +154,7 @@ type StatusReport struct {
 // InitReport distinguishes a fresh scaffold from an idempotent verification or
 // recovery of an already-promoted scaffold whose project registration failed.
 // SkillUpdated reports whether this run actually wrote the retrieval skill
-// payload; Hermes caches the skill prompt per backend process, so a write means
+// payload; a backend may cache the skill prompt per process, so a write means
 // existing sessions still will not see the skill until they are restarted.
 type InitReport struct {
 	Created      bool

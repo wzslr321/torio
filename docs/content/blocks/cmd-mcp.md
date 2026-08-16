@@ -30,7 +30,7 @@ pinned official MCP Go SDK. Tokens stay below `/home/torio-mcp/oauth` as
 token, client secret or credential file from the host.
 
 Every backend launches the credential-free relay over stdio, and each one puts
-the control somewhere its own agent cannot reach. Hermes' `config.yaml` is
+the control somewhere its own agent cannot reach. An agent-owned declaration is
 agent-writable, so its exact relay check is a drift detector, not a boundary.
 Claude Code uses root-owned `/etc/claude-code/managed-mcp.json` together with
 `allowManagedMcpServersOnly: true`; install removes native MCP entries from the

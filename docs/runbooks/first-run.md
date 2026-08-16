@@ -3,7 +3,7 @@
 
 # Runbook — first run
 
-Brings a workstation from nothing to a working setup: a Linux VM, a Hermes backend on
+Brings a workstation from nothing to a working setup: a Linux VM, an agent on
 the VM's own loopback, a tunnel you control, a Second Brain, and your first
 attached repository.
 
@@ -165,7 +165,7 @@ compatible one, so there is no state in which you skip the second command.
 compatible one already exists) and verifies the post-create list output before
 reporting success. `start` is idempotent and confirms a `Running` post-state.
 `bootstrap` operates only on the existing target after a verified `Running`
-precondition, through the typed Lima boundary. Hermes Agent install can be slow,
+precondition, through the typed Lima boundary. A backend install can be slow,
 so give it room — but `10m` is the policy maximum for any single operation, and
 asking for more is refused before any work starts:
 
@@ -174,195 +174,40 @@ torio: timeout 15m0s exceeds policy maximum 10m0s
 ```
 
 On a fully-reconciled target
-it mutates nothing; when the pinned launcher is missing it installs Hermes Agent
-at the pinned commit, then reconciles the PATH shim. It:
+it mutates nothing; when the pinned binary is missing it installs the declared
+backend at its pin. It:
 
-- installs the pinned Hermes Agent when `/home/hermes/hermes-agent/venv/bin/hermes` is missing (never curl|bash pipe — download to a hermes-writable path, run with fixed flags, verify git HEAD);
-- ensures `/usr/local/bin/hermes` is a symlink to the pinned launcher (only after confirming the launcher exists);
-- **verifies** (not merely trusts an exit code): the `hermes` user exists; group `torio-projects` exists; `hermes` and the Lima login operator are members; `hermes` is **not** in the `docker` group (rootful Docker for hermes is forbidden); `uname -m` matches the host profile's guest architecture; `hermes --version` through the documented stable command path; `git --version`; the persistent profile, Second Brain, and workspace paths are directories with the expected owner, group, and mode on native Linux (ext4), not a host share; and no broad host mount is present.
+- installs the backend at its pinned version when it is missing, verifying the download against a checksum this repository commits — never a `curl | bash` pipe;
+- **verifies** (not merely trusts an exit code): the agent's guest user exists; group `torio-projects` exists; the agent and the Lima login operator are members; the agent is **not** in the `docker` group (rootful Docker for the agent is forbidden); `uname -m` matches the host profile's guest architecture; the backend's own version command through the documented stable command path; `git --version`; the persistent profile, Second Brain, and workspace paths are directories with the expected owner, group, and mode on native Linux (ext4), not a host share; and no broad host mount is present.
 
 Any drift or unverifiable state fails closed (exit 6) with remediation. A rerun
 is success only when every postcondition is proven. Use `--json` for the
 machine-readable envelope (one document on stdout).
 
-### Persistent Hermes locations
+### Persistent guest locations
+
+The table below is the Claude Code layout; every backend has the same shape
+under its own identity.
 
 | What | Path (on the VM's native Linux filesystem) |
 | --- | --- |
-| Guest user | `hermes` |
-| Hermes home | `/home/hermes` |
-| Profile / application state | `/home/hermes/.hermes` |
-| Second Brain vault | `/home/hermes/brain` |
-| Workspace root | `/home/hermes/projects` |
+| Guest user | `claude` |
+| Home | `/home/claude` |
+| Profile / application state | `/home/claude/.claude` |
+| Second Brain vault | `/home/claude/brain` |
+| Workspace root | `/home/claude/projects` |
 
 These are also emitted in the `torio vm bootstrap` output (human and `--json`).
 
 `init` creates the VM; `bootstrap` then verifies the guest layout above on an
 already-running instance. Neither recreates or re-images it.
 
-## 3. Bring up the loopback backend
+## 3. Create the Second Brain
 
-Install and start the persistent Hermes backend as a user systemd service inside
-the VM, using the existing `/home/hermes/.hermes` profile (application state,
-not the Second Brain vault at `/home/hermes/brain`). It binds guest loopback
-only (`127.0.0.1:9119`) and never a public address:
-
-```bash
-torio serve install --timeout 2m
-torio serve start   --timeout 2m
-torio serve status
-```
-
-- `install` ensures user linger, renders the unit (loopback bind, `HERMES_HOME`, `Restart=always`), validates it with `systemd-analyze` **before** activation, then reloads and enables it for boot. Idempotent; accepts no secrets; does not start the backend.
-- `start` starts it and fails closed unless the systemd state is active **and** `GET /api/status` answers 200 through loopback.
-- `status` proves the same and exits non-zero when not ready. `stop` and `restart` mirror the lifecycle. `logs [--lines N]` shows bounded, redacted, unit-scoped journal entries only.
-
-## 4. Reach the backend from the host
-
-The backend binds `127.0.0.1:9119` *inside* the VM, so you forward a host
-loopback port to it over SSH. Torio deliberately adds no tunnel feature — you
-control the forward, which means network exposure is never an accident of
-running a command.
-
-Derive the forward from the supported live Lima SSH config and open it:
-
-```bash
-ssh -F ~/.lima/torio/ssh.config -L 19119:127.0.0.1:9119 -N -f \
-    -o ExitOnForwardFailure=yes lima-torio
-```
-
-Verify it from the host — you should get `200`:
-
-```bash
-curl -s -m 5 -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19119/api/status
-```
-
-Tear the tunnel down when you are done by killing the `ssh` process holding the
-forward.
-
-> `overall:degraded` in `/api/status` is **expected** when the messaging gateway
-> is stopped — the serve backend/dashboard component is still `ok`.
-
-## 5. Pin a session token
-
-`hermes serve` gates every non-public `/api/*` route behind an
-`X-Hermes-Session-Token` header. That token is normally injected into the
-dashboard SPA's `index.html`, but `serve` is headless and never renders that
-page — so a remote Desktop client has nothing to read it from, and unauthorized
-calls fail:
-
-```bash
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19119/api/sessions   # -> 401
-```
-
-`/api/status` is public and answers `200` either way, so a green readiness check
-does **not** prove the token is usable.
-
-Pin a token you can also paste into Desktop by setting
-`HERMES_DASHBOARD_SESSION_TOKEN` in a systemd **drop-in**, kept separate from the
-base unit so `torio serve install` re-rendering the unit does not wipe it.
-
-### Generate the value
-
-Any long random string works. Torio does not generate one for you — it handles
-no secrets. For example:
-
-```bash
-python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
-```
-
-This is the value you will paste into Desktop, so keep it somewhere you can copy
-from once, such as your password manager.
-
-### Create the drop-in on the guest
-
-Do this in an **interactive shell on the guest**, not through `torio vm ssh`. Two
-reasons, one of which fails silently:
-
-- `torio vm ssh` forwards no stdin, so piping a file in produces an **empty file while still exiting `0`** — `echo … | torio vm ssh -- sudo -u hermes -- tee …` looks like it worked and did nothing.
-- Passing the token as a command argument would put the secret in the control plane's logs and in `/proc` on the guest. Typing it into a shell you opened yourself keeps it out of both, which is what the credential-neutral boundary expects.
-
-```bash
-limactl shell torio                  # interactive shell in the VM (Lima user)
-sudo -iu hermes                      # become the hermes service identity
-
-install -d -m 700 ~/.config/systemd/user/hermes-serve.service.d
-umask 077
-nano ~/.config/systemd/user/hermes-serve.service.d/override.conf
-```
-
-Type these two lines, then paste your token immediately after the `=`:
-
-```ini
-[Service]
-Environment=HERMES_DASHBOARD_SESSION_TOKEN=
-```
-
-Save with `Ctrl+O`, `Enter`, leave with `Ctrl+X`, then `exit` twice.
-
-The token is typed, never pasted as part of a ready-made block, and the line
-above deliberately stops at `=`. Copying a block that already contains a stand-in
-value pins **that** value: the backend starts, Desktop connects, every check
-passes, and the deployment is guarded by a token an attacker can read in the
-documentation. Leaving the value empty fails visibly instead, which is the
-failure you want.
-
-The file stores the token in plain text, so it must not be group- or
-world-readable: `700` on the directory, `600` on the file. `nano` writes through
-a new file, so check the result rather than assuming:
-
-```bash
-torio vm ssh -- sudo -u hermes -- \
-    stat -c '%a %U:%G %n' /home/hermes/.config/systemd/user/hermes-serve.service.d/override.conf
-```
-
-Confirm you pinned something, without printing it — this catches an empty value
-and a value you meant to replace:
-
-```bash
-torio vm ssh -- sudo -u hermes -- \
-    awk -F= '/SESSION_TOKEN/ {print "token_chars=" length($NF)}' \
-    /home/hermes/.config/systemd/user/hermes-serve.service.d/override.conf
-```
-
-### Apply it
-
-Reload and restart. Plain `sudo -u hermes` does not set `XDG_RUNTIME_DIR`, so
-`systemctl --user` fails with `Failed to connect to bus: No medium found` unless
-it is passed explicitly (the `hermes` uid is `1000`):
-
-```bash
-torio vm ssh -- sudo -u hermes -- \
-    env XDG_RUNTIME_DIR=/run/user/1000 systemctl --user daemon-reload
-torio serve restart --timeout 2m
-```
-
-Verify the gate now opens — `401` without the header, `200` with it:
-
-```bash
-curl -s -o /dev/null -w '%{http_code}\n' \
-    -H 'X-Hermes-Session-Token: [REDACTED]' http://127.0.0.1:19119/api/sessions
-```
-
-Because the value is pinned in the drop-in it is stable across restarts.
-
-### Rotate it
-
-Rotate whenever the value has been anywhere it should not have been — a
-screenshot, a paste buffer you shared, a terminal someone else watched. Generate
-a new value, edit the drop-in with `nano` exactly as above, then repeat the
-reload and restart. The old token stops working the moment the process comes
-back, so **update Desktop in the same sitting**: a stale token there produces a
-`401` that looks like a broken tunnel rather than a rejected credential.
-
-> The token is a **secret**: generate your own, keep it out of the repository,
-> its evidence, and any pull request or comment, and rotate it if it leaks.
-
-## 6. Create the Second Brain
-
-The Brain is a private Markdown vault on the guest at `/home/hermes/brain`,
-versioned by a local Git repository and registered with Hermes as its own
-project, so any session can search it without you opening it first.
+The Brain is a private Markdown vault on the guest at `/home/claude/brain`,
+versioned by a local Git repository, with a retrieval skill installed where the
+backend discovers skills — so any session can search it without you opening it
+first.
 
 ```bash
 torio brain init
@@ -370,21 +215,16 @@ torio brain status
 ```
 
 `init` builds the scaffold atomically through private guest staging, makes the
-first local commit, registers the Hermes project, and installs the global
-`torio-brain` retrieval skill. It is idempotent on state it manages, and it
+first local commit, and installs the global `torio-brain` retrieval skill. It is idempotent on state it manages, and it
 refuses to touch non-empty data it did not create — so a second run is safe and
 an existing vault is never silently absorbed.
 
 It configures no remote and pushes nothing. The Brain stays on the VM.
 
-> If the backend was already running, restart it — `torio serve restart
-> --timeout 2m`. Hermes caches the assembled skills prompt **in the backend
-> process**, keyed on the skills directory rather than on the files in it, and
-> Torio installs the skill by writing it. Reconnecting Desktop is not enough:
-> the client reconnects, the process does not, and the cache it holds is the one
-> that decides whether `torio-brain` is offered. `torio brain status` reports
-> that the file is correct and says in as many words that it cannot tell whether
-> a running session has loaded it.
+> A session that was already open will not see a skill installed after it
+> started: a backend assembles its skills prompt once, per process. Open a new
+> session. `torio brain status` reports the file it verified, which is the state
+> Torio can prove.
 
 ### Bring an existing vault in
 
@@ -415,13 +255,13 @@ Torio brings data in and does not take it out — there is no export command.
 Copying the Brain to your host is something you do explicitly:
 
 ```bash
-limactl copy torio:/home/hermes/brain/ ~/torio-brain-copy/
+limactl copy torio:/home/claude/brain/ ~/torio-brain-copy/
 ```
 
 That is your command. Nothing verifies the result, and Torio does not call it a
 backup.
 
-## 7. Attach a repository
+## 4. Attach a repository
 
 Torio manages only repositories in the registry. It discovers nothing from
 disk, and removing a registry entry leaves the checkout on the guest.
@@ -432,12 +272,12 @@ torio project list
 ```
 
 `add` clones the exact remote into the derived workspace path, gives you and
-`hermes` shared access to it, and registers the project with Hermes before it
+the agent identity shared access to it, before it
 records anything in config. `--use` makes it the active project. If a valid
 checkout of that remote is already at the path, `add` verifies and adopts it
 rather than touching it.
 
-**You do not choose the path.** It is always `/home/hermes/projects/<id>`,
+**You do not choose the path.** It is always `<workspace root>/<id>`,
 derived from the project id — never taken from you, never stored in config.
 Without `--id`, the id is the name you gave, which must be a lowercase slug;
 pass `--id` to pick a different one.
@@ -455,7 +295,7 @@ ssh-ed25519 AAAA…
 Add that key to the repository on github.com as a deploy key, with write access off,
 then run the same command again. Adding it to your account instead would give
 the guest write access to every repository that account can reach.
-Private half, on the guest, owned by the backend identity: /home/hermes/.ssh/torio/my-service
+Private half, on the guest, owned by the backend identity: /home/claude/.ssh/torio/my-service
 ```
 
 On GitHub that is the repository's own **Settings → Deploy keys → Add deploy
@@ -487,7 +327,7 @@ rerun finishes the work instead of starting over.
 ### Inspect and forget
 
 ```bash
-torio project show my-service     # registry entry, checkout state, Hermes registration
+torio project show my-service     # registry entry and checkout state
 torio project use my-service      # switch the active project
 torio project remove my-service   # forget it
 ```
@@ -496,7 +336,7 @@ torio project remove my-service   # forget it
 file names, diffs, or raw Git output. `list` reads config only and runs nothing
 on the guest, so it works with the VM stopped.
 
-`remove` archives the Hermes project and drops the config entry. **The checkout
+`remove` drops the config entry. **The checkout
 is never deleted** — the output tells you where it still is. There is no
 `--delete`.
 
@@ -520,62 +360,25 @@ so rather than proceeding.
 - **No substitution.** If the exact remote is unreadable, Torio does not swap in another repository and does not attempt an auth workaround.
 - **No unattended operator signature.** Torio never pushes, merges, deploys, or releases. Its write route exists inside `project shell`, or one approved signature at a time in an agent session opened with `--push-grant`; no unanswered prompt signs. The forge-side permission of a guest deploy key is outside this guarantee.
 
-## 8. Connect Hermes Desktop
-
-Desktop talks to the same loopback endpoint you forwarded, so bring the tunnel up
-first and confirm both ends are ready: `torio serve status` exits `0`, and the
-`curl` to `http://127.0.0.1:19119/api/status` returns `200`.
-
-In Hermes Desktop → Settings → **Gateway Connection → Remote gateway**, set:
-
-| Field | Value |
-| --- | --- |
-| Remote URL | `http://127.0.0.1:19119` — the host end of the SSH forward to the guest backend on `127.0.0.1:9119` |
-| Session token | the value you pinned in the drop-in |
-
-After **Save and reconnect**, the status bar shows the remote endpoint plus
-matching client and backend versions.
-
-### Point Desktop at a project
-
-Registering the project does **not** by itself change what Desktop shows.
-Settings → **Workspace → Working Directory** defaults to `.`, which resolves
-against the serve unit's `WorkingDirectory=/home/hermes/hermes-agent` — the
-Hermes source checkout — so the file tree shows the wrong repository. Set it to
-the project's derived path:
-
-```text
-/home/hermes/projects/my-service
-```
-
-Optionally set **Repository Discovery Roots** to `/home/hermes/projects` so
-discovery stays inside the workspace root and sees every project you attached.
-
-Two dead ends worth skipping: the folder chip in the status bar opens a context
-menu, not a project switcher; and Desktop's **Terminal** tab is a shell on your
-**host**, not on the guest.
-
-## 9. Configure a model provider
+## 5. Configure a model provider
 
 Until a provider is configured, starting a session fails at agent init — for
-example `agent init failed: No Codex credentials stored`. Check what the guest
+example `agent init failed: No credentials stored`. Check what the guest
 currently has:
 
 ```bash
-torio vm ssh -- sudo -u hermes -- hermes status
+torio vm ssh -- sudo -u claude -- claude --version
 ```
 
 `torio vm ssh` forwards no stdin or TTY by design, so the interactive picker cannot
 be driven through the control plane. Use an interactive shell on the guest
-instead. `limactl shell` logs you in as the Lima user, so become the `hermes`
-service identity explicitly:
+instead. `limactl shell` logs you in as the Lima user, so become the agent
+identity explicitly:
 
 ```bash
-limactl shell torio           # interactive shell in the VM (Lima user)
-sudo -iu hermes                     # become the hermes service identity
-hermes model                        # interactive provider/model picker
-# or, for one provider's credential:
-hermes auth add <provider>
+limactl shell torio-claude-code     # interactive shell in the VM (Lima user)
+sudo -iu claude                     # become the agent identity
+claude                              # sign in through the agent's own flow
 ```
 
 Which provider and credential to use is the operator's judgement. The secret
@@ -584,7 +387,7 @@ never enters the repository, its evidence, or any pull request or comment.
 Selecting a model and holding an actual chat are **manual human steps** beyond
 this runbook, as is the credential entry the step above describes.
 
-## 10. Push, when you decide to
+## 6. Push, when you decide to
 
 The persistent backend receives no operator write credential. A private
 repository's guest deploy key is read-only only if you authorized it that way;
@@ -599,7 +402,7 @@ torio project shell my-service
 
 This forwards your host's SSH agent into an interactive session in the checkout.
 The capability lives exactly as long as the session does and leaves with you
-when you exit. Inside it you are the `hermes` identity, in the project
+when you exit. Inside it you are the agent identity, in the project
 directory, with your agent available to Git:
 
 ```bash

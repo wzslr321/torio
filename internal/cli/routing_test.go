@@ -84,9 +84,9 @@ func TestBackendFlagRoutesToItsOwnInstance(t *testing.T) {
 	}
 }
 
-// The default backend keeps the instance an existing box already has. Deriving
-// a new name for it would strand every VM created before this flag existed.
-func TestNoBackendFlagKeepsTheDefaultInstance(t *testing.T) {
+// With no flag the default backend derives its own instance, the same one
+// `--backend claude-code` names.
+func TestNoBackendFlagDerivesTheDefaultBackendsInstance(t *testing.T) {
 	routingHome(t)
 	code, instance, backendName, stderr := runRouted(t,
 		[]string{"project", "list", "--json"},
@@ -94,23 +94,25 @@ func TestNoBackendFlagKeepsTheDefaultInstance(t *testing.T) {
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
 	}
-	if instance != config.DefaultInstance {
-		t.Errorf("instance = %q, want %q", instance, config.DefaultInstance)
+	want := config.InstancePrefix + backend.DefaultName
+	if instance != want {
+		t.Errorf("instance = %q, want %q", instance, want)
 	}
 	if backendName != backend.DefaultName {
 		t.Errorf("backend = %q, want %q", backendName, backend.DefaultName)
 	}
 }
 
-// --backend hermes resolves to the same box as no flag at all, so the two
-// spellings of "my daily instance" cannot drift into two instances.
+// Naming the default backend explicitly resolves to the same box as no flag at
+// all, so the two spellings of "my daily instance" cannot drift into two.
 func TestTheDefaultBackendNamedExplicitlyIsTheSameInstance(t *testing.T) {
 	routingHome(t)
 	_, instance, _, _ := runRouted(t,
 		[]string{"project", "list", "--json", "--backend", backend.DefaultName},
 		&fakeProjectService{listOut: []projects.Project{sampleProject()}})
-	if instance != config.DefaultInstance {
-		t.Errorf("instance = %q, want %q", instance, config.DefaultInstance)
+	want := config.InstancePrefix + backend.DefaultName
+	if instance != want {
+		t.Errorf("instance = %q, want %q", instance, want)
 	}
 }
 
@@ -144,7 +146,7 @@ func TestTheEnvironmentStillNamesTheBoxDirectly(t *testing.T) {
 // operator asked two questions with different answers and has to be told.
 func TestAFlagCannotRedirectANamedInstance(t *testing.T) {
 	home := routingHome(t)
-	writeInstanceDoc(t, home, "", `{"schema_version":"3","backend":"hermes","projects":[]}`)
+	writeInstanceDoc(t, home, "", `{"schema_version":"3","backend":"codex","projects":[]}`)
 	t.Setenv(config.InstanceEnvKey, config.DefaultInstance)
 
 	code, _, _, stderr := runRouted(t,
@@ -155,10 +157,9 @@ func TestAFlagCannotRedirectANamedInstance(t *testing.T) {
 	}
 }
 
-// A legacy document declares no backend, which means the default one. Comparing
-// it as "unset" rather than as the default would read --backend claude-code
-// against the Hermes box as a match and drive it as the wrong agent.
-func TestAnAbsentDeclarationIsComparedAsTheDefaultBackend(t *testing.T) {
+// A written document that declares no backend predates the field, so it names
+// the removed backend. Naming a live one against it must not read as a match.
+func TestAnAbsentDeclarationIsComparedAsTheRemovedBackend(t *testing.T) {
 	home := routingHome(t)
 	writeInstanceDoc(t, home, "", `{"schema_version":"2","projects":[]}`)
 	t.Setenv(config.InstanceEnvKey, config.DefaultInstance)
@@ -171,31 +172,30 @@ func TestAnAbsentDeclarationIsComparedAsTheDefaultBackend(t *testing.T) {
 	}
 }
 
-// The other half of the same rule, and the one that fails open rather than
-// closed if it is missed: a document that declares nothing means the default
-// backend, so naming that backend explicitly against a legacy box must be a
-// match. Comparing an absent declaration as "unset" would reject the one
-// spelling every pre-existing instance answers to.
-func TestNamingTheDefaultBackendMatchesALegacyDeclaration(t *testing.T) {
+// A box that still resolves to the removed backend is refused with the removal
+// error rather than silently driven as a live agent.
+func TestALegacyDeclarationResolvesToTheRemovedBackend(t *testing.T) {
 	home := routingHome(t)
 	writeInstanceDoc(t, home, "", `{"schema_version":"2","projects":[]}`)
 	t.Setenv(config.InstanceEnvKey, config.DefaultInstance)
 
-	code, _, backendName, stderr := runRouted(t,
-		[]string{"project", "list", "--json", "--backend", backend.DefaultName},
+	code, _, _, stderr := runRouted(t,
+		[]string{"project", "list"},
 		&fakeProjectService{listOut: []projects.Project{sampleProject()}})
-	if code != int(ExitOK) {
-		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	if code == int(ExitOK) {
+		t.Fatalf("a box declaring the removed backend was accepted; stderr=%q", stderr)
 	}
-	if backendName != backend.DefaultName {
-		t.Errorf("backend = %q, want %q", backendName, backend.DefaultName)
+	for _, want := range []string{backend.RemovedName, "removed", backend.DefaultName} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr does not mention %q: %q", want, stderr)
+		}
 	}
 }
 
 // A derived instance has no document until `vm init` writes one, so the flag is
 // the declaration there. Falling back to the default backend because the
-// document is missing would run Hermes commands against the box the operator
-// asked to build for another agent.
+// document is missing would run the default backend's commands against the box
+// the operator asked to build for another agent.
 func TestADerivedInstanceTakesItsBackendFromTheFlag(t *testing.T) {
 	routingHome(t)
 	code, _, backendName, stderr := runRouted(t,
@@ -301,80 +301,14 @@ func TestAddNeverPointsAtACommandTheBackendCannotRun(t *testing.T) {
 	}
 
 	if got := add("claude-code"); strings.Contains(got, "project use") {
-		t.Errorf("add pointed at `project use` on a backend that declares no registry: %q", got)
+		t.Errorf("add pointed at a command no backend has: %q", got)
 	} else if !strings.Contains(got, "project enter") {
 		t.Errorf("add gave no usable next step: %q", got)
 	}
-	// The backend that does keep a registry keeps the step that drives it, so
-	// this is a branch on what the backend declares rather than a step dropped
-	// for everyone.
-	if got := add(backend.DefaultName); !strings.Contains(got, "project use") {
-		t.Errorf("add dropped `project use` on a backend that keeps a registry: %q", got)
-	}
 }
 
-// TestShowReportsNoRegistryRatherThanAnAbsentOne finishes the family the
-// declared-absent registry belongs to. `show` reported a `hermes` block of
-// all-falses and printed "hermes: absent" on a Claude Code box — naming a
-// backend that is not running there and reporting its registration as missing.
-// An object full of falses reads as "the registration is gone", which is a
-// different statement from "there is nowhere to register".
-func TestShowReportsNoRegistryRatherThanAnAbsentOne(t *testing.T) {
-	routingHome(t)
-	service := &fakeProjectService{showReport: projects.ShowReport{
-		Project: projects.Project{
-			ID: "demo", DisplayName: "Demo",
-			Remote: "git@github.com:wzslr321/demo.git",
-			Path:   "/home/claude/projects/demo",
-		},
-	}}
-	show := func(backendName string, jsonOut bool) string {
-		t.Helper()
-		var out, errBuf bytes.Buffer
-		a := &app{
-			stdout:             &out,
-			stderr:             &errBuf,
-			build:              testBuild(),
-			lookupOperatorUser: func() (string, error) { return "testop", nil },
-			newProjects:        func(*lima.Adapter, lima.BootstrapOptions) projectService { return service },
-		}
-		args := []string{"project", "show", "demo", "--backend", backendName}
-		if jsonOut {
-			args = append(args, "--json")
-		}
-		if code := runWithApp(context.Background(), a, args); code != int(ExitOK) {
-			t.Fatalf("%s: exit = %d, want 0; stderr=%q", backendName, code, errBuf.String())
-		}
-		return out.String()
-	}
-
-	envelope := show("claude-code", true)
-	if strings.Contains(envelope, `"hermes"`) {
-		t.Errorf("the envelope describes a registration the backend cannot have: %s", envelope)
-	}
-	if !strings.Contains(envelope, `"registry_declared":false`) {
-		t.Errorf("the envelope does not say the backend declares no registry: %s", envelope)
-	}
-	human := show("claude-code", false)
-	if strings.Contains(human, "hermes:") {
-		t.Errorf("human output labels a line after a backend that is not running there: %q", human)
-	}
-	if !strings.Contains(human, `none declared by backend "claude-code"`) {
-		t.Errorf("human output does not name which backend declares no registry: %q", human)
-	}
-
-	// The backend that does keep one still reports it both ways, so this is a
-	// branch on the declaration rather than a block dropped for everyone.
-	envelope = show(backend.DefaultName, true)
-	if !strings.Contains(envelope, `"hermes"`) || !strings.Contains(envelope, `"registry_declared":true`) {
-		t.Errorf("a backend with a registry lost its registration block: %s", envelope)
-	}
-}
-
-// TestRemoveClaimsNoArchivalItDidNotPerform is the worst of the family: the
-// default branch of the human message asserts that a Hermes project was
-// archived, so on a backend with no registry `remove` reported an action Torio
-// had not taken.
+// `remove` must not claim an action Torio did not take: it forgets a record and
+// says the checkout is retained, and nothing more.
 func TestRemoveClaimsNoArchivalItDidNotPerform(t *testing.T) {
 	routingHome(t)
 	service := &fakeProjectService{removeReport: projects.RemoveReport{
@@ -394,8 +328,8 @@ func TestRemoveClaimsNoArchivalItDidNotPerform(t *testing.T) {
 		[]string{"project", "remove", "demo", "--backend", "claude-code"}); code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, errBuf.String())
 	}
-	if strings.Contains(out.String(), "archived") && !strings.Contains(out.String(), "no registry to archive it from") {
-		t.Errorf("remove claimed an archival on a backend with no registry: %q", out.String())
+	if strings.Contains(out.String(), "archived") {
+		t.Errorf("remove claimed an archival nothing performs: %q", out.String())
 	}
 	if !strings.Contains(out.String(), "still exists on the VM") {
 		t.Errorf("remove stopped saying the checkout is retained: %q", out.String())
@@ -441,7 +375,7 @@ func TestTheRegistryFollowsTheRoutedInstance(t *testing.T) {
 // existing installation is in the first time it runs this build.
 func TestSwitchingBackendsKeepsAnUnmigratedRegistry(t *testing.T) {
 	home := routingHome(t)
-	writeInstanceDoc(t, home, "", `{"schema_version":"3","backend":"hermes","projects":[`+
+	writeInstanceDoc(t, home, "", `{"schema_version":"3","backend":"codex","projects":[`+
 		`{"id":"demo","display_name":"Demo","remote":"git@github.com:wzslr321/demo.git"}]}`)
 
 	for _, args := range [][]string{

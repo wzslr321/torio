@@ -272,8 +272,8 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 			"markdown_files": float64(1),
 			"conflicts":      float64(0),
 		})
-		// As hermes, not as the Lima login user: `brain init` reports the Brain
-		// as 0750 hermes:hermes, so the login user cannot traverse it and `test`
+		// As the agent identity, not as the Lima login user: `brain init` reports
+		// the Brain as 0750 agent-owned, so the login user cannot traverse it and `test`
 		// would report the file missing when it is merely unreadable. The
 		// projects tree is different — 0710 on the shared group — which is why
 		// the checks there need no sudo.

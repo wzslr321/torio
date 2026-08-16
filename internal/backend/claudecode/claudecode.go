@@ -133,18 +133,6 @@ func (claudeBackend) BrainSkill() backend.BrainSkill {
 //go:embed templates/skill/SKILL.md
 var embeddedBrainSkill []byte
 
-// Registry is nil: Claude Code keeps no project registry. A project is a
-// directory it is started in, and its per-project state is files inside that
-// directory. There is nothing for Torio to register a checkout with, and
-// nothing it should invent.
-func (claudeBackend) Registry() backend.ProjectRegistry { return nil }
-
-// Service is nil: Claude Code is a per-session process, not a daemon. There is
-// no unit to install and no readiness endpoint to probe, and reporting an
-// absent service as an unready one would teach an operator to ignore the state
-// that means a real backend has died.
-func (claudeBackend) Service() *backend.ServiceSpec { return nil }
-
 // StatusChecks names this backend's own checks. They are prefixed with the
 // guest identity rather than with the registered name `claude-code`, and the
 // renderer is told which is which instead of guessing.

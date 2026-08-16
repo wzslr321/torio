@@ -155,6 +155,12 @@ type Runtime struct {
 	File File
 	// ConfigLoaded reports whether an on-disk config document was read.
 	ConfigLoaded bool
+	// DeclaredSchemaVersion is the version the document carried on disk, before
+	// it was normalized to the current one. It is kept because what an absent
+	// field meant depends on when the document was written, and normalization
+	// throws that away: a document predating the `backend` field declares no
+	// backend and meant the default of its own era, not of this one.
+	DeclaredSchemaVersion string
 }
 
 // Load resolves paths from opts and loads the config document, returning the
@@ -237,7 +243,7 @@ func loadFrom(paths Paths) (rt Runtime, err error) {
 		return Runtime{}, fmt.Errorf("read config: %w", err)
 	}
 
-	f, err := parseFile(data)
+	f, declared, err := parseFile(data)
 	if err != nil {
 		// The deferred boundary redact scrubs any secret shape this path or the
 		// parse error could carry; parseFile also redacts internally.
@@ -245,6 +251,7 @@ func loadFrom(paths Paths) (rt Runtime, err error) {
 	}
 	rt.File = f
 	rt.ConfigLoaded = true
+	rt.DeclaredSchemaVersion = declared
 	return rt, nil
 }
 
@@ -324,7 +331,7 @@ func verifyPersisted(path string, want File) error {
 	if err != nil {
 		return fmt.Errorf("config: read back written config: %w", err)
 	}
-	got, err := parseFile(data)
+	got, _, err := parseFile(data)
 	if err != nil {
 		return fmt.Errorf("config: written config did not validate on read back: %w", err)
 	}
@@ -375,12 +382,12 @@ func (f File) Validate() (err error) {
 // material: the raw pre-scan rejects unescaped secrets early, and redactErr on
 // every return path scrubs any secret a JSON-escaped value or decoder message
 // could reveal.
-func parseFile(data []byte) (f File, err error) {
+func parseFile(data []byte) (f File, declaredVersion string, err error) {
 	defer func() { err = redactErr(err) }()
 	// Reject secret-shaped material anywhere in the document before echoing any
 	// part of it, so neither the parse error nor later handling can leak it.
 	if containsSecretShape(string(data)) {
-		return File{}, errors.New("contains secret-shaped material; config must be non-secret")
+		return File{}, "", errors.New("contains secret-shaped material; config must be non-secret")
 	}
 
 	// Probe the declared version first. The probe is deliberately non-strict
@@ -391,10 +398,10 @@ func parseFile(data []byte) (f File, err error) {
 		SchemaVersion string `json:"schema_version"`
 	}
 	if err := json.Unmarshal(data, &probe); err != nil {
-		return File{}, fmt.Errorf("invalid JSON: %w", err)
+		return File{}, probe.SchemaVersion, fmt.Errorf("invalid JSON: %w", err)
 	}
 	if !readableSchemaVersion(probe.SchemaVersion) {
-		return File{}, fmt.Errorf("schema_version %q is not supported (want one of %v)",
+		return File{}, probe.SchemaVersion, fmt.Errorf("schema_version %q is not supported (want one of %v)",
 			probe.SchemaVersion, readableSchemaVersions)
 	}
 
@@ -403,13 +410,13 @@ func parseFile(data []byte) (f File, err error) {
 	case "2":
 		var legacy fileJSONV2
 		if err := decodeStrict(data, &legacy); err != nil {
-			return File{}, err
+			return File{}, probe.SchemaVersion, err
 		}
 		raw = fileJSON{SchemaVersion: legacy.SchemaVersion, DefaultTimeout: legacy.DefaultTimeout, Projects: legacy.Projects}
 	case "3":
 		var legacy fileJSONV3
 		if err := decodeStrict(data, &legacy); err != nil {
-			return File{}, err
+			return File{}, probe.SchemaVersion, err
 		}
 		raw = fileJSON{
 			SchemaVersion:  legacy.SchemaVersion,
@@ -419,7 +426,7 @@ func parseFile(data []byte) (f File, err error) {
 		}
 	default:
 		if err := decodeStrict(data, &raw); err != nil {
-			return File{}, err
+			return File{}, probe.SchemaVersion, err
 		}
 	}
 	// The document is normalized to the current version on the way in, so an
@@ -428,16 +435,16 @@ func parseFile(data []byte) (f File, err error) {
 	// disk; what matters is that reading an older one is lossless.
 	f = File{SchemaVersion: ConfigSchemaVersion, Backend: raw.Backend, OperatorKey: raw.OperatorKey}
 	if err := f.setTimeout(raw.DefaultTimeout); err != nil {
-		return File{}, err
+		return File{}, probe.SchemaVersion, err
 	}
 	for _, rp := range raw.Projects {
 		f.Projects = append(f.Projects, Project(rp))
 	}
 
 	if err := f.Validate(); err != nil {
-		return File{}, err
+		return File{}, probe.SchemaVersion, err
 	}
-	return f, nil
+	return f, probe.SchemaVersion, nil
 }
 
 // setTimeout parses and policy-checks the wire default_timeout. An empty value

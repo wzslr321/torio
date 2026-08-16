@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/wzslr321/torio/internal/backend/claudecode"
 	"github.com/wzslr321/torio/internal/brain"
 	"github.com/wzslr321/torio/internal/lima"
 )
@@ -18,7 +19,7 @@ import (
 // know. It is built when the command tree is built, and `--help` short-circuits
 // before the instance and the backend are resolved — so a baked-in instance
 // name and vault path told a Claude Code operator to run
-// `limactl copy torio:/home/hermes/brain/`, naming the wrong box and the wrong
+// `limactl copy torio:/home/claude/brain/`, naming the wrong box and the wrong
 // directory in a single line that looks exactly right.
 //
 // The concrete command belongs in `brain status`, which knows what it just read.
@@ -145,23 +146,22 @@ func (f *fakeBrainService) Import(_ context.Context, opts brain.ImportOptions) (
 
 func initializedBrainReport() brain.StatusReport {
 	return brain.StatusReport{
-		State:             brain.StateInitialized,
-		Path:              brain.Path,
-		PathExists:        true,
-		PathSecure:        true,
-		NativeFilesystem:  true,
-		FSType:            "ext4",
-		Owner:             "hermes",
-		Group:             "hermes",
-		Mode:              "750",
-		ManagedScaffold:   true,
-		GitState:          brain.GitClean,
-		MarkdownFiles:     3,
-		AttachmentFiles:   0,
-		TotalBytes:        4096,
-		ProjectRegistered: true,
-		SkillState:        brain.SkillNotInstalled,
-		Issues:            []string{},
+		State:            brain.StateInitialized,
+		Path:             claudecode.BrainPath,
+		PathExists:       true,
+		PathSecure:       true,
+		NativeFilesystem: true,
+		FSType:           "ext4",
+		Owner:            claudecode.User,
+		Group:            claudecode.User,
+		Mode:             "750",
+		ManagedScaffold:  true,
+		GitState:         brain.GitClean,
+		MarkdownFiles:    3,
+		AttachmentFiles:  0,
+		TotalBytes:       4096,
+		SkillState:       brain.SkillNotInstalled,
+		Issues:           []string{},
 	}
 }
 
@@ -231,10 +231,10 @@ func TestBrainInitJSONEnvelope(t *testing.T) {
 		t.Fatalf("envelope = %#v", env)
 	}
 	data, _ := env["data"].(map[string]any)
-	if data["state"] != "initialized" || data["created"] != true || data["path"] != brain.Path {
+	if data["state"] != "initialized" || data["created"] != true || data["path"] != claudecode.BrainPath {
 		t.Fatalf("data = %#v", data)
 	}
-	if data["project_registered"] != true || data["retrieval_skill"] != "not_installed" {
+	if data["retrieval_skill"] != "not_installed" {
 		t.Fatalf("registration/skill data = %#v", data)
 	}
 }
@@ -271,7 +271,7 @@ func TestBrainImportWiresOptionsAndEmitsBoundedJSON(t *testing.T) {
 		ManifestSHA256: strings.Repeat("a", 64),
 		Conflicts:      0,
 		Skipped:        map[string]int{"excluded": 1},
-		FinalPath:      brain.Path + "/archive",
+		FinalPath:      claudecode.BrainPath + "/archive",
 	}}
 
 	code, stdout, stderr := runBrainCLI(t, []string{
@@ -314,47 +314,6 @@ func TestBrainTransferErrorsDoNotEchoPrivateArguments(t *testing.T) {
 		if strings.Contains(stdout, marker) || strings.Contains(stderr, marker) {
 			t.Fatalf("%v leaked a private argument: stdout=%q stderr=%q", args[:2], stdout, stderr)
 		}
-	}
-}
-
-// The human output distinguishes registered / not_registered / conflict, so the
-// JSON envelope must too: a machine consumer cannot act on a slug conflict if it
-// is indistinguishable from an unregistered project.
-func TestBrainStatusJSONDistinguishesSlugConflictFromNotRegistered(t *testing.T) {
-	cases := []struct {
-		name           string
-		mutate         func(*brain.StatusReport)
-		wantRegistered bool
-		wantConflict   bool
-	}{
-		{"registered", func(*brain.StatusReport) {}, true, false},
-		{"not registered", func(r *brain.StatusReport) {
-			r.ProjectRegistered = false
-		}, false, false},
-		{"slug conflict", func(r *brain.StatusReport) {
-			r.ProjectRegistered = false
-			r.ProjectConflict = true
-			r.State = brain.StateDrift
-			r.Issues = []string{"project_slug_conflict"}
-		}, false, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			status := initializedBrainReport()
-			tc.mutate(&status)
-			service := &fakeBrainService{statusReport: status}
-
-			code, stdout, stderr := runBrainCLI(t, []string{"brain", "status", "--json"}, service)
-			if code != int(ExitOK) {
-				t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
-			}
-			env := decodeOneEnvelope(t, stdout)
-			data, _ := env["data"].(map[string]any)
-			if data["project_registered"] != tc.wantRegistered || data["project_conflict"] != tc.wantConflict {
-				t.Fatalf("project data = %#v, want registered=%t conflict=%t",
-					data, tc.wantRegistered, tc.wantConflict)
-			}
-		})
 	}
 }
 
@@ -414,14 +373,14 @@ func TestMapBrainErrorExitCodes(t *testing.T) {
 	}
 }
 
-// Hermes keys its skill prompt cache on directories and toolsets, not on the
+// A backend may key its skill prompt cache on directories and toolsets, not on the
 // file manifest, so a freshly written SKILL.md is invisible to every session
 // already running. `brain init` must say that instead of implying the skill is
 // live everywhere.
 func TestBrainInitReportsRetrievalSkillActivation(t *testing.T) {
 	status := initializedBrainReport()
 	status.SkillState = brain.SkillInstalled
-	status.SkillPath = brain.SkillFilePath
+	status.SkillPath = claudecode.ProfilePath + "/skills/" + brain.SkillName + "/SKILL.md"
 	service := &fakeBrainService{initReport: brain.InitReport{
 		Created:      true,
 		SkillUpdated: true,
@@ -432,7 +391,7 @@ func TestBrainInitReportsRetrievalSkillActivation(t *testing.T) {
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
 	}
-	if !strings.Contains(stdout, brain.SkillFilePath) {
+	if !strings.Contains(stdout, claudecode.ProfilePath+"/skills/"+brain.SkillName+"/SKILL.md") {
 		t.Errorf("human init output does not name the installed skill path: %q", stdout)
 	}
 	if !strings.Contains(stdout, "new session") {
@@ -455,8 +414,8 @@ func TestBrainInitReportsRetrievalSkillActivation(t *testing.T) {
 
 // TestBrainSkillPathFollowsTheReport pins that the path an operator is told to
 // look at is the one the guest actually has. It used to be a constant naming
-// the Hermes profile, which every Claude Code box would have been handed with
-// full confidence by the command whose only job is to report what is there.
+// one backend's profile, which every box running another would have been handed
+// with full confidence by the command whose only job is to report what is there.
 func TestBrainSkillPathFollowsTheReport(t *testing.T) {
 	const claudePath = "/home/claude/.claude/skills/torio-brain/SKILL.md"
 	status := initializedBrainReport()
@@ -471,7 +430,7 @@ func TestBrainSkillPathFollowsTheReport(t *testing.T) {
 	if !strings.Contains(stdout, claudePath) {
 		t.Errorf("status does not name the backend's own skill path: %q", stdout)
 	}
-	if strings.Contains(stdout, brain.SkillFilePath) {
+	if strings.Contains(stdout, "/home/codex/") {
 		t.Errorf("status names another backend's skill path: %q", stdout)
 	}
 }

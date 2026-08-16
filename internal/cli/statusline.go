@@ -92,7 +92,7 @@ func shortName(in status.Instance) string {
 	if in.Backend.State != status.Known {
 		return in.Name
 	}
-	if in.Name == config.DefaultInstance || in.Name == config.InstancePrefix+in.Backend.Name {
+	if in.Name == config.InstancePrefix+in.Backend.Name {
 		return in.Backend.Name
 	}
 	return in.Name

@@ -17,7 +17,7 @@ import (
 //
 // guestHome is the home of the guest identity this transfer is for, and it is a
 // parameter rather than a constant because the boundary belongs to that
-// identity. It was HermesHome, which on a second backend meant private vault
+// identity. It was a fixed home, which on a second backend meant private vault
 // bytes were only ever accepted into the *other* identity's home — the one
 // place they must not land.
 func (a *Adapter) CopyToGuest(ctx context.Context, hostSourceDir, guestDestinationDir, guestHome string) error {

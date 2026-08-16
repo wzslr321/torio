@@ -8,17 +8,11 @@ import (
 )
 
 // TestBackendDeclaresTheShapeItActuallyHas is the contract test that matters
-// for a process backend: it declares no registry and no service, and a nil
-// there is what the rest of Torio reads to avoid inventing a check or a
-// failure. Declaring one it does not have would be worse than declaring none.
+// for a process backend: its only surface is an interactive session, and a nil
+// declaration elsewhere is what the rest of Torio reads to avoid inventing a
+// check or a failure.
 func TestBackendDeclaresTheShapeItActuallyHas(t *testing.T) {
 	b := New()
-	if b.Registry() != nil {
-		t.Error("Registry() is non-nil: Claude Code keeps no project registry")
-	}
-	if b.Service() != nil {
-		t.Error("Service() is non-nil: Claude Code is a per-session process, not a daemon")
-	}
 	if b.Session() == nil {
 		t.Fatal("Session() is nil: the backend's only surface is an interactive session")
 	}
@@ -70,7 +64,7 @@ func TestAllowedGroupsAreExactlyTheOnesNeeded(t *testing.T) {
 // directory may be tightened but never widened. Claude Code chmods it when it
 // writes a credential; a spec that demanded exact equality would leave every
 // box permanently unbootstrapped after its first login, which is the lesson the
-// Hermes profile path already taught once.
+// another backend's profile path already taught once.
 func TestRequiredPathsKeepTheCredentialDirectoryPrivate(t *testing.T) {
 	for _, spec := range New().RequiredPaths() {
 		switch spec.Path {

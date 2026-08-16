@@ -99,11 +99,13 @@ One instance runs one agent identity, and that has not changed. What `--backend`
 changes is who has to remember which box that is: the operator names the agent,
 and the instance follows.
 
-The mapping is derived, not recorded. The default backend is `hermes`; `torio`
-is its default instance, so a box created before this flag existed is still the one an unflagged command talks to;
-every other backend is `torio-<backend>`. There is no table of instance names to
-maintain and so no second place that can disagree about which box runs which
-agent.
+The mapping is derived, not recorded. Every backend derives `torio-<backend>`,
+and the default backend is `claude-code`, so an unflagged command talks to
+`torio-claude-code`. The bare `torio` instance is deliberately unclaimed: it was
+the instance of the removed backend, and re-pointing it would hand a box built
+for one identity to another ([ADR-0028](../adr/0028-the-hermes-backend-is-removed.md)).
+There is no table of instance names to maintain and so no second place that can
+disagree about which box runs which agent.
 
 `TORIO_INSTANCE` still names a box directly and **wins over the flag**. It is the
 only way to reach an instance whose name Torio did not derive — a test VM, or a
@@ -144,7 +146,7 @@ output in `--json` mode MUST be exactly one envelope.
 
 ## Command surface
 
-This is the full list. Any parent (`vm`, `serve`, `brain`, `project`, `mcp`)
+This is the full list. Any parent (`vm`, `brain`, `project`, `mcp`)
 without a subcommand, or with an unknown one, is a usage error (exit 2),
 fail-closed. An unknown command is a usage error at the root as well.
 
@@ -263,7 +265,9 @@ torio vm ssh -- COMMAND...
   Torio never recreates, resets or deletes an existing VM.
 - The global `--backend NAME` both selects the instance and, on `init`, is
   recorded in that instance's config before the VM is created. It defaults to
-  `hermes`, which is also what an instance that declares nothing runs. A rerun
+  `claude-code`. A document written before the field existed declares nothing and
+  meant the removed backend, so it is refused with an error naming the removal
+  rather than resolved to a live agent. A rerun
   without the flag keeps the declaration; a rerun naming a *different* backend
   is a usage error (`BACKEND_MISMATCH`, exit 2), because the guest is
   provisioned for one agent identity and re-declaring it would leave a guest
@@ -294,10 +298,10 @@ torio vm ssh -- COMMAND...
   is root-equivalent on the guest, so rootful Docker for an agent identity is forbidden by
   [ADR-0003](../adr/0003-ownership-split-and-operator-carried-write.md).
   `bootstrap` **verifies the absence** of that membership and fails closed if it
-  finds it; the provisioning template removes `hermes` from `docker` if the group
-  exists. No Docker Engine is installed at all, and `bootstrap` does **not** check
-  Docker reachability. A future container runtime requires a rootless,
-  hermes-owned design behind its own ADR.
+  finds it; the provisioning template removes the agent identity from `docker` if
+  the group exists. No Docker Engine is installed at all, and `bootstrap` does
+  **not** check Docker reachability. A future container runtime requires a
+  rootless, agent-owned design behind its own ADR.
 - `bootstrap` **verifies** rather than trusting an exit code: the backend
   identity exists, reaches `torio-projects` with the operator, is outside
   `docker`, and satisfies its declared runtime checks; `uname -m` is the host
@@ -307,19 +311,19 @@ torio vm ssh -- COMMAND...
   drifted state (architecture, version, ownership, mount) is reported and
   fail-closed (exit 6), never papered over. A rerun is a success only when every
   postcondition is proven.
-- Backend-required paths have disjoint roles. For Hermes, the paths are (constants in
-  `internal/lima/bootstrap.go`) — `/home/hermes/.hermes` is **not** a knowledge
-  base:
+- Backend-required paths have disjoint roles, and each backend declares its own
+  (`Identity` in `internal/backend`). The profile is **not** a knowledge base.
+  For Claude Code:
 
-  | Constant | Path | Role |
+  | Field | Path | Role |
   |---|---|---|
-  | `HermesHome` | `/home/hermes` | home of the service identity |
-  | `HermesProfilePath` | `/home/hermes/.hermes` | Hermes profile and application state (`$HERMES_HOME`) |
-  | `HermesBrainPath` | `/home/hermes/brain` | Second Brain vault |
-  | `HermesWorkspacePath` | `/home/hermes/projects` | shared project workspace |
+  | `Home` | `/home/claude` | home of the agent identity |
+  | `ProfilePath` | `/home/claude/.claude` | agent profile and application state |
+  | `BrainPath` | `/home/claude/brain` | Second Brain vault |
+  | `WorkspacePath` | `/home/claude/projects` | shared project workspace |
 
-  Hermes bootstrap verifies the profile and the Brain **independently**; neither
-  path is an alias of the other.
+  Bootstrap verifies the profile and the Brain **independently**; neither path
+  is an alias of the other.
 - `bootstrap` runs several bounded guest probes and may install a backend from
   source; run it with the largest timeout policy allows: `--timeout 10m`
   (`config.MaxTimeout`).
@@ -335,56 +339,6 @@ torio backend login
   and declared capabilities. It verifies state and never repairs it.
 - `login` opens the backend's own interactive login flow as its guest identity.
   It is interactive and rejects `--json`; no SSH agent is forwarded.
-
-### Backend
-
-```text
-torio serve install
-torio serve start|stop|restart|status
-torio serve logs [--lines N]
-```
-
-- Every `serve` subcommand acts on the guest service the configured backend
-  **declares**. A backend that declares none (a process backend, such as Claude
-  Code) has no unit to manage: `serve status` exits 0 and reports
-  `service_declared:false` without running a single guest command, while
-  `install`, `start`, `stop`, `restart` and `logs` fail closed with
-  `NO_SERVICE` (exit 3) naming the backend. Asking after a service is a
-  question with an answer; asking Torio to manage one that was never declared
-  is an operator mistake ([ADR-0009](../adr/0009-backend-contract-and-claude-code.md)).
-- `serve install` manages its own **user** service (a custom systemd unit for the
-  backend identity). It generates a deterministic `hermes-serve.service` with a
-  pinned loopback bind
-  (`--host 127.0.0.1 --port 9119`), `HERMES_HOME=/home/hermes/.hermes` and
-  `Restart=always`, validates it with `systemd-analyze --user verify` **before
-  activation**, then runs `daemon-reload` and `enable`. It ensures `linger` for
-  `hermes` so a `Restart=always` service survives without an interactive session
-  and across reboots. It is idempotent (an unchanged rerun is `changed:false`),
-  accepts no secrets, and does **not** start the backend. The unit write is
-  atomic (staging → verify → rename); an invalid unit is never activated. Several
-  bounded guest probes — use a larger `--timeout` (for example `--timeout 2m`).
-- `serve start`/`restart` start the backend and **verify** readiness: a re-query
-  of systemd state (`is-active == active`) **and** an actual
-  `GET /api/status == 200` over loopback. An active process with a dead endpoint
-  is a failure (exit 6). Both are idempotent. `serve stop` is graceful and
-  idempotent (the re-query requires a non-active state) and removes no unit,
-  profile or state.
-- `serve status` proves **both**: the user-systemd state and actual endpoint
-  readiness over loopback. Exit 0 only when `active` and `/api/status == 200`; not
-  installed or inactive → exit 3; active with a dead endpoint → exit 6. It
-  modifies nothing. Its data carries `backend` and `service_declared` first,
-  because those decide whether the remaining fields mean anything: on a backend
-  with no service the rest is absent state, not a service that is down.
-- `serve logs [--lines N]` returns bounded, redacted journal entries for the unit
-  **only** (`journalctl --user -u hermes-serve.service -n N --no-pager`) — scoped
-  to the unit and redacted through execx, so it does not expose Torio's own
-  configuration. That is not an absolute guarantee: the Hermes backend's own
-  stdout and stderr may in principle contain text derived from user data. Treat it
-  as a runtime exposure limit, not a formal privacy guarantee.
-- `serve` binds the guest loopback. Reaching it from the host is an
-  operator-controlled SSH tunnel to the guest's `127.0.0.1:9119` (see the
-  [runbook](../runbooks/first-run.md)); `torio` adds no tunnel feature of its own.
-  `serve` is the Desktop backend.
 
 ### Brain
 
@@ -425,7 +379,7 @@ when it declares a project registry
 the Brain to the host is an explicit operator action:
 
 ```bash
-limactl copy torio:/home/hermes/brain/ <host-destination>/
+limactl copy torio-claude-code:/home/claude/brain/ <host-destination>/
 ```
 
 Torio does not claim that this is a backup and verifies nothing about it.
@@ -444,21 +398,14 @@ torio project shell <id>
 ```
 
 - **A workspace path is not an input.** It is always derived from the configured
-  backend's workspace and the identifier — `/home/hermes/projects/<id>` on
-  Hermes, `/home/claude/projects/<id>` on Claude Code — never accepted from the
+  backend's workspace and the identifier — `/home/claude/projects/<id>` on
+  Claude Code, `/home/codex/projects/<id>` on Codex — never accepted from the
   operator and never stored in the config (see [`config.md`](config.md)).
   Without `--id` the identifier is `<name>` itself, which must be a lowercase
   slug.
-- **The project registry is a declared capability**, exactly as the guest service
-  is. A backend that keeps none — a project is a directory it is started in —
-  clones, verifies and records the checkout as usual, and reports that there was
-  nowhere to register it. `show` and `remove` carry `registry_declared` first,
-  as `serve status` carries `service_declared`, and when it is false they say
-  nothing about a registration: `show` omits the `hermes` object rather than
-  emitting one of all-falses, which reads as a registration that went missing,
-  and `remove` does not report an archival it did not perform. `use` fails
-  closed with `NO_REGISTRY` (exit 3) naming the backend, since there is no
-  active project to select
+- **No backend keeps a project registry.** A project is a directory the agent is
+  started in, so `add` clones, verifies and records the checkout and there is
+  nothing else to register it with ([ADR-0028](../adr/0028-the-hermes-backend-is-removed.md)).
   ([ADR-0009](../adr/0009-backend-contract-and-claude-code.md)).
 - **Torio holds no Git credential on the host.** A remote the guest cannot read
   non-interactively is fail-closed (exit 7). For an SSH remote, `add` generates a
@@ -490,18 +437,12 @@ torio project shell <id>
   rather than retyped: a typo would put a different repository behind an
   identifier that already means something. An unregistered id has nothing to
   complete from and is a usage error (exit 2).
-- Whether a Hermes project already holds the slug is decided from command
-  **output**, never from an exit code: `hermes project show` has exited both 0
-  and non-zero for a project that does not exist, depending on its version. When
-  `show` describes nothing, `hermes project list` answers the existence
-  question. `list` failing, or naming a slug `show` will not describe, is
-  unverifiable state and is fail-closed (exit 6).
 - `list` reads only the config and runs no guest command — it works with the VM
   shut down.
-- `show` reports the registry entry, the checkout state and Hermes registration.
+- `show` reports the registry entry and the checkout state.
   It **reports drift as stable markers rather than repairing it** and never
   returns file names, diffs or raw Git output.
-- `remove` archives the Hermes Project and drops the config entry. The checkout
+- `remove` drops the config entry. The checkout
   directory is **never** deleted, and the output says where it still is.
   There is no `--delete`.
 - `agent` starts the configured backend in the checkout, running as the
@@ -533,8 +474,8 @@ torio project shell <id>
   at all. Both are reported before the session opens, with the remedy, rather
   than at the end of one.
 - `shell` opens an ephemeral operator session in the checkout with an SSH agent
-  forwarded. It lives exactly until the session exits; the persistent Hermes has
-  read-only access to an origin. **What is forwarded is Torio's own agent when
+  forwarded. It lives exactly until the session exits; the agent identity itself
+  has read-only access to an origin. **What is forwarded is Torio's own agent when
   `operator_key` is set**: one pinned key, a confirmation on the host before
   every signature, and a decision log beside the config document
   ([ADR-0015](../adr/0015-mediated-agent-forwarding.md)). With no key pinned the
@@ -575,7 +516,7 @@ identity the agent has a shell as
   store, the `torio-mcp-clients` group and the root-owned policy directory — then
   **proves** the result instead of trusting the exit codes of the commands that
   produced it. Idempotent (`changed:false` on an unchanged run), accepts no
-  secrets, and grants the selected backend identity (`hermes` or `claude`) only
+  secrets, and grants the selected backend identity (`claude` or `codex`) only
   client-group access to broker sockets. `torio-mcp` never lands in
   `torio-projects`, and the agent never lands in the `torio-mcp` group.
 - The release carries guest-Linux broker and relay payloads beside the host
@@ -589,14 +530,12 @@ identity the agent has a shell as
   one `/etc/torio-mcp/policy.d/<service>.json` as `root:root 0644` and reruns
   `install`. An empty or invalid policy does not yield an apparently healthy
   boundary with an empty grant.
-- `install` **does not block** on credentials left under the Hermes profile. They
+- `install` **does not block** on credentials left under the agent profile. They
   are exactly what the broker exists to eliminate, but refusing to install while
   they are present is a deadlock: the operator cannot build the thing they are
   meant to migrate to. That continuous invariant belongs to `status`; revoke a
   migrated native provider grant upstream.
-- For Hermes, `config.yaml` is reconciled to exact policy service names and
-  relay arguments. It is agent-writable, so this is explicitly a drift detector,
-  not an enforcement boundary. For Claude Code, Torio installs root-owned
+- For Claude Code, Torio installs root-owned
   `/etc/claude-code/managed-mcp.json`, pins `allowManagedMcpServersOnly: true`,
   and removes native MCP declarations from agent-owned `.claude.json`. For Codex,
   Torio installs root-owned `/etc/codex/requirements.toml`, whose `mcp_servers`
@@ -608,8 +547,7 @@ identity the agent has a shell as
 - When the selected identity has just joined the client group, `install` reports
   `restart_required`. A long-lived process does not acquire a
   group because the group database changed underneath it — the backend keeps what
-  it started with until the Hermes service is restarted or the Claude agent
-  session is reopened.
+  it started with until the agent session is reopened.
 - `login <service>` is interactive and does not support `--json`. It opens one
   explicitly loopback-bound SSH local forward for the OAuth callback, disables
   agent forwarding and multiplexing, and runs the fixed broker login command as
@@ -620,10 +558,9 @@ identity the agent has a shell as
 - `status` **proves and reports; it repairs nothing.** It verifies that the broker
   identity exists, that its credential store is readable by nobody else, that
   the selected agent can open the broker socket but is **not** in the broker's
-  own group, has no sudo and no group outside the managed set. For Hermes it also
-  rejects native token files; for Claude it rejects any native MCP declaration
-  and proves the root-owned managed-only configuration. It runs no mutating
-  command.
+  own group, has no sudo and no group outside the managed set. For Claude it
+  rejects any native MCP declaration and proves the root-owned managed-only
+  configuration. It runs no mutating command.
 - It also verifies **the two documents that decide what this custody is for**.
   Policy files must be `root:root 0644` regular files (never symlinks) in a
   directory nobody but root writes to — a policy document the agent can write
@@ -633,21 +570,11 @@ identity the agent has a shell as
   complete, the runtime is required: the exact trusted unit must be active, the
   service set must equal the set of ordinary listening sockets exactly, and the
   running process's policy digest must match the verified documents.
-- The `mcp_servers` check reads **one shape of YAML and refuses the rest**. A block
-  in inline syntax, with an anchor, alias, merge key or tab, or in a second
-  document, is reported as drift rather than guessed at. This is not a boundary
-  and must not be described as one: the file belongs to the identity the check
-  constrains. It detects drift and a hand-run `hermes mcp add` — not an adversary
-  writing to the gap between parsers.
 - A guest where the broker was never provisioned is an **unmet precondition
   (exit 3)**, not drift. A boundary that has stopped holding is **verification
   failed (exit 6)**. The distinction is part of the contract: an operator who
   simply has not run the installer yet must not get the alarm that means a
   guarantee broke, or they will learn to ignore the one that matters.
-- Detecting credentials under the Hermes profile reports **a file count and never
-  file names**. The ordinary source of that drift is `hermes mcp add` run directly
-  on a managed guest, which authenticates upstream and writes the token back under
-  the agent's identity.
 - **Tool scope is explicit; secrets are not.** Policy lives in
   `/etc/torio-mcp/policy.d/<service>.json` as `root:root 0644` — readable by the
   agent, unwritable by it. Deny by default; only tools named explicitly pass, with
@@ -670,9 +597,7 @@ Every state-changing command is idempotent, and idempotent success is exit 0:
 - `vm start`/`stop`, `serve start`/`stop`/`restart` — the desired state is
   **re-queried** after the action; a clean exit code is not itself a
   postcondition.
-- `serve install` — an unchanged rerun gives `changed:false`.
 - `brain init` — matching managed state is a success with no action.
 - `project add` — a rerun after an error finishes the work, because nothing is
   rolled back or cleaned.
-- `project remove` — a missing or already archived Hermes Project is not an error.
-- `mcp install` — an unchanged rerun gives `changed:false`, like `serve install`.
+- `mcp install` — an unchanged rerun gives `changed:false`.

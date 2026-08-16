@@ -47,9 +47,6 @@ func (a *Adapter) reconcileMCPClientConfig(ctx context.Context, identity backend
 	var kind, path, python string
 	var argv []string
 	switch identity.Name {
-	case "hermes":
-		kind, path, python = "hermes", HermesConfigPath, hermesAgentDir+"/venv/bin/python"
-		argv = []string{"sudo", "-n", "-u", identity.GuestUser, "--", python, "-c", reconcileMCPClientProgram, kind, path, TorioMCPRelayPath}
 	case "claude-code":
 		kind, path, python = "claude", ClaudeManagedMCPPath, "/usr/bin/python3"
 		argv = []string{"sudo", "-n", "--", python, "-c", reconcileMCPClientProgram, kind, path, TorioMCPRelayPath}
@@ -104,11 +101,10 @@ func mcpConfigChanged(output []byte) (changed, ok bool) {
 	}
 }
 
-// This program changes only the backend's MCP declaration. For Hermes the file
-// is agent-writable, so this is a drift detector and convenience, never the
-// authorization boundary. Claude's separate managed MCP file is root-owned and
-// its pinned managed settings reject every unmanaged server. Both clients still
-// meet the same kernel boundary at the broker socket.
+// This program changes only the backend's MCP declaration. Claude's managed MCP
+// file is root-owned and its pinned managed settings reject every unmanaged
+// server; Codex's lives under a root-owned configuration layer. Every client
+// still meets the same kernel boundary at the broker socket.
 const reconcileMCPClientProgram = `
 import json,os,re,stat,sys,tempfile
 kind,path,relay=sys.argv[1:4]
@@ -148,19 +144,7 @@ def commit(target,rendered,mode):
         except FileNotFoundError: pass
     return True
 changed=False
-if kind == "hermes":
-    import yaml
-    if os.path.exists(path):
-        with open(path,"r",encoding="utf-8") as f:
-            document=yaml.safe_load(f) or {}
-    else:
-        document={}
-    if not isinstance(document,dict):
-        raise SystemExit(4)
-    document["mcp_servers"]={s:{"command":relay,"args":[s],"enabled":True} for s in services}
-    rendered=yaml.safe_dump(document,sort_keys=False,allow_unicode=True).encode()
-    changed=commit(path,rendered,0o600)
-elif kind == "claude":
+if kind == "claude":
     document={"mcpServers":{s:{"type":"stdio","command":relay,"args":[s],"env":{}} for s in services}}
     rendered=(json.dumps(document,indent=2,sort_keys=True)+"\n").encode()
     changed=commit(path,rendered,0o644)

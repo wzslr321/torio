@@ -17,7 +17,7 @@ takes no action itself; an absent or unknown subcommand is a usage error.
 
 **The workspace path is not an input.** It is always derived as
 `<backend workspace>/<id>` — never taken from you, never stored in config. On
-the default backend that is `/home/hermes/projects/<id>`. Without `--id`, the id
+the default backend that is `/home/claude/projects/<id>`. Without `--id`, the id
 is `<name>` itself, which must be a lowercase slug.
 
 **One registry, one checkout per backend.** The registry is shared by every

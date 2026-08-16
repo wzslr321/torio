@@ -10,6 +10,12 @@ import (
 	"strings"
 )
 
+// TorioMCPRelayPath is the only command an MCP server declaration may name on a
+// managed guest (ADR-0004 §3). The relay itself holds no secret and is not a
+// control — the agent may bypass it and talk to the socket directly, and nothing
+// changes. What matters is that every configured server *ends up* at the broker.
+const TorioMCPRelayPath = "/usr/local/bin/torio-mcp-connect"
+
 const maxMCPPayloadBytes = 128 << 20
 
 type mcpInstallFile struct {

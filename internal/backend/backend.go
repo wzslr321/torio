@@ -26,7 +26,6 @@ package backend
 
 import (
 	"context"
-	"strconv"
 
 	"github.com/wzslr321/torio/internal/execx"
 )
@@ -41,7 +40,7 @@ import (
 // separates a credential store from the process that must not read it.
 type Identity struct {
 	// Name is the registry key and the value stored in an instance's config
-	// (`hermes`, `claude-code`).
+	// (`claude-code`, `codex`).
 	Name string
 	// GuestUser is the dedicated non-root guest identity.
 	GuestUser string
@@ -138,11 +137,6 @@ type Backend interface {
 	// bootstrap before anyone can log in to it.
 	ProbeAuth(ctx context.Context, r StepRunner) error
 
-	// Registry is the backend's project-registration surface, nil when it
-	// declares none.
-	Registry() ProjectRegistry
-	// Service is the backend's guest service, nil when it declares none.
-	Service() *ServiceSpec
 	// Session is the backend's interactive session, nil when it declares none.
 	Session() *SessionSpec
 	// Status is the backend's status probe, nil when it declares none.
@@ -212,93 +206,6 @@ const (
 // mechanics; *lima.Adapter satisfies it.
 type Transport interface {
 	SSH(ctx context.Context, command []string) (execx.Result, error)
-}
-
-// RegistryStatus is what a backend's project registry reports about one
-// project. It is deliberately small, and it carries no path: the caller already
-// knows the path it asked about, and an answer that repeated it back would put
-// a guest path into every report that only needed a yes.
-type RegistryStatus struct {
-	// Present reports that a project with our id exists at all.
-	Present bool
-	// Archived reports that the registry holds it in an archived state.
-	Archived bool
-	// PrimaryMatches reports that the project's primary path is the workspace
-	// path the caller asked about.
-	PrimaryMatches bool
-}
-
-// Registered reports the state a successful attach must reach: present, not
-// archived, and pointing at the derived workspace path.
-func (s RegistryStatus) Registered() bool {
-	return s.Present && !s.Archived && s.PrimaryMatches
-}
-
-// Conflicts reports that the id is taken by a project pointing somewhere else —
-// something Torio did not create and must not touch.
-func (s RegistryStatus) Conflicts() bool {
-	return s.Present && !s.PrimaryMatches
-}
-
-// RegistryError is a registry answer Torio must not act on. Malformed
-// separates the two faults a caller has to treat differently: output that could
-// not be parsed is unverifiable state, while everything else is a registration
-// the backend could not carry out.
-type RegistryError struct {
-	Malformed bool
-	Err       error
-}
-
-func (e *RegistryError) Error() string { return e.Err.Error() }
-func (e *RegistryError) Unwrap() error { return e.Err }
-
-// ProjectRegistry is a backend's own record of the projects it works on.
-//
-// Every implementation must prove state from what the backend reports, not
-// from an exit code, unless it has a documented exit-code contract worth
-// trusting. Torio has been burned precisely here: one backend release exited 0
-// for an unknown project and the next exited non-zero, so a reading that was
-// correct against either was wrong against the other.
-type ProjectRegistry interface {
-	// Status reads the registry state for id.
-	Status(ctx context.Context, t Transport, id, workspace string) (RegistryStatus, error)
-	// Create registers id against workspace under the given display name.
-	Create(ctx context.Context, t Transport, id, displayName, workspace string) error
-	// Restore reactivates an archived project.
-	Restore(ctx context.Context, t Transport, id string) error
-	// Archive archives the project. It never touches the checkout.
-	Archive(ctx context.Context, t Transport, id string) error
-	// Activate makes the project the backend's active one.
-	Activate(ctx context.Context, t Transport, id string) error
-}
-
-// ServiceSpec is a backend that runs as a guest service: a user systemd unit
-// bound to guest loopback, with an unauthenticated readiness endpoint.
-type ServiceSpec struct {
-	// UnitName is the user unit Torio owns for the backend.
-	UnitName string
-	// UnitDir is the directory the unit is installed into.
-	UnitDir string
-	// RenderUnit produces the exact unit bytes. It is deterministic and locked
-	// by a golden test so the loopback bind cannot drift off loopback by hand.
-	RenderUnit func() []byte
-	// BindHost and BindPort are the loopback address the service binds. They are
-	// declared rather than discovered so a probe and the generated unit can
-	// never disagree about where the service is, and so neither can be widened
-	// to a public bind by anything short of editing this declaration.
-	BindHost string
-	BindPort int
-	// StatusPath is the unauthenticated readiness endpoint's path.
-	StatusPath string
-	// ParseReady extracts the version from a readiness response body. A
-	// parseable version proves the probe reached the real endpoint and not an
-	// unrelated listener that accepted the socket.
-	ParseReady func(body []byte) (version string, ok bool)
-}
-
-// EndpointURL is the loopback readiness URL probed on the guest.
-func (s *ServiceSpec) EndpointURL() string {
-	return "http://" + s.BindHost + ":" + strconv.Itoa(s.BindPort) + s.StatusPath
 }
 
 // BrainSkill is a backend's skill-discovery layout and the retrieval skill it

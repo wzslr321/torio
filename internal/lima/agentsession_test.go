@@ -20,7 +20,7 @@ const testAgentHelper = "/usr/local/bin/torio-agent-session"
 // push capability nobody asked for.
 func TestProjectAgentSpecCarriesNoPushCapability(t *testing.T) {
 	limaSSHConfigHost(t)
-	cmd, err := ProjectAgentSpec(testAgentHelper, HermesWorkspacePath, HermesWorkspacePath+"/demo")
+	cmd, err := ProjectAgentSpec(testAgentHelper, testWorkspacePath, testWorkspacePath+"/demo")
 	if err != nil {
 		t.Fatalf("ProjectAgentSpec: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestProjectAgentSpecCarriesNoPushCapability(t *testing.T) {
 		"-o ForwardAgent=no",
 		"-a",
 		"-t",
-		testAgentHelper + " " + HermesWorkspacePath + "/demo",
+		testAgentHelper + " " + testWorkspacePath + "/demo",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("argv is missing %q: %v", want, cmd.Args)
@@ -57,14 +57,14 @@ func TestProjectAgentSpecRejectsAnythingButOneSegment(t *testing.T) {
 	for _, p := range []string{
 		"",
 		"/etc/passwd",
-		HermesWorkspacePath,
-		HermesWorkspacePath + "/../etc",
-		HermesWorkspacePath + "/nested/path",
-		HermesWorkspacePath + "/-flag",
-		HermesWorkspacePath + "/has space",
-		HermesWorkspacePath + "/semi;colon",
+		testWorkspacePath,
+		testWorkspacePath + "/../etc",
+		testWorkspacePath + "/nested/path",
+		testWorkspacePath + "/-flag",
+		testWorkspacePath + "/has space",
+		testWorkspacePath + "/semi;colon",
 	} {
-		if _, err := ProjectAgentSpec(testAgentHelper, HermesWorkspacePath, p); err == nil {
+		if _, err := ProjectAgentSpec(testAgentHelper, testWorkspacePath, p); err == nil {
 			t.Errorf("ProjectAgentSpec accepted %q", p)
 		}
 	}
@@ -74,7 +74,7 @@ func TestProjectAgentSpecRejectsAnythingButOneSegment(t *testing.T) {
 // declares no session cannot get one by default. An empty helper would
 // otherwise render an ssh command whose remote argv is just a path.
 func TestProjectAgentSpecRefusesABackendWithNoHelper(t *testing.T) {
-	if _, err := ProjectAgentSpec("", HermesWorkspacePath, HermesWorkspacePath+"/demo"); err == nil {
+	if _, err := ProjectAgentSpec("", testWorkspacePath, testWorkspacePath+"/demo"); err == nil {
 		t.Fatal("ProjectAgentSpec built a session for a backend that declares none")
 	}
 }
@@ -91,7 +91,7 @@ func TestSessionSpecsValidateAgainstTheBackendsOwnWorkspace(t *testing.T) {
 	if _, err := ProjectAgentSpec(testAgentHelper, other, other+"/demo"); err != nil {
 		t.Fatalf("a path under the backend's own workspace was rejected: %v", err)
 	}
-	if _, err := ProjectAgentSpec(testAgentHelper, other, HermesWorkspacePath+"/demo"); err == nil {
+	if _, err := ProjectAgentSpec(testAgentHelper, other, testWorkspacePath+"/demo"); err == nil {
 		t.Error("a path under a different backend's workspace was accepted")
 	}
 	if _, err := ProjectAgentSpec(testAgentHelper, "", other+"/demo"); err == nil {

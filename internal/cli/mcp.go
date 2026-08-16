@@ -114,10 +114,15 @@ func mcpPolicyPayload(g lima.PolicyGrant) mcpPolicyData {
 	return mcpPolicyData{Digest: g.Digest, Services: services}
 }
 
+// unknownAgentUser stands in when a report failed before it could establish the
+// backend's guest identity. Naming a backend here instead would assert an
+// identity Torio never read.
+const unknownAgentUser = "unknown"
+
 func mcpStatusPayload(rep lima.MCPBrokerReport) mcpStatusData {
 	agentUser := rep.AgentUser
 	if agentUser == "" {
-		agentUser = lima.HermesUser
+		agentUser = unknownAgentUser
 	}
 	return mcpStatusData{
 		Instance:     rep.Instance,
@@ -147,7 +152,7 @@ func mcpReportDetails(rep lima.MCPBrokerReport) map[string]any {
 func (a *app) emitMCPStatus(rep lima.MCPBrokerReport) error {
 	agentUser := rep.AgentUser
 	if agentUser == "" {
-		agentUser = lima.HermesUser
+		agentUser = unknownAgentUser
 	}
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("mcp.status", mcpStatusPayload(rep)))
@@ -218,7 +223,7 @@ func newMCPInstallCmd(a *app) *cobra.Command {
 					ce.Message += "; guest was partially changed; re-run `torio mcp install` after fixing the reported precondition"
 				}
 				if rep.RestartRequired {
-					ce.Message += "; run `torio serve restart` before expecting the backend to use its new client-group membership"
+					ce.Message += "; end the current agent session and open a new one before expecting the backend to use its new client-group membership"
 				}
 				return ce
 			}
@@ -292,7 +297,7 @@ type mcpInstallData struct {
 func mcpInstallPayload(rep lima.MCPBrokerInstallReport) mcpInstallData {
 	agentUser := rep.AgentUser
 	if agentUser == "" {
-		agentUser = lima.HermesUser
+		agentUser = unknownAgentUser
 	}
 	return mcpInstallData{
 		Instance:        rep.Instance,
@@ -346,16 +351,12 @@ func (a *app) emitMCPInstall(rep lima.MCPBrokerInstallReport) error {
 	if rep.RestartRequired {
 		agentUser := rep.AgentUser
 		if agentUser == "" {
-			agentUser = lima.HermesUser
-		}
-		next := "end the current agent session and open a new one"
-		if a.backend.Service() != nil {
-			next = "restart it:  torio serve restart"
+			agentUser = unknownAgentUser
 		}
 		if _, err := fmt.Fprintf(a.stdout,
 			"\n%s only just joined %s. The running backend keeps the groups it started with,\n"+
-				"so %s before expecting the agent to reach the broker.\n",
-			agentUser, lima.TorioMCPClientsGroup, next); err != nil {
+				"so end the current agent session and open a new one before expecting the agent to reach the broker.\n",
+			agentUser, lima.TorioMCPClientsGroup); err != nil {
 			return err
 		}
 	}

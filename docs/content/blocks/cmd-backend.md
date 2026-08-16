@@ -58,7 +58,7 @@ difference for an operator, and collapsing them is how a box that holds a
 credential comes to report that its state is unknowable.
 
 For a backend that is an MCP client, `status` also reports its configured server
-names. On Hermes this comes from an agent-owned file and is therefore a drift
+names. Where this comes from an agent-owned file it is a drift
 detector. Claude Code's released route is the root-owned managed MCP document;
 unmanaged native entries are excluded by the pinned managed setting. Codex keeps
 its declarations in a file the agent owns, and a root-owned allowlist decides

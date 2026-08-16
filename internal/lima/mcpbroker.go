@@ -15,34 +15,29 @@ const mcpBrokerOp = "mcp_broker"
 // broker that runs under its own guest identity, so no released-path upstream
 // credential exists under the identity the agent has a shell as.
 //
-// The separation is the whole decision. Hermes stores MCP OAuth tokens under
-// $HERMES_HOME, and its own agent/file_safety.py states that the read denylist
-// protecting them "is NOT a security boundary" because the terminal tool runs as
-// the same OS user. Moving the credentials to an identity `hermes` cannot read
-// is what turns the claim into one the kernel enforces rather than one the agent
-// is asked to respect.
+// The separation is the whole decision. An agent that keeps its own MCP
+// credentials keeps them under the identity it has a shell as, where any read
+// denylist protecting them is a request rather than a boundary. Moving the
+// credentials to an identity the agent cannot read is what turns the claim into
+// one the kernel enforces rather than one the agent is asked to respect.
 const (
 	// TorioMCPUser owns every upstream MCP credential on the guest. It is
 	// unprivileged, has no sudo, and is deliberately outside TorioProjectsGroup:
-	// it must not be able to reach project checkouts, and hermes must not be able
-	// to reach its home.
+	// it must not be able to reach project checkouts, and the agent identity
+	// must not be able to reach its home.
 	TorioMCPUser = "torio-mcp"
 	// TorioMCPHome holds the broker's credential store. 0700 is not a
 	// convenience default here — it is the custody boundary.
 	TorioMCPHome = "/home/torio-mcp"
-	// TorioMCPClientsGroup is the entire privilege hermes is granted: permission
-	// to open a connection to the broker's socket. It conveys no read access to
-	// TorioMCPHome and no authority over the broker's policy.
+	// TorioMCPClientsGroup is the entire privilege the agent identity is
+	// granted: permission to open a connection to the broker's socket. It
+	// conveys no read access to TorioMCPHome and no authority over the broker's
+	// policy.
 	TorioMCPClientsGroup = "torio-mcp-clients"
-	// HermesMCPTokensPath is where Hermes puts MCP credentials when it manages
-	// them itself. On a Torio-managed guest it must hold nothing: content here
-	// means somebody ran `hermes mcp add` directly and put a token back under the
-	// agent's own identity.
-	HermesMCPTokensPath = HermesProfilePath + "/mcp-tokens"
 )
 
 // torioMCPHomeSpec is the required state of the broker's home. Unlike the
-// Hermes paths in bootstrapRequiredPaths, nothing here may be group-readable:
+// backend's own paths, nothing here may be group-readable:
 // AllowStricter is deliberately absent so a *looser* mode fails and the check
 // cannot be satisfied by widening.
 var torioMCPHomeSpec = backend.PathSpec{
@@ -106,47 +101,10 @@ func (r *MCPBrokerReport) record(name string, ok bool, detail string) {
 	r.Checks = append(r.Checks, CheckResult{Name: name, OK: ok, Detail: boundDetail(detail)})
 }
 
-// VerifyMCPBroker proves the ADR-0004 boundary on the guest. It modifies
-// nothing: every drift is reported as a stable marker and fails closed, never
-// repaired in place — the same contract the rest of the adapter keeps, and the
-// only one that makes a security claim worth printing.
-func (a *Adapter) VerifyMCPBroker(ctx context.Context) (MCPBrokerReport, error) {
-	rep := MCPBrokerReport{Instance: InstanceName, AgentUser: HermesUser}
-
-	// Order is custody first, then the two documents that decide what the
-	// custody is for, then liveness. A guest whose policy is agent-writable has
-	// a broken boundary whether or not anything is listening, so the socket
-	// check is not what an operator should hear about first.
-	steps := append(brokerIdentitySteps(a),
-		a.verifyNoHermesMCPTokens,
-		a.verifyPolicyDocuments,
-		a.verifyHermesMCPServers,
-	)
-	for _, step := range steps {
-		if err := step(ctx, &rep); err != nil {
-			return rep, err
-		}
-	}
-	runtimePresent, err := a.probeMCPRuntimePresence(ctx, &rep)
-	if err != nil {
-		return rep, err
-	}
-	if !runtimePresent {
-		return rep, nil
-	}
-	if err := a.verifyMCPBrokerUnit(ctx, &rep); err != nil {
-		return rep, err
-	}
-	if err := a.verifyBrokerSockets(ctx, &rep); err != nil {
-		return rep, err
-	}
-	return rep, nil
-}
-
-// VerifyMCPBrokerFor proves the released transport for the selected backend.
-// Unlike the legacy Hermes-only verifier it also checks the backend-specific
-// client declaration and the OAuth/runtime relationship: a broker with complete
-// OAuth state must be active and publishing the exact policy sockets.
+// VerifyMCPBrokerFor proves the released transport for the selected backend. It
+// checks custody, the backend-specific client declaration and the OAuth/runtime
+// relationship: a broker with complete OAuth state must be active and
+// publishing the exact policy sockets.
 func (a *Adapter) VerifyMCPBrokerFor(ctx context.Context, identity backend.Identity) (MCPBrokerReport, error) {
 	rep := MCPBrokerReport{Instance: InstanceName, AgentUser: identity.GuestUser}
 	if err := validateMCPBackendIdentity(identity); err != nil {
@@ -154,11 +112,6 @@ func (a *Adapter) VerifyMCPBrokerFor(ctx context.Context, identity backend.Ident
 	}
 	for _, step := range brokerIdentityStepsFor(a, identity) {
 		if err := step(ctx, &rep); err != nil {
-			return rep, err
-		}
-	}
-	if identity.Name == "hermes" {
-		if err := a.verifyNoHermesMCPTokens(ctx, &rep); err != nil {
 			return rep, err
 		}
 	}
@@ -197,19 +150,6 @@ func (a *Adapter) VerifyMCPBrokerFor(ctx context.Context, identity backend.Ident
 		return rep, err
 	}
 	return rep, nil
-}
-
-// brokerIdentitySteps prove the separation itself: the identities exist, the
-// credential store is reachable by nobody but its owner, and the agent may open the
-// socket without being able to read what is behind it.
-//
-// They are named apart from the full status set because install and status ask
-// different questions. Install proves what install created. Status additionally
-// asks whether a credential has since reappeared under the agent's own identity
-// — an ongoing invariant, not a postcondition of provisioning, and one that
-// would deadlock the installer if it gated it (see InstallMCPBroker).
-func brokerIdentitySteps(a *Adapter) []func(context.Context, *MCPBrokerReport) error {
-	return brokerIdentityStepsFor(a, Hermes().Identity())
 }
 
 func brokerIdentityStepsFor(a *Adapter, identity backend.Identity) []func(context.Context, *MCPBrokerReport) error {
@@ -586,51 +526,5 @@ func (a *Adapter) verifyMCPBrokerUnit(ctx context.Context, rep *MCPBrokerReport)
 		return a.brokerFailed(rep, name, "effective broker system unit drift", "remove systemd drop-ins or runtime overrides, then run `torio mcp install` on the host")
 	}
 	rep.record(name, true, "enabled and active")
-	return nil
-}
-
-// verifyNoHermesMCPTokens catches the one drift an operator can cause without
-// touching Torio at all: running `hermes mcp add` on a managed guest, which
-// authenticates upstream and writes the token straight back under the agent's
-// own identity.
-//
-// Presence of the directory is not the finding — Hermes creates it unprompted.
-// Content is. The check reports how many credential files it found and never
-// their names: the shape of the drift is what the operator needs, and guest
-// filenames are not something this surface prints.
-func (a *Adapter) verifyNoHermesMCPTokens(ctx context.Context, rep *MCPBrokerReport) error {
-	const name = "hermes_mcp_tokens"
-
-	st, kind, err := a.statPath(ctx, rep, name, HermesMCPTokensPath)
-	if err != nil {
-		return err
-	}
-	if st == pathUnprovable {
-		return a.probeUnusable(rep, name, "the Hermes MCP token store")
-	}
-	if st == pathAbsent {
-		rep.record(name, true, "absent")
-		return nil
-	}
-	if kind != "directory" {
-		return a.brokerFailed(rep, name, "mcp-tokens exists and is not a directory",
-			"inspect the guest by hand; this path is managed by Hermes and should be a directory or absent")
-	}
-
-	// -printf x emits one byte per match, so the reply carries a count and no
-	// filename ever crosses the boundary.
-	found, err := a.brokerProbe(ctx, rep, name, "sudo", "-n", "find", HermesMCPTokensPath, "-mindepth", "1", "-type", "f", "-printf", "x")
-	if err != nil {
-		return err
-	}
-	if found.exit != 0 {
-		return a.brokerFailed(rep, name, "could not enumerate the Hermes MCP token store", "verify the path on the guest")
-	}
-	if n := len(strings.TrimSpace(found.out)); n > 0 {
-		return a.brokerFailed(rep, name,
-			fmt.Sprintf("%d credential files under the Hermes profile", n),
-			"a credential was created outside the broker (likely `hermes mcp add`); revoke it upstream and re-add the service through `torio mcp`")
-	}
-	rep.record(name, true, "empty")
 	return nil
 }

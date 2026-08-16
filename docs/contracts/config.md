@@ -103,16 +103,18 @@ Fields:
 | Field | Type | Required | Meaning |
 |---|---|---|---|
 | `schema_version` | string | yes | `"3"` is written. `"2"` is still read and normalized to `"3"` on the next write. Any other value is rejected, with no migration. |
-| `backend` | string | no | The agent backend this instance runs, fixed at `vm init`. Omitted means `hermes`. A name this binary has no implementation for is rejected, and the error names the ones it has. |
+| `backend` | string | no | The agent backend this instance runs, fixed at `vm init`. Omitted in a document written before the field existed means the removed backend, and resolves to a refusal that names the removal. A name this binary has no implementation for is rejected, and the error names the ones it has. |
 | `default_timeout` | string (Go duration) | no | Default operation timeout; validated > 0 and ≤ the policy maximum. Feeds the timeout policy when `--timeout` is not given explicitly (the flag wins). |
 | `projects` | array | no | **Legacy.** Where the registry lived before it was shared (see below). The *default* instance's array is still read when `projects.json` is absent; any instance's is preserved verbatim when its document is rewritten for another reason, and none of them ever gains an entry. Omitted normalizes to an empty registry. |
 
 ### Versions and what an older binary does
 
-A `"2"` document predates instances declaring a backend. It names none, and an
-instance that names none is running Hermes — which is what every instance
-created before the field already is. Reading the absence as anything else would
-re-point a working box at a different agent on upgrade.
+A `"2"` document predates instances declaring a backend. It names none, and what
+that meant when it was written is the backend this binary no longer implements.
+It therefore resolves to a refusal naming the removal, not to the current
+default: reading the absence as a live agent would re-point a working box at a
+different one on upgrade
+([ADR-0028](../adr/0028-the-hermes-backend-is-removed.md)).
 
 A `"2"` document carrying a `backend` field is rejected. A document means what
 its declared version says it means, and one that mixes the two was written by
@@ -120,8 +122,8 @@ something that understood neither.
 
 An older binary reading a `"3"` document fails closed, by its own version gate
 and by the strict decoder on `backend`. That is the intended failure: an old
-binary cannot know its Hermes-shaped commands are pointed at a box running a
-different agent, so it must stop rather than guess
+binary cannot know its commands are pointed at a box running a different agent,
+so it must stop rather than guess
 ([ADR-0009](../adr/0009-backend-contract-and-claude-code.md)).
 
 A valid document:
@@ -129,7 +131,7 @@ A valid document:
 ```json
 {
   "schema_version": "3",
-  "backend": "hermes",
+  "backend": "claude-code",
   "default_timeout": "45s",
   "projects": [
     {
@@ -189,7 +191,7 @@ while a written document with no entries means the operator has attached
 nothing. Collapsing them would make an upgrade look like a mass detach.
 
 **A workspace path is not a field.** It is derived from `id` as
-`<backend workspace root>/<id>` — `/home/hermes/projects/<id>` on a Hermes
+`<backend workspace root>/<id>` — `/home/claude/projects/<id>` on a Claude Code
 instance — by the projects layer, so the config cannot point a project at an
 arbitrary guest path. A project object carrying a `path` field is
 rejected like any unknown field.

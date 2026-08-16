@@ -83,12 +83,9 @@ type backendStatusData struct {
 	// the report: Torio had a way to ask and has no answer, which is not the
 	// same as having no way to ask.
 	Credentials string `json:"credentials"`
-	// The capabilities the backend declares. They are reported even when false,
-	// because "this backend has no service" is the answer to a question
-	// operators keep asking, and an omitted key answers nothing.
-	RegistryDeclared bool `json:"registry_declared"`
-	ServiceDeclared  bool `json:"service_declared"`
-	SessionDeclared  bool `json:"session_declared"`
+	// SessionDeclared reports whether the backend opens an interactive session.
+	// It is reported even when false, because an omitted key answers nothing.
+	SessionDeclared bool `json:"session_declared"`
 	// MCPServers names the MCP servers the guest is configured with, if the
 	// backend can report them. They are names only, read from a file the agent
 	// owns: this is what is configured, never what is permitted.
@@ -104,14 +101,12 @@ func (a *app) emitBackendStatus(rep lima.BootstrapReport) error {
 	version, _ := checkDetail(rep, checks.Version)
 	mcpServers, _ := checkDetail(rep, checks.MCPServers)
 	data := backendStatusData{
-		Backend:          id.Name,
-		User:             id.GuestUser,
-		Version:          version,
-		Credentials:      credentialState(rep, checks.Auth),
-		RegistryDeclared: a.backend.Registry() != nil,
-		ServiceDeclared:  a.backend.Service() != nil,
-		SessionDeclared:  a.backend.Session() != nil,
-		MCPServers:       mcpServers,
+		Backend:         id.Name,
+		User:            id.GuestUser,
+		Version:         version,
+		Credentials:     credentialState(rep, checks.Auth),
+		SessionDeclared: a.backend.Session() != nil,
+		MCPServers:      mcpServers,
 	}
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("backend.status", data))
@@ -120,9 +115,9 @@ func (a *app) emitBackendStatus(rep lima.BootstrapReport) error {
 		"Backend %s (guest user %s)\n"+
 			"  version:     %s\n"+
 			"  credential:  %s\n"+
-			"  declares:    registry=%t service=%t session=%t\n",
+			"  declares:    session=%t\n",
 		data.Backend, data.User, orNone(data.Version), data.Credentials,
-		data.RegistryDeclared, data.ServiceDeclared, data.SessionDeclared); err != nil {
+		data.SessionDeclared); err != nil {
 		return err
 	}
 	if data.MCPServers != "" {

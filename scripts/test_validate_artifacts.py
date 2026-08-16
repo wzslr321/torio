@@ -28,15 +28,15 @@ import validate_artifacts as v  # noqa: E402
 PRE_FIX_BLOCK = """\
 ```bash
 limactl shell torio            # interactive shell in the VM (Lima user)
-sudo -iu hermes                      # become the hermes service identity
+sudo -iu agent                       # become the agent service identity
 
-install -d -m 700 ~/.config/systemd/user/hermes-serve.service.d
+install -d -m 700 ~/.config/systemd/user/agent-serve.service.d
 umask 077
-cat > ~/.config/systemd/user/hermes-serve.service.d/override.conf <<'EOF'
+cat > ~/.config/systemd/user/agent-serve.service.d/override.conf <<'EOF'
 [Service]
-Environment=HERMES_DASHBOARD_SESSION_TOKEN=PASTE-YOUR-TOKEN-HERE
+Environment=AGENT_DASHBOARD_SESSION_TOKEN=PASTE-YOUR-TOKEN-HERE
 EOF
-chmod 600 ~/.config/systemd/user/hermes-serve.service.d/override.conf
+chmod 600 ~/.config/systemd/user/agent-serve.service.d/override.conf
 ```
 """
 
@@ -44,7 +44,7 @@ chmod 600 ~/.config/systemd/user/hermes-serve.service.d/override.conf
 POST_FIX_BLOCK = """\
 ```ini
 [Service]
-Environment=HERMES_DASHBOARD_SESSION_TOKEN=
+Environment=AGENT_DASHBOARD_SESSION_TOKEN=
 ```
 
 Save with `Ctrl+O`.
@@ -54,7 +54,7 @@ Save with `Ctrl+O`.
 class PasteableCredentials(unittest.TestCase):
     def test_placeholder_value_is_rejected(self) -> None:
         findings = v.pasteable_credentials(PRE_FIX_BLOCK)
-        self.assertEqual([(9, "HERMES_DASHBOARD_SESSION_TOKEN")], findings)
+        self.assertEqual([(9, "AGENT_DASHBOARD_SESSION_TOKEN")], findings)
 
     def test_assignment_stopping_at_equals_is_accepted(self) -> None:
         # A value must be looked for on the assignment's own line. Matching
@@ -88,7 +88,7 @@ class PasteableCredentials(unittest.TestCase):
         # code block, on the same line. Those are not a value.
         page = (
             "<pre><code>[Service]\n"
-            "Environment=HERMES_DASHBOARD_SESSION_TOKEN=</code></pre>\n"
+            "Environment=AGENT_DASHBOARD_SESSION_TOKEN=</code></pre>\n"
         )
         self.assertEqual([], v.pasteable_credentials(v._as_read_by_a_human(page, ".html")))
 
@@ -160,7 +160,7 @@ func newGroupRunCmd(a *app) *cobra.Command {
 # A deliberate ratchet, updated on purpose when a command is added or removed:
 # the derivation reads internal/cli/, and this pin is what makes an accidental
 # change to the surface fail a test instead of passing silently.
-PINNED_COMMAND_COUNT = 34
+PINNED_COMMAND_COUNT = 27
 
 
 class CommandSurface(unittest.TestCase):

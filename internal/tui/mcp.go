@@ -218,7 +218,7 @@ func (s *mcpScreen) view(r *root, w int) string {
 	rep := s.report
 	agentUser := rep.AgentUser
 	if agentUser == "" {
-		agentUser = lima.HermesUser
+		agentUser = "unknown"
 	}
 	b.WriteString(line(true, "credential owner", lima.TorioMCPUser+" (home "+lima.TorioMCPHome+", readable by nobody else)"))
 	b.WriteString(line(true, "agent identity", agentUser+" — may open the broker socket, cannot read its credentials"))

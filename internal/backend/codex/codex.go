@@ -107,15 +107,6 @@ install -d -o root -g root -m 0755 ` + installDir + `
 // write before anything has run as the agent.
 const systemConfigDir = "/etc/codex"
 
-// Registry is nil: Codex keeps no project registry. A project is a directory it
-// is started in, and there is nothing for Torio to register a checkout with.
-func (codexBackend) Registry() backend.ProjectRegistry { return nil }
-
-// Service is nil: Codex is a per-session process, not a daemon. Reporting an
-// absent service as an unready one would teach an operator to ignore the state
-// that means a real backend has died.
-func (codexBackend) Service() *backend.ServiceSpec { return nil }
-
 // StatusChecks names this backend's own checks. They are prefixed with the guest
 // identity rather than with the registered name, and the renderer is told which
 // is which instead of guessing.

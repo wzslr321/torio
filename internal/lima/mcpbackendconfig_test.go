@@ -7,22 +7,6 @@ import (
 	"github.com/wzslr321/torio/internal/backend"
 )
 
-func TestHermesMCPConfigMustNameEachPolicyServiceAsItsRelayArgument(t *testing.T) {
-	grant := PolicyGrant{Services: []PolicyService{{Name: "atlassian"}}}
-	good := "mcp_servers:\n  atlassian:\n    command: /usr/local/bin/torio-mcp-connect\n    args:\n    - atlassian\n    enabled: true\n"
-	if err := hermesMCPConfigExact(good, grant); err != nil {
-		t.Fatalf("exact config rejected: %v", err)
-	}
-	for _, bad := range []string{
-		"mcp_servers:\n  atlassian:\n    command: /usr/local/bin/torio-mcp-connect\n    args:\n    - linear\n",
-		"mcp_servers:\n  extra:\n    command: /usr/local/bin/torio-mcp-connect\n    args:\n    - extra\n",
-	} {
-		if err := hermesMCPConfigExact(bad, grant); err == nil {
-			t.Fatalf("config outside the policy was accepted:\n%s", bad)
-		}
-	}
-}
-
 func TestVerifyMCPBrokerForClaudeProvesManagedRelayAndReportsPendingOAuth(t *testing.T) {
 	script := identityVerificationScript()
 	script[5] = scriptedResponse{result: stdoutResult("1001\n")}

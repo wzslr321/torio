@@ -52,7 +52,7 @@ func operatorShellHost(t *testing.T) string {
 func TestOperatorShellSpecBuildsThePromotedArgv(t *testing.T) {
 	home := operatorShellHost(t)
 
-	spec, err := OperatorShellSpec(HermesWorkspacePath, "/home/hermes/projects/demo")
+	spec, err := OperatorShellSpec(testWorkspacePath, "/home/agent/projects/demo")
 	if err != nil {
 		t.Fatalf("OperatorShellSpec: unexpected error: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestOperatorShellSpecBuildsThePromotedArgv(t *testing.T) {
 		"-t",
 		"lima-" + InstanceName,
 		OperatorShellHelper,
-		"/home/hermes/projects/demo",
+		"/home/agent/projects/demo",
 	}
 	if !equalArgs(spec.Args, want) {
 		t.Fatalf("argv = %v, want %v", spec.Args, want)
@@ -84,7 +84,7 @@ func TestProjectEnterSpecBuildsAnInteractiveSessionWithoutAgentForwarding(t *tes
 	home := operatorShellHost(t)
 	t.Setenv("SSH_AUTH_SOCK", "")
 
-	spec, err := ProjectEnterSpec(HermesWorkspacePath, HermesWorkspacePath+"/demo")
+	spec, err := ProjectEnterSpec(testWorkspacePath, testWorkspacePath+"/demo")
 	if err != nil {
 		t.Fatalf("ProjectEnterSpec: unexpected error: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestProjectEnterSpecBuildsAnInteractiveSessionWithoutAgentForwarding(t *tes
 		"-t",
 		"lima-" + InstanceName,
 		ProjectEnterHelper,
-		HermesWorkspacePath + "/demo",
+		testWorkspacePath + "/demo",
 	}
 	if spec.Name != "ssh" || !equalArgs(spec.Args, want) {
 		t.Fatalf("command = %s %v, want ssh %v", spec.Name, spec.Args, want)
@@ -150,7 +150,7 @@ func TestMCPLoginSpecRejectsAnInvalidServiceBeforeReadingHostState(t *testing.T)
 func TestOperatorShellSpecPutsOverridesAfterTheConfigFlag(t *testing.T) {
 	operatorShellHost(t)
 
-	spec, err := OperatorShellSpec(HermesWorkspacePath, HermesWorkspacePath+"/demo")
+	spec, err := OperatorShellSpec(testWorkspacePath, testWorkspacePath+"/demo")
 	if err != nil {
 		t.Fatalf("OperatorShellSpec: unexpected error: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestOperatorShellSpecPutsOverridesAfterTheConfigFlag(t *testing.T) {
 func TestOperatorShellSpecNeverBackgroundsTheSession(t *testing.T) {
 	operatorShellHost(t)
 
-	spec, err := OperatorShellSpec(HermesWorkspacePath, HermesWorkspacePath+"/demo")
+	spec, err := OperatorShellSpec(testWorkspacePath, testWorkspacePath+"/demo")
 	if err != nil {
 		t.Fatalf("OperatorShellSpec: unexpected error: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestOperatorShellSpecNeverBackgroundsTheSession(t *testing.T) {
 func TestOperatorShellSpecInheritsTheOperatorEnvironment(t *testing.T) {
 	operatorShellHost(t)
 
-	spec, err := OperatorShellSpec(HermesWorkspacePath, HermesWorkspacePath+"/demo")
+	spec, err := OperatorShellSpec(testWorkspacePath, testWorkspacePath+"/demo")
 	if err != nil {
 		t.Fatalf("OperatorShellSpec: unexpected error: %v", err)
 	}
@@ -223,8 +223,8 @@ func TestOperatorShellSpecInheritsTheOperatorEnvironment(t *testing.T) {
 func TestOperatorShellSpecNeverBuildsARemoteCommandString(t *testing.T) {
 	operatorShellHost(t)
 
-	path := HermesWorkspacePath + "/demo"
-	spec, err := OperatorShellSpec(HermesWorkspacePath, path)
+	path := testWorkspacePath + "/demo"
+	spec, err := OperatorShellSpec(testWorkspacePath, path)
 	if err != nil {
 		t.Fatalf("OperatorShellSpec: unexpected error: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestOperatorShellSpecRequiresARunningSSHAgent(t *testing.T) {
 	operatorShellHost(t)
 	t.Setenv("SSH_AUTH_SOCK", "")
 
-	_, err := OperatorShellSpec(HermesWorkspacePath, "/home/hermes/projects/demo")
+	_, err := OperatorShellSpec(testWorkspacePath, "/home/agent/projects/demo")
 	if err == nil {
 		t.Fatalf("OperatorShellSpec = nil error, want a refusal when no agent is running")
 	}
@@ -280,7 +280,7 @@ func TestOperatorShellSpecRequiresTheCanonicalSSHConfig(t *testing.T) {
 		t.Fatalf("removing the lima ssh config: %v", err)
 	}
 
-	_, err := OperatorShellSpec(HermesWorkspacePath, "/home/hermes/projects/demo")
+	_, err := OperatorShellSpec(testWorkspacePath, "/home/agent/projects/demo")
 	if err == nil {
 		t.Fatalf("OperatorShellSpec = nil error, want a refusal when the instance ssh config is missing")
 	}
@@ -301,7 +301,7 @@ func TestOperatorShellSpecRequiresTheCanonicalSSHConfig(t *testing.T) {
 // guest workspace, with a strict identifier. The remote side hands this value
 // to the guest helper, so a traversal, a flag-shaped name, whitespace or a
 // shell metacharacter must never get that far — and neither must a path
-// pointing anywhere outside /home/hermes/projects.
+// pointing anywhere outside /home/agent/projects.
 func TestOperatorShellSpecRejectsInvalidProjectPaths(t *testing.T) {
 	operatorShellHost(t)
 
@@ -312,24 +312,24 @@ func TestOperatorShellSpecRejectsInvalidProjectPaths(t *testing.T) {
 		{"empty", ""},
 		{"relative", "demo"},
 		{"outside the workspace", "/etc/passwd"},
-		{"the workspace root itself", HermesWorkspacePath},
-		{"trailing slash", HermesWorkspacePath + "/demo/"},
-		{"nested below a project", HermesWorkspacePath + "/demo/src"},
-		{"parent traversal", HermesWorkspacePath + "/../.ssh"},
-		{"dot segment", HermesWorkspacePath + "/./demo"},
-		{"flag-shaped id", HermesWorkspacePath + "/-oProxyCommand=touch /tmp/pwned"},
-		{"space in id", HermesWorkspacePath + "/de mo"},
-		{"shell metacharacters", HermesWorkspacePath + "/demo;rm -rf /"},
-		{"command substitution", HermesWorkspacePath + "/demo$(id)"},
-		{"newline", HermesWorkspacePath + "/demo\ntouch /tmp/pwned"},
-		{"quote", HermesWorkspacePath + "/de'mo"},
-		{"overlong id", HermesWorkspacePath + "/" + strings.Repeat("a", 65)},
+		{"the workspace root itself", testWorkspacePath},
+		{"trailing slash", testWorkspacePath + "/demo/"},
+		{"nested below a project", testWorkspacePath + "/demo/src"},
+		{"parent traversal", testWorkspacePath + "/../.ssh"},
+		{"dot segment", testWorkspacePath + "/./demo"},
+		{"flag-shaped id", testWorkspacePath + "/-oProxyCommand=touch /tmp/pwned"},
+		{"space in id", testWorkspacePath + "/de mo"},
+		{"shell metacharacters", testWorkspacePath + "/demo;rm -rf /"},
+		{"command substitution", testWorkspacePath + "/demo$(id)"},
+		{"newline", testWorkspacePath + "/demo\ntouch /tmp/pwned"},
+		{"quote", testWorkspacePath + "/de'mo"},
+		{"overlong id", testWorkspacePath + "/" + strings.Repeat("a", 65)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			spec, err := OperatorShellSpec(HermesWorkspacePath, tc.path)
+			spec, err := OperatorShellSpec(testWorkspacePath, tc.path)
 			if err == nil {
-				t.Fatalf("OperatorShellSpec(HermesWorkspacePath, %q) = %v, nil error; want a refusal", tc.path, spec.Args)
+				t.Fatalf("OperatorShellSpec(testWorkspacePath, %q) = %v, nil error; want a refusal", tc.path, spec.Args)
 			}
 			var lerr *Error
 			if !errors.As(err, &lerr) {
@@ -351,10 +351,10 @@ func TestOperatorShellSpecAcceptsWellFormedProjectIDs(t *testing.T) {
 	operatorShellHost(t)
 
 	for _, id := range []string{"demo", "torio-box", "a.b_c-1", "A1", strings.Repeat("a", 64)} {
-		path := HermesWorkspacePath + "/" + id
-		spec, err := OperatorShellSpec(HermesWorkspacePath, path)
+		path := testWorkspacePath + "/" + id
+		spec, err := OperatorShellSpec(testWorkspacePath, path)
 		if err != nil {
-			t.Errorf("OperatorShellSpec(HermesWorkspacePath, %q) = %v, want it accepted", path, err)
+			t.Errorf("OperatorShellSpec(testWorkspacePath, %q) = %v, want it accepted", path, err)
 			continue
 		}
 		if got := spec.Args[len(spec.Args)-1]; got != path {

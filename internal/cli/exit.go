@@ -31,7 +31,7 @@ const (
 	ExitVerification ExitCode = 6
 	// ExitPermission is a permission/capability denial (brain attempts admin action).
 	ExitPermission ExitCode = 7
-	// ExitExternal is an external dependency failure (Hermes/Docker/Git unavailable).
+	// ExitExternal is an external dependency failure (the agent, Docker or Git unavailable).
 	ExitExternal ExitCode = 8
 	// ExitReconcile signals reconciliation is required (state/resource disagreement).
 	ExitReconcile ExitCode = 9

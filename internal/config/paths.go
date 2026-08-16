@@ -62,17 +62,19 @@ func ValidInstanceName(name string) bool {
 // The mapping is derived rather than recorded because the alternative — a table
 // of instance names the operator maintains — makes the operator responsible for
 // a fact Torio can compute, and gives two places to disagree about which box
-// runs which agent. The default backend keeps DefaultInstance so an existing
-// box, created before any of this, is still the one an unflagged command talks
-// to.
+// runs which agent.
 //
-// The caller resolves the backend name; this function only shapes it. An empty
-// name means the default backend, for the same reason an absent `backend` field
-// in a config document does.
-func InstanceForBackend(name string, defaultBackend string) (string, error) {
+// Every backend derives its own name. Bare DefaultInstance is deliberately not
+// among them: it was the instance of the backend that has since been removed,
+// and re-pointing it at a live agent would hand a box provisioned for one
+// identity to another. It stays reachable only through InstanceEnvKey, where
+// naming a box directly is the operator's own decision.
+//
+// The caller resolves the backend name; this function only shapes it.
+func InstanceForBackend(name string) (string, error) {
 	name = strings.TrimSpace(name)
-	if name == "" || name == defaultBackend {
-		return DefaultInstance, nil
+	if name == "" {
+		return "", errors.New("no backend name to derive an instance from")
 	}
 	derived := InstancePrefix + name
 	if !instancePattern.MatchString(derived) {

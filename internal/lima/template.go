@@ -15,13 +15,6 @@ import (
 // supported hosts run the same Ubuntu build compiled for different machines,
 // so a single pair of constants could only have described one of them.
 //
-// PromotedHermesCommit is the Hermes Agent pin from Gate 0. Init embeds it for
-// callers/docs; guest Hermes install is reconciled in bootstrap. It is not
-// host-derived — Hermes is built in the guest — so it stays a constant.
-// Re-promoted 2026-08-03: wzslr321/hermes-agent 0a62610 (descendant of the
-// Gate 0 pin 91546b8; picks up the openclaw EXDEV fsync fix).
-const PromotedHermesCommit = "0a62610f10cc34d696b2239b2c69fa1ba0f1ca63"
-
 // Default VM resources for torio vm init (product disk SHOULD be 60GiB).
 const (
 	DefaultCPUs   = 4
@@ -107,10 +100,11 @@ type InitResult struct {
 	ImageDigest   string
 }
 
+// withDefaults fills the sizing knobs an operator may leave unset. The backend
+// is deliberately not among them: this package holds no implementation to fall
+// back to, and a box provisioned for an unnamed agent would be a box running
+// something nobody chose. Callers validate it and fail closed instead.
 func (o InitOptions) withDefaults() InitOptions {
-	if o.Backend == nil {
-		o.Backend = Hermes()
-	}
 	if o.CPUs == 0 {
 		o.CPUs = DefaultCPUs
 	}
@@ -144,6 +138,9 @@ func validateOperatorUser(user string) error {
 
 func renderTemplate(opts InitOptions, profile Profile) ([]byte, error) {
 	opts = opts.withDefaults()
+	if opts.Backend == nil {
+		return nil, fmt.Errorf("no backend selected; a box is provisioned for one named agent")
+	}
 	op := strings.TrimSpace(opts.OperatorUser)
 	if err := validateOperatorUser(op); err != nil {
 		return nil, err

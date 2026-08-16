@@ -30,7 +30,7 @@ func statusListJSON(name, state string) string {
 // enumeration itself.
 func TestStatusReportsAStoppedBoxWithoutEnteringIt(t *testing.T) {
 	fake := &fakeLimaRunner{script: []scriptedResp{
-		{res: execx.Result{ExitCode: 0, Stdout: []byte(statusListJSON("torio", "Stopped") + "\n")}},
+		{res: execx.Result{ExitCode: 0, Stdout: []byte(statusListJSON("torio-claude-code", "Stopped") + "\n")}},
 	}}
 
 	code, stdout, stderr := runVMWithFake(t, []string{"status"}, fake)
@@ -45,7 +45,7 @@ func TestStatusReportsAStoppedBoxWithoutEnteringIt(t *testing.T) {
 	if got, want := statusCells(lines[0]), []string{"INSTANCE", "BOX", "BACKEND", "SESSION", "WAITING", "PROGRESS"}; !slices.Equal(got, want) {
 		t.Errorf("header = %q, want %q", got, want)
 	}
-	if got, want := statusCells(lines[1]), []string{"torio", "stopped", "hermes", "0", "no", glyphUnknown}; !slices.Equal(got, want) {
+	if got, want := statusCells(lines[1]), []string{"torio-claude-code", "stopped", backend.DefaultName, "0", "no", glyphUnknown}; !slices.Equal(got, want) {
 		t.Errorf("row = %q, want %q", got, want)
 	}
 	if len(fake.calls) != 1 {
@@ -57,7 +57,7 @@ func TestStatusReportsAStoppedBoxWithoutEnteringIt(t *testing.T) {
 // for something else is not reported, because reporting it would claim an agent
 // is not running on a box that never had one.
 func TestStatusReportsOnlyTorioOwnedBoxes(t *testing.T) {
-	body := statusListJSON("torio", "Stopped") + "\n" +
+	body := statusListJSON("torio-claude-code", "Stopped") + "\n" +
 		statusListJSON("someone-elses-vm", "Running") + "\n"
 	fake := &fakeLimaRunner{script: []scriptedResp{
 		{res: execx.Result{ExitCode: 0, Stdout: []byte(body)}},
@@ -99,7 +99,7 @@ func TestStatusIgnoresTheInvocationConfigAndDegradesPerBox(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("XDG_CONFIG_HOME", home)
 			if tc.writeRoot {
-				dir := filepath.Join(home, "torio")
+				dir := filepath.Join(home, "torio", "instances", "torio-claude-code")
 				if err := os.MkdirAll(dir, 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -108,7 +108,7 @@ func TestStatusIgnoresTheInvocationConfigAndDegradesPerBox(t *testing.T) {
 				}
 			}
 			fake := &fakeLimaRunner{script: []scriptedResp{{
-				res: execx.Result{ExitCode: 0, Stdout: []byte(statusListJSON("torio", "Stopped") + "\n")},
+				res: execx.Result{ExitCode: 0, Stdout: []byte(statusListJSON("torio-claude-code", "Stopped") + "\n")},
 			}}}
 			var stdout, stderr bytes.Buffer
 			a := &app{
@@ -128,10 +128,10 @@ func TestStatusIgnoresTheInvocationConfigAndDegradesPerBox(t *testing.T) {
 			if code != int(ExitOK) {
 				t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
 			}
-			if tc.writeRoot && !hasStatusRow(stdout.String(), "torio", "stopped", glyphUnknown) {
+			if tc.writeRoot && !hasStatusRow(stdout.String(), "torio-claude-code", "stopped", glyphUnknown) {
 				t.Errorf("stdout = %q, want one degraded row", stdout.String())
 			}
-			if !tc.writeRoot && !hasStatusRow(stdout.String(), "torio", "stopped", backend.DefaultName) {
+			if !tc.writeRoot && !hasStatusRow(stdout.String(), "torio-claude-code", "stopped", backend.DefaultName) {
 				t.Errorf("stdout = %q, want the box-owned default document", stdout.String())
 			}
 		})
@@ -140,7 +140,7 @@ func TestStatusIgnoresTheInvocationConfigAndDegradesPerBox(t *testing.T) {
 
 func TestStatusJSONEnvelope(t *testing.T) {
 	fake := &fakeLimaRunner{script: []scriptedResp{
-		{res: execx.Result{ExitCode: 0, Stdout: []byte(statusListJSON("torio", "Stopped") + "\n")}},
+		{res: execx.Result{ExitCode: 0, Stdout: []byte(statusListJSON("torio-claude-code", "Stopped") + "\n")}},
 	}}
 
 	code, stdout, stderr := runVMWithFake(t, []string{"status", "--json"}, fake)
@@ -183,7 +183,7 @@ func TestStatusJSONEnvelope(t *testing.T) {
 		t.Fatalf("instances = %d, want 1", len(env.Data.Instances))
 	}
 	in := env.Data.Instances[0]
-	if in.Name != "torio" || in.Box != "stopped" || in.Backend.Name != "hermes" {
+	if in.Name != "torio-claude-code" || in.Box != "stopped" || in.Backend.Name != backend.DefaultName {
 		t.Errorf("instance = %+v", in)
 	}
 	// Every field states which of the three kinds of answer it is, and the
@@ -247,7 +247,7 @@ func TestStatusVerboseDiagnosesAnUnresolvedBackend(t *testing.T) {
 	}
 }
 
-func TestCustomInstanceWithNoBackendDeclarationDefaultsToHermes(t *testing.T) {
+func TestCustomInstanceWithNoBackendDeclarationTakesTheDefault(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	got := (&app{}).resolveBoxBackend("scratch-box")
@@ -256,13 +256,13 @@ func TestCustomInstanceWithNoBackendDeclarationDefaultsToHermes(t *testing.T) {
 		t.Fatalf("resolveBoxBackend: %v", got.Err)
 	}
 	if got.Name != backend.DefaultName || got.Backend == nil {
-		t.Fatalf("resolution = %+v, want the ADR-0009 default backend", got)
+		t.Fatalf("resolution = %+v, want the default backend", got)
 	}
 }
 
-func TestDirectInstanceWithDerivedPrefixStillDefaultsToHermes(t *testing.T) {
+func TestDirectInstanceWithDerivedPrefixStillDefaultsToTheDefaultBackend(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	const instance = "torio-ci-hermes-123-1"
+	const instance = "torio-ci-agent-123-1"
 	t.Setenv(config.InstanceEnvKey, instance)
 
 	got := (&app{instance: instance}).resolveBoxBackend(instance)

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/wzslr321/torio/internal/backend"
+	"github.com/wzslr321/torio/internal/backend/claudecode"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/guestexec"
 	"github.com/wzslr321/torio/internal/lima"
@@ -55,7 +56,7 @@ func New(guest Guest, opts lima.BootstrapOptions) *Manager {
 // options the Brain is already bounded by.
 func (m *Manager) backend() backend.Backend {
 	if m.bootstrapOpts.Backend == nil {
-		return lima.Hermes()
+		return claudecode.New()
 	}
 	return m.bootstrapOpts.Backend
 }
@@ -108,7 +109,7 @@ func (m *Manager) legacySkillPath() string {
 }
 
 // Init creates a fresh scaffold through a private sibling staging directory,
-// commits it locally, promotes it, and registers the separate Hermes Project.
+// commits it locally and promotes it.
 // Existing managed state is verified and never overwritten.
 func (m *Manager) Init(ctx context.Context) (report InitReport, retErr error) {
 	const op = "init"
@@ -152,21 +153,16 @@ func (m *Manager) Init(ctx context.Context) (report InitReport, retErr error) {
 		report.Status = status
 		return report, m.activateRetrieval(ctx, op, &report)
 	case StateDrift:
-		// A fully promoted, secure scaffold with only missing/conflicting Hermes
-		// registration is safe to resume. Every other drift is a no-adopt
-		// conflict.
+		// A fully promoted, secure scaffold is safe to resume. Every other drift
+		// is a no-adopt conflict.
 		if status.ManagedScaffold && status.PathSecure && status.NativeFilesystem {
-			if err := m.ensureProject(ctx, op); err != nil {
-				report.Status = status
-				return report, err
-			}
 			final, err := m.inspectStatus(ctx, op)
 			report.Status = final
 			if err != nil {
 				return report, err
 			}
 			if final.State != StateInitialized {
-				return report, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("managed Brain remains in drift after project registration")}
+				return report, &Error{Op: op, Kind: KindVerification, Err: fmt.Errorf("managed Brain remains in drift")}
 			}
 			return report, m.activateRetrieval(ctx, op, &report)
 		}
@@ -241,11 +237,6 @@ func (m *Manager) Init(ctx context.Context) (report InitReport, retErr error) {
 	promoted = true
 	report.Created = true
 
-	if err := m.ensureProject(ctx, op); err != nil {
-		status, _ := m.inspectStatus(ctx, op)
-		report.Status = status
-		return report, err
-	}
 	final, err := m.inspectStatus(ctx, op)
 	report.Status = final
 	if err != nil {
@@ -380,7 +371,7 @@ func (m *Manager) writeSkillFile(ctx context.Context, op, what string, payload [
 }
 
 // removeLegacySkill retires the installation that releases before the category
-// move left at $HERMES_HOME/skills/torio-brain.
+// move left at the backend's own skill root.
 //
 // It removes the SKILL.md and then rmdirs the directory — never `rm -r`. What
 // has to go is the second file carrying the same skill name, because two of
@@ -574,12 +565,7 @@ func (m *Manager) newStatusReport() StatusReport {
 
 func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, error) {
 	report := m.newStatusReport()
-	project, err := m.projectStatus(ctx, op)
-	if err != nil {
-		return report, err
-	}
-	report.ProjectRegistered = project.Registered()
-	report.ProjectConflict = project.Conflicts()
+	var err error
 
 	// The skill lives under the backend's own profile, not under the Brain, so
 	// probe it before the vault: an uninitialized or drifted Brain returns early
@@ -624,12 +610,7 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 		return report, err
 	}
 	if !exists {
-		if project.Present || project.Conflicts() {
-			report.Issues = append(report.Issues, "project_registered_without_scaffold")
-			report.State = StateDrift
-		} else {
-			report.State = StateUninitialized
-		}
+		report.State = StateUninitialized
 		return report, nil
 	}
 	report.PathExists = true
@@ -677,23 +658,9 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 	empty := len(emptyRes.Stdout) == 0
 
 	if empty {
-		if project.Present || project.Conflicts() {
-			report.Issues = append(report.Issues, "project_registered_without_scaffold")
-		}
-		// An empty directory has nothing to overwrite, so a leftover
-		// registration on its own must not block a rebuild.
-		//
-		// Treating it as drift made `brain init` refuse forever: the drift
-		// branch repairs a scaffold that exists, and here there is none. There
-		// was no way out either, because Hermes cannot free a slug — `archive`
-		// keeps the project visible to `project show`, and no delete exists. An
-		// operator who cleared the Brain to start over was left with a Brain
-		// that could not be recreated by any supported command.
-		//
-		// A registration pointing at a *different* path stays drift. That slug
-		// belongs to something else, and scaffolding under it would trample a
-		// project Torio does not own.
-		if report.PathSecure && report.NativeFilesystem && !project.Conflicts() {
+		// An empty directory has nothing to overwrite, so it is a Brain waiting
+		// to be built rather than one that drifted.
+		if report.PathSecure && report.NativeFilesystem {
 			report.State = StateUninitialized
 		} else {
 			report.State = StateDrift
@@ -807,20 +774,8 @@ func (m *Manager) inspectStatus(ctx context.Context, op string) (StatusReport, e
 	}
 
 	report.ManagedScaffold = scaffoldComplete && gitRepo && !report.GitHasRemote && !hasSymlink
-	// Registration is only a condition where a backend has a registry. Without
-	// that clause an unregistered vault is drift on a backend that has nowhere to
-	// register it, `init` repairs nothing, and its own postcondition then fails —
-	// which is to say the Brain could never be initialized at all on such a
-	// backend, however healthy the vault on disk.
-	registrationDeclared := m.backend().Registry() != nil
 	switch {
 	case !report.PathSecure || !report.NativeFilesystem || !report.ManagedScaffold:
-		report.State = StateDrift
-	case project.Conflicts():
-		report.Issues = append(report.Issues, "project_slug_conflict")
-		report.State = StateDrift
-	case registrationDeclared && !project.Registered():
-		report.Issues = append(report.Issues, "project_not_registered")
 		report.State = StateDrift
 	default:
 		report.State = StateInitialized
@@ -841,60 +796,6 @@ func (m *Manager) requireBootstrapVerified(ctx context.Context, op string) error
 
 func (m *Manager) requireRootAccess(ctx context.Context, op string) error {
 	return m.mustRun(ctx, op, KindGuestCommand, "verify passwordless sudo", guestexec.RootExec("true"))
-}
-
-// ensureProject registers the vault as a project with the backend, so a
-// cross-project retrieval skill has something to retrieve from. A backend that
-// declares no project registry has nothing to register the vault with, and the
-// vault is no less usable for it: the skill reaches a path, not a registration.
-func (m *Manager) ensureProject(ctx context.Context, op string) error {
-	reg := m.backend().Registry()
-	if reg == nil {
-		return nil
-	}
-	status, err := m.projectStatus(ctx, op)
-	if err != nil {
-		return err
-	}
-	if status.Conflicts() {
-		return &Error{Op: op, Kind: KindRegistration, Err: fmt.Errorf("backend project slug %q points to a different primary path", ProjectSlug)}
-	}
-	if status.Registered() {
-		return nil
-	}
-	if err := reg.Create(ctx, m.guest, ProjectSlug, ProjectName, m.vault()); err != nil {
-		return m.mapRegistryErr(op, err)
-	}
-	status, err = m.projectStatus(ctx, op)
-	if err != nil {
-		return err
-	}
-	if !status.Registered() {
-		return &Error{Op: op, Kind: KindRegistration, Err: fmt.Errorf("backend project registration postcondition failed")}
-	}
-	return nil
-}
-
-func (m *Manager) projectStatus(ctx context.Context, op string) (backend.RegistryStatus, error) {
-	reg := m.backend().Registry()
-	if reg == nil {
-		// No registry to be registered with. The vault is reached by path, and
-		// a backend that keeps no project list has nothing to add it to.
-		return backend.RegistryStatus{}, nil
-	}
-	status, err := reg.Status(ctx, m.guest, ProjectSlug, m.vault())
-	if err != nil {
-		return backend.RegistryStatus{}, m.mapRegistryErr(op, err)
-	}
-	return status, nil
-}
-
-func (m *Manager) mapRegistryErr(op string, err error) error {
-	var registryErr *backend.RegistryError
-	if errors.As(err, &registryErr) && registryErr.Malformed {
-		return &Error{Op: op, Kind: KindVerification, Err: registryErr.Err}
-	}
-	return &Error{Op: op, Kind: KindRegistration, Err: err}
 }
 
 func (m *Manager) testPath(ctx context.Context, op, flag, path string) (bool, error) {

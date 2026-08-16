@@ -128,7 +128,7 @@ func legacyProjects(path string) (_ []Project, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
-	doc, err := parseFile(data)
+	doc, _, err := parseFile(data)
 	if err != nil {
 		return nil, fmt.Errorf("config file %s: %w", path, err)
 	}

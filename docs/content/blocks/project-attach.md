@@ -9,12 +9,12 @@ torio project list
 ```
 
 `add` clones the exact remote into the derived workspace path, gives you and
-`hermes` shared access to it, and registers the project with Hermes before it
+the agent identity shared access to it, before it
 records anything in config. `--use` makes it the active project. If a valid
 checkout of that remote is already at the path, `add` verifies and adopts it
 rather than touching it.
 
-**You do not choose the path.** It is always `/home/hermes/projects/<id>`,
+**You do not choose the path.** It is always `<workspace root>/<id>`,
 derived from the project id — never taken from you, never stored in config.
 Without `--id`, the id is the name you gave, which must be a lowercase slug;
 pass `--id` to pick a different one.
@@ -32,7 +32,7 @@ ssh-ed25519 AAAA…
 Add that key to the repository on github.com as a deploy key, with write access off,
 then run the same command again. Adding it to your account instead would give
 the guest write access to every repository that account can reach.
-Private half, on the guest, owned by the backend identity: /home/hermes/.ssh/torio/my-service
+Private half, on the guest, owned by the backend identity: /home/claude/.ssh/torio/my-service
 ```
 
 On GitHub that is the repository's own **Settings → Deploy keys → Add deploy
@@ -64,7 +64,7 @@ rerun finishes the work instead of starting over.
 ### Inspect and forget {#project-inspect}
 
 ```bash
-torio project show my-service     # registry entry, checkout state, Hermes registration
+torio project show my-service     # registry entry and checkout state
 torio project use my-service      # switch the active project
 torio project remove my-service   # forget it
 ```
@@ -73,7 +73,7 @@ torio project remove my-service   # forget it
 file names, diffs, or raw Git output. `list` reads config only and runs nothing
 on the guest, so it works with the VM stopped.
 
-`remove` archives the Hermes project and drops the config entry. **The checkout
+`remove` drops the config entry. **The checkout
 is never deleted** — the output tells you where it still is. There is no
 `--delete`.
 

@@ -126,7 +126,7 @@ func TestZeroProfileFailsClosed(t *testing.T) {
 		t.Fatal("profile() accepted the zero Profile")
 	}
 
-	if _, err := renderTemplate(InitOptions{OperatorUser: "operator"}, Profile{}); err == nil {
+	if _, err := renderTemplate(InitOptions{OperatorUser: "operator", Backend: newTestBackend()}, Profile{}); err == nil {
 		t.Error("renderTemplate accepted an incomplete profile")
 	}
 
@@ -141,7 +141,7 @@ func TestZeroProfileFailsClosed(t *testing.T) {
 // back out of it proves they read the same struct.
 func TestRenderedTemplateCarriesEachHostsPins(t *testing.T) {
 	for host, p := range profiles {
-		body, err := renderTemplate(InitOptions{OperatorUser: "operator"}, p)
+		body, err := renderTemplate(InitOptions{OperatorUser: "operator", Backend: newTestBackend()}, p)
 		if err != nil {
 			t.Errorf("%s: renderTemplate: %v", host, err)
 			continue

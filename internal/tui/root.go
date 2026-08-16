@@ -28,11 +28,10 @@ const (
 	screenDashboard
 	screenProjects
 	screenBrain
-	screenServe
 	screenMCP
 )
 
-var screenOrder = []screenID{screenSetup, screenDashboard, screenProjects, screenBrain, screenServe, screenMCP}
+var screenOrder = []screenID{screenSetup, screenDashboard, screenProjects, screenBrain, screenMCP}
 
 func (s screenID) title() string {
 	switch s {
@@ -44,8 +43,6 @@ func (s screenID) title() string {
 		return "Projects"
 	case screenBrain:
 		return "Brain"
-	case screenServe:
-		return "Serve"
 	case screenMCP:
 		return "MCP"
 	default:
@@ -168,7 +165,6 @@ type root struct {
 	dash     dashScreen
 	projects projectsScreen
 	brain    brainScreen
-	serve    serveScreen
 	mcp      mcpScreen
 
 	// afterSession is run when an interactive session ends cleanly, set by the
@@ -189,7 +185,6 @@ func newRoot(d Deps) *root {
 		active: screenSetup,
 		spin:   sp,
 	}
-	r.serve = newServeScreen()
 	return r
 }
 
@@ -237,9 +232,8 @@ func (r *root) probeGuest() tea.Cmd {
 		defer cancel()
 
 		f := wizard.Facts{
-			Box:             box,
-			ServiceDeclared: d.ServiceDeclared,
-			Credential:      wizard.CredentialUnknown,
+			Box:        box,
+			Credential: wizard.CredentialUnknown,
 		}
 
 		rep, err := d.Bootstrap(ctx, true)
@@ -252,12 +246,6 @@ func (r *root) probeGuest() tea.Cmd {
 		// that did not would report every answer as a failure to reach it,
 		// which reads as a fact about setup rather than about the box.
 		if f.Bootstrapped {
-			if d.ServiceDeclared && d.ServeStatus != nil {
-				if sr, err := d.ServeStatus(ctx); err == nil {
-					f.ServeInstalled = sr.Installed
-					f.ServeRunning = sr.Ready
-				}
-			}
 			if d.BrainStatus != nil {
 				if br, err := d.BrainStatus(ctx); err == nil {
 					f.BrainReady = br.State == brain.StateInitialized
@@ -544,9 +532,8 @@ func (r *root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		r.probed = true
 		r.facts = wizard.Facts{
-			Box:             msg.state,
-			ServiceDeclared: r.deps.ServiceDeclared,
-			Credential:      wizard.CredentialUnknown,
+			Box:        msg.state,
+			Credential: wizard.CredentialUnknown,
 		}
 		if msg.state != lima.StateRunning {
 			// Nothing guest-side can be asked of a box that is not running, so
@@ -601,7 +588,6 @@ func (r *root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		r.dash = dashScreen{}
 		r.projects = projectsScreen{}
 		r.brain = brainScreen{}
-		r.serve = newServeScreen()
 		r.mcp = mcpScreen{}
 		r.afterSession = nil
 		r.note = "rebound to " + msg.name
@@ -652,7 +638,7 @@ func (r *root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return r, r.probeFacts()
 
-	case logsMsg, pollMsg, projectsMsg, brainMsg, serveMsg:
+	case pollMsg, projectsMsg, brainMsg:
 		return r, r.delegate(msg)
 
 	case tea.KeyMsg:
@@ -668,9 +654,6 @@ func (r *root) afterChange() tea.Cmd {
 	cmds := []tea.Cmd{r.probeFacts()}
 	if r.active == screenProjects {
 		cmds = append(cmds, r.projects.load(r.deps))
-	}
-	if r.active == screenServe {
-		cmds = append(cmds, r.serve.load(r.deps))
 	}
 	if r.active == screenBrain {
 		cmds = append(cmds, r.brain.load(r.deps))
@@ -758,8 +741,6 @@ func (r *root) enter() tea.Cmd {
 		return r.projects.load(r.deps)
 	case screenBrain:
 		return r.brain.load(r.deps)
-	case screenServe:
-		return r.serve.load(r.deps)
 	case screenMCP:
 		return r.mcp.load(r.deps)
 	default:
@@ -787,8 +768,6 @@ func (r *root) delegate(msg tea.Msg) tea.Cmd {
 		return r.projects.update(r, msg)
 	case screenBrain:
 		return r.brain.update(r, msg)
-	case screenServe:
-		return r.serve.update(r, msg)
 	case screenMCP:
 		return r.mcp.update(r, msg)
 	}
@@ -888,8 +867,6 @@ func (r *root) body(w int) string {
 		b.WriteString(r.projects.view(r, w))
 	case r.active == screenBrain:
 		b.WriteString(r.brain.view(r, w))
-	case r.active == screenServe:
-		b.WriteString(r.serve.view(r, w))
 	case r.active == screenMCP:
 		b.WriteString(r.mcp.view(r, w))
 	}
@@ -960,8 +937,6 @@ func (r *root) screenKeys() string {
 		return r.projects.keys(r)
 	case screenBrain:
 		return r.brain.keys(r)
-	case screenServe:
-		return r.serve.keys()
 	case screenMCP:
 		return r.mcp.keys(r)
 	}

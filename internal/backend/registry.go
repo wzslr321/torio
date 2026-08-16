@@ -7,10 +7,15 @@ import (
 )
 
 // DefaultName is the backend an instance runs when its config does not name
-// one. Instances created before the config carried a backend all run Hermes,
-// so the default is what they already are — reading an older document must not
-// silently re-point a box at a different agent.
-const DefaultName = "hermes"
+// one.
+const DefaultName = "claude-code"
+
+// RemovedName is the backend this binary no longer implements. It is named
+// rather than merely absent because every instance created before the config
+// carried a backend field resolves to it: those documents are still on disk,
+// and an operator whose box stops resolving is owed the reason and the way
+// forward rather than a list of names that does not include the one they had.
+const RemovedName = "hermes"
 
 var (
 	mu       sync.RWMutex
@@ -48,6 +53,13 @@ func Lookup(name string) (Backend, error) {
 	defer mu.RUnlock()
 	b, ok := registry[name]
 	if !ok {
+		if name == RemovedName {
+			return nil, fmt.Errorf(
+				"backend %q was removed; this box cannot be reached as it is. "+
+					"Create a box on a supported backend with `torio vm init --backend %s`, "+
+					"or rebind this instance from the hub. Known backends: %v",
+				RemovedName, DefaultName, namesLocked())
+		}
 		return nil, fmt.Errorf("unknown backend %q; known backends: %v", name, namesLocked())
 	}
 	return b, nil
