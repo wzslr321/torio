@@ -221,9 +221,6 @@ func (m *Manager) Import(ctx context.Context, opts ImportOptions) (report Transf
 		return report, err
 	}
 	swapped = true
-	if err := m.ensureProject(ctx, op); err != nil {
-		return report, err
-	}
 	final, err := m.inspectStatus(ctx, op)
 	if err != nil {
 		return report, err
@@ -245,15 +242,15 @@ func (m *Manager) prepareGuestImport(ctx context.Context, op, hostPayload string
 		return err
 	}
 	// The payload arrives over `limactl copy`, which is rsync running as the Lima
-	// login user — never as hermes. Staging private to hermes could not receive
+	// login user — never as the agent. Staging private to the agent could not receive
 	// it at all: rsync stopped at "cannot stat destination" before writing a
 	// byte, so no import ever completed. Group-writable is still not enough,
 	// because rsync sets times on the destination root and only its owner may do
 	// that: the transfer then lands every file and still exits 23. So the payload
 	// directory belongs to whoever the guest session actually is, and
-	// adoptGuestPayload hands it back to hermes before anything reads it.
+	// adoptGuestPayload hands it back to the agent before anything reads it.
 	//
-	// The staging root above it stays hermes-owned and not operator-writable: it
+	// The staging root above it stays agent-owned and not operator-writable: it
 	// holds the manifest that verification checks the payload against, and the
 	// side supplying the payload must not be able to rewrite its own reference.
 	transportUser, err := m.guestSessionUser(ctx, op)
@@ -309,12 +306,12 @@ func (m *Manager) guestSessionUser(ctx context.Context, op string) (string, erro
 	return user, nil
 }
 
-// adoptGuestPayload hands the copied tree from the operator to hermes.
+// adoptGuestPayload hands the copied tree from the operator to the agent.
 //
 // rsync lands the payload owned by the Lima login user, carrying the host
-// staging modes — 0700 directories, which hermes cannot even enter. Verification
-// runs as hermes and the Brain is hermes-owned throughout, so ownership and
-// modes are normalized here, between the copy and the first read: hermes:hermes,
+// staging modes — 0700 directories, which the agent cannot even enter. Verification
+// runs as the agent and the Brain is agent-owned throughout, so ownership and
+// modes are normalized here, between the copy and the first read: agent:agent,
 // 0750 on directories and 0640 on files, the same shape the canonical Brain
 // keeps. Doing it before verification also means the checked bytes are the bytes
 // that will be moved into place, with nothing rewritten afterwards.
@@ -358,7 +355,7 @@ func (m *Manager) verifyGuestPayload(ctx context.Context, op string, manifest *t
 }
 
 // movePayloadIntoContainedCandidate lands the verified payload at
-// candidate/<into>, creating a hermes-owned 0750 parent first when the target
+// candidate/<into>, creating an agent-owned 0750 parent first when the target
 // is nested deeper than the candidate root.
 func (m *Manager) movePayloadIntoContainedCandidate(ctx context.Context, op, into string) error {
 	target := m.importCandidatePath() + "/" + into

@@ -199,7 +199,7 @@ func TestLoadRegistryRejectsMalformedDocuments(t *testing.T) {
 	for name, body := range map[string]string{
 		"unknown schema":       `{"schema_version":"3","projects":[]}`,
 		"missing schema":       `{"projects":[]}`,
-		"unknown field":        `{"schema_version":"1","projects":[],"backend":"hermes"}`,
+		"unknown field":        `{"schema_version":"1","projects":[],"backend":"codex"}`,
 		"smuggled path":        `{"schema_version":"1","projects":[{"id":"a","display_name":"A","remote":"git@h:a.git","path":"/etc"}]}`,
 		"invalid id":           `{"schema_version":"1","projects":[{"id":"../etc","display_name":"A","remote":"git@h:a.git"}]}`,
 		"duplicate id":         `{"schema_version":"1","projects":[{"id":"a","display_name":"A","remote":"git@h:a.git"},{"id":"a","display_name":"B","remote":"git@h:b.git"}]}`,

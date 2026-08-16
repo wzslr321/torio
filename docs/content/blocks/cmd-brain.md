@@ -12,8 +12,8 @@ error.
 
 | Command | What it does |
 | --- | --- |
-| `torio brain init` | Create the canonical scaffold atomically through private guest staging, make the first local commit, and register the Hermes project. Then install or refresh the global `torio-brain` retrieval skill so other projects can search the Brain. Idempotent for managed state; refuses to touch non-empty data it did not create. Configures no remote and pushes nothing. |
-| `torio brain status` | Report state (`initialized`, `uninitialized`, or drift), the canonical path, native filesystem, ownership and mode, Git worktree state, aggregate counts, Hermes project registration, and skill state. Changes nothing. |
+| `torio brain init` | Create the canonical scaffold atomically through private guest staging, make the first local commit, Then install or refresh the global `torio-brain` retrieval skill so other projects can search the Brain. Idempotent for managed state; refuses to touch non-empty data it did not create. Configures no remote and pushes nothing. |
+| `torio brain status` | Report state (`initialized`, `uninitialized`, or drift), the canonical path, native filesystem, ownership and mode, Git worktree state, aggregate counts, and skill state. Changes nothing. |
 | `torio brain import <host-directory>` | Import an existing Markdown vault through private host and guest staging, verified by checksum on the guest. Accepts `--into SUBDIR` to land the import as one new contained subtree, and `--dry-run` to preflight without transferring anything. The hub offers the same import on `m` on its Brain tab, and always preflights first: what would move is shown, in counts, before a second enter moves it. |
 | `torio brain sync` | Reconcile this backend's replica with the vault on the host, both ways, by carrying Git bundles over the same one-shot transport `brain import` uses. Unsaved work in the guest vault is committed first. Neither vault gains a network remote. A merge that cannot be made automatically stops that direction, leaves it as it was, and names the host vault where you resolve it with Git. Counts are reported; note names and content are not. Rebinding the hub runs the same reconciliation on both sides of the move, and its note reports what each carried. |
 
@@ -27,7 +27,7 @@ hardlinks, special files, and executables. Existing data is **never** overwritte
 — the single exception is an untouched scaffold that Torio itself created.
 
 Sessions that were already open when `init` ran will not see the retrieval skill:
-Hermes caches a skill's prompt per backend process, so restart them.
+A backend may cache a skill's prompt per process, so restart open sessions.
 
 ### The vault on your host {#brain-export}
 
@@ -54,8 +54,8 @@ than as a fault:
 - **Registration.** A backend that keeps no project registry has nothing to
   register the vault with. The vault is reached by path, so nothing is lost.
 - **The retrieval skill.** Each backend ships its own, because a retrieval skill
-  names the tools one agent has and the vault path one identity owns: the Hermes
-  skill calls `search_files` under `/home/hermes/brain`, the Claude Code skill
+  names the tools one agent has and the vault path one identity owns: the Claude
+  Code skill
   calls `Grep` under `/home/claude/brain`, and the Codex skill searches
   `/home/codex/brain` with the `grep` and `find` the guest image ships. Torio
   installs the one the backend

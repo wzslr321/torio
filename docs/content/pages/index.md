@@ -9,7 +9,7 @@ description: Torio runs an agent backend in a Linux VM with named repositories a
 <section class="hero">
 <p class="hero-eyebrow">Thin control plane · macOS and Linux</p>
 <h1 class="hero-title">Agents need context.<br>Credentials need a boundary.</h1>
-<p class="hero-lede">Torio creates a Linux VM, runs Hermes, Claude Code or Codex inside it, attaches the repositories you name, and keeps a private Markdown vault the agent can search. Host Git and provider credentials stay outside the VM. Private SSH reads use a guest-generated deploy key, MCP OAuth belongs to a separate guest identity, and operator Git write capability exists only inside a session you open.</p>
+<p class="hero-lede">Torio creates a Linux VM, runs Claude Code or Codex inside it, attaches the repositories you name, and keeps a private Markdown vault the agent can search. Host Git and provider credentials stay outside the VM. Private SSH reads use a guest-generated deploy key, MCP OAuth belongs to a separate guest identity, and operator Git write capability exists only inside a session you open.</p>
 <p class="hero-actions"><a class="btn btn-primary" href="tutorials.html#get-started">Get started</a><a class="btn btn-quiet" href="#pieces">See how it fits together</a></p>
 </section>
 
@@ -26,23 +26,21 @@ the point. A prompt is a control inside the agent's own process: it can be
 ignored, and in practice it is clicked through. The box replaces it with
 controls the agent cannot reach: an unprivileged identity with no `sudo`, a
 binary it cannot rewrite, no operator write credential, and the edge of a VM.
-Here is the default Hermes stack:
+Here is the stack:
 
 <div class="stack" aria-label="How the pieces fit together">
 <section class="stack-zone">
 <p class="stack-where">On your host</p>
 <div class="stack-items">
 <div class="stack-item"><b>torio</b><span>The host CLI creates and verifies the VM, installs the backend, and records non-secret instance and project configuration.</span></div>
-<div class="stack-item"><b>Hermes Desktop</b><span>The chat app, pointed at a URL instead of a local backend.</span></div>
-<div class="stack-item"><b>Your <code>ssh -L</code></b><span>The one and only route from the host to the backend. You open it in a terminal you can see, and close it when you are done.</span></div>
 </div>
 </section>
-<p class="stack-pipe"><span>localhost:19119 → the VM's 127.0.0.1:9119</span></p>
+<p class="stack-pipe"><span>a session you open, over the VM's own SSH</span></p>
 <section class="stack-zone">
 <p class="stack-where">Inside the Linux VM</p>
 <div class="stack-items">
-<div class="stack-item"><b>Hermes backend</b><span>A <code>hermes serve</code> process, run as a user systemd service so it survives logout and restarts on its own. It binds <code>127.0.0.1</code> <em>of the guest</em>: nothing on your network, and nothing on your host, can reach it except through your tunnel.</span></div>
-<div class="stack-item"><b>Your Second Brain</b><span>A private Markdown vault, versioned by its own Git repository and registered with Hermes so any session can search it. Torio can import an existing vault into it; there is no export, because getting data back out is a copy you run yourself. The vault's format is a written standard, and it also ships as the <a href="https://github.com/wzslr321/torio/tree/main/brainkit">Brain Kit plugin</a> for Claude Code, usable against a directory of notes with no VM under it at all.</span></div>
+<div class="stack-item"><b>The agent</b><span>Claude Code or Codex, installed at a pinned version and run as its own unprivileged guest identity. It is a process you start inside a checkout, not a daemon: nothing is listening, on the guest or anywhere else.</span></div>
+<div class="stack-item"><b>Your Second Brain</b><span>A private Markdown vault, versioned by its own Git repository, with a retrieval skill installed where the agent looks for one so any session can search it. Torio can import an existing vault into it; there is no export, because getting data back out is a copy you run yourself. The vault's format is a written standard, and it also ships as the <a href="https://github.com/wzslr321/torio/tree/main/brainkit">Brain Kit plugin</a> for Claude Code, usable against a directory of notes with no VM under it at all.</span></div>
 <div class="stack-item"><b>Your projects</b><span>Repository clones on the VM's own Linux filesystem — not on a host share reaching back into your home directory. The model sees the ones you registered, and no others.</span></div>
 </div>
 </section>
@@ -58,10 +56,9 @@ Run `torio` on a terminal. The hub verifies the box, shows the remaining setup
 steps, and runs the corresponding commands. The tutorial lists the same commands
 for scripts and manual use.
 
-For Hermes, open your SSH tunnel and point Desktop at
-`http://127.0.0.1:19119`. Work in the guest checkout, review `git diff`, then use
-`torio project shell` when you decide to push. The forwarded capability ends
-with the session.
+Open a project with `torio project enter <id>`, or from the hub. Work in the
+guest checkout, review `git diff`, then use `torio project shell` when you
+decide to push. The forwarded capability ends with the session.
 
 Once you run more than one box, `torio status` is the command to remember. It
 polls every box Torio owns and reports one row each: whether it is running,

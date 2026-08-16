@@ -6,7 +6,7 @@ resolve a contradiction by guessing.
 
 ## Product status
 
-The delivered product is the `torio` binary: VM lifecycle, a loopback Hermes
+The delivered product is the `torio` binary: VM lifecycle, a per-session agent
 backend, a Second Brain, a multi-project registry, operator-carried push, and the
 MCP custody boundary. The operator-facing surface is [`README.md`](README.md) and
 one runbook, [`docs/runbooks/first-run.md`](docs/runbooks/first-run.md). Both
@@ -56,7 +56,7 @@ this policy or its guard still needs an explicit, dedicated pull request.
 
 ## 1. Mission
 
-A thin, trusted control plane over Hermes Agent, Lima and Git. Not a new agent
+A thin, trusted control plane over a coding agent, Lima and Git. Not a new agent
 framework, not a task queue, not a general worktree manager.
 
 ## 2. Normative words
@@ -75,20 +75,19 @@ In order of authority:
 3. Contracts in `docs/contracts/`.
 4. [`docs/03-architecture.md`](docs/03-architecture.md).
 
-Current Hermes Agent documentation and source are the truth about Hermes. Do not
-use model memory to guess its commands, ports, options, paths or lifecycle.
+A backend's own current documentation and source are the truth about it. Do not
+use model memory to guess its commands, options, paths or lifecycle.
 
 ## 4. Fixed boundaries
 
 Scope and rationale: [ADR-0003](docs/adr/0003-ownership-split-and-operator-carried-write.md)
 and [`docs/03-architecture.md`](docs/03-architecture.md).
 
-### Hermes Agent owns
+### The agent owns
 
 - model execution;
 - profiles, sessions and memory;
-- the agent-side project registry;
-- Kanban, dispatch and retry.
+- its own per-project state, as files inside the checkout.
 
 ### Torio owns
 
@@ -159,9 +158,8 @@ Every implementation MUST preserve:
     state and leaves no passing check behind
     ([ADR-0009](docs/adr/0009-backend-contract-and-claude-code.md)).
 
-A control MUST NOT live in a file the agent can write. Hermes hooks,
-`mcp_servers.<n>.tools.include` and a backend's own managed-settings file are
-all that trap. Where a check has to read such a file anyway, its own comment
+A control MUST NOT live in a file the agent can write. A backend's own
+managed-settings file and any per-tool include list are that trap. Where a check has to read such a file anyway, its own comment
 MUST say that it is a drift detector and not a boundary.
 
 ## 6. Implementation rules
@@ -172,9 +170,8 @@ MUST say that it is a drift detector and not a boundary.
 - Do not run a command through `sh -c` when the arguments can be passed directly.
 - Every external command has a typed adapter, a timeout, a captured exit code and
   redacted logs.
-- Do not import Hermes' private Python modules. Use its verified CLI, API or
-  plugin contract.
-- Do not write to `~/.hermes/kanban.db` directly.
+- Do not import a backend's private modules. Use its verified CLI or documented
+  contract.
 - A mutating operation is idempotent or requires an idempotency key.
 - Every state and artefact write is crash-safe: temp file → fsync → atomic
   rename.
@@ -242,7 +239,7 @@ conclusion, and the effect on an ADR or contract.
 - Read the relevant contracts before writing anything.
 - Change one vertical behaviour slice per task.
 - Do not widen scope "for the future".
-- Do not build compatibility with unverified Hermes versions.
+- Do not build compatibility with unverified backend versions.
 - Do not add a mechanism merely because a library offers it.
 - If a security requirement is technically unachievable, fail closed and record
   the problem.

@@ -7,7 +7,7 @@ import (
 )
 
 // The runtime directory is the access path to every broker socket. At 0750 its
-// group is what lets hermes traverse it, so the unit must set both the mode and
+// group is what lets the agent traverse it, so the unit must set both the mode and
 // the client group explicitly rather than accepting systemd's defaults.
 func TestMCPBrokerUnitCreatesTheClientRuntimeDirectory(t *testing.T) {
 	u := string(mcpBrokerUnit())

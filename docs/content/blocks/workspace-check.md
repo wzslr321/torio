@@ -1,7 +1,7 @@
 ## Run a check without leaving the control plane {#workspace-check}
 
 To run something inside a checkout without opening a session, `torio vm ssh`
-executes a fixed command as `hermes` and returns its output. It forwards no
+executes a fixed command as `claude` and returns its output. It forwards no
 stdin and no TTY, so it suits non-interactive checks and nothing else.
 
 Pick a check from the repository's own contributor documentation — one that
@@ -9,10 +9,10 @@ reads and reports rather than writing, installing, deploying, or pushing — and
 run it against the derived workspace path:
 
 ```bash
-torio vm ssh -- sudo -u hermes -- \
-    python3 /home/hermes/projects/my-service/scripts/some-check.py --check
-torio vm ssh -- sudo -u hermes -- \
-    git -C /home/hermes/projects/my-service status --porcelain
+torio vm ssh -- sudo -u claude -- \
+    python3 /home/claude/projects/my-service/scripts/some-check.py --check
+torio vm ssh -- sudo -u claude -- \
+    git -C /home/claude/projects/my-service status --porcelain
 ```
 
 The second command must print nothing: a check that leaves the tree dirty was

@@ -1,8 +1,9 @@
 ## Create the Second Brain {#brain-bring-up}
 
-The Brain is a private Markdown vault on the guest at `/home/hermes/brain`,
-versioned by a local Git repository and registered with Hermes as its own
-project, so any session can search it without you opening it first.
+The Brain is a private Markdown vault on the guest at `/home/claude/brain`,
+versioned by a local Git repository, with a retrieval skill installed where the
+backend discovers skills — so any session can search it without you opening it
+first.
 
 ```bash
 torio brain init
@@ -10,21 +11,16 @@ torio brain status
 ```
 
 `init` builds the scaffold atomically through private guest staging, makes the
-first local commit, registers the Hermes project, and installs the global
-`torio-brain` retrieval skill. It is idempotent on state it manages, and it
+first local commit, and installs the global `torio-brain` retrieval skill. It is idempotent on state it manages, and it
 refuses to touch non-empty data it did not create — so a second run is safe and
 an existing vault is never silently absorbed.
 
 It configures no remote and pushes nothing. The Brain stays on the VM.
 
-> If the backend was already running, restart it — `torio serve restart
-> --timeout 2m`. Hermes caches the assembled skills prompt **in the backend
-> process**, keyed on the skills directory rather than on the files in it, and
-> Torio installs the skill by writing it. Reconnecting Desktop is not enough:
-> the client reconnects, the process does not, and the cache it holds is the one
-> that decides whether `torio-brain` is offered. `torio brain status` reports
-> that the file is correct and says in as many words that it cannot tell whether
-> a running session has loaded it.
+> A session that was already open will not see a skill installed after it
+> started: a backend assembles its skills prompt once, per process. Open a new
+> session. `torio brain status` reports the file it verified, which is the state
+> Torio can prove.
 
 ### Bring an existing vault in {#brain-import}
 
@@ -55,7 +51,7 @@ Torio brings data in and does not take it out — there is no export command.
 Copying the Brain to your host is something you do explicitly:
 
 ```bash
-limactl copy torio:/home/hermes/brain/ ~/torio-brain-copy/
+limactl copy torio:/home/claude/brain/ ~/torio-brain-copy/
 ```
 
 That is your command. Nothing verifies the result, and Torio does not call it a

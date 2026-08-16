@@ -23,7 +23,7 @@ func TestVerifyMCPBrokerStoppedUnitIsDrift(t *testing.T) {
 		scriptedResponse{result: exitResult(3, "inactive\n", "")},
 	)
 
-	rep, err := New(&fakeRunner{script: script}).VerifyMCPBroker(context.Background())
+	rep, err := New(&fakeRunner{script: script}).VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err == nil {
 		t.Fatal("stopped broker unit was accepted")
 	}
@@ -34,10 +34,13 @@ func TestVerifyMCPBrokerStoppedUnitIsDrift(t *testing.T) {
 
 func TestVerifyMCPBrokerAcceptsAbsentRuntimeWithAnInactiveDormantUnit(t *testing.T) {
 	base := okBrokerScript()
+	// No private OAuth session yet, so no runtime is expected to exist either:
+	// this is the state between `mcp install` and the first `mcp login`.
+	base[len(base)-12] = scriptedResponse{result: stdoutResult("directory root:root 755\n")}
 	script := append([]scriptedResponse{}, base[:len(base)-11]...)
 	script = append(script, scriptedResponse{result: exitResult(1, "directory\n", "no such file")})
 
-	rep, err := New(&fakeRunner{script: script}).VerifyMCPBroker(context.Background())
+	rep, err := New(&fakeRunner{script: script}).VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err != nil {
 		t.Fatalf("absent runtime should be valid before daemon delivery: %v", err)
 	}
@@ -55,7 +58,7 @@ func TestVerifyMCPBrokerRejectsRuntimeWithoutATrustedUnit(t *testing.T) {
 		scriptedResponse{result: stdoutResult("directory root:root 755\n")},
 	)
 
-	rep, err := New(&fakeRunner{script: script}).VerifyMCPBroker(context.Background())
+	rep, err := New(&fakeRunner{script: script}).VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err == nil {
 		t.Fatal("runtime sockets without the trusted system unit were accepted")
 	}
@@ -68,7 +71,7 @@ func TestVerifySocketsAbsentRuntimeIsDriftForAnActiveUnit(t *testing.T) {
 	fr := &fakeRunner{script: socketScript(
 		scriptedResponse{result: exitResult(1, "directory\n", "no such file")}, // stat /run/torio-mcp
 	)}
-	rep, err := New(fr).VerifyMCPBroker(context.Background())
+	rep, err := New(fr).VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err == nil {
 		t.Fatal("active broker with no runtime directory was accepted")
 	}
@@ -84,7 +87,7 @@ func TestVerifySocketsRejectsAnEmptyRuntimeDirectory(t *testing.T) {
 		scriptedResponse{result: stdoutResult("torio-mcp:torio-mcp-clients 750\n")},
 		scriptedResponse{result: stdoutResult("")},
 	)}
-	rep, err := New(fr).VerifyMCPBroker(context.Background())
+	rep, err := New(fr).VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err == nil {
 		t.Fatal("an empty runtime directory was accepted even though the broker published no services")
 	}
@@ -104,7 +107,7 @@ func TestVerifySocketsStaleSocketIsDrift(t *testing.T) {
 		scriptedResponse{result: stdoutResult("atlassian.sock torio-mcp torio-mcp-clients 660\n")},
 		scriptedResponse{result: stdoutResult("u_str LISTEN 0 4096 /run/user/1000/systemd/private 1 * 0\n")},
 	)}
-	rep, err := New(fr).VerifyMCPBroker(context.Background())
+	rep, err := New(fr).VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err == nil {
 		t.Fatal("stale socket accepted; expected drift")
 	}
@@ -125,7 +128,7 @@ func TestVerifySocketsLiveSocketPasses(t *testing.T) {
 		scriptedResponse{result: stdoutResult("u_str LISTEN 0 4096 /run/torio-mcp/atlassian.sock 9 * 0\n")},
 		scriptedResponse{result: stdoutResult(validGuestPolicyDigest() + "\n")},
 	)}
-	rep, err := New(fr).VerifyMCPBroker(context.Background())
+	rep, err := New(fr).VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err != nil {
 		t.Fatalf("live socket rejected: %v", err)
 	}
@@ -138,7 +141,7 @@ func TestVerifySocketsLiveSocketPasses(t *testing.T) {
 func TestVerifySocketsRejectsAStalePolicyGeneration(t *testing.T) {
 	script := okBrokerScript()
 	script[len(script)-1] = scriptedResponse{result: stdoutResult(strings.Repeat("0", 64) + "\n")}
-	rep, err := New(&fakeRunner{script: script}).VerifyMCPBroker(context.Background())
+	rep, err := New(&fakeRunner{script: script}).VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err == nil {
 		t.Fatal("running broker with a stale effective-policy digest was accepted")
 	}
@@ -153,7 +156,7 @@ func TestVerifySocketsRejectsAServiceSetDifferentFromParsedPolicy(t *testing.T) 
 	script[len(script)-3] = scriptedResponse{result: stdoutResult("slack.sock torio-mcp torio-mcp-clients 660\n")}
 	script[len(script)-2] = scriptedResponse{result: stdoutResult("u_str LISTEN 0 4096 /run/torio-mcp/slack.sock 9 * 0\n")}
 
-	rep, err := New(&fakeRunner{script: script}).VerifyMCPBroker(context.Background())
+	rep, err := New(&fakeRunner{script: script}).VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err == nil {
 		t.Fatal("listening socket set different from parsed policy was accepted")
 	}
@@ -172,7 +175,7 @@ func TestVerifySocketsWrongModeIsDrift(t *testing.T) {
 		scriptedResponse{result: stdoutResult("atlassian.sock torio-mcp torio-mcp-clients 666\n")},
 		scriptedResponse{result: stdoutResult("u_str LISTEN 0 4096 /run/torio-mcp/atlassian.sock 9 * 0\n")},
 	)}
-	rep, err := New(fr).VerifyMCPBroker(context.Background())
+	rep, err := New(fr).VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err == nil {
 		t.Fatal("world-writable socket accepted")
 	}
@@ -187,7 +190,7 @@ func TestVerifySocketsWrongModeIsDrift(t *testing.T) {
 // The socket is 0660 torio-mcp:torio-mcp-clients, so the agent reaches it only
 // by traversing the directory above it — and at 0750 that traversal comes from
 // the directory's group. A directory owned torio-mcp:torio-mcp 0750 therefore
-// satisfies owner and mode while every connect from hermes fails, and `status`
+// satisfies owner and mode while every connect from the agent fails, and `status`
 // would print that the broker boundary holds.
 func TestVerifySocketsWrongDirGroupIsDrift(t *testing.T) {
 	fr := &fakeRunner{script: socketScript(
@@ -196,7 +199,7 @@ func TestVerifySocketsWrongDirGroupIsDrift(t *testing.T) {
 		scriptedResponse{result: stdoutResult("atlassian.sock torio-mcp torio-mcp-clients 660\n")},
 		scriptedResponse{result: stdoutResult("u_str LISTEN 0 4096 /run/torio-mcp/atlassian.sock 9 * 0\n")},
 	)}
-	rep, err := New(fr).VerifyMCPBroker(context.Background())
+	rep, err := New(fr).VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err == nil {
 		t.Fatal("socket directory closed to the client group accepted; expected drift")
 	}
@@ -217,7 +220,7 @@ func TestVerifySocketsWorldTraversableDirectoryIsDrift(t *testing.T) {
 		scriptedResponse{result: stdoutResult("u_str LISTEN 0 4096 /run/torio-mcp/atlassian.sock 9 * 0\n")},
 		scriptedResponse{result: stdoutResult(validGuestPolicyDigest() + "\n")},
 	)}
-	rep, err := New(fr).VerifyMCPBroker(context.Background())
+	rep, err := New(fr).VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err == nil {
 		t.Fatal("world-traversable broker runtime directory was accepted")
 	}
@@ -235,7 +238,7 @@ func TestVerifySocketsUnusableProbeIsNotAbsence(t *testing.T) {
 	fr := &fakeRunner{script: socketScript(
 		scriptedResponse{result: exitResult(1, "", "sudo: a password is required")},
 	)}
-	rep, err := New(fr).VerifyMCPBroker(context.Background())
+	rep, err := New(fr).VerifyMCPBrokerFor(context.Background(), testAgentIdentity())
 	if err == nil {
 		t.Fatal("unusable root probe accepted as absence; expected the check to fail closed")
 	}

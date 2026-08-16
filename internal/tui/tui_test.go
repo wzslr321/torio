@@ -13,7 +13,6 @@ import (
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
 	"github.com/wzslr321/torio/internal/projects"
-	"github.com/wzslr321/torio/internal/serve"
 	"github.com/wzslr321/torio/internal/status"
 )
 
@@ -27,13 +26,11 @@ type fakeDeps struct {
 	credState string
 
 	projectList []projects.Project
-	serveReport serve.StatusReport
 	brainReport brain.StatusReport
 	pollReport  status.Report
 
 	failWith  error
 	deployKey *projects.DeployKey
-	serveErr  error
 }
 
 func (f *fakeDeps) record(name string) error {
@@ -54,12 +51,11 @@ func (f *fakeDeps) called(name string) bool {
 // how a capability the backend does not declare is expressed.
 func (f *fakeDeps) deps() Deps {
 	return Deps{
-		Instance:        "torio",
-		Backend:         "hermes",
-		Version:         "1.2.3",
-		ServiceDeclared: true,
-		Timeout:         time.Second,
-		LongTimeout:     time.Second,
+		Instance:    "torio",
+		Backend:     "claude-code",
+		Version:     "1.2.3",
+		Timeout:     time.Second,
+		LongTimeout: time.Second,
 
 		VMStatus: func(context.Context) (lima.Status, error) {
 			return lima.Status{State: f.boxState}, nil
@@ -75,15 +71,6 @@ func (f *fakeDeps) deps() Deps {
 		},
 		CredentialState: func(lima.BootstrapReport) string { return f.credState },
 
-		ServeStatus:  func(context.Context) (serve.StatusReport, error) { return f.serveReport, f.serveErr },
-		ServeInstall: func(context.Context) error { return f.record("serve-install") },
-		ServeStart:   func(context.Context) error { return f.record("serve-start") },
-		ServeStop:    func(context.Context) error { return f.record("serve-stop") },
-		ServeRestart: func(context.Context) error { return f.record("serve-restart") },
-		ServeLogs: func(context.Context, int) (string, error) {
-			return "line one\nline two", f.record("serve-logs")
-		},
-
 		BrainStatus: func(context.Context) (brain.StatusReport, error) { return f.brainReport, nil },
 		BrainInit:   func(context.Context) error { return f.record("brain-init") },
 
@@ -94,7 +81,6 @@ func (f *fakeDeps) deps() Deps {
 			}
 			return nil, nil
 		},
-		ProjectUse:    func(_ context.Context, id string) error { return f.record("project-use:" + id) },
 		ProjectRemove: func(_ context.Context, id string) error { return f.record("project-remove:" + id) },
 
 		Poll: func(context.Context) (status.Report, error) { return f.pollReport, nil },
@@ -437,99 +423,15 @@ func isQuit(cmd tea.Cmd) bool {
 	return ok
 }
 
-// A backend with no session still owes the operator a way forward on Enter.
-// Its way into a project is the gateway, so the key opens a panel with the
-// service's state and the tunnel that reaches it, in the words the runbooks
-// use (docs/content/blocks/tunnel.md, desktop-connect.md). A failure banner
-// here taught the operator that selecting a project is broken, when the
-// backend was doing exactly what it declares.
-func TestEnterOpensTheGatewayPanelWhenTheBackendHasNoSession(t *testing.T) {
-	f := &fakeDeps{
-		boxState:    lima.StateRunning,
-		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
-		serveReport: serve.StatusReport{
-			ServiceDeclared: true,
-			Installed:       true,
-			Enabled:         true,
-			Active:          true,
-			ActiveState:     "active",
-			EndpointReady:   true,
-			EndpointCode:    200,
-			Version:         "1.0",
-			Ready:           true,
-			URL:             "http://127.0.0.1:9119/api/status",
-		},
-	}
-	r := settled(t, f)
-	r.switchTo(screenProjects)
-	drain(t, r, r.projects.load(r.deps))
-
-	press(t, r, "enter")
-
-	if r.busy != "" {
-		t.Errorf("a session was started for a backend that declares none: %q", r.busy)
-	}
-	if r.errText != "" {
-		t.Fatalf("enter reported a failure instead of the way forward: %q", r.errText)
-	}
-	view := r.View()
-	for _, want := range []string{
-		"ssh -F ~/.lima/torio/ssh.config",
-		"-L 19119:127.0.0.1:9119",
-		"lima-torio",
-		"http://127.0.0.1:19119",
-	} {
-		if !strings.Contains(view, want) {
-			t.Errorf("the gateway panel does not carry %q:\n%s", want, view)
-		}
-	}
-
-	press(t, r, "esc")
-	if strings.Contains(r.View(), "ssh -F") {
-		t.Error("escape left the gateway panel on screen")
-	}
-}
-
-// A gateway that is not ready is reported as what it is, with the tab that
-// fixes it, not as a hub failure and not as a tunnel that would dial a dead
-// endpoint as if nothing were wrong.
-func TestGatewayPanelNamesTheServeTabWhenTheServiceIsNotReady(t *testing.T) {
-	f := &fakeDeps{
-		boxState:    lima.StateRunning,
-		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
-		serveReport: serve.StatusReport{
-			ServiceDeclared: true,
-			Installed:       true,
-			ActiveState:     "inactive",
-			URL:             "http://127.0.0.1:9119/api/status",
-		},
-		serveErr: errors.New("service is \"inactive\", not active; run `torio serve start`"),
-	}
-	r := settled(t, f)
-	r.switchTo(screenProjects)
-	drain(t, r, r.projects.load(r.deps))
-
-	press(t, r, "enter")
-
-	view := r.View()
-	if !strings.Contains(view, "installed, not running") {
-		t.Errorf("the panel does not carry the service state:\n%s", view)
-	}
-	if !strings.Contains(view, "Serve tab") {
-		t.Errorf("the panel does not name the tab that starts the service:\n%s", view)
-	}
-}
-
 // A backend with neither a session nor a service has no way forward to offer,
 // and the screen reports the missing capability rather than opening a panel
 // about a gateway that does not exist.
-func TestEnterStillRefusesWhenThereIsNoSessionAndNoService(t *testing.T) {
+func TestEnterStillRefusesWhenThereIsNoSession(t *testing.T) {
 	f := &fakeDeps{
 		boxState:    lima.StateRunning,
 		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
 	}
 	d := f.deps()
-	d.ServiceDeclared = false
 	r := newRoot(d)
 	drain(t, r, r.probeFacts())
 	r.switchTo(screenProjects)
@@ -644,27 +546,6 @@ func TestDecliningTheConfirmationKeepsTheProject(t *testing.T) {
 	}
 }
 
-// A backend with no service has nothing missing, and must not be rendered as a
-// service that is down.
-func TestServeScreenReportsAnAbsentServiceAsAbsent(t *testing.T) {
-	f := &fakeDeps{boxState: lima.StateRunning}
-	d := f.deps()
-	d.ServiceDeclared = false
-	r := newRoot(d)
-	drain(t, r, r.probeFacts())
-	r.switchTo(screenServe)
-
-	view := r.View()
-	if !strings.Contains(view, "runs no guest service") {
-		t.Errorf("view does not report the absent service:\n%s", view)
-	}
-
-	press(t, r, "i")
-	if len(f.calls) != 0 {
-		t.Errorf("a service operation ran for a backend that declares none: %v", f.calls)
-	}
-}
-
 // The dashboard must tell three silences apart. A box whose facts could not be
 // proven may never render as a quiet one.
 func TestDashboardDistinguishesUnknownFromNotApplicable(t *testing.T) {
@@ -673,7 +554,7 @@ func TestDashboardDistinguishesUnknownFromNotApplicable(t *testing.T) {
 		pollReport: status.Report{Instances: []status.Instance{{
 			Name:     "torio",
 			Box:      "running",
-			Backend:  status.BackendField{State: status.Known, Name: "hermes"},
+			Backend:  status.BackendField{State: status.Known, Name: "claude-code"},
 			Session:  status.SessionField{State: status.Unknown},
 			Waiting:  status.WaitingField{State: status.NotApplicable},
 			Progress: status.ProgressField{State: status.Known, AgeSeconds: 240},
@@ -737,7 +618,7 @@ func TestHeaderNamesTheInstanceAndBackend(t *testing.T) {
 	r := settled(t, f)
 
 	view := r.View()
-	for _, want := range []string{"torio", "hermes", "running"} {
+	for _, want := range []string{"torio", "claude-code", "running"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("header does not carry %q:\n%s", want, view)
 		}
@@ -777,7 +658,8 @@ func TestRebindSwapsTheBindingAndReprobes(t *testing.T) {
 	defer cancel()
 	d := f.deps()
 	d.ctx = ctx
-	d.Backends = []string{"claude-code", "hermes"}
+	d.Backend = "codex"
+	d.Backends = []string{"claude-code", "codex"}
 	rebound := ""
 	next := &fakeDeps{boxState: lima.StateRunning}
 	d.Rebind = func(name string) (Deps, error) {
@@ -823,7 +705,8 @@ func TestRebindSwapsTheBindingAndReprobes(t *testing.T) {
 func TestFailedRebindKeepsTheOldBinding(t *testing.T) {
 	f := &fakeDeps{boxState: lima.StateRunning}
 	d := f.deps()
-	d.Backends = []string{"claude-code", "hermes"}
+	d.Backend = "codex"
+	d.Backends = []string{"claude-code", "codex"}
 	d.Rebind = func(string) (Deps, error) {
 		return Deps{}, errors.New("instance torio-claude-code has no box")
 	}
@@ -834,7 +717,7 @@ func TestFailedRebindKeepsTheOldBinding(t *testing.T) {
 	press(t, r, "k")
 	press(t, r, "enter")
 
-	if r.deps.Backend != "hermes" {
+	if r.deps.Backend != "codex" {
 		t.Errorf("a failed rebind moved the binding to %q", r.deps.Backend)
 	}
 	if !strings.Contains(r.errText, "has no box") {
@@ -850,7 +733,8 @@ func TestFailedRebindKeepsTheOldBinding(t *testing.T) {
 func TestRebindIsRefusedWhileAnOperationIsInFlight(t *testing.T) {
 	f := &fakeDeps{boxState: lima.StateRunning}
 	d := f.deps()
-	d.Backends = []string{"claude-code", "hermes"}
+	d.Backend = "codex"
+	d.Backends = []string{"claude-code", "codex"}
 	d.Rebind = func(name string) (Deps, error) { return f.deps(), nil }
 	r := newRoot(d)
 	drain(t, r, r.probeFacts())
@@ -867,7 +751,8 @@ func TestRebindIsRefusedWhileAnOperationIsInFlight(t *testing.T) {
 func TestEscapeClosesTheChooserWithoutRebinding(t *testing.T) {
 	f := &fakeDeps{boxState: lima.StateRunning}
 	d := f.deps()
-	d.Backends = []string{"claude-code", "hermes"}
+	d.Backend = "codex"
+	d.Backends = []string{"claude-code", "codex"}
 	rebound := false
 	d.Rebind = func(string) (Deps, error) { rebound = true; return f.deps(), nil }
 	r := newRoot(d)
@@ -910,7 +795,8 @@ func TestNoChooserWhenTheBuildOffersNoRebind(t *testing.T) {
 func TestRebindReconcilesTheBrainOnBothSides(t *testing.T) {
 	f := &fakeDeps{boxState: lima.StateRunning}
 	d := f.deps()
-	d.Backends = []string{"claude-code", "hermes"}
+	d.Backend = "codex"
+	d.Backends = []string{"claude-code", "codex"}
 	oldSynced, newSynced := 0, 0
 	d.BrainSync = func(context.Context) (brain.SyncReport, error) {
 		oldSynced++
@@ -942,7 +828,7 @@ func TestRebindReconcilesTheBrainOnBothSides(t *testing.T) {
 	if !strings.Contains(r.note, "rebound to claude-code") {
 		t.Errorf("note = %q, want the rebind named first", r.note)
 	}
-	if !strings.Contains(r.note, "hermes") || !strings.Contains(r.note, "2 to the host") {
+	if !strings.Contains(r.note, "codex") || !strings.Contains(r.note, "2 to the host") {
 		t.Errorf("note = %q, want the side that was left and what it carried", r.note)
 	}
 	if !strings.Contains(r.note, "1 back") {
@@ -956,7 +842,8 @@ func TestRebindReconcilesTheBrainOnBothSides(t *testing.T) {
 func TestRebindStillRebindsWhenTheBrainCannotSync(t *testing.T) {
 	f := &fakeDeps{boxState: lima.StateRunning}
 	d := f.deps()
-	d.Backends = []string{"claude-code", "hermes"}
+	d.Backend = "codex"
+	d.Backends = []string{"claude-code", "codex"}
 	d.BrainSync = func(context.Context) (brain.SyncReport, error) {
 		return brain.SyncReport{}, errors.New("verify the box first")
 	}
@@ -990,7 +877,8 @@ func TestRebindStillRebindsWhenTheBrainCannotSync(t *testing.T) {
 func TestFailedRebindKeepsTheOldBindingAndItsBrainNote(t *testing.T) {
 	f := &fakeDeps{boxState: lima.StateRunning}
 	d := f.deps()
-	d.Backends = []string{"claude-code", "hermes"}
+	d.Backend = "codex"
+	d.Backends = []string{"claude-code", "codex"}
 	synced := 0
 	d.BrainSync = func(context.Context) (brain.SyncReport, error) {
 		synced++
@@ -1009,13 +897,13 @@ func TestFailedRebindKeepsTheOldBindingAndItsBrainNote(t *testing.T) {
 	if synced != 1 {
 		t.Fatalf("the side being left was synced %d times, want 1", synced)
 	}
-	if r.deps.Backend != "hermes" {
+	if r.deps.Backend != "codex" {
 		t.Errorf("a failed rebind moved the binding to %q", r.deps.Backend)
 	}
 	if !strings.Contains(r.errText, "has no box") {
 		t.Errorf("error text = %q, want it to carry the cause", r.errText)
 	}
-	if !strings.Contains(r.note, "hermes") {
+	if !strings.Contains(r.note, "codex") {
 		t.Errorf("note = %q, want the outbound reconciliation kept", r.note)
 	}
 }
@@ -1026,7 +914,8 @@ func TestFailedRebindKeepsTheOldBindingAndItsBrainNote(t *testing.T) {
 func TestRebindNamesTheHostVaultOnAConflict(t *testing.T) {
 	f := &fakeDeps{boxState: lima.StateRunning}
 	d := f.deps()
-	d.Backends = []string{"claude-code", "hermes"}
+	d.Backend = "codex"
+	d.Backends = []string{"claude-code", "codex"}
 	next := &fakeDeps{boxState: lima.StateRunning}
 	d.Rebind = func(name string) (Deps, error) {
 		nd := next.deps()
@@ -1124,39 +1013,6 @@ func TestProjectsReportsAFailedSessionPreflightAndOpensNothing(t *testing.T) {
 	}
 	if r.busy != "" {
 		t.Errorf("busy = %q, want the operation released", r.busy)
-	}
-}
-
-// The footer is the one place the hub says which keys are live, so it must not
-// name a key the backend has nothing to answer with.
-func TestProjectsFooterOmitsUseWhereThereIsNoRegistry(t *testing.T) {
-	f := &fakeDeps{
-		boxState:    lima.StateRunning,
-		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
-	}
-	d := f.deps()
-	d.ProjectUse = nil
-	r := newRoot(d)
-	r.switchTo(screenProjects)
-
-	if got := r.projects.keys(r); strings.Contains(got, "u use") {
-		t.Errorf("footer = %q, want no use key on a backend that keeps no registry", got)
-	}
-}
-
-// Where the registry exists the key stays offered.
-func TestProjectsFooterKeepsUseWhereThereIsARegistry(t *testing.T) {
-	f := &fakeDeps{
-		boxState:    lima.StateRunning,
-		projectList: []projects.Project{{ID: "torio", Path: "/w/torio"}},
-	}
-	d := f.deps()
-	d.ProjectUse = func(context.Context, string) error { return nil }
-	r := newRoot(d)
-	r.switchTo(screenProjects)
-
-	if got := r.projects.keys(r); !strings.Contains(got, "u use") {
-		t.Errorf("footer = %q, want the use key on a backend that keeps a registry", got)
 	}
 }
 
@@ -1840,7 +1696,7 @@ func TestMCPTabProvesTheBoundary(t *testing.T) {
 	d.MCPStatus = func(context.Context) (lima.MCPBrokerReport, error) {
 		return lima.MCPBrokerReport{
 			Instance:  "torio",
-			AgentUser: "hermes",
+			AgentUser: "claude",
 			Checks:    []lima.CheckResult{{Name: "broker_user", OK: true, Detail: "present"}},
 			Policy: lima.PolicyGrant{Digest: "abc123", Services: []lima.PolicyService{
 				{Name: "linear", UpstreamEndpoint: "https://mcp.linear.app/sse", Tools: 3, WriteTools: 1},
@@ -1870,7 +1726,7 @@ func TestMCPTabProvesTheBoundary(t *testing.T) {
 }
 
 // `6` reaches the tab like any other number key.
-func TestNumberSixSwitchesToTheMCPTab(t *testing.T) {
+func TestNumberFiveSwitchesToTheMCPTab(t *testing.T) {
 	f := &fakeDeps{boxState: lima.StateRunning}
 	d := f.deps()
 	d.MCPStatus = func(context.Context) (lima.MCPBrokerReport, error) {
@@ -1879,7 +1735,7 @@ func TestNumberSixSwitchesToTheMCPTab(t *testing.T) {
 	r := newRoot(d)
 	drain(t, r, r.probeFacts())
 
-	press(t, r, "6")
+	press(t, r, "5")
 
 	if r.active != screenMCP {
 		t.Fatalf("active screen = %v, want the MCP tab", r.active)

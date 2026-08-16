@@ -31,7 +31,7 @@ const (
 	KindGuestCommand ErrorKind = "guest_command_failed"
 	// KindGit is a Git operation that failed.
 	KindGit ErrorKind = "git_failed"
-	// KindRegistration is the Hermes project CLI failing or reporting a state we
+	// KindRegistration is a backend registration failing or reporting a state we
 	// cannot verify.
 	KindRegistration ErrorKind = "registration_failed"
 	// KindNoRegistry is asking Torio to drive a project registry the backend

@@ -68,7 +68,7 @@ func loginArgv() []string {
 //
 // There is no category. Codex routes by reading each skill's description, so a
 // skill is not competing for a position in a static index the way it is on the
-// Hermes backend, which is the entire reason that mechanism exists there and the
+// a service backend, which is the entire reason that mechanism existed and the
 // reason it is absent here.
 //
 // The payload is this backend's own text. It names the tools this agent has,

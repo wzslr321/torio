@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/wzslr321/torio/internal/backend/claudecode"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
 )
@@ -47,11 +48,6 @@ type fakeGuest struct {
 	gitRepo         bool
 	gitDirty        bool
 	gitRemote       bool
-	registered      bool
-	wrongProject    bool
-	showMissing     bool
-	showBrokenCLI   bool
-	projectShow     string
 	bootstrapErr    error
 	lockHeld        bool
 	lockStale       bool
@@ -70,18 +66,13 @@ type fakeGuest struct {
 	skillStaged     []byte
 	// Category state mirrors the skill's: the DESCRIPTION.md is installed,
 	// digested and ownership-checked exactly like SKILL.md.
-	categoryDirMode string
-	categoryPresent bool
-	categoryDigest  string
-	categoryMode    string
-	// legacySkillPresent models a guest installed before the category move.
-	legacySkillPresent bool
-	failContains       map[string]int
-	truncateOn         string
-	transportErr       error
-	calls              []fakeCall
-	copies             []fakeCopy
-	copyFromErr        error
+	skillRootMode string
+	failContains  map[string]int
+	truncateOn    string
+	transportErr  error
+	calls         []fakeCall
+	copies        []fakeCopy
+	copyFromErr   error
 	// carriedBundle is the file name CopyFromGuest writes into the host staging
 	// directory, empty for a transport that carries nothing.
 	carriedBundle string
@@ -108,8 +99,8 @@ func readyFake() *fakeGuest {
 		state:        lima.StateRunning,
 		pathExists:   true,
 		empty:        true,
-		owner:        lima.HermesUser,
-		group:        lima.HermesUser,
+		owner:        claudecode.User,
+		group:        claudecode.User,
 		mode:         "750",
 		fstype:       "ext4",
 		totalBytes:   4096,
@@ -125,49 +116,34 @@ func initializedFake() *fakeGuest {
 	f.empty = false
 	f.scaffold = true
 	f.gitRepo = true
-	f.registered = true
 	f.markdownCount = 3
 	f.pristineTree = true
 	return f
 }
 
-// The payloads this package's tests are written against. They are the Hermes
+// The payload this package's tests are written against. It is the fixture
 // backend's own declaration, reached the way production reaches it, because the
-// retrieval skill now travels with the backend rather than living here — and a
-// test that kept its own copy would pass while the shipped one drifted.
-func hermesSkillPayload() ([]byte, string, error) {
-	return declaredPayload(lima.Hermes().BrainSkill().Payload)
-}
-
-func hermesCategoryPayload() ([]byte, string, error) {
-	return declaredPayload(lima.Hermes().BrainSkill().CategoryPayload)
+// retrieval skill travels with the backend rather than living here — and a test
+// that kept its own copy would pass while the shipped one drifted.
+func declaredSkillPayload() ([]byte, string, error) {
+	return declaredPayload(claudecode.New().BrainSkill().Payload)
 }
 
 // withInstalledSkill puts the current embedded payload on the fake guest with
 // the ownership and mode a real install produces.
 func (f *fakeGuest) withInstalledSkill(t *testing.T) *fakeGuest {
 	t.Helper()
-	_, digest, err := hermesSkillPayload()
+	_, digest, err := declaredSkillPayload()
 	if err != nil {
-		t.Fatalf("hermesSkillPayload() error = %v", err)
+		t.Fatalf("declaredSkillPayload() error = %v", err)
 	}
-	_, categoryDigest, err := hermesCategoryPayload()
-	if err != nil {
-		t.Fatalf("hermesCategoryPayload() error = %v", err)
-	}
+	f.skillRootMode = "750"
 	f.skillDirMode = "750"
 	f.skillPresent = true
 	f.skillDigest = digest
-	f.skillOwner = lima.HermesUser
-	f.skillGroup = lima.HermesUser
+	f.skillOwner = claudecode.User
+	f.skillGroup = claudecode.User
 	f.skillMode = "640"
-	// A current installation includes the category description; without it the
-	// skill renders at the top level with no uncapped description, which is the
-	// state the category move exists to leave behind.
-	f.categoryDirMode = "750"
-	f.categoryPresent = true
-	f.categoryDigest = categoryDigest
-	f.categoryMode = "640"
 	return f
 }
 
@@ -287,7 +263,7 @@ func (f *fakeGuest) route(ctx context.Context, stdin []byte, argv []string) (exe
 		f.lockToken = strings.TrimSpace(string(stdin))
 		return okResult(""), nil
 	case strings.Contains(joined, "stat -c %U:%G %a "+lockPath):
-		return okResult("hermes:hermes 700\n"), nil
+		return okResult(claudecode.User + ":" + claudecode.User + " 700\n"), nil
 	case strings.Contains(joined, "find "+lockPath+" -maxdepth 0 -mmin +"+staleLockAge):
 		if f.lockStale {
 			return okResult(lockPath + "\n"), nil
@@ -328,7 +304,7 @@ func (f *fakeGuest) route(ctx context.Context, stdin []byte, argv []string) (exe
 		return okResult(strings.Repeat(".", f.importFiles)), nil
 	case joined == "id -un":
 		return okResult(fakeGuestSessionUser + "\n"), nil
-	case strings.Contains(joined, "chown -R -- "+lima.HermesUser+":"+lima.HermesUser+" "+importPayloadPath):
+	case strings.Contains(joined, "chown -R -- "+claudecode.User+":"+claudecode.User+" "+importPayloadPath):
 		return okResult(""), nil
 	case strings.Contains(joined, "chmod -R u=rwX,g=rX,o= -- "+importPayloadPath):
 		return okResult(""), nil
@@ -382,113 +358,75 @@ func (f *fakeGuest) route(ctx context.Context, stdin []byte, argv []string) (exe
 			return okResult(""), nil
 		}
 		return exitResult(1, "", ""), nil
-	// Retrieval skill routes. SkillFilePath has SkillPath as a prefix, so the
+	// Retrieval skill routes. skillFilePath has skillDir as a prefix, so the
 	// file probes must be matched first.
-	case strings.Contains(joined, "test -L "+SkillFilePath):
+	case strings.Contains(joined, "test -L "+skillFilePath):
 		if f.skillSymlink {
 			return okResult(""), nil
 		}
 		return exitResult(1, "", ""), nil
-	case strings.Contains(joined, "test -f "+SkillFilePath):
+	case strings.Contains(joined, "test -f "+skillFilePath):
 		if f.skillPresent {
 			return okResult(""), nil
 		}
 		return exitResult(1, "", ""), nil
-	case strings.Contains(joined, "stat -c %U:%G %a "+SkillFilePath):
+	case strings.Contains(joined, "stat -c %U:%G %a "+skillFilePath):
 		if !f.skillPresent {
 			return exitResult(1, "", "no such file or directory"), nil
 		}
 		return okResult(f.skillOwner + ":" + f.skillGroup + " " + f.skillMode + "\n"), nil
-	case strings.Contains(joined, "sha256sum -- "+SkillFilePath):
+	case strings.Contains(joined, "sha256sum -- "+skillFilePath):
 		if !f.skillPresent {
 			return exitResult(1, "", "no such file or directory"), nil
 		}
-		return okResult(f.skillDigest + "  " + SkillFilePath + "\n"), nil
-	case strings.Contains(joined, "test -L "+SkillPath):
+		return okResult(f.skillDigest + "  " + skillFilePath + "\n"), nil
+	case strings.Contains(joined, "test -L "+skillDir):
 		if f.skillDirSymlink {
 			return okResult(""), nil
 		}
 		return exitResult(1, "", ""), nil
-	case strings.Contains(joined, "test -d "+SkillPath):
+	case strings.Contains(joined, "test -d "+skillDir):
 		if f.skillDirMode != "" {
 			return okResult(""), nil
 		}
 		return exitResult(1, "", ""), nil
-	case strings.Contains(joined, "stat -c %U:%G %a "+SkillPath):
+	case strings.Contains(joined, "stat -c %U:%G %a "+skillDir):
 		if f.skillDirMode == "" {
 			return exitResult(1, "", "no such file or directory"), nil
 		}
-		return okResult(lima.HermesUser + ":" + lima.HermesUser + " " + f.skillDirMode + "\n"), nil
-	case strings.Contains(joined, "install -d -o hermes -g hermes -m 0750 "+SkillPath):
+		return okResult(claudecode.User + ":" + claudecode.User + " " + f.skillDirMode + "\n"), nil
+	case strings.Contains(joined, "install -d -o "+claudecode.User+" -g "+claudecode.User+" -m 0750 "+skillDir):
 		f.skillDirMode = "750"
 		return okResult(""), nil
-	// Category routes. SkillCategoryPath is a prefix of both SkillPath and
-	// SkillCategoryFilePath, so it must be matched after them.
-	case strings.Contains(joined, "test -L "+SkillCategoryFilePath):
+	// The discovery root itself. skillDir has it as a prefix, so these must be
+	// matched after the routes above.
+	case strings.Contains(joined, "test -L "+skillRoot):
 		return exitResult(1, "", ""), nil
-	case strings.Contains(joined, "test -f "+SkillCategoryFilePath):
-		if f.categoryPresent {
+	case strings.Contains(joined, "test -d "+skillRoot):
+		if f.skillRootMode != "" {
 			return okResult(""), nil
 		}
 		return exitResult(1, "", ""), nil
-	case strings.Contains(joined, "stat -c %U:%G %a "+SkillCategoryFilePath):
-		if !f.categoryPresent {
+	case strings.Contains(joined, "stat -c %U:%G %a "+skillRoot):
+		if f.skillRootMode == "" {
 			return exitResult(1, "", "no such file or directory"), nil
 		}
-		return okResult(lima.HermesUser + ":" + lima.HermesUser + " " + f.categoryMode + "\n"), nil
-	case strings.Contains(joined, "sha256sum -- "+SkillCategoryFilePath):
-		if !f.categoryPresent {
-			return exitResult(1, "", "no such file or directory"), nil
-		}
-		return okResult(f.categoryDigest + "  " + SkillCategoryFilePath + "\n"), nil
-	case strings.Contains(joined, "mv -T "+skillStagingPath+" "+SkillCategoryFilePath):
-		sum := sha256.Sum256(f.skillStaged)
-		f.categoryPresent = true
-		f.categoryDigest = hex.EncodeToString(sum[:])
-		f.categoryMode = "640"
-		f.skillStaged = nil
-		return okResult(""), nil
-	case strings.Contains(joined, "test -L "+SkillCategoryPath):
-		return exitResult(1, "", ""), nil
-	case strings.Contains(joined, "test -d "+SkillCategoryPath):
-		if f.categoryDirMode != "" {
-			return okResult(""), nil
-		}
-		return exitResult(1, "", ""), nil
-	case strings.Contains(joined, "stat -c %U:%G %a "+SkillCategoryPath):
-		if f.categoryDirMode == "" {
-			return exitResult(1, "", "no such file or directory"), nil
-		}
-		return okResult(lima.HermesUser + ":" + lima.HermesUser + " " + f.categoryDirMode + "\n"), nil
-	case strings.Contains(joined, "install -d -o hermes -g hermes -m 0750 "+SkillCategoryPath):
-		f.categoryDirMode = "750"
-		return okResult(""), nil
-	// Pre-category installation, retired by removeLegacySkill.
-	case strings.Contains(joined, "test -L "+legacySkillPath):
-		return exitResult(1, "", ""), nil
-	case strings.Contains(joined, "test -f "+legacySkillPath+"/SKILL.md"),
-		strings.Contains(joined, "test -d "+legacySkillPath):
-		if f.legacySkillPresent {
-			return okResult(""), nil
-		}
-		return exitResult(1, "", ""), nil
-	case strings.Contains(joined, "rm -f -- "+legacySkillPath+"/SKILL.md"):
-		f.legacySkillPresent = false
-		return okResult(""), nil
-	case strings.Contains(joined, "rmdir -- "+legacySkillPath):
+		return okResult(claudecode.User + ":" + claudecode.User + " " + f.skillRootMode + "\n"), nil
+	case strings.Contains(joined, "install -d -o "+claudecode.User+" -g "+claudecode.User+" -m 0750 "+skillRoot):
+		f.skillRootMode = "750"
 		return okResult(""), nil
 	case strings.Contains(joined, "tee "+skillStagingPath):
 		f.skillStaged = append([]byte(nil), stdin...)
 		return okResult(""), nil
 	case strings.Contains(joined, "chmod 0640 "+skillStagingPath):
 		return okResult(""), nil
-	case strings.Contains(joined, "mv -T "+skillStagingPath+" "+SkillFilePath):
+	case strings.Contains(joined, "mv -T "+skillStagingPath+" "+skillFilePath):
 		sum := sha256.Sum256(f.skillStaged)
 		f.skillPresent = true
 		f.skillSymlink = false
 		f.skillDigest = hex.EncodeToString(sum[:])
-		f.skillOwner = lima.HermesUser
-		f.skillGroup = lima.HermesUser
+		f.skillOwner = claudecode.User
+		f.skillGroup = claudecode.User
 		f.skillMode = "640"
 		f.skillStaged = nil
 		return okResult(""), nil
@@ -563,40 +501,6 @@ func (f *fakeGuest) route(ctx context.Context, stdin []byte, argv []string) (exe
 		return okResult(strings.Repeat(".", f.markdownCount)), nil
 	case strings.Contains(joined, "du -sb -- "+Path):
 		return okResult(fmt.Sprintf("%d\t%s\n", f.totalBytes, Path)), nil
-	// The `hermes project` fakes below encode a contract hand-verified against a
-	// real Hermes v0.19.0 guest, not an assumed one. Two properties matter and
-	// must not be "simplified":
-	//   1. `show <unknown-slug>` exits 0 with EMPTY stdout and a stderr
-	//      diagnostic. Upstream `hermes_cli/main.py` calls `args.func(args)` and
-	//      discards the result, so every `return 1` in `projects_cmd.py` is dead
-	//      code. A non-zero exit therefore means a broken/missing CLI
-	//      (`showBrokenCLI`), never "no such project".
-	//   2. `list` output carries slugs and names, never any path.
-	case strings.Contains(joined, "hermes project show "+ProjectSlug):
-		switch {
-		case f.projectShow != "":
-			return okResult(f.projectShow), nil
-		case f.showBrokenCLI:
-			return exitResult(2, "", "usage: hermes project show"), nil
-		case f.showMissing:
-			return exitResult(0, "", "project: no such project: "+ProjectSlug), nil
-		case f.wrongProject:
-			return okResult(projectShowOutput("/home/hermes/other")), nil
-		case f.registered:
-			return okResult(projectShowOutput(Path)), nil
-		default:
-			return exitResult(0, "", "project: no such project: "+ProjectSlug), nil
-		}
-	case strings.Contains(joined, "hermes project list"):
-		if f.registered {
-			return okResult(fmt.Sprintf("* %-24s %s  [1 folder(s)]\n", ProjectSlug, ProjectName)), nil
-		}
-		return okResult(""), nil
-	case strings.Contains(joined, "hermes project create"):
-		f.registered = true
-		f.showMissing = false
-		f.showBrokenCLI = false
-		return okResult("created\n"), nil
 	case strings.Contains(joined, "tee "+stagingPath+"/"):
 		return okResult(""), nil
 	case strings.Contains(joined, "mv -T "+stagingPath+" "+Path):
@@ -630,17 +534,6 @@ func okResult(stdout string) execx.Result {
 
 func exitResult(code int, stdout, stderr string) execx.Result {
 	return execx.Result{ExitCode: code, Stdout: []byte(stdout), Stderr: []byte(stderr)}
-}
-
-// projectShowOutput reproduces the block a real `hermes project show <slug>`
-// prints for an existing project: a slug/id header, padded fields, and the
-// folder list whose first entry repeats the primary path.
-func projectShowOutput(primary string) string {
-	return ProjectSlug + "  [p_75fa0ebf]\n" +
-		"  name:    " + ProjectName + "\n" +
-		"  primary: " + primary + "\n" +
-		"  folders:\n" +
-		"    * " + primary + "\n"
 }
 
 func (f *fakeGuest) saw(fragment string) bool {

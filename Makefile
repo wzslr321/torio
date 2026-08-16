@@ -56,7 +56,7 @@ lint:
 	golangci-lint run ./...
 
 # One journey, run once per backend. PLATFORM_E2E_BACKEND selects which
-# (default: hermes); the shared steps are asserted identically on both, which is
+# (default: claude-code); the shared steps are asserted identically on each,
 # the point of having a backend contract at all.
 platform-e2e:
 	@test -n "$$PLATFORM_E2E_TORIO_BIN" || (echo "PLATFORM_E2E_TORIO_BIN is required" >&2; exit 2)

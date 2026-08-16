@@ -79,7 +79,7 @@ func TestLoadInstanceReadsTheNamedBoxOwnDocument(t *testing.T) {
 	writeInstanceConfig(t, cfgHome, "torio-claude-code", `{"schema_version":"3","backend":"claude-code"}`)
 
 	elsewhere := filepath.Join(t.TempDir(), "elsewhere.json")
-	if err := os.WriteFile(elsewhere, []byte(`{"schema_version":"3","backend":"hermes"}`), 0o600); err != nil {
+	if err := os.WriteFile(elsewhere, []byte(`{"schema_version":"3","backend":"codex"}`), 0o600); err != nil {
 		t.Fatalf("write explicit config: %v", err)
 	}
 
@@ -228,7 +228,7 @@ func TestLoadRejectsWorkspacePathInProject(t *testing.T) {
 	cfgHome := t.TempDir()
 	writeConfig(t, cfgHome, `{"schema_version":"2","projects":[{"id":"my-project",`+
 		`"display_name":"My Project","remote":"https://github.com/owner/my-project.git",`+
-		`"path":"/home/hermes/projects/my-project"}]}`)
+		`"path":"/home/claude/projects/my-project"}]}`)
 	if _, err := loadWith(t, Options{}, cfgHome); err == nil {
 		t.Fatalf("a project carrying a workspace path must be rejected (fail closed)")
 	}
@@ -633,7 +633,7 @@ func TestOperatorKeyRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
-	got, err := parseFile(data)
+	got, _, err := parseFile(data)
 	if err != nil {
 		t.Fatalf("parseFile() error = %v", err)
 	}

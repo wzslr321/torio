@@ -23,13 +23,11 @@ type projectService interface {
 	Add(context.Context, projects.AddRequest) (projects.AddReport, error)
 	List() ([]projects.Project, error)
 	Show(context.Context, string) (projects.ShowReport, error)
-	Use(context.Context, string) (projects.UseReport, error)
 	Remove(context.Context, string) (projects.RemoveReport, error)
 	SetRemote(context.Context, string, string) (projects.SetRemoteReport, error)
 	EnterPreflight(context.Context, string) (projects.EnterSession, error)
 	ShellPreflight(context.Context, string) (projects.ShellSession, error)
 	RemoteAccess(context.Context, string, projects.SessionIdentity) (projects.RemoteAccess, error)
-	CheckServiceEnv(context.Context) (projects.ServiceEnvCheck, error)
 }
 
 var _ projectService = (*projects.Manager)(nil)
@@ -54,7 +52,6 @@ func newProjectCmd(a *app) *cobra.Command {
 	cmd.AddCommand(newProjectAddCmd(a))
 	cmd.AddCommand(newProjectListCmd(a))
 	cmd.AddCommand(newProjectShowCmd(a))
-	cmd.AddCommand(newProjectUseCmd(a))
 	cmd.AddCommand(newProjectRemoveCmd(a))
 	cmd.AddCommand(newProjectSetRemoteCmd(a))
 	cmd.AddCommand(newProjectEnterCmd(a))
@@ -65,7 +62,6 @@ func newProjectCmd(a *app) *cobra.Command {
 
 func newProjectAddCmd(a *app) *cobra.Command {
 	var id string
-	var use bool
 	var local bool
 	var bundle string
 	cmd := &cobra.Command{
@@ -139,7 +135,6 @@ func newProjectAddCmd(a *app) *cobra.Command {
 				Remote:      remote,
 				Local:       local,
 				BundlePath:  bundle,
-				Use:         use,
 			})
 			if err != nil {
 				cliErr := mapProjectError("project.add", err)
@@ -160,7 +155,6 @@ func newProjectAddCmd(a *app) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&id, "id", "", "project id (slug) to use instead of <name>")
-	cmd.Flags().BoolVar(&use, "use", false, "make the project active in the backend's registry after a successful add")
 	cmd.Flags().BoolVar(&local, "local", false, "make an empty repository in the guest; the project has no remote")
 	cmd.Flags().StringVar(&bundle, "from-bundle", "", "attach from a Git bundle on this machine (git bundle create FILE --all)")
 	return cmd
@@ -217,7 +211,7 @@ func newProjectShowCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <id>",
 		Short: "Report the state of one attached project",
-		Long: "Report the registry entry, the state of the guest checkout and of the Hermes " +
+		Long: "Report the registry entry and the state of the guest checkout " +
 			"registration. It reports drift as stable markers instead of repairing it, and " +
 			"never returns file names, diffs or raw Git output.",
 		Args: cobra.ExactArgs(1),
@@ -237,32 +231,11 @@ func newProjectShowCmd(a *app) *cobra.Command {
 	}
 }
 
-func newProjectUseCmd(a *app) *cobra.Command {
-	return &cobra.Command{
-		Use:   "use <id>",
-		Short: "Make a registered project the active Hermes project",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, cancel := a.opContext(cmd)
-			defer cancel()
-			service, err := a.projectService("project.use")
-			if err != nil {
-				return err
-			}
-			report, err := service.Use(ctx, args[0])
-			if err != nil {
-				return mapProjectError("project.use", err)
-			}
-			return a.emitProjectUse(report)
-		},
-	}
-}
-
 func newProjectRemoveCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "remove <id>",
 		Short: "Forget a project without touching its checkout",
-		Long: "Archive the Hermes project and remove the config entry. The guest checkout is " +
+		Long: "Remove the config entry. The guest checkout is " +
 			"never deleted and the output says where it still is; there is no --delete.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -769,15 +742,6 @@ func (a *app) reportShellEnd(cmd *cobra.Command, service projectService, session
 		return err
 	}
 
-	ctx, cancel := a.opContext(cmd)
-	defer cancel()
-	check, checkErr := service.CheckServiceEnv(ctx)
-	if _, err := fmt.Fprintf(a.stdout, "  hermes service environment: %s\n", serviceEnvState(check)); err != nil {
-		return err
-	}
-	if checkErr != nil {
-		return mapProjectError("project.shell", checkErr)
-	}
 	if runErr != nil {
 		return mapOperatorShellError(runErr)
 	}
@@ -820,14 +784,11 @@ type projectAddData struct {
 	// Initialized is a local project made here, distinct from cloned because
 	// nothing arrived: the repository has no commit until the operator makes
 	// one (ADR-0027).
-	Initialized    bool     `json:"initialized"`
-	Adopted        bool     `json:"adopted"`
-	HermesCreated  bool     `json:"hermes_created"`
-	HermesRestored bool     `json:"hermes_restored"`
-	Registered     bool     `json:"registered"`
-	Activated      bool     `json:"activated"`
-	Notes          []string `json:"notes"`
-	NextStep       string   `json:"next_step"`
+	Initialized bool     `json:"initialized"`
+	Adopted     bool     `json:"adopted"`
+	Registered  bool     `json:"registered"`
+	Notes       []string `json:"notes"`
+	NextStep    string   `json:"next_step"`
 }
 
 type projectListData struct {
@@ -835,18 +796,11 @@ type projectListData struct {
 	Count    int           `json:"count"`
 }
 
-// projectShowData mirrors `serve status`: the declaration comes first, because
-// it decides whether the block after it means anything. On a backend that keeps
-// no registry the `hermes` object is absent rather than all-false — an object
-// full of falses reads as "the registration is missing", which is a different
-// statement from "there is nowhere to register".
 type projectShowData struct {
 	projectData
-	Checkout         projectCheckoutData `json:"checkout"`
-	RegistryDeclared bool                `json:"registry_declared"`
-	Hermes           *projectHermesData  `json:"hermes,omitempty"`
-	Issues           []string            `json:"issues"`
-	NextStep         string              `json:"next_step"`
+	Checkout projectCheckoutData `json:"checkout"`
+	Issues   []string            `json:"issues"`
+	NextStep string              `json:"next_step"`
 }
 
 type projectCheckoutData struct {
@@ -864,34 +818,12 @@ type projectCheckoutData struct {
 	Mode               string `json:"mode"`
 }
 
-type projectHermesData struct {
-	Present        bool `json:"present"`
-	Archived       bool `json:"archived"`
-	PrimaryMatches bool `json:"primary_matches"`
-	Registered     bool `json:"registered"`
-}
-
-type projectUseData struct {
-	projectData
-	Active   bool   `json:"active"`
-	NextStep string `json:"next_step"`
-}
-
-// projectRemoveData keeps the three hermes_* flags flat and always present, so
-// the envelope a Hermes instance emits is byte-for-byte what it was. On a
-// backend that keeps no registry all three are false, and registry_declared is
-// what says why: there was nothing to archive, rather than an archival that
-// failed to happen.
 type projectRemoveData struct {
 	projectData
-	RegistryDeclared      bool     `json:"registry_declared"`
-	HermesArchived        bool     `json:"hermes_archived"`
-	HermesAlreadyArchived bool     `json:"hermes_already_archived"`
-	HermesAbsent          bool     `json:"hermes_absent"`
-	CheckoutRetained      bool     `json:"checkout_retained"`
-	CheckoutPath          string   `json:"checkout_path"`
-	Notes                 []string `json:"notes"`
-	NextStep              string   `json:"next_step"`
+	CheckoutRetained bool     `json:"checkout_retained"`
+	CheckoutPath     string   `json:"checkout_path"`
+	Notes            []string `json:"notes"`
+	NextStep         string   `json:"next_step"`
 }
 
 func projectView(p projects.Project) projectData {
@@ -899,26 +831,16 @@ func projectView(p projects.Project) projectData {
 }
 
 func (a *app) emitProjectAdd(report projects.AddReport) error {
-	// `use` selects the active project in the backend's registry, so on a
-	// backend that declares none it is a command that fails closed by design.
-	// Naming it as the next step would send the operator to a `NO_REGISTRY`
-	// error to learn something Torio already knows here.
-	next := "torio project use " + report.Project.ID
-	if report.Activated || a.backend.Registry() == nil {
-		next = "torio project enter " + report.Project.ID
-	}
+	next := "torio project enter " + report.Project.ID
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("project.add", projectAddData{
-			projectData:    projectView(report.Project),
-			Cloned:         report.Cloned,
-			Initialized:    report.Initialized,
-			Adopted:        report.Adopted,
-			HermesCreated:  report.HermesCreated,
-			HermesRestored: report.HermesRestored,
-			Registered:     report.Registered,
-			Activated:      report.Activated,
-			Notes:          notes(report.Notes),
-			NextStep:       next,
+			projectData: projectView(report.Project),
+			Cloned:      report.Cloned,
+			Initialized: report.Initialized,
+			Adopted:     report.Adopted,
+			Registered:  report.Registered,
+			Notes:       notes(report.Notes),
+			NextStep:    next,
 		}))
 	}
 	state := "attached"
@@ -929,9 +851,6 @@ func (a *app) emitProjectAdd(report projects.AddReport) error {
 		state = "cloned"
 	case report.Adopted:
 		state = "adopted"
-	}
-	if report.Activated {
-		state += ", active"
 	}
 	if _, err := fmt.Fprintf(a.stdout,
 		"%s: %s\n"+
@@ -973,15 +892,12 @@ func (a *app) emitProjectList(list []projects.Project) error {
 
 func (a *app) emitProjectShow(report projects.ShowReport) error {
 	next := showNextStep(report)
-	declared := a.backend.Registry() != nil
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("project.show", projectShowData{
-			projectData:      projectView(report.Project),
-			Checkout:         checkoutView(report.Checkout),
-			RegistryDeclared: declared,
-			Hermes:           hermesView(declared, report.Hermes),
-			Issues:           notes(report.Issues),
-			NextStep:         next,
+			projectData: projectView(report.Project),
+			Checkout:    checkoutView(report.Checkout),
+			Issues:      notes(report.Issues),
+			NextStep:    next,
 		}))
 	}
 	state := "ok"
@@ -992,40 +908,19 @@ func (a *app) emitProjectShow(report projects.ShowReport) error {
 	if len(report.Issues) > 0 {
 		issues = strings.Join(report.Issues, ",")
 	}
-	// The label follows the declaration, not just its value. `hermes:` on a box
-	// that runs a different agent names a backend that is not there, whatever
-	// the value beside it says.
-	registration := fmt.Sprintf("  hermes:    %s\n", hermesState(report.Hermes))
-	if !declared {
-		registration = fmt.Sprintf("  registry:  none declared by backend %q\n", a.backend.Identity().Name)
-	}
 	_, err := fmt.Fprintf(a.stdout,
 		"%s: %s\n"+
 			"  path:      %s\n"+
 			"  remote:    %s\n"+
 			"  checkout:  present=%t repository=%t origin=%t clean=%t shared=%t\n"+
 			"  ownership: %s:%s %s\n"+
-			"%s"+
 			"  issues:    %s\n"+
 			"next: %s\n",
 		report.Project.ID, state, report.Project.Path, remoteOrLocal(report.Project.Remote),
 		report.Checkout.PathExists, report.Checkout.Repository, report.Checkout.OriginMatches,
 		report.Checkout.Clean, report.Checkout.SharedPermissions,
 		report.Checkout.Owner, report.Checkout.Group, report.Checkout.Mode,
-		registration, issues, next)
-	return err
-}
-
-func (a *app) emitProjectUse(report projects.UseReport) error {
-	next := "torio project enter " + report.Project.ID
-	if a.jsonOut {
-		return writeJSON(a.stdout, successEnvelope("project.use", projectUseData{
-			projectData: projectView(report.Project),
-			Active:      true,
-			NextStep:    next,
-		}))
-	}
-	_, err := fmt.Fprintf(a.stdout, "%s: active\nnext: %s\n", report.Project.ID, next)
+		issues, next)
 	return err
 }
 
@@ -1101,37 +996,21 @@ func (a *app) emitProjectRemove(report projects.RemoveReport) error {
 	const next = "torio project list"
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("project.remove", projectRemoveData{
-			projectData:           projectView(report.Project),
-			RegistryDeclared:      a.backend.Registry() != nil,
-			HermesArchived:        report.HermesArchived,
-			HermesAlreadyArchived: report.HermesAlreadyArchived,
-			HermesAbsent:          report.HermesAbsent,
-			CheckoutRetained:      report.CheckoutRetained,
-			CheckoutPath:          report.CheckoutPath,
-			Notes:                 notes(report.Notes),
-			NextStep:              next,
+			projectData:      projectView(report.Project),
+			CheckoutRetained: report.CheckoutRetained,
+			CheckoutPath:     report.CheckoutPath,
+			Notes:            notes(report.Notes),
+			NextStep:         next,
 		}))
-	}
-	// The default branch claims an archival happened, so a backend that keeps no
-	// registry needs its own: nothing was archived there, and saying otherwise
-	// asserts an action Torio did not take.
-	hermes := "hermes project archived"
-	switch {
-	case a.backend.Registry() == nil:
-		hermes = "no registry to archive it from"
-	case report.HermesAlreadyArchived:
-		hermes = "hermes project already archived"
-	case report.HermesAbsent:
-		hermes = "hermes project absent"
 	}
 	// The retained checkout is stated, not implied: `remove` forgets a project,
 	// and an operator who reads "removed" must not have to guess whether their
 	// working tree is still on the guest.
 	if _, err := fmt.Fprintf(a.stdout,
-		"%s: removed from the registry (%s)\n"+
+		"%s: removed from the registry\n"+
 			"  the checkout directory %s still exists on the VM; Torio never deletes it\n"+
 			"next: %s\n",
-		report.Project.ID, hermes, report.CheckoutPath, next); err != nil {
+		report.Project.ID, report.CheckoutPath, next); err != nil {
 		return err
 	}
 	return nil
@@ -1139,8 +1018,8 @@ func (a *app) emitProjectRemove(report projects.RemoveReport) error {
 
 // showNextStep picks the one command that actually moves the reported state
 // forward. `show` never repairs anything, so the choice is between the two ways
-// drift gets resolved: a rerun of `add`, which reclones a missing checkout and
-// reconciles the Hermes registration, and an operator session, for drift inside
+// drift gets resolved: a rerun of `add`, which reclones a missing checkout,
+// and an operator session, for drift inside
 // a checkout that exists — Torio will not reset, clean or repoint a working
 // tree, so only a human can.
 func showNextStep(report projects.ShowReport) string {
@@ -1148,7 +1027,7 @@ func showNextStep(report projects.ShowReport) string {
 		return "torio project enter " + report.Project.ID
 	}
 	for _, issue := range report.Issues {
-		if strings.HasPrefix(issue, "hermes_") || issue == "checkout_absent" {
+		if issue == "checkout_absent" {
 			continue
 		}
 		return "torio project enter " + report.Project.ID
@@ -1175,35 +1054,6 @@ func checkoutView(c projects.CheckoutStatus) projectCheckoutData {
 		Owner:              c.Owner,
 		Group:              c.Group,
 		Mode:               c.Mode,
-	}
-}
-
-// hermesView returns the registration block, or nil when the backend declares
-// no registry. Nil is what keeps the block out of the envelope entirely: there
-// is no registration to describe, so describing one as missing would report a
-// shape as a fault.
-func hermesView(declared bool, h projects.HermesStatus) *projectHermesData {
-	if !declared {
-		return nil
-	}
-	return &projectHermesData{
-		Present:        h.Present,
-		Archived:       h.Archived,
-		PrimaryMatches: h.PrimaryMatches,
-		Registered:     h.Present && !h.Archived && h.PrimaryMatches,
-	}
-}
-
-func hermesState(h projects.HermesStatus) string {
-	switch {
-	case !h.Present:
-		return "absent"
-	case !h.PrimaryMatches:
-		return "conflict"
-	case h.Archived:
-		return "archived"
-	default:
-		return "registered"
 	}
 }
 
@@ -1289,21 +1139,6 @@ func (a *app) printDeployKey(key *projects.DeployKey) {
 			"the guest write access to every repository that account can reach.\n"+
 			"Private half, on the guest, owned by the backend identity: %s\n\n",
 		state, key.PublicKey, key.Host, key.KeyPath)
-}
-
-// serviceEnvState names the three outcomes of the post-session check. A guest
-// with no backend installed reports "not checked" rather than "clean": there
-// was nothing to leak into, which is not the same as having looked and found
-// nothing.
-func serviceEnvState(check projects.ServiceEnvCheck) string {
-	switch {
-	case check.AgentSocketPresent:
-		return "SSH_AUTH_SOCK present"
-	case check.Checked:
-		return "no forwarded agent socket"
-	default:
-		return "not checked"
-	}
 }
 
 // mapOperatorShellError classifies the end of an interactive session. A remote

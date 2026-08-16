@@ -17,7 +17,7 @@ compatible one, so there is no state in which you skip the second command.
 compatible one already exists) and verifies the post-create list output before
 reporting success. `start` is idempotent and confirms a `Running` post-state.
 `bootstrap` operates only on the existing target after a verified `Running`
-precondition, through the typed Lima boundary. Hermes Agent install can be slow,
+precondition, through the typed Lima boundary. A backend install can be slow,
 so give it room — but `10m` is the policy maximum for any single operation, and
 asking for more is refused before any work starts:
 
@@ -26,26 +26,28 @@ torio: timeout 15m0s exceeds policy maximum 10m0s
 ```
 
 On a fully-reconciled target
-it mutates nothing; when the pinned launcher is missing it installs Hermes Agent
-at the pinned commit, then reconciles the PATH shim. It:
+it mutates nothing; when the pinned binary is missing it installs the declared
+backend at its pin. It:
 
-- installs the pinned Hermes Agent when `/home/hermes/hermes-agent/venv/bin/hermes` is missing (never curl|bash pipe — download to a hermes-writable path, run with fixed flags, verify git HEAD);
-- ensures `/usr/local/bin/hermes` is a symlink to the pinned launcher (only after confirming the launcher exists);
-- **verifies** (not merely trusts an exit code): the `hermes` user exists; group `torio-projects` exists; `hermes` and the Lima login operator are members; `hermes` is **not** in the `docker` group (rootful Docker for hermes is forbidden); `uname -m` matches the host profile's guest architecture; `hermes --version` through the documented stable command path; `git --version`; the persistent profile, Second Brain, and workspace paths are directories with the expected owner, group, and mode on native Linux (ext4), not a host share; and no broad host mount is present.
+- installs the backend at its pinned version when it is missing, verifying the download against a checksum this repository commits — never a `curl | bash` pipe;
+- **verifies** (not merely trusts an exit code): the agent's guest user exists; group `torio-projects` exists; the agent and the Lima login operator are members; the agent is **not** in the `docker` group (rootful Docker for the agent is forbidden); `uname -m` matches the host profile's guest architecture; the backend's own version command through the documented stable command path; `git --version`; the persistent profile, Second Brain, and workspace paths are directories with the expected owner, group, and mode on native Linux (ext4), not a host share; and no broad host mount is present.
 
 Any drift or unverifiable state fails closed (exit 6) with remediation. A rerun
 is success only when every postcondition is proven. Use `--json` for the
 machine-readable envelope (one document on stdout).
 
-### Persistent Hermes locations {#persistent-locations}
+### Persistent guest locations {#persistent-locations}
+
+The table below is the Claude Code layout; every backend has the same shape
+under its own identity.
 
 | What | Path (on the VM's native Linux filesystem) |
 | --- | --- |
-| Guest user | `hermes` |
-| Hermes home | `/home/hermes` |
-| Profile / application state | `/home/hermes/.hermes` |
-| Second Brain vault | `/home/hermes/brain` |
-| Workspace root | `/home/hermes/projects` |
+| Guest user | `claude` |
+| Home | `/home/claude` |
+| Profile / application state | `/home/claude/.claude` |
+| Second Brain vault | `/home/claude/brain` |
+| Workspace root | `/home/claude/projects` |
 
 These are also emitted in the `torio vm bootstrap` output (human and `--json`).
 

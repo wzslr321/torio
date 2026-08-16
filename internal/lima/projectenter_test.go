@@ -13,7 +13,7 @@ func TestProjectEnterHelperIsAValidNonPushWorkspaceShell(t *testing.T) {
 		t.Skip("bash is not available; the guest helper cannot be parsed here")
 	}
 
-	content, err := projectHelper(embeddedProjectEnter, HermesWorkspacePath, "project enter")
+	content, err := projectHelper(embeddedProjectEnter, testWorkspacePath, "project enter")
 	if err != nil {
 		t.Fatalf("resolving the guest helper: %v", err)
 	}

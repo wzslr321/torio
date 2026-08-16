@@ -95,7 +95,7 @@ func newBrainInitCmd(a *app) *cobra.Command {
 		Use:   "init",
 		Short: "Create or verify the private Git-versioned Brain",
 		Long: "Create the canonical Markdown scaffold atomically through private guest staging, " +
-			"make its initial local Git commit, and register the separate Second Brain Hermes " +
+			"and make its initial local Git commit. " +
 			"Project. Once the Brain verifies, install or refresh the global torio-brain " +
 			"retrieval skill so every project can search it; sessions already open must be " +
 			"restarted to see it. Idempotent for matching managed state; refuses non-empty " +
@@ -125,7 +125,7 @@ func newBrainStatusCmd(a *app) *cobra.Command {
 		Short: "Report Brain integrity and bounded aggregate metadata",
 		Long: "Report initialized, uninitialized, or drift state; canonical path, native " +
 			"filesystem, ownership/mode, Git worktree state, bounded aggregate counts and bytes, " +
-			"Hermes Project registration, and retrieval skill state. No note names or content " +
+			"and retrieval skill state. No note names or content " +
 			"are returned.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -263,22 +263,20 @@ func (a *app) brainService(command string) (brainService, error) {
 }
 
 type brainStatusData struct {
-	State             string `json:"state"`
-	Path              string `json:"path"`
-	PathExists        bool   `json:"path_exists"`
-	NativeFilesystem  bool   `json:"native_filesystem"`
-	FSType            string `json:"fstype"`
-	Owner             string `json:"owner"`
-	Group             string `json:"group"`
-	Mode              string `json:"mode"`
-	GitState          string `json:"git_state"`
-	GitHasRemote      bool   `json:"git_has_remote"`
-	MarkdownFiles     int    `json:"markdown_files"`
-	AttachmentFiles   int    `json:"attachment_files"`
-	TotalBytes        int64  `json:"total_bytes"`
-	ProjectRegistered bool   `json:"project_registered"`
-	ProjectConflict   bool   `json:"project_conflict"`
-	RetrievalSkill    string `json:"retrieval_skill"`
+	State            string `json:"state"`
+	Path             string `json:"path"`
+	PathExists       bool   `json:"path_exists"`
+	NativeFilesystem bool   `json:"native_filesystem"`
+	FSType           string `json:"fstype"`
+	Owner            string `json:"owner"`
+	Group            string `json:"group"`
+	Mode             string `json:"mode"`
+	GitState         string `json:"git_state"`
+	GitHasRemote     bool   `json:"git_has_remote"`
+	MarkdownFiles    int    `json:"markdown_files"`
+	AttachmentFiles  int    `json:"attachment_files"`
+	TotalBytes       int64  `json:"total_bytes"`
+	RetrievalSkill   string `json:"retrieval_skill"`
 	// How far this replica stands from the one Brain on the host (ADR-0025).
 	// hub_ref_known is false on a box that has never reconciled, where the two
 	// counts would otherwise read as agreement.
@@ -292,7 +290,7 @@ type brainInitData struct {
 	Created bool `json:"created"`
 	// SkillUpdated distinguishes "the payload was written now" from "it was
 	// already current", which is the only signal a caller has for deciding
-	// whether running Hermes sessions are stale.
+	// whether running agent sessions are stale.
 	SkillUpdated bool `json:"retrieval_skill_updated"`
 	brainStatusData
 }
@@ -315,26 +313,24 @@ func brainData(report brain.StatusReport) brainStatusData {
 		issues = []string{}
 	}
 	return brainStatusData{
-		State:             string(report.State),
-		Path:              report.Path,
-		PathExists:        report.PathExists,
-		NativeFilesystem:  report.NativeFilesystem,
-		FSType:            report.FSType,
-		Owner:             report.Owner,
-		Group:             report.Group,
-		Mode:              report.Mode,
-		GitState:          string(report.GitState),
-		GitHasRemote:      report.GitHasRemote,
-		MarkdownFiles:     report.MarkdownFiles,
-		AttachmentFiles:   report.AttachmentFiles,
-		TotalBytes:        report.TotalBytes,
-		ProjectRegistered: report.ProjectRegistered,
-		ProjectConflict:   report.ProjectConflict,
-		RetrievalSkill:    string(report.SkillState),
-		HubRefKnown:       report.HubRefKnown,
-		AheadOfHub:        report.AheadOfHub,
-		BehindHub:         report.BehindHub,
-		Issues:            issues,
+		State:            string(report.State),
+		Path:             report.Path,
+		PathExists:       report.PathExists,
+		NativeFilesystem: report.NativeFilesystem,
+		FSType:           report.FSType,
+		Owner:            report.Owner,
+		Group:            report.Group,
+		Mode:             report.Mode,
+		GitState:         string(report.GitState),
+		GitHasRemote:     report.GitHasRemote,
+		MarkdownFiles:    report.MarkdownFiles,
+		AttachmentFiles:  report.AttachmentFiles,
+		TotalBytes:       report.TotalBytes,
+		RetrievalSkill:   string(report.SkillState),
+		HubRefKnown:      report.HubRefKnown,
+		AheadOfHub:       report.AheadOfHub,
+		BehindHub:        report.BehindHub,
+		Issues:           issues,
 	}
 }
 
@@ -416,7 +412,7 @@ func (a *app) emitBrainTransfer(command string, report brain.TransferReport) err
 // startup and does not rebuild that when a file appears.
 //
 // The path comes from the report because it is the backend's path. Naming a
-// fixed one here would have every Claude Code box told to look under the Hermes
+// fixed one here would have every box told to look under another backend's
 // profile — a wrong answer printed with full confidence by the command whose
 // only job is to report what is on the guest.
 func brainSkillNotes(state brain.SkillState, path string, updated bool) []string {
@@ -453,13 +449,6 @@ func (a *app) emitBrainStatus(command string, report brain.StatusReport, extra [
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope(command, brainData(report)))
 	}
-	project := "not_registered"
-	if report.ProjectRegistered {
-		project = "registered"
-	}
-	if report.ProjectConflict {
-		project = "conflict"
-	}
 	issues := "none"
 	if len(report.Issues) > 0 {
 		issues = strings.Join(report.Issues, ",")
@@ -481,13 +470,12 @@ func (a *app) emitBrainStatus(command string, report brain.StatusReport, extra [
 			"  markdown:    %d files\n"+
 			"  attachments: %d files\n"+
 			"  total bytes: %d\n"+
-			"  project:     %s\n"+
 			"  skill:       %s\n"+
 			"  issues:      %s\n",
 		report.State, report.Path, report.FSType, report.NativeFilesystem,
 		report.Owner, report.Group, report.Mode, report.GitState, report.GitHasRemote,
 		hub, report.MarkdownFiles, report.AttachmentFiles, report.TotalBytes,
-		project, report.SkillState, issues)
+		report.SkillState, issues)
 	if err != nil {
 		return err
 	}
@@ -505,23 +493,21 @@ func brainStatusDetails(report brain.StatusReport) map[string]any {
 	}
 	data := brainData(report)
 	return map[string]any{
-		"state":              data.State,
-		"path":               data.Path,
-		"path_exists":        data.PathExists,
-		"native_filesystem":  data.NativeFilesystem,
-		"fstype":             data.FSType,
-		"owner":              data.Owner,
-		"group":              data.Group,
-		"mode":               data.Mode,
-		"git_state":          data.GitState,
-		"git_has_remote":     data.GitHasRemote,
-		"markdown_files":     data.MarkdownFiles,
-		"attachment_files":   data.AttachmentFiles,
-		"total_bytes":        data.TotalBytes,
-		"project_registered": data.ProjectRegistered,
-		"project_conflict":   data.ProjectConflict,
-		"retrieval_skill":    data.RetrievalSkill,
-		"issues":             data.Issues,
+		"state":             data.State,
+		"path":              data.Path,
+		"path_exists":       data.PathExists,
+		"native_filesystem": data.NativeFilesystem,
+		"fstype":            data.FSType,
+		"owner":             data.Owner,
+		"group":             data.Group,
+		"mode":              data.Mode,
+		"git_state":         data.GitState,
+		"git_has_remote":    data.GitHasRemote,
+		"markdown_files":    data.MarkdownFiles,
+		"attachment_files":  data.AttachmentFiles,
+		"total_bytes":       data.TotalBytes,
+		"retrieval_skill":   data.RetrievalSkill,
+		"issues":            data.Issues,
 	}
 }
 

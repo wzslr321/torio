@@ -22,7 +22,6 @@ import (
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
 	"github.com/wzslr321/torio/internal/projects"
-	"github.com/wzslr321/torio/internal/serve"
 	"github.com/wzslr321/torio/internal/status"
 )
 
@@ -71,15 +70,8 @@ type Deps struct {
 	Backend  string
 	Version  string
 
-	// ServiceDeclared is whether this backend runs a guest service. It is fixed
-	// for the life of the program because the backend is resolved before it.
-	// Whether the backend has an interactive session is not a flag here: the
-	// session seams below are nil when it does not, which is one fact in one
-	// place rather than two that can disagree.
-	ServiceDeclared bool
-
 	// Timeout bounds an ordinary operation. LongTimeout bounds the ones that
-	// legitimately take minutes: bootstrap, brain init, service install.
+	// legitimately take minutes: bootstrap and brain init.
 	Timeout     time.Duration
 	LongTimeout time.Duration
 
@@ -100,13 +92,6 @@ type Deps struct {
 	// than a copy so the hub and the command surface cannot disagree about what
 	// counts as a logged-out box.
 	CredentialState func(lima.BootstrapReport) string
-
-	ServeStatus  func(context.Context) (serve.StatusReport, error)
-	ServeInstall func(context.Context) error
-	ServeStart   func(context.Context) error
-	ServeStop    func(context.Context) error
-	ServeRestart func(context.Context) error
-	ServeLogs    func(context.Context, int) (string, error)
 
 	// BrainSync reconciles this box's replica of the one Second Brain with the
 	// copy on the host (ADR-0025). It returns what moved, in counts, because a
@@ -131,7 +116,6 @@ type Deps struct {
 	// hub has to render it too, or its failure banner instructs the operator
 	// to add a key they cannot see.
 	ProjectAdd    func(ctx context.Context, req ProjectAddRequest) (*projects.DeployKey, error)
-	ProjectUse    func(ctx context.Context, id string) error
 	ProjectRemove func(ctx context.Context, id string) error
 	// ProjectShow is `project show` for one project: what the guest holds and
 	// the markers naming what drifted. The hub lists projects, so the hub is

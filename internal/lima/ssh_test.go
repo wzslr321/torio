@@ -120,7 +120,7 @@ func TestSSHForInstanceAddressesItsOwnTargetAndLeavesTheGlobalAlone(t *testing.T
 //
 // Without it `limactl shell` falls back to that home whenever the host's working
 // directory does not exist on the guest — which is always, since the V1 template
-// mounts nothing. Torio runs its guest commands as hermes, which cannot enter
+// mounts nothing. Torio runs its guest commands as the agent identity, which cannot enter
 // the operator's home, so a command that restores its initial directory before
 // exiting fails there after producing correct output: GNU find exits 1 with
 // "Failed to restore initial working directory", and `torio brain init` reported
@@ -131,7 +131,7 @@ func TestSSHPinsTheGuestWorkingDirectory(t *testing.T) {
 		call func(a *Adapter) error
 	}{
 		{"SSH", func(a *Adapter) error {
-			_, err := a.SSH(context.Background(), []string{"find", "/home/hermes/brain"})
+			_, err := a.SSH(context.Background(), []string{"find", "/home/agent/brain"})
 			return err
 		}},
 		{"SSHInput", func(a *Adapter) error {

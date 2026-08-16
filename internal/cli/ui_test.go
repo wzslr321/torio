@@ -12,7 +12,6 @@ import (
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
 	"github.com/wzslr321/torio/internal/projects"
-	"github.com/wzslr321/torio/internal/serve"
 	"github.com/wzslr321/torio/internal/tui"
 )
 
@@ -202,11 +201,10 @@ func hubSeamApp(t *testing.T, service projectService) *app {
 	return &app{
 		stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, build: testBuild(),
 		// A backend that declares an interactive session, because these are the
-		// seams that open one. Hermes runs a service instead and declares none.
+		// seams that open one.
 		backend:            claudecode.New(),
 		lookupOperatorUser: func() (string, error) { return "testop", nil },
 		newLima:            func() *lima.Adapter { return lima.New(&fakeLimaRunner{}) },
-		newServe:           func() *serve.Adapter { return serve.New(lima.New(&fakeLimaRunner{}), claudecode.New()) },
 		newBrain: func(*lima.Adapter, lima.BootstrapOptions) brainService {
 			return &fakeBrainService{}
 		},
@@ -374,36 +372,5 @@ func TestHubAddWithARemoteIsUnchanged(t *testing.T) {
 	}
 	if got, want := service.addReq.DisplayName, "demo"; got != want {
 		t.Errorf("add used display name %q, want %q", got, want)
-	}
-}
-
-// `project use` selects the active project in a backend's own registry. A
-// backend that keeps no registry has nothing to select, so the hub is given no
-// seam and the screen stops offering the key (ADR-0009: an absent capability is
-// reported as a state, never offered as an action that fails).
-func TestHubHasNoUseSeamOnABackendWithNoRegistry(t *testing.T) {
-	a := hubSeamApp(t, &fakeProjectService{})
-
-	d, err := a.tuiDeps()
-	if err != nil {
-		t.Fatalf("wiring the hub failed: %v", err)
-	}
-	if d.ProjectUse != nil {
-		t.Error("the hub was given a use seam on a backend that keeps no registry")
-	}
-}
-
-// On the backend that does keep one, the seam is there.
-func TestHubHasAUseSeamOnABackendWithARegistry(t *testing.T) {
-	a := hubSeamApp(t, &fakeProjectService{})
-	a.backend = lima.Hermes()
-	a.newServe = func() *serve.Adapter { return serve.New(lima.New(&fakeLimaRunner{}), lima.Hermes()) }
-
-	d, err := a.tuiDeps()
-	if err != nil {
-		t.Fatalf("wiring the hub failed: %v", err)
-	}
-	if d.ProjectUse == nil {
-		t.Error("the hub was given no use seam on a backend that keeps a registry")
 	}
 }

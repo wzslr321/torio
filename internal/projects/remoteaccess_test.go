@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/wzslr321/torio/internal/backend/claudecode"
 )
 
 func TestClassifyRemoteReadsTheTransportAndHost(t *testing.T) {
@@ -76,7 +78,7 @@ func TestRemoteAccessChecksTheIdentityThatWillUseIt(t *testing.T) {
 		wantUser string
 	}{
 		"operator session": {OperatorIdentity, testOwner},
-		"agent session":    {AgentIdentity, "hermes"},
+		"agent session":    {AgentIdentity, claudecode.User},
 	} {
 		g := shellFake()
 		g.pushURL = "git@github.com:owner/demo.git"

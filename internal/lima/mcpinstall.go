@@ -47,13 +47,6 @@ func (r *MCPBrokerInstallReport) record(name string, ok bool, detail string) {
 	r.Checks = append(r.Checks, CheckResult{Name: name, OK: ok, Detail: boundDetail(detail)})
 }
 
-// ProvisionMCPBroker is the Hermes-compatible boundary provisioner retained for
-// adapter callers. The CLI uses ProvisionMCPBrokerFor so installation also
-// deploys the released transport for the selected backend.
-func (a *Adapter) ProvisionMCPBroker(ctx context.Context) (MCPBrokerInstallReport, error) {
-	return a.provisionMCPBrokerBoundary(ctx, Hermes().Identity())
-}
-
 // ProvisionMCPBrokerFor provisions custody, installs the broker/relay/unit from
 // the same release as the host binary, and reconciles the selected backend's
 // MCP declaration. It leaves the unit stopped while any service needs login;

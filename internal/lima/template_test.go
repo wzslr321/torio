@@ -24,9 +24,9 @@ func TestValidateOperatorUserAcceptsSafeNames(t *testing.T) {
 // The helper is provisioned as a data file rather than written by a script:
 // Lima then owns the ownership and mode, and re-materializes the file root-owned
 // on every boot. The session it opens carries the operator's forwarded agent, so
-// nothing writable by the operator or by hermes may sit on that path.
+// nothing writable by the operator or by the agent may sit on that path.
 func TestRenderTemplateInstallsTheOperatorShellHelper(t *testing.T) {
-	body, err := renderTemplate(InitOptions{OperatorUser: "operator"}, testProfile)
+	body, err := renderTemplate(InitOptions{OperatorUser: "operator", Backend: newTestBackend()}, testProfile)
 	if err != nil {
 		t.Fatalf("renderTemplate: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestRenderTemplateInstallsTheOperatorShellHelper(t *testing.T) {
 	}
 	// The provisioned bytes are the shipped script with one value filled in.
 	// Comparing against the raw embed would only prove the placeholder survived.
-	want, err := projectHelper(embeddedProjectShell, HermesWorkspacePath, "operator shell")
+	want, err := projectHelper(embeddedProjectShell, testWorkspacePath, "operator shell")
 	if err != nil {
 		t.Fatalf("resolving the helper: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestRenderTemplateInstallsTheOperatorShellHelper(t *testing.T) {
 }
 
 func TestRenderTemplateInstallsTheProjectEnterHelper(t *testing.T) {
-	body, err := renderTemplate(InitOptions{OperatorUser: "operator"}, testProfile)
+	body, err := renderTemplate(InitOptions{OperatorUser: "operator", Backend: newTestBackend()}, testProfile)
 	if err != nil {
 		t.Fatalf("renderTemplate: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestRenderTemplateInstallsTheProjectEnterHelper(t *testing.T) {
 	if !ok {
 		t.Fatal("project enter helper has no content block")
 	}
-	want, err := projectHelper(embeddedProjectEnter, HermesWorkspacePath, "project enter")
+	want, err := projectHelper(embeddedProjectEnter, testWorkspacePath, "project enter")
 	if err != nil {
 		t.Fatalf("resolving the helper: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestRenderTemplateInstallsTheProjectEnterHelper(t *testing.T) {
 // be executed.
 func TestRenderedTemplateAddsTheOperatorToTorioProjects(t *testing.T) {
 	const operator = "operator"
-	body, err := renderTemplate(InitOptions{OperatorUser: operator}, testProfile)
+	body, err := renderTemplate(InitOptions{OperatorUser: operator, Backend: newTestBackend()}, testProfile)
 	if err != nil {
 		t.Fatalf("renderTemplate: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestRenderedTemplateValidatesWithInstalledLima(t *testing.T) {
 	if err != nil {
 		t.Skip("limactl is not installed")
 	}
-	body, err := renderTemplate(InitOptions{OperatorUser: "operator"}, testProfile)
+	body, err := renderTemplate(InitOptions{OperatorUser: "operator", Backend: newTestBackend()}, testProfile)
 	if err != nil {
 		t.Fatalf("renderTemplate: %v", err)
 	}
@@ -241,10 +241,10 @@ func TestValidateOperatorUserRejectsInjection(t *testing.T) {
 // A guest is built for one agent. Provisioning a second agent identity into
 // torio-projects "just in case" would widen who can read every checkout on the
 // box, for a backend nothing on it will ever run — so a rendered template must
-// carry exactly the declared backend's identity and layout, and the base
-// package list must not carry another backend's build dependencies either.
+// carry exactly the declared backend's block and nothing standing in for it.
 func TestRenderedTemplateProvisionsOnlyTheDeclaredBackendsIdentity(t *testing.T) {
-	text, err := renderTemplate(InitOptions{OperatorUser: "operator"}.withDefaults(), testProfile)
+	b := newTestBackend()
+	text, err := renderTemplate(InitOptions{OperatorUser: "operator", Backend: b}.withDefaults(), testProfile)
 	if err != nil {
 		t.Fatalf("renderTemplate: %v", err)
 	}
@@ -254,31 +254,23 @@ func TestRenderedTemplateProvisionsOnlyTheDeclaredBackendsIdentity(t *testing.T)
 		t.Fatal("rendered template does not wait for the dpkg lock")
 	}
 
-	id := Hermes().Identity()
-	for _, want := range []string{
-		"apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends " + strings.Join(hermesBuildDeps, " "),
-		"useradd --create-home --shell /bin/bash --user-group " + id.GuestUser,
-		"usermod -aG " + TorioProjectsGroup + " " + id.GuestUser,
-		"install -d -o " + id.GuestUser + " -g " + TorioProjectsGroup + " -m 2770 " + id.WorkspacePath,
-		"install -d -o " + id.GuestUser + " -g " + id.GuestUser + " -m 0750 " + id.ProfilePath,
-		"install -d -o " + id.GuestUser + " -g " + id.GuestUser + " -m 0750 " + id.BrainPath,
-		"gpasswd -d " + id.GuestUser + " " + dockerGroup,
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("rendered template is missing the declared backend's provisioning: %q", want)
+	// The declared backend's own script is what provisions the guest identity.
+	for _, line := range strings.Split(strings.TrimSpace(b.ProvisionScript()), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if !strings.Contains(got, strings.TrimSpace(line)) {
+			t.Errorf("rendered template is missing the declared backend's provisioning: %q", line)
 		}
 	}
 
-	// The backend's build dependencies belong to the backend, not to every
-	// guest Torio creates.
+	// The base package list is what every guest gets. A backend's own build
+	// dependencies belong to its provisioning block, not here.
 	base := got[strings.Index(got, "apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends"):]
 	base = base[:strings.Index(base, "\n")]
-	for _, dep := range hermesBuildDeps {
-		if dep == "git" || dep == "curl" || dep == "ca-certificates" {
-			continue // genuinely universal; the base list carries these
-		}
-		if strings.Contains(base, dep) {
-			t.Errorf("base package list carries the backend-specific dependency %q", dep)
+	for _, universal := range []string{"git", "curl", "ca-certificates"} {
+		if !strings.Contains(base, universal) {
+			t.Errorf("base package list is missing the universal dependency %q", universal)
 		}
 	}
 }

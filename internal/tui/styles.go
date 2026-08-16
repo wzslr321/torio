@@ -43,11 +43,6 @@ var (
 	styField = lipgloss.NewStyle().Foreground(colText).Background(lipgloss.Color("#1a2033")).Padding(0, 1)
 	styBtn   = lipgloss.NewStyle().Foreground(colText).Background(lipgloss.Color("#263354")).Bold(true).Padding(0, 2)
 
-	styPanel = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colDivider).
-			Padding(0, 1)
-
 	styErrPanel = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(colAmber).

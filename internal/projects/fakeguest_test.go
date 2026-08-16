@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/wzslr321/torio/internal/backend/claudecode"
 	"github.com/wzslr321/torio/internal/config"
 	"github.com/wzslr321/torio/internal/execx"
 	"github.com/wzslr321/torio/internal/lima"
@@ -18,17 +19,17 @@ const (
 	testName   = "Demo"
 	testRemote = "git@github.com:owner/demo.git"
 	testHost   = "github.com"
-	testPath   = lima.HermesWorkspacePath + "/" + testID
+	testPath   = claudecode.WorkspacePath + "/" + testID
 	testOwner  = "operator"
 	// testKeyPath and testKeyConfig are the deploy key and the Git include file
 	// derived from the identity home and the project ID. They are spelled out
 	// rather than built from the production helpers so a drifting path fails
 	// here instead of passing against itself.
-	testKeyPath   = lima.HermesHome + "/.ssh/torio/" + testID
+	testKeyPath   = claudecode.Home + "/.ssh/torio/" + testID
 	testKeyConfig = testKeyPath + ".gitconfig"
 	// testBundleStaging is where a carried bundle lands, spelled out for the
 	// same reason as the key paths above.
-	testBundleStaging = lima.HermesHome + "/" + bundleStagingDirName
+	testBundleStaging = claudecode.Home + "/" + bundleStagingDirName
 	// testPublicKey is the public half the guest double reports. A public key is
 	// not a credential: it is the half an operator is meant to publish.
 	testPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeFakeFakeFakeFakeFakeFakeFakeFakeFake torio-deploy-" + testID
@@ -73,25 +74,10 @@ type fakeCall struct {
 	argv []string
 }
 
-// fakeGuest is the typed guest double. Its `hermes project` routes reproduce a
-// contract read from the real Hermes v0.19.0 source on the guest
-// (`hermes_cli/projects_cmd.py`, `hermes_cli/projects_db.py`), not an assumed
-// one:
-//
-//   - every subcommand exits 0 even when it fails, because
-//     `hermes_cli/main.py` calls `args.func(args)` and discards the return
-//     value, so each `return 1` is dead code;
-//   - an unknown slug therefore means exit 0, EMPTY stdout and the stderr line
-//     `project: no such project: <slug>`;
-//   - `show` prints `<slug>  [<id>]` plus ` (archived)` when archived, and
-//     resolves archived projects too (`get_project` has no archived filter);
-//   - `create` silently allocates `<slug>-2` when the slug is taken
-//     (`_unique_slug`), so a blind create can never be trusted;
-//   - `list` output carries slugs and names, never a path, and hides archived
-//     projects unless `--all` is passed.
-//
-// A non-zero exit consequently means the Hermes CLI itself is broken or absent,
-// never "no such project" — modelled by hermesShowExit / hermesListExit.
+// fakeGuest is the typed guest double. It routes on argv rather than on call
+// order, so a test that adds a probe somewhere in the middle does not have to
+// renumber a script — and a command nothing routes is an error rather than a
+// silent empty reply.
 type fakeGuest struct {
 	bootstrapErr error
 	transportErr error
@@ -136,33 +122,6 @@ type fakeGuest struct {
 	deployKeyExists bool
 	keyAuthorized   bool
 
-	// Hermes project registry.
-	hermesPresent bool
-	// hermesCreateNoop models the real failure shape of `hermes project create`:
-	// exit 0, a stderr diagnostic, and no project created.
-	hermesCreateNoop bool
-	hermesArchived   bool
-	hermesPrimary    string
-	hermesActive     string
-	hermesShowExit   int
-	hermesListExit   int
-	// hermesUnknownShowExit is what `show` returns for a project that does not
-	// exist. Hermes 0.19.0 returned 0 and wrote only a stderr diagnostic;
-	// 0.19.1 returns non-zero. Both are "no such project", so the exit code is
-	// not the answer -- which is exactly what these tests have to cover.
-	hermesUnknownShowExit int
-	// hermesShowOutput overrides the `show` block verbatim, so a test can feed
-	// output the parser must refuse.
-	hermesShowOutput string
-	// useSilent models `hermes project use` exiting 0 without confirming.
-	useSilent bool
-
-	// hermesUID is what `id -u hermes` prints, and serviceEnvironment is the
-	// `Environment=` property of the backend user unit. Together they are the
-	// post-session read-only look at the persistent service environment.
-	hermesUID          string
-	serviceEnvironment string
-
 	// Per-user global safe.directory entries.
 	safeDirs map[string][]string
 
@@ -188,33 +147,28 @@ type fakeCopy struct {
 	home  string
 }
 
-// readyFake is a bootstrap-verified guest with a reachable remote, no checkout
-// and an empty Hermes project registry: the shape `Add` clones into.
+// readyFake is a bootstrap-verified guest with a reachable remote and no
+// checkout: the shape `Add` clones into.
 func readyFake() *fakeGuest {
 	return &fakeGuest{
-		remote:                testRemote,
-		remoteReadable:        true,
-		owner:                 lima.HermesUser,
-		group:                 sharedGroup,
-		mode:                  "2775",
-		safeDirs:              map[string][]string{},
-		failContains:          map[string]int{},
-		hermesUID:             "1001",
-		hermesUnknownShowExit: 1,
-		serviceEnvironment:    "HERMES_HOME=" + lima.HermesProfilePath,
+		remote:         testRemote,
+		remoteReadable: true,
+		owner:          claudecode.User,
+		group:          sharedGroup,
+		mode:           "2775",
+		safeDirs:       map[string][]string{},
+		failContains:   map[string]int{},
 	}
 }
 
-// attachedFake is a guest that already holds a compliant checkout and a Hermes
-// project pointing at it: the shape a rerun of `Add` must accept unchanged.
+// attachedFake is a guest that already holds a compliant checkout: the shape a
+// rerun of `Add` must accept unchanged.
 func attachedFake() *fakeGuest {
 	f := readyFake()
 	f.pathExists = true
 	f.isRepo = true
 	f.origin = f.remote
-	f.hermesPresent = true
-	f.hermesPrimary = testPath
-	f.safeDirs[lima.HermesUser] = []string{testPath}
+	f.safeDirs[claudecode.User] = []string{testPath}
 	f.safeDirs[testOwner] = []string{testPath}
 	f.branch = "main"
 	f.ahead = "3"
@@ -301,8 +255,8 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 		f.pathExists = true
 		f.isRepo = true
 		f.origin = ""
-		f.owner = lima.HermesUser
-		f.group = lima.HermesUser
+		f.owner = claudecode.User
+		f.group = claudecode.User
 		f.mode = "755"
 		return okResult(""), nil
 	case strings.Contains(joined, "id -un"):
@@ -312,7 +266,7 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 		return okResult(""), nil
 	case strings.Contains(joined, "install -d -o "+testOwner+" -g "+sharedGroup+" -m 2770 "+testBundleStaging):
 		return okResult(""), nil
-	case strings.Contains(joined, "chown -R "+lima.HermesUser+":"+lima.HermesUser+" "+testBundleStaging):
+	case strings.Contains(joined, "chown -R "+claudecode.User+":"+claudecode.User+" "+testBundleStaging):
 		f.bundleReadable = true
 		return okResult(""), nil
 	case strings.Contains(joined, "chmod -R u=rwX,g=,o= "+testBundleStaging):
@@ -329,8 +283,8 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 		// A clone from a bundle records the bundle path as its origin, which is
 		// exactly what the attach has to remove.
 		f.origin = testBundleStaging + "/project.bundle"
-		f.owner = lima.HermesUser
-		f.group = lima.HermesUser
+		f.owner = claudecode.User
+		f.group = claudecode.User
 		f.mode = "755"
 		return okResult(""), nil
 	case strings.Contains(joined, "git -C "+testPath+" remote remove origin"):
@@ -363,8 +317,8 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 		f.pathExists = true
 		f.isRepo = true
 		f.origin = f.remote
-		f.owner = lima.HermesUser
-		f.group = lima.HermesUser
+		f.owner = claudecode.User
+		f.group = claudecode.User
 		f.mode = "755"
 		return okResult(""), nil
 
@@ -423,8 +377,8 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 		return exitResult(1, "", ""), nil
 
 	// --- shared permissions ---
-	case strings.Contains(joined, "chown -R "+lima.HermesUser+":"+sharedGroup+" -- "+testPath):
-		f.owner = lima.HermesUser
+	case strings.Contains(joined, "chown -R "+claudecode.User+":"+sharedGroup+" -- "+testPath):
+		f.owner = claudecode.User
 		f.group = sharedGroup
 		return okResult(""), nil
 	case strings.Contains(joined, "chmod -R g+rwX -- "+testPath):
@@ -445,62 +399,6 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 		f.safeDirs[user] = append(f.safeDirs[user], testPath)
 		return okResult(""), nil
 
-	// --- persistent backend environment (read-only) ---
-	case strings.Contains(joined, "id -u "+lima.HermesUser):
-		return okResult(f.hermesUID + "\n"), nil
-	case strings.Contains(joined, "systemctl --user show "+lima.HermesUnitName):
-		return okResult("Environment=" + f.serviceEnvironment + "\n"), nil
-
-	// --- hermes project ---
-	case strings.Contains(joined, "hermes project show "):
-		if f.hermesShowExit != 0 {
-			return exitResult(f.hermesShowExit, "", "usage: hermes project show"), nil
-		}
-		if f.hermesShowOutput != "" {
-			return okResult(f.hermesShowOutput), nil
-		}
-		if !f.hermesPresent {
-			return exitResult(f.hermesUnknownShowExit, "", "project: no such project: "+testID), nil
-		}
-		return okResult(projectShowOutput(testID, testName, f.hermesPrimary, f.hermesArchived)), nil
-	case strings.Contains(joined, "hermes project list"):
-		if f.hermesListExit != 0 {
-			return exitResult(f.hermesListExit, "", "usage: hermes project list"), nil
-		}
-		if !f.hermesPresent || f.hermesArchived {
-			return okResult("No projects yet. Create one with `hermes project create <name>`.\n"), nil
-		}
-		return okResult(fmt.Sprintf("  %-24s %s  [1 folder(s)]\n", testID, testName)), nil
-	case strings.Contains(joined, "hermes project create "):
-		// Real `create` never fails by exit code and silently suffixes a taken
-		// slug, so the double registers under our slug only when it is free.
-		if f.hermesCreateNoop {
-			return exitResult(0, "", "project: could not create project"), nil
-		}
-		if !f.hermesPresent {
-			f.hermesPresent = true
-			f.hermesArchived = false
-			f.hermesPrimary = testPath
-		}
-		return okResult("Created project " + testID + " (p_0123abcd)\n"), nil
-	case strings.Contains(joined, "hermes project archive "):
-		if !f.hermesPresent {
-			return exitResult(0, "", "project: no such project: "+testID), nil
-		}
-		f.hermesArchived = true
-		return okResult("Archived " + testID + "\n"), nil
-	case strings.Contains(joined, "hermes project restore "):
-		if !f.hermesPresent {
-			return exitResult(0, "", "project: no such project: "+testID), nil
-		}
-		f.hermesArchived = false
-		return okResult("Restored " + testID + "\n"), nil
-	case strings.Contains(joined, "hermes project use "):
-		if !f.hermesPresent || f.useSilent {
-			return exitResult(0, "", "project: no such project: "+testID), nil
-		}
-		f.hermesActive = testID
-		return okResult("Active project: " + testID + "\n"), nil
 	}
 	return execx.Result{}, fmt.Errorf("unrouted fake guest command: %s", joined)
 }
@@ -536,23 +434,6 @@ func userOf(joined string) string {
 		}
 	}
 	return ""
-}
-
-// projectShowOutput reproduces the block `_print_project` writes for an
-// existing project, including the ` (archived)` header flag.
-func projectShowOutput(slug, name, primary string, archived bool) string {
-	flags := ""
-	if archived {
-		flags = " (archived)"
-	}
-	out := slug + "  [p_0123abcd]" + flags + "\n" +
-		"  name:    " + name + "\n"
-	if primary != "" {
-		out += "  primary: " + primary + "\n" +
-			"  folders:\n" +
-			"    * " + primary + "\n"
-	}
-	return out
 }
 
 func okResult(stdout string) execx.Result {

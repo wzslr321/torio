@@ -116,7 +116,7 @@ func TestIsHexDigestRejectsAnythingThatIsNotOne(t *testing.T) {
 	}
 }
 
-// TestTheCommandPathPointsAtARootOwnedTarget pins the asymmetry with the Hermes
+// TestTheCommandPathPointsAtARootOwnedTarget pins the asymmetry with a vendor-script
 // shim that ADR-0009 records. The stable name on sudo's secure_path must resolve
 // to a file under a root-owned system directory, never to something the agent's
 // own uid could rewrite before an operator runs it.

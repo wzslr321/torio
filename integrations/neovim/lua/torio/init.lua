@@ -2,12 +2,7 @@ local M = {}
 
 local defaults = {
   torio_cmd = { "torio" },
-  curl_cmd = { "curl" },
-  api_url = "http://127.0.0.1:19119",
   width = 48,
-  session_token = function()
-    return vim.env.HERMES_SESSION_TOKEN
-  end,
 }
 
 local config = vim.deepcopy(defaults)
@@ -16,7 +11,6 @@ local state = {
   window = nil,
   projects = {},
   project_by_line = {},
-  session_by_line = {},
   current_project = nil,
   view = "projects",
 }
@@ -96,12 +90,11 @@ local function render_projects()
 	state.view = "projects"
 	state.current_project = nil
   state.project_by_line = {}
-  state.session_by_line = {}
   local lines = {
     "Torio",
     "====",
-    "<CR>/s sessions  t terminal  P push shell",
-    "u use  h health  r refresh  q close",
+    "<CR>/t terminal  P push shell",
+    "h health  r refresh  q close",
     "",
     "Projects",
     "--------",
@@ -127,24 +120,10 @@ local function refresh_projects()
   end)
 end
 
-local function use_project(project)
-  if not project then
-    notify("select a project first", vim.log.levels.WARN)
-    return
-  end
-  run_json({ "project", "use", project.id, "--json" }, function(data)
-    if data then
-      notify("active Hermes project: " .. project.id)
-      refresh_projects()
-    end
-  end)
-end
-
 local function render_health(project, data)
 	state.view = "health"
 	state.current_project = project
   state.project_by_line = {}
-  state.session_by_line = {}
   local lines = {
     "Torio / " .. project.id,
     "====",
@@ -159,15 +138,10 @@ local function render_health(project, data)
     end
   end
   local checkout = data.checkout or {}
-  local hermes = data.hermes or {}
   table.insert(lines, "")
   table.insert(lines, "checkout:")
   for _, key in ipairs({ "path_exists", "repository", "origin_matches", "clean", "shared_permissions" }) do
     table.insert(lines, string.format("  %-20s %s", key, one_line(checkout[key])))
-  end
-  table.insert(lines, "hermes:")
-  for _, key in ipairs({ "registered", "archived", "primary_matches" }) do
-    table.insert(lines, string.format("  %-20s %s", key, one_line(hermes[key])))
   end
   local issues = data.issues or {}
   if #issues > 0 then
@@ -187,100 +161,6 @@ local function show_health(project)
     if data then
       render_health(project, data)
     end
-  end)
-end
-
-local function curl_config(token)
-  if type(token) ~= "string" or token == "" then
-    return nil, "configure session_token or HERMES_SESSION_TOKEN"
-  end
-  if token:find("[\r\n]") then
-    return nil, "session token contains a newline"
-  end
-  token = token:gsub("\\", "\\\\"):gsub('"', '\\"')
-  return 'header = "X-Hermes-Session-Token: ' .. token .. '"\n'
-end
-
-local function curl_environment()
-  local env = vim.fn.environ()
-  env.HERMES_SESSION_TOKEN = nil
-  env.HERMES_DASHBOARD_SESSION_TOKEN = nil
-  return env
-end
-
-local function fetch_sessions(project, callback)
-  local provider = config.session_token
-  local token = type(provider) == "function" and provider() or nil
-  local stdin, err = curl_config(token)
-  if not stdin then
-    notify(err, vim.log.levels.WARN)
-    callback(nil)
-    return
-  end
-  local args = command(config.curl_cmd, {
-    "--config", "-",
-    "--fail", "--silent", "--show-error",
-    "--noproxy", "*",
-    "--get", config.api_url .. "/api/sessions",
-    "--data-urlencode", "cwd_prefix=" .. project.path,
-    "--data-urlencode", "limit=50",
-  })
-  vim.system(args, {
-    text = true,
-    stdin = stdin,
-    env = curl_environment(),
-    clear_env = true,
-  }, function(result)
-    vim.schedule(function()
-      if result.code ~= 0 then
-        notify("Hermes sessions request failed (exit " .. result.code .. ")", vim.log.levels.ERROR)
-        callback(nil)
-        return
-      end
-      local ok, data = pcall(vim.json.decode, result.stdout or "")
-      if not ok or type(data) ~= "table" then
-        notify("invalid JSON from Hermes sessions API", vim.log.levels.ERROR)
-        callback(nil)
-        return
-      end
-      callback(data.sessions or data)
-    end)
-  end)
-end
-
-local function show_sessions(project)
-  project = project or selected_project()
-  if not project then
-    notify("select a project first", vim.log.levels.WARN)
-    return
-  end
-  set_lines({ "Torio / " .. project.id, "====", "loading sessions..." })
-  fetch_sessions(project, function(sessions)
-    if not sessions then
-      return
-    end
-    state.view = "sessions"
-    state.current_project = project
-    state.project_by_line = {}
-    state.session_by_line = {}
-    local lines = {
-      "Torio / " .. project.id,
-      "====",
-      "b projects  t terminal  P push shell  r refresh  y copy id",
-      "",
-      "Hermes sessions",
-      "---------------",
-    }
-    for _, session in ipairs(sessions) do
-      local active = session.is_active and "●" or "○"
-      local title = one_line(session.title or session.name or "untitled")
-      table.insert(lines, string.format("%s %-36s %s", active, title, one_line(session.updated_at)))
-      state.session_by_line[#lines] = session
-    end
-    if #sessions == 0 then
-      table.insert(lines, "  no sessions for this workspace")
-    end
-    set_lines(lines)
   end)
 end
 
@@ -312,28 +192,17 @@ local function ensure_panel()
   map("q", function() vim.api.nvim_win_close(0, true) end)
   map("r", function()
 	local project = selected_project()
-	if state.view == "sessions" and project then
-		show_sessions(project)
-	elseif state.view == "health" and project then
+	if state.view == "health" and project then
 		show_health(project)
 	else
 		refresh_projects()
 	end
   end)
   map("b", render_projects)
-  map("u", function() use_project(selected_project()) end)
   map("t", function() open_terminal(selected_project(), false) end)
   map("P", function() open_terminal(selected_project(), true) end)
   map("h", function() show_health(selected_project()) end)
-  map("s", function() show_sessions(selected_project()) end)
-  map("<CR>", function() show_sessions(selected_project()) end)
-  map("y", function()
-    local session = state.session_by_line[vim.api.nvim_win_get_cursor(0)[1]]
-    if session and session.id then
-      vim.fn.setreg("+", session.id)
-      notify("copied session id")
-    end
-  end)
+  map("<CR>", function() open_terminal(selected_project(), false) end)
 end
 
 function M.open()
@@ -341,17 +210,14 @@ function M.open()
   refresh_projects()
 end
 
+-- The path is only a label for a project reached by id; the CLI derives the
+-- real one from the backend the invocation selects.
 local function project_from_id(id)
-  return { id = id, path = "/home/hermes/projects/" .. id }
+  return { id = id }
 end
 
 function M.enter(id) open_terminal(project_from_id(id), false) end
 function M.push_shell(id) open_terminal(project_from_id(id), true) end
-function M.use(id) use_project(project_from_id(id)) end
-function M.sessions(id)
-  ensure_panel()
-  show_sessions(project_from_id(id))
-end
 function M.health(id)
   ensure_panel()
   show_health(project_from_id(id))
@@ -363,10 +229,8 @@ local function create_commands()
   end
   vim.api.nvim_create_user_command("Torio", M.open, {})
   vim.api.nvim_create_user_command("TorioProjects", M.open, {})
-  vim.api.nvim_create_user_command("TorioUse", function(args) M.use(args.args) end, { nargs = 1, complete = complete })
   vim.api.nvim_create_user_command("TorioEnter", function(args) M.enter(args.args) end, { nargs = 1, complete = complete })
   vim.api.nvim_create_user_command("TorioPushShell", function(args) M.push_shell(args.args) end, { nargs = 1, complete = complete })
-  vim.api.nvim_create_user_command("TorioSessions", function(args) M.sessions(args.args) end, { nargs = 1, complete = complete })
   vim.api.nvim_create_user_command("TorioHealth", function(args) M.health(args.args) end, { nargs = 1, complete = complete })
 end
 

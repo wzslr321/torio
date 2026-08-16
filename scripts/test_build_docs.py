@@ -290,8 +290,8 @@ class ShellHighlightTests(unittest.TestCase):
 
 class SlugTests(unittest.TestCase):
     def test_slug_is_url_safe_and_stable(self):
-        self.assertEqual(bd.slug("Point Hermes Desktop at the backend"), "point-hermes-desktop-at-the-backend")
-        self.assertEqual(bd.slug("`torio serve` — exit codes"), "torio-serve-exit-codes")
+        self.assertEqual(bd.slug("Point the desktop app at the backend"), "point-the-desktop-app-at-the-backend")
+        self.assertEqual(bd.slug("`torio brain` — exit codes"), "torio-brain-exit-codes")
 
 
 class CheckModeTests(unittest.TestCase):

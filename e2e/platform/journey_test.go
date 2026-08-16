@@ -228,11 +228,9 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 
 		backendStatus := torio.mustRun("backend-status", "backend.status", "backend", "status")
 		expectData(backendStatus, map[string]any{
-			"backend":           profile.name,
-			"user":              profile.user,
-			"registry_declared": profile.declaresRegistry,
-			"service_declared":  profile.declaresService,
-			"session_declared":  profile.declaresSession,
+			"backend":          profile.name,
+			"user":             profile.user,
+			"session_declared": profile.declaresSession,
 		})
 
 		ambient := torio.mustRun("status-after-bootstrap", "status", "status")
@@ -272,8 +270,8 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 			"markdown_files": float64(1),
 			"conflicts":      float64(0),
 		})
-		// As hermes, not as the Lima login user: `brain init` reports the Brain
-		// as 0750 hermes:hermes, so the login user cannot traverse it and `test`
+		// As the agent identity, not as the Lima login user: `brain init` reports
+		// the Brain as 0750 agent-owned, so the login user cannot traverse it and `test`
 		// would report the file missing when it is merely unreadable. The
 		// projects tree is different — 0710 on the shared group — which is why
 		// the checks there need no sudo.
@@ -281,11 +279,10 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 		expectData(present, map[string]any{"exit_code": float64(0)})
 		brainStatus := torio.mustRun("brain-status", "brain.status", "brain", "status")
 		expectData(brainStatus, map[string]any{
-			"state":              "initialized",
-			"native_filesystem":  true,
-			"path":               profile.vault,
-			"project_registered": profile.declaresRegistry,
-			"retrieval_skill":    "installed",
+			"state":             "initialized",
+			"native_filesystem": true,
+			"path":              profile.vault,
+			"retrieval_skill":   "installed",
 		})
 		// Where the backend actually looks, read as the identity that reads it.
 		// A report saying "installed" and a file the agent can open are two
@@ -294,46 +291,12 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 		expectData(skill, map[string]any{"exit_code": float64(0)})
 	}, SpecTimeout(15*time.Minute))
 
-	It("reports honestly about a service the backend does not declare", Label(guestStage), func(ctx SpecContext) {
-		torio.setContext(ctx)
-		if profile.declaresService {
-			Skip("this backend declares a service; the next spec exercises it")
-		}
-		// A backend with no service is not an unready one. `status` answers and
-		// exits 0; asking Torio to manage the service is the operator error.
-		status := torio.mustRun("serve-status-undeclared", "serve.status", "serve", "status")
-		expectData(status, map[string]any{"backend": profile.name, "service_declared": false})
-		_, err := torio.run("serve-install-undeclared", "serve.install", "serve", "install")
-		Expect(err).To(HaveOccurred(), "installing a service the backend does not declare must fail closed")
-	}, SpecTimeout(5*time.Minute))
-
-	It("installs and exercises the persistent backend service", Label(guestStage), func(ctx SpecContext) {
-		torio.setContext(ctx)
-		if !profile.declaresService {
-			Skip("this backend declares no guest service")
-		}
-		installed := torio.mustRun("serve-install", "serve.install", "serve", "install")
-		expectData(installed, map[string]any{"validated": true, "enabled": true})
-		again := torio.mustRun("serve-install-idempotent", "serve.install", "serve", "install")
-		expectData(again, map[string]any{"changed": false, "validated": true, "enabled": true})
-		started := torio.mustRun("serve-start", "serve.start", "serve", "start")
-		expectData(started, map[string]any{"active": true, "endpoint_ready": true, "ready": true})
-		status := torio.mustRun("serve-status", "serve.status", "serve", "status")
-		expectData(status, map[string]any{"active": true, "endpoint_ready": true, "ready": true})
-		restarted := torio.mustRun("serve-restart", "serve.restart", "serve", "restart")
-		expectData(restarted, map[string]any{"active": true, "endpoint_ready": true, "ready": true})
-	}, SpecTimeout(12*time.Minute))
-
 	It("attaches, verifies and removes a real Git project non-destructively", Label(guestStage), func(ctx SpecContext) {
 		torio.setContext(ctx)
-		addArgs := []string{"project", "add", "ci-fixture", fixtureRemote, "--id", "ci-fixture"}
-		if profile.declaresRegistry {
-			addArgs = append(addArgs, "--use")
-		}
-		added := torio.mustRun("project-add", "project.add", addArgs...)
+		added := torio.mustRun("project-add", "project.add",
+			"project", "add", "ci-fixture", fixtureRemote, "--id", "ci-fixture")
 		expectData(added, map[string]any{
 			"id": "ci-fixture", "cloned": true, "registered": true,
-			"activated": profile.declaresRegistry,
 		})
 		listed := torio.mustRun("project-list", "project.list", "project", "list")
 		expectData(listed, map[string]any{"count": float64(1)})
@@ -352,15 +315,6 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 		expectData(checkout, map[string]any{"exit_code": float64(0)})
 		head := torio.mustRun("project-fixture-head", "vm.ssh", "vm", "ssh", "--", "sudo", "-u", profile.user, "--", "git", "-C", profile.workspace+"/ci-fixture", "rev-parse", "HEAD")
 		expectData(head, map[string]any{"exit_code": float64(0), "stdout": fixtureCommit + "\n"})
-		if profile.declaresRegistry {
-			used := torio.mustRun("project-use", "project.use", "project", "use", "ci-fixture")
-			expectData(used, map[string]any{"active": true})
-		} else {
-			// A backend with no registry has no active project to set, and says
-			// so rather than pretending the call succeeded.
-			_, err := torio.run("project-use-undeclared", "project.use", "project", "use", "ci-fixture")
-			Expect(err).To(HaveOccurred(), "activating on a backend with no registry must fail closed")
-		}
 		removed := torio.mustRun("project-remove", "project.remove", "project", "remove", "ci-fixture")
 		expectData(removed, map[string]any{"checkout_retained": true})
 		empty := torio.mustRun("project-list-empty", "project.list", "project", "list")
@@ -401,20 +355,8 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 		expectData(removed, map[string]any{"checkout_retained": true})
 	}, SpecTimeout(6*time.Minute))
 
-	It("stops services and the VM idempotently", Label(guestStage), func(ctx SpecContext) {
+	It("stops the VM idempotently", Label(guestStage), func(ctx SpecContext) {
 		torio.setContext(ctx)
-		if profile.declaresService {
-			stoppedService := torio.mustRun("serve-stop", "serve.stop", "serve", "stop")
-			expectData(stoppedService, map[string]any{"active": false})
-			stoppedAgain := torio.mustRun("serve-stop-idempotent", "serve.stop", "serve", "stop")
-			expectData(stoppedAgain, map[string]any{"active": false})
-		} else {
-			// Stopping a service the backend never declared is the same operator
-			// error as installing one, and refusing it is the contract holding —
-			// not something to route around by asking for it anyway.
-			_, err := torio.run("serve-stop-undeclared", "serve.stop", "serve", "stop")
-			Expect(err).To(HaveOccurred(), "stopping a service the backend does not declare must fail closed")
-		}
 		stoppedVM := torio.mustRun("vm-stop", "vm.stop", "vm", "stop")
 		expectData(stoppedVM, map[string]any{"state": "stopped"})
 		stoppedVMAgain := torio.mustRun("vm-stop-idempotent", "vm.stop", "vm", "stop")

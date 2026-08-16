@@ -39,10 +39,6 @@ type fakeProjectService struct {
 	showReport projects.ShowReport
 	showErr    error
 
-	useID     string
-	useReport projects.UseReport
-	useErr    error
-
 	removeID     string
 	removeReport projects.RemoveReport
 	removeErr    error
@@ -65,10 +61,6 @@ type fakeProjectService struct {
 	setRemoteURL    string
 	setRemoteReport projects.SetRemoteReport
 	setRemoteErr    error
-
-	serviceEnv      projects.ServiceEnvCheck
-	serviceEnvErr   error
-	serviceEnvCalls int
 }
 
 func (f *fakeProjectService) Add(ctx context.Context, req projects.AddRequest) (projects.AddReport, error) {
@@ -84,11 +76,6 @@ func (f *fakeProjectService) List() ([]projects.Project, error) { return f.listO
 func (f *fakeProjectService) Show(_ context.Context, id string) (projects.ShowReport, error) {
 	f.showID = id
 	return f.showReport, f.showErr
-}
-
-func (f *fakeProjectService) Use(_ context.Context, id string) (projects.UseReport, error) {
-	f.useID = id
-	return f.useReport, f.useErr
 }
 
 func (f *fakeProjectService) Remove(_ context.Context, id string) (projects.RemoveReport, error) {
@@ -134,11 +121,6 @@ func (f *fakeProjectService) RemoteAccess(_ context.Context, id string, who proj
 	return f.remoteAccess, nil
 }
 
-func (f *fakeProjectService) CheckServiceEnv(context.Context) (projects.ServiceEnvCheck, error) {
-	f.serviceEnvCalls++
-	return f.serviceEnv, f.serviceEnvErr
-}
-
 // fakeInteractiveRunner records the exact interactive command it was handed and
 // never spawns anything.
 type fakeInteractiveRunner struct {
@@ -156,7 +138,7 @@ func sampleProject() projects.Project {
 		ID:          "torio",
 		DisplayName: "Torio",
 		Remote:      "git@github.com:wzslr321/torio.git",
-		Path:        lima.HermesWorkspacePath + "/torio",
+		Path:        claudecode.WorkspacePath + "/torio",
 	}
 }
 
@@ -217,13 +199,13 @@ func TestProjectCommandsWireLimaAdapterAndOperator(t *testing.T) {
 }
 
 // TestProjectCommandsCarryTheInstanceBackend is the assertion whose absence let
-// every `project` command run as the wrong agent on a non-Hermes instance.
+// every `project` command run as the wrong agent on an instance running another backend.
 //
 // The project manager derives the guest identity, the workspace, the registry
 // and the interactive session from the backend in its options, and falls back to
 // the backend Torio shipped first when given none. The CLI passed none. Nothing
-// failed loudly: `project add` verified the *hermes* user's bootstrap on a guest
-// that has no hermes user, and `project agent` would have asked for a session
+// failed loudly: `project add` verified another backend's guest identity on a
+// box that has no such user, and `project agent` would have asked for a session
 // the fallback backend does not declare.
 func TestProjectCommandsCarryTheInstanceBackend(t *testing.T) {
 	// Declared the way an instance really declares it — in the config document —
@@ -266,10 +248,9 @@ func TestProjectCommandsCarryTheInstanceBackend(t *testing.T) {
 
 func TestProjectAddDefaultsIDToNameAndReportsNextStep(t *testing.T) {
 	service := &fakeProjectService{addReport: projects.AddReport{
-		Project:       sampleProject(),
-		Cloned:        true,
-		HermesCreated: true,
-		Registered:    true,
+		Project:    sampleProject(),
+		Cloned:     true,
+		Registered: true,
 	}}
 	code, stdout, stderr := runProjectCLI(t,
 		[]string{"project", "add", "torio", "git@github.com:wzslr321/torio.git"}, service)
@@ -283,23 +264,22 @@ func TestProjectAddDefaultsIDToNameAndReportsNextStep(t *testing.T) {
 	if !strings.Contains(stdout, "cloned") {
 		t.Errorf("human output does not report the attach state: %q", stdout)
 	}
-	if !strings.Contains(stdout, lima.HermesWorkspacePath+"/torio") {
+	if !strings.Contains(stdout, claudecode.WorkspacePath+"/torio") {
 		t.Errorf("human output does not report the derived path: %q", stdout)
 	}
-	if !strings.Contains(stdout, "next: torio project use torio") {
+	if !strings.Contains(stdout, "next: torio project enter torio") {
 		t.Errorf("human output does not report the exact next step: %q", stdout)
 	}
 }
 
-func TestProjectAddIDOverrideAndUse(t *testing.T) {
+func TestProjectAddIDOverride(t *testing.T) {
 	service := &fakeProjectService{addReport: projects.AddReport{
 		Project:    sampleProject(),
 		Adopted:    true,
 		Registered: true,
-		Activated:  true,
 	}}
 	code, stdout, stderr := runProjectCLI(t,
-		[]string{"project", "add", "Torio", "git@github.com:wzslr321/torio.git", "--id", "torio", "--use"}, service)
+		[]string{"project", "add", "Torio", "git@github.com:wzslr321/torio.git", "--id", "torio"}, service)
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
 	}
@@ -307,23 +287,21 @@ func TestProjectAddIDOverrideAndUse(t *testing.T) {
 		ID:          "torio",
 		DisplayName: "Torio",
 		Remote:      "git@github.com:wzslr321/torio.git",
-		Use:         true,
 	}
 	if !reflect.DeepEqual(service.addReq, want) {
 		t.Fatalf("add request = %+v, want %+v", service.addReq, want)
 	}
 	if !strings.Contains(stdout, "next: torio project enter torio") {
-		t.Errorf("an activated project must hand off to the ordinary terminal: %q", stdout)
+		t.Errorf("an attached project must hand off to the ordinary terminal: %q", stdout)
 	}
 }
 
 func TestProjectAddJSONEnvelope(t *testing.T) {
 	service := &fakeProjectService{addReport: projects.AddReport{
-		Project:       sampleProject(),
-		Cloned:        true,
-		HermesCreated: true,
-		Registered:    true,
-		Notes:         []string{"checkout_retained"},
+		Project:    sampleProject(),
+		Cloned:     true,
+		Registered: true,
+		Notes:      []string{"checkout_retained"},
 	}}
 	code, stdout, stderr := runProjectCLI(t,
 		[]string{"project", "add", "torio", "git@github.com:wzslr321/torio.git", "--json"}, service)
@@ -335,13 +313,13 @@ func TestProjectAddJSONEnvelope(t *testing.T) {
 		t.Fatalf("envelope ok/command = %v/%v", env["ok"], env["command"])
 	}
 	data, _ := env["data"].(map[string]any)
-	if data["id"] != "torio" || data["path"] != lima.HermesWorkspacePath+"/torio" {
+	if data["id"] != "torio" || data["path"] != claudecode.WorkspacePath+"/torio" {
 		t.Fatalf("data id/path = %v/%v", data["id"], data["path"])
 	}
-	if data["cloned"] != true || data["registered"] != true || data["activated"] != false {
+	if data["cloned"] != true || data["registered"] != true {
 		t.Fatalf("data outcome flags = %+v", data)
 	}
-	if data["next_step"] != "torio project use torio" {
+	if data["next_step"] != "torio project enter torio" {
 		t.Fatalf("data next_step = %v", data["next_step"])
 	}
 }
@@ -361,7 +339,7 @@ func TestProjectListHuman(t *testing.T) {
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
 	}
-	for _, want := range []string{"torio", "Torio", lima.HermesWorkspacePath + "/torio"} {
+	for _, want := range []string{"torio", "Torio", claudecode.WorkspacePath + "/torio"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("human list is missing %q: %q", want, stdout)
 		}
@@ -410,9 +388,8 @@ func TestProjectShowJSONEnvelope(t *testing.T) {
 		Checkout: projects.CheckoutStatus{
 			PathExists: true, Directory: true, Repository: true, OriginMatches: true,
 			FullClone: true, Clean: true, NoCredentialHelper: true, SharedPermissions: true,
-			Owner: "hermes", Group: "torio-projects", Mode: "2770",
+			Owner: claudecode.User, Group: "torio-projects", Mode: "2770",
 		},
-		Hermes: projects.HermesStatus{Present: true, PrimaryMatches: true},
 		Issues: []string{},
 	}}
 	code, stdout, stderr := runProjectCLI(t, []string{"project", "show", "torio", "--json"}, service)
@@ -431,17 +408,13 @@ func TestProjectShowJSONEnvelope(t *testing.T) {
 	if checkout["clean"] != true || checkout["origin_matches"] != true {
 		t.Fatalf("checkout data = %+v", checkout)
 	}
-	hermes, _ := data["hermes"].(map[string]any)
-	if hermes["registered"] != true {
-		t.Fatalf("hermes data = %+v", hermes)
-	}
 	if issues, _ := data["issues"].([]any); len(issues) != 0 {
 		t.Fatalf("issues = %v", data["issues"])
 	}
 }
 
 // TestProjectShowHumanReportsDriftAndItsNextStep locks the split `show` makes:
-// drift a rerun of `add` reconciles (a missing checkout, a Hermes registration)
+// drift a rerun of `add` reconciles (a missing checkout)
 // hands off to `add`, and drift inside an existing working tree hands off to an
 // operator session, because Torio will not reset or repoint a tree.
 func TestProjectShowHumanReportsDriftAndItsNextStep(t *testing.T) {
@@ -456,14 +429,12 @@ func TestProjectShowHumanReportsDriftAndItsNextStep(t *testing.T) {
 		// three-argument form would ask the operator to retype a remote Torio
 		// already holds, and a mistyped one attaches a different repository.
 		{"absent checkout", []string{"checkout_absent"}, "next: torio project add torio"},
-		{"hermes only", []string{"hermes_project_archived"}, "next: torio project add torio"},
 		{"none", nil, "next: torio project enter torio"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			service := &fakeProjectService{showReport: projects.ShowReport{
 				Project:  sampleProject(),
 				Checkout: projects.CheckoutStatus{PathExists: true, Directory: true, Repository: true},
-				Hermes:   projects.HermesStatus{Present: true, PrimaryMatches: true},
 				Issues:   tc.issues,
 			}}
 			code, stdout, stderr := runProjectCLI(t, []string{"project", "show", "torio"}, service)
@@ -484,36 +455,13 @@ func TestProjectShowHumanReportsDriftAndItsNextStep(t *testing.T) {
 
 // --- use ---
 
-func TestProjectUseJSONEnvelope(t *testing.T) {
-	service := &fakeProjectService{useReport: projects.UseReport{Project: sampleProject()}}
-	code, stdout, stderr := runProjectCLI(t, []string{"project", "use", "torio", "--json"}, service)
-	if code != int(ExitOK) {
-		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
-	}
-	if service.useID != "torio" {
-		t.Fatalf("use id = %q", service.useID)
-	}
-	env := decodeOneEnvelope(t, stdout)
-	if env["command"] != "project.use" {
-		t.Fatalf("command = %v", env["command"])
-	}
-	data, _ := env["data"].(map[string]any)
-	if data["active"] != true || data["id"] != "torio" {
-		t.Fatalf("data = %+v", data)
-	}
-	if data["next_step"] != "torio project enter torio" {
-		t.Fatalf("next_step = %v", data["next_step"])
-	}
-}
-
 // --- remove ---
 
 func TestProjectRemoveHumanStatesCheckoutIsRetained(t *testing.T) {
 	service := &fakeProjectService{removeReport: projects.RemoveReport{
 		Project:          sampleProject(),
-		HermesArchived:   true,
 		CheckoutRetained: true,
-		CheckoutPath:     lima.HermesWorkspacePath + "/torio",
+		CheckoutPath:     claudecode.WorkspacePath + "/torio",
 		Notes:            []string{"checkout_retained"},
 	}}
 	code, stdout, stderr := runProjectCLI(t, []string{"project", "remove", "torio"}, service)
@@ -526,7 +474,7 @@ func TestProjectRemoveHumanStatesCheckoutIsRetained(t *testing.T) {
 	if !strings.Contains(stdout, "still exists") {
 		t.Errorf("removal must state the checkout directory still exists: %q", stdout)
 	}
-	if !strings.Contains(stdout, lima.HermesWorkspacePath+"/torio") {
+	if !strings.Contains(stdout, claudecode.WorkspacePath+"/torio") {
 		t.Errorf("removal must name the retained directory: %q", stdout)
 	}
 }
@@ -534,9 +482,8 @@ func TestProjectRemoveHumanStatesCheckoutIsRetained(t *testing.T) {
 func TestProjectRemoveJSONEnvelope(t *testing.T) {
 	service := &fakeProjectService{removeReport: projects.RemoveReport{
 		Project:          sampleProject(),
-		HermesArchived:   true,
 		CheckoutRetained: true,
-		CheckoutPath:     lima.HermesWorkspacePath + "/torio",
+		CheckoutPath:     claudecode.WorkspacePath + "/torio",
 		Notes:            []string{"checkout_retained"},
 	}}
 	code, stdout, stderr := runProjectCLI(t, []string{"project", "remove", "torio", "--json"}, service)
@@ -548,10 +495,7 @@ func TestProjectRemoveJSONEnvelope(t *testing.T) {
 		t.Fatalf("command = %v", env["command"])
 	}
 	data, _ := env["data"].(map[string]any)
-	if data["checkout_retained"] != true || data["checkout_path"] != lima.HermesWorkspacePath+"/torio" {
-		t.Fatalf("data = %+v", data)
-	}
-	if data["hermes_archived"] != true {
+	if data["checkout_retained"] != true || data["checkout_path"] != claudecode.WorkspacePath+"/torio" {
 		t.Fatalf("data = %+v", data)
 	}
 }
@@ -600,7 +544,7 @@ func TestProjectEnterRejectsJSONBeforePreflight(t *testing.T) {
 func TestProjectEnterPreflightsThenRunsWithoutPushCapability(t *testing.T) {
 	service := &fakeProjectService{enterSession: enterSession()}
 	runner := &fakeInteractiveRunner{}
-	want := execx.InteractiveCommand{Name: "ssh", Args: []string{"-a", "-t", "lima-torio", "enter-helper", lima.HermesWorkspacePath + "/torio"}}
+	want := execx.InteractiveCommand{Name: "ssh", Args: []string{"-a", "-t", "lima-torio", "enter-helper", claudecode.WorkspacePath + "/torio"}}
 	var gotPath string
 
 	code, stdout, stderr := runProjectCLI(t, []string{"project", "enter", "torio"}, service,
@@ -614,7 +558,7 @@ func TestProjectEnterPreflightsThenRunsWithoutPushCapability(t *testing.T) {
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
 	}
-	if service.enterID != "torio" || gotPath != lima.HermesWorkspacePath+"/torio" {
+	if service.enterID != "torio" || gotPath != claudecode.WorkspacePath+"/torio" {
 		t.Fatalf("preflight id = %q, enter spec path = %q", service.enterID, gotPath)
 	}
 	if len(runner.cmds) != 1 || !reflect.DeepEqual(runner.cmds[0], want) {
@@ -622,9 +566,6 @@ func TestProjectEnterPreflightsThenRunsWithoutPushCapability(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "without SSH agent forwarding") || !strings.Contains(stdout, "session ended") {
 		t.Errorf("ordinary session boundary is unclear: %q", stdout)
-	}
-	if service.serviceEnvCalls != 0 {
-		t.Errorf("ordinary session ran push-capability post-check %d times", service.serviceEnvCalls)
 	}
 }
 
@@ -656,10 +597,9 @@ func TestProjectShellRejectsJSON(t *testing.T) {
 func TestProjectShellPreflightsThenRunsTheOperatorShellCommand(t *testing.T) {
 	service := &fakeProjectService{
 		shellSession: shellSession(),
-		serviceEnv:   projects.ServiceEnvCheck{Checked: true},
 	}
 	runner := &fakeInteractiveRunner{}
-	want := execx.InteractiveCommand{Name: "ssh", Args: []string{"-t", "lima-torio", "helper", lima.HermesWorkspacePath + "/torio"}}
+	want := execx.InteractiveCommand{Name: "ssh", Args: []string{"-t", "lima-torio", "helper", claudecode.WorkspacePath + "/torio"}}
 	var gotPath string
 	code, stdout, stderr := runProjectCLI(t, []string{"project", "shell", "torio"}, service,
 		func(a *app) {
@@ -675,7 +615,7 @@ func TestProjectShellPreflightsThenRunsTheOperatorShellCommand(t *testing.T) {
 	if service.shellID != "torio" {
 		t.Fatalf("preflight id = %q", service.shellID)
 	}
-	if gotPath != lima.HermesWorkspacePath+"/torio" {
+	if gotPath != claudecode.WorkspacePath+"/torio" {
 		t.Fatalf("shell spec path = %q", gotPath)
 	}
 	if len(runner.cmds) != 1 || !reflect.DeepEqual(runner.cmds[0], want) {
@@ -683,17 +623,11 @@ func TestProjectShellPreflightsThenRunsTheOperatorShellCommand(t *testing.T) {
 	}
 	// The operator is told, before the session opens, that the capability they
 	// are about to hold is bounded by the session.
-	if !strings.Contains(stdout, lima.HermesWorkspacePath+"/torio") || !strings.Contains(stdout, "exit") {
+	if !strings.Contains(stdout, claudecode.WorkspacePath+"/torio") || !strings.Contains(stdout, "exit") {
 		t.Errorf("the opening line does not state where the session lands and when the capability ends: %q", stdout)
 	}
 	if !strings.Contains(stdout, "session ended") {
 		t.Errorf("the end of the session is not reported: %q", stdout)
-	}
-	if service.serviceEnvCalls != 1 {
-		t.Errorf("service environment checked %d times, want exactly 1", service.serviceEnvCalls)
-	}
-	if !strings.Contains(stdout, "hermes service environment: no forwarded agent socket") {
-		t.Errorf("the post-session service environment check is not reported: %q", stdout)
 	}
 }
 
@@ -717,9 +651,6 @@ func TestProjectShellNeverClaimsAPushHappened(t *testing.T) {
 		t.Errorf("output does not disclaim the push: %q", stdout)
 	}
 	// A zero-value check is a check that did not run, and says so.
-	if !strings.Contains(stdout, "hermes service environment: not checked") {
-		t.Errorf("an unread service environment must not read as clean: %q", stdout)
-	}
 }
 
 func TestProjectShellChildExitIsExternal(t *testing.T) {
@@ -734,9 +665,9 @@ func TestProjectShellChildExitIsExternal(t *testing.T) {
 		t.Errorf("the child exit code is not reported: %q", stderr)
 	}
 	// A session that ended badly still forwarded an agent, so the end of the
-	// session is still reported and the service environment still checked.
-	if !strings.Contains(stdout, "session ended") || service.serviceEnvCalls != 1 {
-		t.Errorf("a failed session skipped the post-session report: %q, checks=%d", stdout, service.serviceEnvCalls)
+	// session is still reported.
+	if !strings.Contains(stdout, "session ended") {
+		t.Errorf("a failed session skipped the post-session report: %q", stdout)
 	}
 }
 
@@ -767,34 +698,10 @@ func TestProjectShellPreflightFailuresMapToExitCodesAndOpenNothing(t *testing.T)
 			if len(runner.cmds) != 0 {
 				t.Fatalf("a failed preflight opened a session: %+v", runner.cmds)
 			}
-			if service.serviceEnvCalls != 0 || stdout != "" {
-				t.Fatalf("a failed preflight reported a session: %q, checks=%d", stdout, service.serviceEnvCalls)
+			if stdout != "" {
+				t.Fatalf("a failed preflight reported a session: %q", stdout)
 			}
 		})
-	}
-}
-
-// The forwarded agent reaching the persistent service identity is the one
-// invariant ADR-0003 puts above the session's own outcome, so it is reported
-// even when the session itself ended cleanly.
-func TestProjectShellReportsAServiceEnvironmentLeak(t *testing.T) {
-	service := &fakeProjectService{
-		shellSession: shellSession(),
-		serviceEnv:   projects.ServiceEnvCheck{Checked: true, AgentSocketPresent: true},
-		serviceEnvErr: &projects.Error{
-			Op: "shell", Kind: projects.KindVerification, Err: errors.New("the persistent Hermes service environment declares SSH_AUTH_SOCK"),
-		},
-	}
-	code, stdout, stderr := runProjectCLI(t, []string{"project", "shell", "torio"}, service,
-		withShell(&fakeInteractiveRunner{}, execx.InteractiveCommand{Name: "ssh"}))
-	if code != int(ExitVerification) {
-		t.Fatalf("exit = %d, want %d; stderr=%q", code, ExitVerification, stderr)
-	}
-	if !strings.Contains(stdout, "session ended") {
-		t.Errorf("the session end is not reported: %q", stdout)
-	}
-	if !strings.Contains(stderr, "SSH_AUTH_SOCK") {
-		t.Errorf("the leak is not named: %q", stderr)
 	}
 }
 
@@ -858,10 +765,10 @@ func TestProjectErrorKindsMapToContractExitCodes(t *testing.T) {
 }
 
 func TestProjectUnknownIDIsConflict(t *testing.T) {
-	service := &fakeProjectService{useErr: &projects.Error{
-		Op: "use", Kind: projects.KindConflict, Err: errors.New("project id is not registered: \"ghost\""),
+	service := &fakeProjectService{showErr: &projects.Error{
+		Op: "show", Kind: projects.KindConflict, Err: errors.New("project id is not registered: \"ghost\""),
 	}}
-	code, _, stderr := runProjectCLI(t, []string{"project", "use", "ghost"}, service)
+	code, _, stderr := runProjectCLI(t, []string{"project", "show", "ghost"}, service)
 	if code != int(ExitConflict) {
 		t.Fatalf("exit = %d, want %d", code, ExitConflict)
 	}
@@ -894,7 +801,7 @@ func testDeployKey() *projects.DeployKey {
 	return &projects.DeployKey{
 		PublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeFakeFakeFakeFakeFakeFakeFakeFakeFake torio-deploy-demo",
 		Host:      "github.com",
-		KeyPath:   "/home/hermes/.ssh/torio/demo",
+		KeyPath:   claudecode.Home + "/.ssh/torio/demo",
 		Generated: true,
 	}
 }
@@ -1270,7 +1177,7 @@ func TestMaterializingGetsTheLongBoundRatherThanTheOperationTimeout(t *testing.T
 // the flag unusable for the only thing it is for.
 func TestProjectAddLocalRequestsAProjectWithNoRemote(t *testing.T) {
 	service := &fakeProjectService{addReport: projects.AddReport{
-		Project:     projects.Project{ID: "notes", DisplayName: "notes", Path: lima.HermesWorkspacePath + "/notes"},
+		Project:     projects.Project{ID: "notes", DisplayName: "notes", Path: claudecode.WorkspacePath + "/notes"},
 		Initialized: true,
 		Registered:  true,
 	}}

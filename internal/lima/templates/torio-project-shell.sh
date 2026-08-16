@@ -18,7 +18,7 @@
 # the shared project group, never sudo and never root. That shape was measured
 # on a live guest: entering through `sg torio-projects` reached the checkout and
 # wrote in it without sudo, and the checkout was left carrying no root-owned
-# files afterwards, which is what keeps `hermes` able to keep working in it.
+# files afterwards, which is what keeps the agent able to keep working in it.
 set -euo pipefail
 
 workspace='__TORIO_WORKSPACE_ROOT__'
@@ -56,7 +56,7 @@ fi
 [ -d "$project" ] || die 'project directory does not exist'
 
 # The session carries the operator's own identity. A root session would leave
-# root-owned files in a checkout that hermes has to keep working in.
+# root-owned files in a checkout the agent has to keep working in.
 [ "$(id -u)" -ne 0 ] || die 'refusing to open a project session as root'
 command -v sg >/dev/null 2>&1 || die 'sg is missing on this guest'
 

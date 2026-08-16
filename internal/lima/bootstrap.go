@@ -43,7 +43,9 @@ func (a *Adapter) Bootstrap(ctx context.Context, opts BootstrapOptions) (Bootstr
 	rep := BootstrapReport{Instance: InstanceName}
 	b := opts.Backend
 	if b == nil {
-		b = Hermes()
+		// This package holds no backend to fall back to, and guessing one would
+		// verify a box against the postconditions of an agent nobody selected.
+		return rep, &Error{Op: bootstrapOp, Kind: KindVerificationFailed, Err: fmt.Errorf("no backend selected; every guest postcondition is a backend's own")}
 	}
 	rep.Backend = b.Identity().Name
 
@@ -178,59 +180,11 @@ func (r *stepRunner) Reconcile() bool { return r.reconcile }
 
 const bootstrapOp = "bootstrap"
 
-// The intended guest identity and the persistent Hermes locations. These are
-// exported so the CLI can surface the Remote Second Brain V1 connection handoff
-// without duplicating string literals.
-const (
-	// HermesUser is the dedicated non-root guest identity that owns the
-	// persistent profile and Second Brain vault.
-	HermesUser = "hermes"
-	// HermesHome is the persistent Hermes home on the VM's Linux filesystem.
-	HermesHome = "/home/hermes"
-	// HermesProfilePath is the persistent Hermes application profile / state
-	// directory (NOT the Second Brain vault).
-	HermesProfilePath = "/home/hermes/.hermes"
-	// HermesBrainPath is the persistent Second Brain vault directory.
-	HermesBrainPath = "/home/hermes/brain"
-	// HermesWorkspacePath is the persistent shared workspace directory.
-	HermesWorkspacePath = "/home/hermes/projects"
-	// TorioProjectsGroup is the shared guest group that lets the operator and
-	// hermes reach the same directories without either becoming the other. It
-	// is the only guest authority the two identities have in common, so any
-	// staging directory both must touch is grouped here.
-	TorioProjectsGroup = "torio-projects"
-)
-
-// The fixed, repository-controlled reconcile targets. These are constants (not
-// caller input) so the guest changes are a small, auditable, fixed set — never a
-// general remote-script transport.
-const (
-	dockerGroup             = "docker"
-	hermesAgentDir          = "/home/hermes/hermes-agent"
-	hermesTarget            = "/home/hermes/hermes-agent/venv/bin/hermes" // pinned launcher (owned by hermes)
-	hermesShimPath          = "/usr/local/bin/hermes"                     // on sudo secure_path
-	hermesInstallScriptPath = "/home/hermes/.torio-hermes-install.sh"
-	hermesInstallScriptURL  = "https://hermes-agent.nousresearch.com/install.sh"
-)
-
-// hermesBuildDeps are the guest packages the Hermes install needs to build. They
-// are named once, here, and used both by the install step and by the template
-// that pre-installs them so a first bootstrap does not pay for a compile it
-// could have avoided.
-var hermesBuildDeps = []string{
-	"ripgrep", "ffmpeg", "build-essential", "python3-dev", "libffi-dev",
-	"curl", "ca-certificates", "git",
-}
-
-// bootstrapRequiredPaths are the persistent Hermes directories that must resolve
-// on the VM's native Linux filesystem with the V1 layout (ADR-0003). Owned
-// paths are inspected via sudo.
-var bootstrapRequiredPaths = []backend.PathSpec{
-	{Path: HermesHome, Owner: HermesUser, Group: TorioProjectsGroup, Modes: []string{"710", "0710"}},
-	{Path: HermesProfilePath, Owner: HermesUser, Group: HermesUser, Modes: []string{"750", "0750"}, AllowStricter: true},
-	{Path: HermesBrainPath, Owner: HermesUser, Group: HermesUser, Modes: []string{"750", "0750"}, AllowStricter: true},
-	{Path: HermesWorkspacePath, Owner: HermesUser, Group: TorioProjectsGroup, Modes: []string{"2770"}},
-}
+// TorioProjectsGroup is the shared guest group that lets the operator and the
+// agent identity reach the same directories without either becoming the other.
+// It is the only guest authority the two identities have in common, so any
+// staging directory both must touch is grouped here.
+const TorioProjectsGroup = "torio-projects"
 
 // operatorShellHelperSpec is the required guest state of the operator shell
 // helper (OperatorShellHelper), the fixed remote argv of `torio project shell`.
@@ -325,10 +279,9 @@ type BootstrapOptions struct {
 	// must equal; a mismatch is reported as drift. Empty is unpinned for this
 	// run: a backend that carries its own pin still enforces that one.
 	PinnedVersion string
-	// Backend is the agent backend this instance runs. A nil Backend is the
-	// Hermes backend: every instance created before an instance declared one
-	// runs Hermes, and reading an older config must not re-point a box at a
-	// different agent.
+	// Backend is the agent backend this instance runs. It is required: this
+	// package holds no implementation to fall back to, and every guest
+	// postcondition below is a backend's own.
 	Backend backend.Backend
 	// VerifyOnly runs every check and repairs nothing. A step that would have
 	// installed or linked something fails instead, carrying the remediation
@@ -410,7 +363,7 @@ func (a *Adapter) verifyTorioProjectsGroup(ctx context.Context, rep *BootstrapRe
 // without it. That is not hypothetical: provisioning adds the group over the
 // session `limactl start` opened, so the master is stale by construction on
 // every freshly created machine. This check reported "member" — correctly, from
-// the database — while rsync could not traverse HermesHome and `torio brain
+// the database — while rsync could not traverse the agent's home and `torio brain
 // import` failed on a guest that was configured exactly right.
 func (a *Adapter) verifyOperatorInTorioProjects(ctx context.Context, rep *BootstrapReport, operator string) error {
 	const name = "operator_torio_projects"
@@ -487,7 +440,7 @@ func (a *Adapter) verifyPaths(ctx context.Context, rep *BootstrapReport, specs [
 			return err
 		}
 		if st.ExitCode != 0 || strings.TrimSpace(string(st.Stdout)) != "directory" {
-			return a.verifyFailed(rep, name, "not a directory", "create the persistent Hermes directory on the guest")
+			return a.verifyFailed(rep, name, "not a directory", "create the persistent agent directory on the guest")
 		}
 		og, err := a.guestProbe(ctx, rep, name, "sudo", "-n", "stat", "-c", "%U:%G %a", spec.Path)
 		if err != nil {
@@ -516,7 +469,7 @@ func (a *Adapter) verifyPaths(ctx context.Context, rep *BootstrapReport, specs [
 		}
 		fstype := fields[0]
 		if !nativeFSTypes[fstype] {
-			return a.verifyFailed(rep, name, "backed by non-native filesystem "+fstype, "Hermes state must live on the VM's Linux filesystem, not a host share (ADR-0002)")
+			return a.verifyFailed(rep, name, "backed by non-native filesystem "+fstype, "agent state must live on the VM's Linux filesystem, not a host share (ADR-0002)")
 		}
 		rep.record(name, true, fmt.Sprintf("%s:%s %s %s", owner, group, mode, strings.Join(fields, " ")))
 	}
@@ -634,7 +587,7 @@ func (a *Adapter) verifyRootHelperFile(ctx context.Context, rep *BootstrapReport
 	if owner != spec.Owner || group != spec.Group {
 		return a.verifyFailed(rep, name,
 			fmt.Sprintf("helper owner:group %s:%s, want %s:%s", owner, group, spec.Owner, spec.Group),
-			"a helper the operator or hermes owns can be rewritten between sessions; "+remediation)
+			"a helper the operator or the agent owns can be rewritten between sessions; "+remediation)
 	}
 	writable, parsed := modeGrantsForeignWrite(mode)
 	if !parsed {
@@ -824,16 +777,16 @@ func modeGrantsForeignWrite(mode string) (writable, parsed bool) {
 //
 // An exact match always passes. A spec may additionally accept a mode that
 // grants strictly less, because two of the required directories are tightened
-// by their own owner in normal use: Hermes chmods /home/hermes/.hermes to 0700
+// by their own owner in normal use: an agent may chmod its own profile to 0700
 // the first time it writes provider credentials there. Bootstrap accepted 0750
 // and nothing else, so the first ordinary use of the product left every machine
 // permanently unbootstrapped — `brain init`, `project add` and every other
 // verified command failed closed, on a guest where nothing was wrong.
 //
-// Only the hermes-private directories opt in. The group bit they surrender
-// belongs to the hermes group, whose sole member is hermes. Everywhere else the
+// Only the agent-private directories opt in. The group bit they surrender
+// belongs to the agent's own group, whose sole member is the agent. Everywhere else the
 // granted permission is load-bearing for somebody other than the owner — the
-// operator traverses HermesHome and writes under HermesWorkspacePath through
+// operator traverses the agent's home and writes under its workspace through
 // torio-projects, and the operator shell helper must stay executable by all —
 // so there a stricter mode is drift and still fails.
 //
@@ -862,36 +815,6 @@ func modeMatches(spec backend.PathSpec, mode string) bool {
 		}
 	}
 	return false
-}
-
-// parseHermesVersion extracts the semver-ish version from `hermes --version`
-// output, whose first line is verified to look like
-// "Hermes Agent v0.19.0 (2026.7.20) · upstream …". A recognizable version is
-// required: a clean exit with unrecognized output is not proof.
-func parseHermesVersion(out string) (string, bool) {
-	line := strings.TrimSpace(firstLine(out))
-	const marker = "Hermes Agent v"
-	i := strings.Index(line, marker)
-	if i < 0 {
-		return "", false
-	}
-	rest := line[i+len(marker):]
-	end := strings.IndexAny(rest, " \t(")
-	if end >= 0 {
-		rest = rest[:end]
-	}
-	rest = strings.TrimSpace(rest)
-	if rest == "" {
-		return "", false
-	}
-	return rest, true
-}
-
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
 }
 
 // boundDetail caps a derived detail string so a report value can never carry an

@@ -64,7 +64,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 // generated ssh.config sets ControlMaster auto with ControlPersist yes, so every
 // later `limactl shell` and `limactl copy` multiplexes over the same master and
 // inherits the identity the login had *before* the group existed. The operator
-// then cannot traverse HermesHome, which is 0710 root of the shared group, and
+// then cannot traverse the agent's home, which is 0710 root of the shared group, and
 // `torio brain import` failed inside rsync with "cannot stat destination" on a
 // guest where the group was correctly configured. Bootstrap read the group
 // database and reported the operator a member, because it was: only the live

@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Removed
+
+- **BREAKING: the Hermes backend is gone**, and with it `torio serve`, the
+  hub's Serve tab and gateway panel, and `torio project use`
+  ([ADR-0028](docs/adr/0028-the-hermes-backend-is-removed.md)). No shipped
+  backend declared a guest service or a project registry any more, so both
+  capabilities leave the backend contract rather than being kept for an
+  implementation that no longer exists.
+- **BREAKING: the default backend is `claude-code`**, and no backend derives
+  the bare `torio` instance — every one of them is `torio-<backend>`, which is
+  the name the two surviving backends already had. An operator whose settings
+  lived in the root `config.json` moves them to
+  `instances/torio-claude-code/config.json`.
+- **BREAKING: a box that still resolves to `hermes` is refused**, with an error
+  naming the removal and the way forward. That includes every config document
+  written before the `backend` field existed: such a document declares nothing,
+  and what it meant when it was written was Hermes. It is never silently
+  re-pointed at a live agent.
+- **BREAKING: JSON envelope fields are gone**, rather than reporting `false`
+  for ever: `registry_declared` and `service_declared` from `backend status`,
+  `hermes` and `registry_declared` from `project show`, `hermes_created` /
+  `hermes_restored` / `activated` from `project add`, `hermes_archived` and its
+  siblings from `project remove`, `project_registered` and `project_conflict`
+  from `brain status`, and the `hermes_home` alias for `home` from
+  `vm bootstrap`.
+
 ### Added
 
 - **Codex CLI as the third backend.** `torio vm init --backend codex` builds a

@@ -363,7 +363,7 @@ The `index.md` test in step 3 matters: a directory named `brain` that is not a
 vault is somebody else's data, and writing notes into it is the worst failure
 mode this kit has.
 
-Inside a Torio guest the path is fixed by the backend — `/home/hermes/brain`,
+Inside a Torio guest the path is fixed by the backend — `/home/claude/brain`,
 `/home/claude/brain` or `/home/codex/brain` — and is not resolved at all. There,
 the vault is a property of the identity the agent runs as.
 

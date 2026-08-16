@@ -4,7 +4,7 @@ output: docs/runbooks/first-run.md
 
 # Runbook — first run
 
-Brings a workstation from nothing to a working setup: a Linux VM, a Hermes backend on
+Brings a workstation from nothing to a working setup: a Linux VM, an agent on
 the VM's own loopback, a tunnel you control, a Second Brain, and your first
 attached repository.
 
@@ -28,28 +28,18 @@ the same sources.
 
 <!-- include: vm-bring-up level=2 heading="2. Create and verify the VM" -->
 
-<!-- include: serve-bring-up level=2 heading="3. Bring up the loopback backend" -->
+<!-- include: brain-bring-up level=2 heading="3. Create the Second Brain" -->
 
-<!-- include: tunnel level=2 heading="4. Reach the backend from the host" -->
-
-<!-- include: session-token level=2 heading="5. Pin a session token" -->
-
-<!-- include: brain-bring-up level=2 heading="6. Create the Second Brain" -->
-
-<!-- include: project-attach level=2 heading="7. Attach a repository" -->
+<!-- include: project-attach level=2 heading="4. Attach a repository" -->
 
 <!-- include: invariants-projects level=2 heading="What holds, always" -->
 
-<!-- include: desktop-connect level=2 heading="8. Connect Hermes Desktop" -->
-
-<!-- include: desktop-workspace level=3 -->
-
-<!-- include: provider-auth level=2 heading="9. Configure a model provider" -->
+<!-- include: provider-auth level=2 heading="5. Configure a model provider" -->
 
 Selecting a model and holding an actual chat are **manual human steps** beyond
 this runbook, as is the credential entry the step above describes.
 
-<!-- include: project-push level=2 heading="10. Push, when you decide to" -->
+<!-- include: project-push level=2 heading="6. Push, when you decide to" -->
 
 ## Stopping
 

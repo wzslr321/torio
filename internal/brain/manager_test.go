@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wzslr321/torio/internal/backend/claudecode"
 	"github.com/wzslr321/torio/internal/lima"
 )
 
@@ -21,12 +22,11 @@ func TestInitFreshBrainUsesStagingCommitAndRegistersProject(t *testing.T) {
 		t.Fatalf("report = %#v, want created initialized Brain", report)
 	}
 	for _, fragment := range []string{
-		"install -d -o hermes -g hermes -m 0750 " + stagingPath,
+		"install -d -o " + claudecode.User + " -g " + claudecode.User + " -m 0750 " + stagingPath,
 		"git -C " + stagingPath + " init",
 		"git -C " + stagingPath + " add -- README.md AGENTS.md todo.md",
 		"git -C " + stagingPath + " -c user.name=torio -c user.email=torio@localhost commit",
 		"mv -T " + stagingPath + " " + Path,
-		"hermes project create Second Brain " + Path + " --slug " + ProjectSlug,
 	} {
 		if !g.saw(fragment) {
 			t.Errorf("missing typed guest argv containing %q", fragment)
@@ -35,8 +35,8 @@ func TestInitFreshBrainUsesStagingCommitAndRegistersProject(t *testing.T) {
 	if g.saw(" sh ") || g.saw("sh -c") || g.saw("--use") {
 		t.Errorf("init used a forbidden shell or --use: %v", g.calls)
 	}
-	if len(g.payloads()) != 6 {
-		t.Fatalf("guest payload count = %d, want lock token plus 3 scaffold files plus the retrieval skill and its category description",
+	if len(g.payloads()) != 5 {
+		t.Fatalf("guest payload count = %d, want lock token plus 3 scaffold files plus the retrieval skill",
 			len(g.payloads()))
 	}
 }
@@ -51,7 +51,7 @@ func TestInitIsIdempotentAndDoesNotDuplicateProject(t *testing.T) {
 	if report.Created || report.Status.State != StateInitialized {
 		t.Fatalf("report = %#v, want unchanged initialized Brain", report)
 	}
-	if g.saw("hermes project create") || g.saw("git -C "+stagingPath+" init") {
+	if g.saw("git -C " + stagingPath + " init") {
 		t.Fatalf("idempotent init mutated existing Brain: %v", g.calls)
 	}
 }
@@ -67,27 +67,8 @@ func TestInitCreatesMissingCanonicalDirectoryBeforeScaffolding(t *testing.T) {
 	if !report.Created {
 		t.Fatalf("report.Created = false, want true")
 	}
-	if !g.saw("install -d -o hermes -g hermes -m 0750 " + Path) {
+	if !g.saw("install -d -o " + claudecode.User + " -g " + claudecode.User + " -m 0750 " + Path) {
 		t.Fatalf("missing canonical private-directory creation: %v", g.calls)
-	}
-}
-
-// `show` exiting non-zero means the Hermes CLI is broken, not that the slug is
-// absent. The list fallback then only proves the CLI is reachable; its output
-// must never be parsed for the primary path.
-func TestInitDoesNotTrustProjectListWhenShowIsUnavailable(t *testing.T) {
-	g := initializedFake()
-	g.showBrokenCLI = true
-
-	report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
-	if err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
-	if report.Created {
-		t.Fatalf("report.Created = true, want idempotent verification")
-	}
-	if !g.saw("hermes project list") || !g.saw("hermes project create") {
-		t.Fatalf("missing show result trusted ambiguous list output: %v", g.calls)
 	}
 }
 
@@ -97,7 +78,7 @@ func TestInitRefusesNonemptyUnmanagedDirectory(t *testing.T) {
 
 	_, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 	assertKind(t, err, KindConflict)
-	if g.saw("tee "+stagingPath) || g.saw("git -C "+stagingPath) || g.saw("hermes project create") {
+	if g.saw("tee "+stagingPath) || g.saw("git -C "+stagingPath) {
 		t.Fatalf("conflicting init mutated guest: %v", g.calls)
 	}
 }
@@ -148,27 +129,13 @@ func TestInitSurfacesGitFailuresBeforePromotion(t *testing.T) {
 			g.setFailure(fragment, 1)
 			_, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
 			assertKind(t, err, KindGit)
-			if g.saw("mv -T "+stagingPath) || g.saw("hermes project create") {
-				t.Fatalf("failed Git setup was promoted or registered: %v", g.calls)
+			if g.saw("mv -T " + stagingPath) {
+				t.Fatalf("failed Git setup was promoted: %v", g.calls)
 			}
 			if !g.saw("rm -rf -- " + stagingPath) {
 				t.Fatalf("failed staging was not cleaned up: %v", g.calls)
 			}
 		})
-	}
-}
-
-func TestInitSurfacesHermesRegistrationFailureAfterSafePromotion(t *testing.T) {
-	g := readyFake()
-	g.setFailure("hermes project create", 1)
-
-	report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
-	assertKind(t, err, KindRegistration)
-	if !report.Created {
-		t.Fatalf("report.Created = false, want true after promoted scaffold")
-	}
-	if !g.saw("mv -T " + stagingPath) {
-		t.Fatalf("registration was attempted before promotion: %v", g.calls)
 	}
 }
 
@@ -275,109 +242,6 @@ func TestStatusFailsClosedWhenRootPathProbeHasUnexpectedExit(t *testing.T) {
 	}
 }
 
-func TestInitRejectsWrongExistingProjectWithoutCreatingDuplicate(t *testing.T) {
-	g := initializedFake()
-	g.registered = false
-	g.wrongProject = true
-
-	_, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
-	assertKind(t, err, KindRegistration)
-	if g.saw("hermes project create") {
-		t.Fatalf("init duplicated a conflicting slug: %v", g.calls)
-	}
-}
-
-func TestStatusRejectsBrainPresentOnlyAsNonPrimaryProjectFolder(t *testing.T) {
-	g := initializedFake()
-	g.projectShow = projectShowOutput("/home/hermes/other")
-
-	report, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
-	if err != nil {
-		t.Fatalf("Status() error = %v", err)
-	}
-	if report.ProjectRegistered {
-		t.Fatalf("secondary folder was accepted as primary registration: %#v", report)
-	}
-	if !report.ProjectConflict || report.State != StateDrift {
-		t.Fatalf("secondary-only path did not fail closed as drift: %#v", report)
-	}
-}
-
-// Real `hermes project show <slug>` exits 0 for an unknown slug and prints
-// nothing on stdout, so an absent project must never be reported as a slug
-// conflict on an otherwise-fresh guest.
-func TestStatusReportsUninitializedWhenProjectShowExitsZeroWithoutOutput(t *testing.T) {
-	cases := []struct {
-		name   string
-		mutate func(*fakeGuest)
-	}{
-		{"canonical path missing", func(g *fakeGuest) { g.pathExists = false }},
-		{"canonical path empty", func(g *fakeGuest) { g.pathExists = true; g.empty = true }},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			g := readyFake()
-			tc.mutate(g)
-
-			report, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
-			if err != nil {
-				t.Fatalf("Status() error = %v", err)
-			}
-			if report.ProjectRegistered || report.ProjectConflict {
-				t.Fatalf("absent project reported as registered/conflicting: %#v", report)
-			}
-			if report.State != StateUninitialized {
-				t.Fatalf("state = %q, want %q; report=%#v", report.State, StateUninitialized, report)
-			}
-			for _, issue := range []string{"project_slug_conflict", "project_registered_without_scaffold"} {
-				if slices.Contains(report.Issues, issue) {
-					t.Fatalf("absent project raised issue %q: %#v", issue, report)
-				}
-			}
-		})
-	}
-}
-
-// An absent project must not make Init refuse a directory Torio just created
-// empty; it must fall through to registration.
-func TestInitRegistersProjectWhenProjectShowExitsZeroWithoutOutput(t *testing.T) {
-	g := readyFake()
-	g.pathExists = false
-
-	report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
-	if err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
-	if !report.Created || report.Status.State != StateInitialized {
-		t.Fatalf("report = %#v, want created initialized Brain", report)
-	}
-	if !g.saw("hermes project create Second Brain " + Path + " --slug " + ProjectSlug) {
-		t.Fatalf("absent project was not registered: %v", g.calls)
-	}
-}
-
-// The exit-code fix must not weaken conflict detection: a slug whose printed
-// primary path is not ours is still a refusal.
-func TestStatusReportsConflictWhenProjectSlugPointsElsewhere(t *testing.T) {
-	g := initializedFake()
-	g.registered = false
-	g.wrongProject = true
-
-	report, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
-	if err != nil {
-		t.Fatalf("Status() error = %v", err)
-	}
-	if report.ProjectRegistered || !report.ProjectConflict {
-		t.Fatalf("foreign primary path was not a conflict: %#v", report)
-	}
-	if report.State != StateDrift {
-		t.Fatalf("state = %q, want %q; report=%#v", report.State, StateDrift, report)
-	}
-	if !slices.Contains(report.Issues, "project_slug_conflict") {
-		t.Fatalf("issues = %v, want project_slug_conflict", report.Issues)
-	}
-}
-
 func TestInitRefusesConcurrentGuestLockBeforeStagingWork(t *testing.T) {
 	g := readyFake()
 	g.lockHeld = true
@@ -392,7 +256,7 @@ func TestInitRefusesConcurrentGuestLockBeforeStagingWork(t *testing.T) {
 func TestInitGuestLockPreventsVerifyThenPromoteInterleaving(t *testing.T) {
 	g := &blockingGuest{
 		base:    readyFake(),
-		blockOn: "hermes project show " + ProjectSlug,
+		blockOn: "mv -T " + stagingPath + " " + Path,
 		blocked: make(chan struct{}),
 		unblock: make(chan struct{}),
 	}
@@ -444,72 +308,9 @@ func assertKind(t *testing.T, err error, want ErrorKind) {
 	}
 }
 
-// The 60-character cap Hermes applies to a skill description is the whole
-// always-on trigger budget: `extract_skill_description` truncates to
-// `desc[:57] + "..."`, and the truncated string is the only text about this
-// skill that reaches the system prompt of every session.
-func TestRetrievalSkillPayloadContract(t *testing.T) {
-	payload, digest, err := hermesSkillPayload()
-	if err != nil {
-		t.Fatalf("hermesSkillPayload() error = %v", err)
-	}
-	if len(digest) != 64 {
-		t.Fatalf("digest = %q, want a hex sha256", digest)
-	}
-	text := string(payload)
-	if !strings.HasPrefix(text, "---\n") {
-		t.Fatalf("SKILL.md must start with YAML frontmatter, got %.20q", text)
-	}
-	front, _, ok := strings.Cut(strings.TrimPrefix(text, "---\n"), "\n---\n")
-	if !ok {
-		t.Fatalf("SKILL.md frontmatter is not terminated")
-	}
-	if !strings.Contains(front, "name: "+SkillName) {
-		t.Fatalf("frontmatter does not declare name %q: %q", SkillName, front)
-	}
-	description := skillDescription(front)
-	if description == "" {
-		t.Fatalf("frontmatter has no description: %q", front)
-	}
-	if len(description) > 60 {
-		t.Fatalf("description is %d chars, want <= 60: %q", len(description), description)
-	}
-	// Hermes has no `when-to-use` and no `allowed-tools` frontmatter field;
-	// declaring either would be an unenforced permission claim.
-	for _, forbidden := range []string{"when-to-use", "allowed-tools"} {
-		if strings.Contains(front, forbidden) {
-			t.Errorf("frontmatter declares unsupported field %q", forbidden)
-		}
-	}
-	if !strings.Contains(text, Path) {
-		t.Errorf("skill body does not pin the canonical absolute path %q", Path)
-	}
-	if strings.Contains(text, "OBSIDIAN_VAULT_PATH") {
-		t.Errorf("skill body depends on OBSIDIAN_VAULT_PATH; the canonical path is fixed")
-	}
-	// search_files and read_file are the only retrieval tools Hermes exposes;
-	// there is no separate grep, glob, or ls tool to fall back on.
-	for _, tool := range []string{"search_files", "read_file"} {
-		if !strings.Contains(text, tool) {
-			t.Errorf("skill body does not name the %s tool", tool)
-		}
-	}
-}
-
-func skillDescription(frontmatter string) string {
-	for _, line := range strings.Split(frontmatter, "\n") {
-		value, ok := strings.CutPrefix(strings.TrimSpace(line), "description:")
-		if !ok {
-			continue
-		}
-		return strings.Trim(strings.TrimSpace(value), `"'`)
-	}
-	return ""
-}
-
 // The retrieval skill is what makes the Brain reachable from every project, so
 // it must appear only once the Brain itself is promoted, committed and
-// registered. A partial Brain must never become globally discoverable.
+// A partial Brain must never become globally discoverable.
 func TestInitInstallsRetrievalSkillOnlyAfterTheBrainFullySucceeds(t *testing.T) {
 	g := readyFake()
 
@@ -524,11 +325,11 @@ func TestInitInstallsRetrievalSkillOnlyAfterTheBrainFullySucceeds(t *testing.T) 
 		t.Fatalf("skill state = %q, want %q", report.Status.SkillState, SkillInstalled)
 	}
 	for _, fragment := range []string{
-		"install -d -o hermes -g hermes -m 0750 " + SkillPath,
+		"install -d -o " + claudecode.User + " -g " + claudecode.User + " -m 0750 " + skillDir,
 		"tee " + skillStagingPath,
 		"chmod 0640 " + skillStagingPath,
-		"mv -T " + skillStagingPath + " " + SkillFilePath,
-		"sha256sum -- " + SkillFilePath,
+		"mv -T " + skillStagingPath + " " + skillFilePath,
+		"sha256sum -- " + skillFilePath,
 	} {
 		if !g.saw(fragment) {
 			t.Errorf("missing typed guest argv containing %q", fragment)
@@ -538,16 +339,14 @@ func TestInitInstallsRetrievalSkillOnlyAfterTheBrainFullySucceeds(t *testing.T) 
 		t.Errorf("skill install used a forbidden shell: %v", g.calls)
 	}
 	promote := g.firstIndex("mv -T " + stagingPath + " " + Path)
-	register := g.firstIndex("hermes project create")
 	install := g.firstIndex("mv -T " + skillStagingPath)
-	if promote < 0 || register < 0 || install < 0 || install < promote || install < register {
-		t.Fatalf("skill promoted at call %d, want after scaffold promote=%d and register=%d",
-			install, promote, register)
+	if promote < 0 || install < 0 || install < promote {
+		t.Fatalf("skill promoted at call %d, want after the scaffold promote at %d", install, promote)
 	}
 }
 
 // Every Init failure mode must leave the skill discovery root untouched. A
-// globally advertised skill pointing at a half-built or unregistered vault
+// globally advertised skill pointing at a half-built vault
 // would make every future session read a Brain Torio never verified.
 func TestInitDoesNotInstallRetrievalSkillForAPartialBrain(t *testing.T) {
 	cases := []struct {
@@ -559,9 +358,6 @@ func TestInitDoesNotInstallRetrievalSkillForAPartialBrain(t *testing.T) {
 		{"git commit failed", readyFake, func(g *fakeGuest) {
 			g.setFailure("git -C "+stagingPath+" -c user.name=torio", 1)
 		}, KindGit},
-		{"project registration failed", readyFake, func(g *fakeGuest) {
-			g.setFailure("hermes project create", 1)
-		}, KindRegistration},
 		{"unmanaged directory", readyFake, func(g *fakeGuest) {
 			g.empty = false
 		}, KindConflict},
@@ -580,7 +376,7 @@ func TestInitDoesNotInstallRetrievalSkillForAPartialBrain(t *testing.T) {
 				t.Fatalf("report.SkillUpdated = true for a failed Init")
 			}
 			for _, fragment := range []string{
-				"install -d -o hermes -g hermes -m 0750 " + SkillPath,
+				"install -d -o " + claudecode.User + " -g " + claudecode.User + " -m 0750 " + skillDir,
 				"tee " + skillStagingPath,
 				"mv -T " + skillStagingPath,
 			} {
@@ -611,7 +407,7 @@ func TestInitLeavesACurrentRetrievalSkillUntouched(t *testing.T) {
 	for _, fragment := range []string{
 		"tee " + skillStagingPath,
 		"mv -T " + skillStagingPath,
-		"install -d -o hermes -g hermes -m 0750 " + SkillPath,
+		"install -d -o " + claudecode.User + " -g " + claudecode.User + " -m 0750 " + skillDir,
 	} {
 		if g.saw(fragment) {
 			t.Errorf("idempotent init rewrote the retrieval skill: saw %q", fragment)
@@ -699,9 +495,9 @@ func TestInitRepairsADriftedRetrievalSkill(t *testing.T) {
 			if !report.SkillUpdated || report.Status.SkillState != SkillInstalled {
 				t.Fatalf("report = %#v, want a repaired retrieval skill", report)
 			}
-			_, digest, err := hermesSkillPayload()
+			_, digest, err := declaredSkillPayload()
 			if err != nil {
-				t.Fatalf("hermesSkillPayload() error = %v", err)
+				t.Fatalf("declaredSkillPayload() error = %v", err)
 			}
 			if g.skillDigest != digest || g.skillMode != "640" || g.skillDirMode != "750" {
 				t.Fatalf("guest skill = %q %s dir %s, want the embedded payload at 640/750",
@@ -713,7 +509,7 @@ func TestInitRepairsADriftedRetrievalSkill(t *testing.T) {
 
 // A symlinked skill path could redirect a root-owned write anywhere on the
 // guest, so Torio refuses instead of following it.
-func TestInitRefusesToWriteThroughASymlinkedSkillPath(t *testing.T) {
+func TestInitRefusesToWriteThroughASymlinkedskillDir(t *testing.T) {
 	for _, name := range []string{"payload", "directory"} {
 		t.Run(name, func(t *testing.T) {
 			g := initializedFake().withInstalledSkill(t)
@@ -733,172 +529,23 @@ func TestInitRefusesToWriteThroughASymlinkedSkillPath(t *testing.T) {
 }
 
 // The install path is the whole point of the task: only a skill under the
-// global $HERMES_HOME/skills root is visible from every project. Pinning it
+// backend's own global skills root is visible from every project. Pinning it
 // here stops a later refactor from quietly moving it under the vault, under a
-// project, or under the Hermes profile root itself.
-func TestRetrievalSkillInstallsUnderTheGlobalHermesSkillsRoot(t *testing.T) {
-	if SkillPath != lima.HermesProfilePath+"/skills/"+SkillCategory+"/"+SkillName {
-		t.Fatalf("SkillPath = %q, want $HERMES_HOME/skills/%s/%s", SkillPath, SkillCategory, SkillName)
+// project, or under the profile root itself.
+func TestRetrievalSkillInstallsUnderTheGlobalSkillsRoot(t *testing.T) {
+	if skillDir != skillRoot+"/"+SkillName {
+		t.Fatalf("skillDir = %q, want %s/%s", skillDir, skillRoot, SkillName)
 	}
-	// One level of category, no deeper: Hermes derives the category from the
-	// first path segment, so a nested path would name a category nobody chose.
-	if strings.Count(strings.TrimPrefix(SkillPath, lima.HermesProfilePath+"/skills/"), "/") != 1 {
-		t.Fatalf("SkillPath = %q, want exactly one category segment above the skill", SkillPath)
+	if skillFilePath != skillDir+"/SKILL.md" {
+		t.Fatalf("skillFilePath = %q, want %s/SKILL.md", skillFilePath, skillDir)
 	}
-	if SkillFilePath != SkillPath+"/SKILL.md" {
-		t.Fatalf("SkillFilePath = %q, want %s/SKILL.md", SkillFilePath, SkillPath)
-	}
-	if strings.HasPrefix(SkillPath, Path) {
-		t.Fatalf("SkillPath %q is inside the vault; skills under the Brain are not discovered", SkillPath)
+	if strings.HasPrefix(skillDir, Path) {
+		t.Fatalf("skillDir %q is inside the vault; skills under the Brain are not discovered", skillDir)
 	}
 	// Staging must not sit inside the discovery root: os.walk treats any
 	// directory holding a SKILL.md as a skill, so a half-written payload there
 	// would be loadable.
-	if strings.HasPrefix(skillStagingPath, lima.HermesProfilePath+"/skills") {
+	if strings.HasPrefix(skillStagingPath, claudecode.ProfilePath+"/skills") {
 		t.Fatalf("skillStagingPath %q is inside the skill discovery root", skillStagingPath)
-	}
-}
-
-// A guest installed before the category move carries a second SKILL.md under
-// the same skill name. Hermes does not pick one: skill_view collects every
-// candidate and, on more than one, returns an "Ambiguous skill name" error
-// instead. Leaving the old copy behind would therefore turn a visibility
-// improvement into a total loss of retrieval, so init must retire it.
-func TestInitRetiresThePreCategorySkillInstallation(t *testing.T) {
-	g := initializedFake()
-	g.legacySkillPresent = true
-	if _, err := New(g, lima.BootstrapOptions{}).Init(context.Background()); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
-	if !g.saw("rm -f -- " + legacySkillPath + "/SKILL.md") {
-		t.Errorf("init left the superseded skill in place: %v", g.calls)
-	}
-	// rmdir, never `rm -r`: anything else under the old path is not Torio's,
-	// and with SKILL.md gone the name collision is already resolved.
-	if !g.saw("rmdir -- " + legacySkillPath) {
-		t.Errorf("init did not try to sweep up the emptied legacy directory")
-	}
-	if g.saw("rm -rf -- " + legacySkillPath) {
-		t.Errorf("init removed the legacy path recursively: %v", g.calls)
-	}
-}
-
-// Status has to see the collision too, otherwise an operator whose retrieval
-// silently stopped working is told everything is fine.
-func TestStatusReportsDriftWhileThePreCategorySkillSurvives(t *testing.T) {
-	g := initializedFake().withInstalledSkill(t)
-	g.legacySkillPresent = true
-	report, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
-	if err != nil {
-		t.Fatalf("Status() error = %v", err)
-	}
-	if report.SkillState != SkillDrift {
-		t.Errorf("skill state = %q, want %q while a second copy of the name exists", report.SkillState, SkillDrift)
-	}
-}
-
-// The category description is the only place in the skill index not truncated
-// at 60 characters, and Hermes reads it from the frontmatter `description`
-// key — a body-only file renders nothing at all.
-func TestCategoryDescriptionCarriesTheRuleInItsFrontmatter(t *testing.T) {
-	payload, _, err := hermesCategoryPayload()
-	if err != nil {
-		t.Fatalf("hermesCategoryPayload() error = %v", err)
-	}
-	text := string(payload)
-	if !strings.HasPrefix(text, "---\n") {
-		t.Fatalf("category description has no frontmatter block")
-	}
-	end := strings.Index(text[4:], "\n---")
-	if end < 0 {
-		t.Fatalf("category description frontmatter is unterminated")
-	}
-	front := text[4 : 4+end]
-	if !strings.Contains(front, "description:") {
-		t.Fatalf("category frontmatter has no description key; Hermes would render nothing:\n%s", front)
-	}
-	for _, want := range []string{Path, "bulk"} {
-		if !strings.Contains(front, want) {
-			t.Errorf("category description does not mention %q; it is the uncapped slot, so it should:\n%s", want, front)
-		}
-	}
-}
-
-// The status an init report carries is taken before the skill is repaired, so
-// without clearing it the same block prints `skill: installed` alongside
-// `issues: retrieval_skill_drift`. An operator who just watched the repair
-// succeed reads that as a failure — observed on a real guest during the v0.1.0
-// upgrade.
-func TestInitDoesNotReportDriftItJustRepaired(t *testing.T) {
-	g := initializedFake().withInstalledSkill(t)
-	g.legacySkillPresent = true
-
-	report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
-	if err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
-	if report.Status.SkillState != SkillInstalled {
-		t.Fatalf("skill state = %q, want %q", report.Status.SkillState, SkillInstalled)
-	}
-	if slices.Contains(report.Status.Issues, issueSkillDrift) {
-		t.Errorf("init reported %q as an outstanding issue after repairing it: %v", issueSkillDrift, report.Status.Issues)
-	}
-}
-
-// Clearing the issue must not become a habit of hiding it: a Brain nobody
-// repaired still has to say so.
-func TestStatusStillReportsDriftNobodyRepaired(t *testing.T) {
-	g := initializedFake().withInstalledSkill(t)
-	g.legacySkillPresent = true
-
-	report, err := New(g, lima.BootstrapOptions{}).Status(context.Background())
-	if err != nil {
-		t.Fatalf("Status() error = %v", err)
-	}
-	if !slices.Contains(report.Issues, issueSkillDrift) {
-		t.Errorf("status hid %q on an unrepaired guest: %v", issueSkillDrift, report.Issues)
-	}
-}
-
-// An operator who clears the Brain to start over must be able to recreate it.
-//
-// Before this, an empty canonical directory with the Hermes project still
-// registered was drift, and Init's drift branch only repairs a scaffold that
-// exists — so `brain init` refused, permanently. There was no way out either:
-// Hermes cannot free a slug, because `archive` leaves the project visible to
-// `project show` and no delete exists. Observed on a real guest while rebuilding
-// a Brain around an imported vault.
-func TestInitRebuildsAnEmptyBrainThatIsStillRegistered(t *testing.T) {
-	g := readyFake()
-	g.registered = true
-
-	report, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
-	if err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
-	if !report.Created || report.Status.State != StateInitialized {
-		t.Fatalf("report = %#v, want a rebuilt, initialized Brain", report)
-	}
-	if !g.saw("mv -T " + stagingPath + " " + Path) {
-		t.Errorf("no scaffold was promoted: %v", g.calls)
-	}
-	// The registration is reconciled, not duplicated: the slug already points
-	// at this path.
-	if g.saw("hermes project create") {
-		t.Errorf("init re-created a project that was already registered")
-	}
-}
-
-// A slug held by a project pointing somewhere else is a different situation and
-// must stay refused. Scaffolding under it would trample a project Torio does not
-// own, and no amount of emptiness here makes that safe.
-func TestInitStillRefusesWhenTheSlugBelongsToAnotherPath(t *testing.T) {
-	g := readyFake()
-	g.wrongProject = true
-
-	_, err := New(g, lima.BootstrapOptions{}).Init(context.Background())
-	assertKind(t, err, KindConflict)
-	if g.saw("mv -T " + stagingPath + " " + Path) {
-		t.Errorf("init scaffolded under a slug owned by another path: %v", g.calls)
 	}
 }

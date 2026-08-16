@@ -4,10 +4,10 @@
 // re-derive them.
 //
 // Two boundaries define the package. The workspace path is always derived from
-// the project ID as /home/hermes/projects/<id> — never taken from an operator,
+// the project ID as <backend workspace>/<id> — never taken from an operator,
 // never stored in config — so an attachment cannot point anywhere else on the
 // guest. Host Git credentials never enter this package: every remote operation
-// runs noninteractively as the `hermes` service user, so a repository the guest
+// runs noninteractively as the agent's guest identity, so a repository the guest
 // cannot read fails closed instead of prompting.
 //
 // A private SSH remote is the ordinary case of that, so an unreadable one is
@@ -22,18 +22,17 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/wzslr321/torio/internal/backend"
 	"github.com/wzslr321/torio/internal/config"
 )
 
 const (
-	// sharedGroup is the group the operator and `hermes` both belong to, and the
+	// sharedGroup is the group the operator and the agent both belong to, and the
 	// only way found to let both identities work one checkout without sudo:
-	// workspaceRoot is 2770 hermes:torio-projects, so setgid puts every file
+	// workspaceRoot is 2770 agent:torio-projects, so setgid puts every file
 	// created below it in the group and both members can write it. Membership is
-	// deliberately narrow — the operator's login identity and `hermes`, never
+	// deliberately narrow — the operator's login identity and the agent, never
 	// "every uid >= 500", which on Ubuntu also sweeps in systemd dynamic users.
-	// It is also why `hermes` is never in the docker group: that group is
+	// It is also why the agent is never in the docker group: that group is
 	// root-equivalent, so it would give the agent the whole guest.
 	sharedGroup = "torio-projects"
 )
@@ -71,7 +70,7 @@ var publicKeyPattern = regexp.MustCompile(`^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nist
 type Project struct {
 	// ID is the stable slug; it also derives Path.
 	ID string
-	// DisplayName is the human label, and the name the Hermes project carries.
+	// DisplayName is the human label.
 	DisplayName string
 	// Remote is the validated Git remote. The config layer has already proven it
 	// carries no credential, which is what makes it safe to echo.
@@ -99,8 +98,6 @@ type AddRequest struct {
 	// repository that exists only on the operator's disk gets in, and how a
 	// local project reaches a second box.
 	BundlePath string
-	// Use activates the project in Hermes after a successful add.
-	Use bool
 	// AllowDuplicateRemote carries the explicit operator decision to register a
 	// remote another project already uses.
 	AllowDuplicateRemote bool
@@ -120,20 +117,9 @@ type AddReport struct {
 	// project. It is distinct from Cloned because nothing arrived: the
 	// repository has no commit until the operator makes one.
 	Initialized bool
-	// RegistryDeclared reports that the backend keeps a project registry at
-	// all. When it is false the two fields below are meaningless rather than
-	// false-and-alarming: nothing was registered because there was nowhere to
-	// register it.
-	RegistryDeclared bool
-	// HermesCreated / HermesRestored report what this run did to the backend's
-	// project registration.
-	HermesCreated  bool
-	HermesRestored bool
 	// Registered reports that the config registry holds the project after the
 	// call. It is false on every failure path.
 	Registered bool
-	// Activated reports that `hermes project use` succeeded.
-	Activated bool
 	// Notes are bounded, non-secret state markers describing what a failure left
 	// behind and what a rerun will finish (see addNote*).
 	Notes []string
@@ -168,11 +154,6 @@ type DeployKey struct {
 // to assume it either way.
 type RemoveReport struct {
 	Project Project
-	// HermesArchived / HermesAlreadyArchived / HermesAbsent are the three
-	// idempotent shapes the Hermes side can end in.
-	HermesArchived        bool
-	HermesAlreadyArchived bool
-	HermesAbsent          bool
 	// CheckoutRetained is always true: V1 has no --delete.
 	CheckoutRetained bool
 	// CheckoutPath is the directory that still exists after the removal.
@@ -233,7 +214,7 @@ type CheckoutStatus struct {
 	Owner string
 	Group string
 	Mode  string
-	// SharedPermissions reports hermes:torio-projects ownership with the setgid
+	// SharedPermissions reports agent:torio-projects ownership with the setgid
 	// bit and group rwx, so both trusted identities can work the tree.
 	SharedPermissions bool
 }
@@ -284,24 +265,12 @@ func (c CheckoutStatus) issues() []string {
 	return out
 }
 
-// HermesStatus is the derived state of the backend's project registration. It
-// is the contract's registry status under the name the JSON envelope has always
-// used for it; a backend that declares no registry leaves it zero, which
-// `RegistryDeclared` is what distinguishes from "declared and absent".
-type HermesStatus = backend.RegistryStatus
-
 // ShowReport is the inspected state of one attached project.
 type ShowReport struct {
 	Project  Project
 	Checkout CheckoutStatus
-	Hermes   HermesStatus
 	// Issues are stable, payload-free markers for everything that does not hold.
 	Issues []string
-}
-
-// UseReport is the outcome of activating a project in Hermes.
-type UseReport struct {
-	Project Project
 }
 
 // EnterSpec is the data an ordinary interactive project session needs. It is
@@ -404,25 +373,6 @@ type ReviewContext struct {
 	// of them means there is nothing to push.
 	Ahead      int
 	AheadKnown bool
-}
-
-// ServiceEnvCheck is the read-only look at the persistent Hermes backend
-// environment that follows an operator session.
-//
-// ADR-0003 puts write capability in the ephemeral session and nowhere else:
-// the persistent `hermes` service identity must never hold SSH_AUTH_SOCK. This
-// is the cheap regression detector for that invariant. It carries a verdict —
-// never the environment it read.
-//
-// The two booleans are three states, and the middle one matters: a guest with
-// no backend installed has nothing to leak into, which is neither a clean bill
-// of health nor a failure.
-type ServiceEnvCheck struct {
-	// Checked reports that the backend unit environment was actually read.
-	Checked bool
-	// AgentSocketPresent reports the invariant breach: the persistent service
-	// environment declares SSH_AUTH_SOCK.
-	AgentSocketPresent bool
 }
 
 // Registry is the narrow config boundary the manager reads and persists the

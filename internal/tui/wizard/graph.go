@@ -32,10 +32,6 @@ const (
 	StepBootstrap Step = "bootstrap"
 	// StepBackendLogin is a backend whose credential was proven absent.
 	StepBackendLogin Step = "backend-login"
-	// StepServeInstall is a service backend with no unit on the guest.
-	StepServeInstall Step = "serve-install"
-	// StepServeStart is an installed unit that is not running.
-	StepServeStart Step = "serve-start"
 	// StepBrainInit is a box with no initialized Second Brain.
 	StepBrainInit Step = "brain-init"
 	// StepProjectAdd is a set-up box with nothing registered to work on.
@@ -69,12 +65,6 @@ type Facts struct {
 	// string is read as unknown, so a caller that could not ask is never taken
 	// to have proven the credential absent.
 	Credential string
-	// ServiceDeclared is whether this backend runs a guest service at all.
-	// False makes ServeInstalled and ServeRunning meaningless rather than
-	// false-and-alarming.
-	ServiceDeclared bool
-	ServeInstalled  bool
-	ServeRunning    bool
 	// BrainReady is whether the Second Brain is initialized and undrifted.
 	BrainReady bool
 	// ProjectCount is how many projects the registry holds for this instance.
@@ -104,14 +94,6 @@ func Next(f Facts) Step {
 	// check could not be read, which is not evidence of a logged-out box.
 	if f.Credential == CredentialAbsent {
 		return StepBackendLogin
-	}
-	if f.ServiceDeclared {
-		if !f.ServeInstalled {
-			return StepServeInstall
-		}
-		if !f.ServeRunning {
-			return StepServeStart
-		}
 	}
 	if !f.BrainReady {
 		return StepBrainInit
@@ -171,9 +153,6 @@ func applicable(f Facts) []Step {
 	if f.Credential != CredentialNotApplicable {
 		steps = append(steps, StepBackendLogin)
 	}
-	if f.ServiceDeclared {
-		steps = append(steps, StepServeInstall, StepServeStart)
-	}
 	return append(steps, StepBrainInit, StepProjectAdd)
 }
 
@@ -221,18 +200,6 @@ func Describe(s Step) Description {
 			Title:   "Sign in to the backend",
 			Detail:  "The backend holds no credential yet. Torio hands you the real login session and returns here when it ends.",
 			Command: "torio backend login",
-		}
-	case StepServeInstall:
-		return Description{
-			Title:   "Install the service",
-			Detail:  "Writes the backend's user service onto the guest. No host file is touched.",
-			Command: "torio serve install",
-		}
-	case StepServeStart:
-		return Description{
-			Title:   "Start the service",
-			Detail:  "Starts the installed unit and waits for its endpoint to answer on the guest loopback.",
-			Command: "torio serve start",
 		}
 	case StepBrainInit:
 		return Description{

@@ -10,7 +10,10 @@
   Claude client route root-managed and removes native MCP declarations, and
   [ADR-0016](0016-session-scoped-push-grant.md), which accepts the
   session-scoped push grant deferred under "Push stays human", on top of
-  [ADR-0015](0015-mediated-agent-forwarding.md).
+  [ADR-0015](0015-mediated-agent-forwarding.md), and
+  [ADR-0028](0028-the-hermes-backend-is-removed.md), which removes the Hermes
+  backend and with it the service tier, the project registry, and the rule that
+  an instance declaring no backend runs Hermes.
 - Applies to: `internal/backend`, `internal/lima`, `internal/serve`,
   `internal/projects`, `internal/brain`, `internal/config`, `internal/cli`
 

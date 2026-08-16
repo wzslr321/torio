@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 
@@ -60,8 +62,8 @@ func TestMCPLoginRunsTheFixedSessionThenActivatesTheBroker(t *testing.T) {
 		},
 		newInteractive: func() execx.InteractiveRunner { return runner },
 		activateMCP: func(_ context.Context, _ *lima.Adapter, identity backend.Identity) (lima.MCPBrokerActivationReport, error) {
-			if identity.Name != "hermes" {
-				t.Fatalf("backend = %q, want hermes", identity.Name)
+			if identity.Name != backend.DefaultName {
+				t.Fatalf("backend = %q, want %q", identity.Name, backend.DefaultName)
 			}
 			return lima.MCPBrokerActivationReport{Pending: 1}, nil
 		},
@@ -97,7 +99,7 @@ func cliTestPolicyDigest(files ...string) string {
 }
 
 // okMCPScript is the guest replying that every ADR-0004 boundary holds, probe
-// by probe, in the order lima.VerifyMCPBroker issues them.
+// by probe, in the order lima.VerifyMCPBrokerFor issues them.
 func okMCPScript() []scriptedResp {
 	out := func(s string) scriptedResp { return scriptedResp{res: execx.Result{Stdout: []byte(s)}} }
 	return []scriptedResp{
@@ -106,23 +108,27 @@ func okMCPScript() []scriptedResp {
 		out("torio-mcp\n"),
 		out("torio-mcp torio-mcp-clients\n"),
 		out(cliSudoDenied),                               // broker holds no sudo
-		out("1000\n"),                                    // id -u hermes
-		out("torio-mcp-clients:x:995:hermes\n"),          // getent group
-		out("hermes torio-projects torio-mcp-clients\n"), // id -nG hermes (client)
-		out("hermes torio-projects torio-mcp-clients\n"), // id -nG hermes (not owner)
-		out(cliSudoDenied),                               // hermes holds no sudo
+		out("1000\n"),                                    // id -u the agent
+		out("torio-mcp-clients:x:995:claude\n"),          // getent group
+		out("claude torio-projects torio-mcp-clients\n"), // id -nG agent (client)
+		out("claude torio-projects torio-mcp-clients\n"), // id -nG agent (not owner)
+		out(cliSudoDenied),                               // the agent holds no sudo
 		// Each `stat %F` probe names a control path first, so a present path
 		// answers with two lines and an absent one with the control line alone.
 		// An empty reply means the probe never ran, which fails closed.
-		out("directory\ndirectory\n"),    // stat %F broker home
-		out("torio-mcp:torio-mcp 700\n"), // stat %U:%G %a broker home
-		{res: execx.Result{ExitCode: 1, Stdout: []byte("directory\n"), Stderr: []byte("no such file")}}, // stat mcp-tokens: absent
+		out("directory\ndirectory\n"),           // stat %F broker home
+		out("torio-mcp:torio-mcp 700\n"),        // stat %U:%G %a broker home
 		out("directory\ndirectory\n"),           // stat %F policy dir
 		out("root:root 755\n"),                  // stat %U:%G %a policy dir
 		out("atlassian.json root root 644 f\n"), // find policy documents
 		out(cliTestPolicyDocs["atlassian.json"]),
-		out("directory\nregular file\n"), // stat %F hermes config.yaml
-		out("mcp_servers:\n  atlassian:\n    command: /usr/local/bin/torio-mcp-connect\n"), // cat config.yaml
+		out("regular file root:root 644\n"),        // stat managed settings
+		out(`{"allowManagedMcpServersOnly":true}`), // cat managed settings
+		out("regular file root:root 644\n"),        // stat managed MCP
+		out(`{"mcpServers":{"atlassian":{"type":"stdio","command":"/usr/local/bin/torio-mcp-connect","args":["atlassian"],"env":{}}}}`),
+		{res: execx.Result{ExitCode: 1, Stdout: []byte("directory\n"), Stderr: []byte("agent config absent")}}, // agent-owned config
+		out("directory root:root 755\ndirectory torio-mcp:torio-mcp 700\n"),                                    // private OAuth dir
+		out("directory root:root 755\nregular file torio-mcp:torio-mcp 600\n"),                                 // atlassian session
 		out("directory\ndirectory\n"), // runtime is present
 		out("directory root:root 755\nregular file root:root 644\n"),
 		out("enabled\n"),
@@ -145,10 +151,11 @@ func okMCPScript() []scriptedResp {
 // Indices into okMCPScript. The probes run in a fixed order, so a reply spliced
 // at a guessed offset would be consumed by a different check and prove nothing.
 const (
-	mcpPolicyListingIndex  = 15
-	mcpPolicyDocumentIndex = 16
-	mcpAgentConfigIndex    = 18
-	mcpSocketListingIndex  = 27
+	mcpPolicyListingIndex  = 14
+	mcpPolicyDocumentIndex = 15
+	mcpAgentConfigIndex    = 19
+	mcpOAuthSessionIndex   = 22
+	mcpSocketListingIndex  = 31
 )
 
 // multiServiceMCPScript is a guest whose policy directory holds three services
@@ -168,10 +175,16 @@ func multiServiceMCPScript() []scriptedResp {
 	script = append(script[:mcpPolicyDocumentIndex], append(documents, script[mcpPolicyDocumentIndex+1:]...)...)
 	shift := len(documents) - 1
 
-	script[mcpAgentConfigIndex+shift] = out("mcp_servers:\n" +
-		"  atlassian:\n    command: /usr/local/bin/torio-mcp-connect\n" +
-		"  linear:\n    command: /usr/local/bin/torio-mcp-connect\n" +
-		"  slack:\n    command: /usr/local/bin/torio-mcp-connect\n")
+	script[mcpAgentConfigIndex+shift] = out(`{"mcpServers":{` +
+		`"atlassian":{"type":"stdio","command":"/usr/local/bin/torio-mcp-connect","args":["atlassian"],"env":{}},` +
+		`"linear":{"type":"stdio","command":"/usr/local/bin/torio-mcp-connect","args":["linear"],"env":{}},` +
+		`"slack":{"type":"stdio","command":"/usr/local/bin/torio-mcp-connect","args":["slack"],"env":{}}}}`)
+
+	// One private OAuth session probe per policy service, in the grant's order.
+	session := out("directory root:root 755\nregular file torio-mcp:torio-mcp 600\n")
+	sessionAt := mcpOAuthSessionIndex + shift
+	script = append(script[:sessionAt], append([]scriptedResp{session, session}, script[sessionAt:]...)...)
+	shift += 2
 
 	socket := mcpSocketListingIndex + shift
 	script[socket] = out("atlassian.sock torio-mcp torio-mcp-clients 660\n" +
@@ -204,7 +217,7 @@ func TestMCPStatusHappyPathHumanAndJSON(t *testing.T) {
 	if code != int(ExitOK) {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
 	}
-	for _, want := range []string{"broker_user", "hermes_not_broker_owner", "hermes_mcp_tokens"} {
+	for _, want := range []string{"broker_user", "claude_not_broker_owner", "claude_mcp_servers"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("human output does not mention check %q: %q", want, stdout)
 		}
@@ -311,7 +324,10 @@ func TestMCPStatusReportsNoWriteToolOnTheReleasedSurface(t *testing.T) {
 
 func TestMCPStatusAcceptsAProvisionedBoundaryWithoutTheUnreleasedDaemon(t *testing.T) {
 	script := okMCPScript()
-	script = append(script[:19], scriptedResp{res: execx.Result{
+	// No private OAuth session yet, so no runtime is expected either: this is
+	// the state between `mcp install` and the first `mcp login`.
+	script[22] = scriptedResp{res: execx.Result{Stdout: []byte("directory root:root 755\n")}}
+	script = append(script[:23], scriptedResp{res: execx.Result{
 		ExitCode: 1,
 		Stdout:   []byte("directory\n"),
 	}})
@@ -342,10 +358,10 @@ func TestMCPStatusNotInstalledIsPrecondition(t *testing.T) {
 }
 
 // TestMCPStatusBrokenCustodyIsVerification is the alarm that must be loud: the
-// broker exists, but hermes can read its credential store.
+// broker exists, but the agent can read its credential store.
 func TestMCPStatusBrokenCustodyIsVerification(t *testing.T) {
 	script := okMCPScript()
-	script[8] = scriptedResp{res: execx.Result{Stdout: []byte("hermes torio-mcp-clients torio-mcp\n")}}
+	script[8] = scriptedResp{res: execx.Result{Stdout: []byte("claude torio-mcp-clients torio-mcp\n")}}
 	code, stdout, _ := runVMWithFake(t, []string{"mcp", "status", "--json"}, &fakeLimaRunner{script: script})
 	if code != int(ExitVerification) {
 		t.Fatalf("exit = %d, want %d (verification)", code, int(ExitVerification))
@@ -361,29 +377,6 @@ func TestMCPStatusBrokenCustodyIsVerification(t *testing.T) {
 	checks, _ := details["checks"].([]any)
 	if len(checks) == 0 {
 		t.Fatalf("error details carry no checks: %v", details)
-	}
-}
-
-// TestMCPStatusLeftoverTokensReportsCountNotNames guards the privacy rule at the
-// surface an operator actually reads: the count is the finding, guest filenames
-// are never printed.
-func TestMCPStatusLeftoverTokensReportsCountNotNames(t *testing.T) {
-	script := okMCPScript()
-	script[12] = scriptedResp{res: execx.Result{Stdout: []byte("directory\ndirectory\n")}}
-	// Spliced, not appended: the socket probe follows the token probes, so an
-	// extra reply at the end would be consumed by the wrong check.
-	script = append(script[:13], append([]scriptedResp{{res: execx.Result{Stdout: []byte("xxx")}}}, script[13:]...)...)
-	code, stdout, _ := runVMWithFake(t, []string{"mcp", "status", "--json"}, &fakeLimaRunner{script: script})
-	if code != int(ExitVerification) {
-		t.Fatalf("exit = %d, want %d (verification)", code, int(ExitVerification))
-	}
-	if !strings.Contains(stdout, "3 credential files") {
-		t.Errorf("output does not report the credential count: %q", stdout)
-	}
-	for _, leak := range []string{".json", "atlassian"} {
-		if strings.Contains(stdout, leak) {
-			t.Errorf("output leaks %q; the surface reports a count, never names", leak)
-		}
 	}
 }
 
@@ -413,7 +406,7 @@ func freshMCPInstallScript() []scriptedResp {
 	fail := func(code int, stdout string) scriptedResp {
 		return scriptedResp{res: execx.Result{ExitCode: code, Stdout: []byte(stdout)}}
 	}
-	return []scriptedResp{
+	return append([]scriptedResp{
 		fail(2, ""),                          // getent group -> absent
 		out(""),                              // groupadd
 		fail(1, ""),                          // id -u torio-mcp -> absent
@@ -424,7 +417,7 @@ func freshMCPInstallScript() []scriptedResp {
 		out("directory\n"),                   // stat %F home
 		out("torio-mcp:torio-mcp 755\n"),     // stat %U:%G %a -> too open
 		out(""),                              // chmod 700
-		out("hermes torio-projects\n"),       // id -nG hermes -> not a client yet
+		out("claude torio-projects\n"),       // id -nG agent -> not a client yet
 		out(""),                              // usermod -aG
 		out("directory\n"),                   // policy dir pre-staged by root
 		out("997\n"),                         // verify broker identity
@@ -432,18 +425,61 @@ func freshMCPInstallScript() []scriptedResp {
 		out("torio-mcp\n"),
 		out("torio-mcp torio-mcp-clients\n"),
 		out(cliSudoDenied), // broker holds no sudo
-		out("1000\n"),      // id -u hermes
-		out("torio-mcp-clients:x:995:hermes\n"),
-		out("hermes torio-projects torio-mcp-clients\n"),
-		out("hermes torio-projects torio-mcp-clients\n"),
-		out(cliSudoDenied), // hermes holds no sudo
+		out("1000\n"),      // id -u the agent
+		out("torio-mcp-clients:x:995:claude\n"),
+		out("claude torio-projects torio-mcp-clients\n"),
+		out("claude torio-projects torio-mcp-clients\n"),
+		out(cliSudoDenied), // the agent holds no sudo
 		out("directory\ndirectory\n"),
 		out("torio-mcp:torio-mcp 700\n"),
 		out("directory\ndirectory\n"),           // verify policy directory path
 		out("root:root 755\n"),                  // verify policy directory ownership
 		out("atlassian.json root root 644 f\n"), // verify policy document metadata
 		out(cliTestPolicyDocs["atlassian.json"]),
+	}, mcpPayloadInstallResponses()...)
+}
+
+// mcpPayloadInstallResponses is the tail of a fresh install: the three release
+// files land and are verified from the digest that was sent, the backend's MCP
+// declaration is reconciled, and the runtime stays dormant because no policy
+// service has a private OAuth session yet.
+func mcpPayloadInstallResponses() []scriptedResp {
+	out := func(s string) scriptedResp { return scriptedResp{res: execx.Result{Stdout: []byte(s)}} }
+	fail := func(code int, stdout string) scriptedResp {
+		return scriptedResp{res: execx.Result{ExitCode: code, Stdout: []byte(stdout)}}
 	}
+	// One file lands in eight calls: prove absent, write, chown, chmod, rename,
+	// fsync, then re-stat and re-digest what actually landed.
+	install := func(mode, digest string) []scriptedResp {
+		return []scriptedResp{
+			fail(1, ""), // stat: absent
+			out(""),     // dd
+			out(""),     // chown
+			out(""),     // chmod
+			out(""),     // mv -T
+			out(""),     // sync -f
+			out("root:root " + mode + " regular file\n"),
+			out(digest + "  installed\n"),
+		}
+	}
+	var script []scriptedResp
+	script = append(script, install("755", mcpPayloadDigest(testProfile.MCPBrokerArtifact()))...)
+	script = append(script, install("755", mcpPayloadDigest(testProfile.MCPRelayArtifact()))...)
+	script = append(script, install("644", cliTestMCPBrokerUnitDigest())...)
+	script = append(script,
+		out(""),                          // systemctl daemon-reload, after the unit landed
+		out("changed\n"),                 // reconcile the backend's managed MCP declaration
+		out("unchanged\n"),               // scrub any agent-owned native declaration
+		out("directory root:root 755\n"), // no private OAuth directory yet
+		fail(1, "disabled\n"),            // unit is not enabled
+		fail(3, "inactive\n"),            // unit is not active
+	)
+	return script
+}
+
+func cliTestMCPBrokerUnitDigest() string {
+	sum := sha256.Sum256([]byte(cliTestMCPBrokerUnit))
+	return hex.EncodeToString(sum[:])
 }
 
 func mcpInstallEmptyPolicyScript() []scriptedResp {
@@ -466,7 +502,7 @@ func TestMCPInstallFreshReportsChangeAndRestart(t *testing.T) {
 		t.Errorf("data.changed = %v, want true on a fresh guest", data["changed"])
 	}
 	if data["restart_required"] != true {
-		t.Errorf("data.restart_required = %v, want true: hermes only just joined the client group", data["restart_required"])
+		t.Errorf("data.restart_required = %v, want true: the agent only just joined the client group", data["restart_required"])
 	}
 }
 
@@ -497,7 +533,7 @@ func TestMCPInstallHumanErrorReportsPartialChangeAndRestart(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("stdout = %q, want empty human error output", stdout)
 	}
-	for _, want := range []string{"guest was partially changed", "torio serve restart", "re-run `torio mcp install`"} {
+	for _, want := range []string{"guest was partially changed", "open a new one", "re-run `torio mcp install`"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr does not contain %q: %q", want, stderr)
 		}
@@ -535,13 +571,13 @@ func TestMCPInstallHumanOutputNamesTheRestartStep(t *testing.T) {
 	}
 	// A broker the agent cannot reach, with no stated reason, is the failure mode
 	// this line exists to prevent.
-	if !strings.Contains(stdout, "serve restart") {
-		t.Errorf("human output does not tell the operator to restart the backend: %q", stdout)
+	if !strings.Contains(stdout, "open a new one") {
+		t.Errorf("human output does not tell the operator how to pick up the new membership: %q", stdout)
 	}
 	// The restart is what is left to do, so it stays last. A grant printed after
 	// it pushes the one actionable line off the bottom of the output.
-	if grant := strings.Index(stdout, "Granted policy"); grant < 0 || grant > strings.Index(stdout, "serve restart") {
-		t.Errorf("the grant must be printed before the restart step: %q", stdout)
+	if grant := strings.Index(stdout, "Granted policy"); grant < 0 || grant > strings.Index(stdout, "open a new one") {
+		t.Errorf("the grant must be printed before the session step: %q", stdout)
 	}
 }
 

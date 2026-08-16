@@ -1,6 +1,6 @@
 # Copilot code review instructions
 
-Torio is a Go control plane over Hermes Agent, Lima and Git. It provisions a VM,
+Torio is a Go control plane over coding agents, Lima and Git. It provisions a VM,
 a system identity and a credential boundary, so a change that looks small can
 move a boundary.
 

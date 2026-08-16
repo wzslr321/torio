@@ -242,20 +242,20 @@ func TestChecksumFileUsesContainedAbsoluteGuestPaths(t *testing.T) {
 		{Path: "notes/space name.md", Size: 1, Sha256: strings.Repeat("a", 64)},
 		{Path: "日本語/ノート.md", Size: 1, Sha256: strings.Repeat("b", 64)},
 	}}
-	payload, err := manifest.ChecksumFile("/home/hermes/.torio-brain-import-staging/payload")
+	payload, err := manifest.ChecksumFile("/home/claude/.torio-brain-import-staging/payload")
 	if err != nil {
 		t.Fatalf("ChecksumFile: %v", err)
 	}
 	text := string(payload)
 	for _, want := range []string{
-		strings.Repeat("a", 64) + "  /home/hermes/.torio-brain-import-staging/payload/notes/space name.md\n",
-		strings.Repeat("b", 64) + "  /home/hermes/.torio-brain-import-staging/payload/日本語/ノート.md\n",
+		strings.Repeat("a", 64) + "  /home/claude/.torio-brain-import-staging/payload/notes/space name.md\n",
+		strings.Repeat("b", 64) + "  /home/claude/.torio-brain-import-staging/payload/日本語/ノート.md\n",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("checksum payload missing expected entry: %q", text)
 		}
 	}
-	for _, prefix := range []string{"relative", "/home/hermes/../operator", "/home/hermes/bad\npath"} {
+	for _, prefix := range []string{"relative", "/home/claude/../operator", "/home/claude/bad\npath"} {
 		if _, err := manifest.ChecksumFile(prefix); err == nil {
 			t.Errorf("ChecksumFile accepted unsafe prefix %q", prefix)
 		}

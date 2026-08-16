@@ -7,7 +7,7 @@
 #
 # Prerequisites, all on the host:
 #   - vhs and JetBrains Mono installed
-#   - the default hermes box running, bootstrapped, with a Brain and a service
+#   - the default claude-code box running, bootstrapped, with a Brain
 #   - the binary built from this tree: `go build -o torio ./cmd/torio`
 #   - run from the repository root
 
@@ -69,11 +69,11 @@ Sleep 4s
 Type "a"
 Sleep 800ms
 Set TypingSpeed 90ms
-Type "hermes-agent"
+Type "torio"
 Sleep 600ms
 Tab
 Set TypingSpeed 45ms
-Type "https://github.com/NousResearch/hermes-agent.git"
+Type "https://github.com/wzslr321/torio.git"
 Set TypingSpeed 60ms
 Sleep 1500ms
 Enter

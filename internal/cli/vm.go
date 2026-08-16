@@ -154,10 +154,6 @@ func (a *app) declareBackend(name string) error {
 		return usageError(err.Error())
 	}
 	current := a.runtime.File.Backend
-	if current == "" && name == backend.DefaultName {
-		// Nothing to record: an absent declaration already means the default.
-		return nil
-	}
 	if current != "" && current != name {
 		return &CLIError{
 			Exit:    ExitUsage,
@@ -299,7 +295,7 @@ func newVMBootstrapCmd(a *app) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := a.opContext(cmd)
 			defer cancel()
-			// V1 runs unpinned: the observed hermes version is reported so drift is
+			// V1 runs unpinned: the observed agent version is reported so drift is
 			// visible. Enforcing a pin would need a new pin source and a new ADR;
 			// the D2 version-lock manifest was never wired and is gone (ADR-0005).
 			opUser, err := a.lookupOperatorUser()
@@ -391,17 +387,12 @@ func (a *app) emitVMState(command string, state lima.State) error {
 // vmBootstrapData is the `data` object for a successful `vm bootstrap`. It
 // carries the proven checks plus the guest locations the operator needs for the
 // connection handoff — no secrets, no raw output.
-//
-// `hermes_home` is a legacy alias for `home`, emitted on every backend so no
-// existing reader breaks. New readers should use `home`, which is the identity's
-// home whichever backend owns it.
 type vmBootstrapData struct {
 	Instance      string      `json:"instance"`
 	Backend       string      `json:"backend"`
 	Checks        []checkData `json:"checks"`
 	GuestUser     string      `json:"guest_user"`
 	Home          string      `json:"home"`
-	HermesHome    string      `json:"hermes_home"`
 	ProfilePath   string      `json:"profile_path"`
 	BrainPath     string      `json:"brain_path"`
 	WorkspacePath string      `json:"workspace_path"`
@@ -414,7 +405,6 @@ func bootstrapData(rep lima.BootstrapReport, id backend.Identity) vmBootstrapDat
 		Checks:        checkPayload(rep.Checks),
 		GuestUser:     id.GuestUser,
 		Home:          id.Home,
-		HermesHome:    id.Home,
 		ProfilePath:   id.ProfilePath,
 		BrainPath:     id.BrainPath,
 		WorkspacePath: id.WorkspacePath,
@@ -434,7 +424,7 @@ func bootstrapReportDetails(rep lima.BootstrapReport) map[string]any {
 // emitVMBootstrap renders a successful bootstrap. JSON mode emits exactly one
 // success envelope; human mode prints one line per proven check plus the
 // operator connection handoff (the persistent profile/brain locations and the
-// stable command path). The post-bootstrap action to reach Hermes stays operator-controlled.
+// stable command path). The post-bootstrap action stays operator-controlled.
 func (a *app) emitVMBootstrap(rep lima.BootstrapReport) error {
 	if a.jsonOut {
 		return writeJSON(a.stdout, successEnvelope("vm.bootstrap", bootstrapData(rep, a.backend.Identity())))
@@ -463,10 +453,6 @@ func (a *app) emitVMBootstrap(rep lima.BootstrapReport) error {
 func (a *app) writeBootstrapNextStep(rep lima.BootstrapReport) error {
 	if credentialState(rep, a.backend.StatusChecks().Auth) == "absent" {
 		_, err := fmt.Fprintf(a.stdout, "next: torio backend login\n")
-		return err
-	}
-	if a.backend.Service() != nil {
-		_, err := fmt.Fprintf(a.stdout, "next: torio serve install\n")
 		return err
 	}
 	if a.backend.Session() != nil {

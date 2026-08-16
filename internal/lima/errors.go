@@ -45,7 +45,7 @@ const (
 	// KindPostconditionFailed means a mutating command (start) exited zero,
 	// but re-querying the instance did not confirm the expected resulting
 	// state. A clean exit code alone is never sufficient proof of a
-	// state-changing operation (see docs/contracts/cli.md's Hermes-adapter
+	// state-changing operation (see docs/contracts/cli.md's adapter
 	// mutation-postcondition rule, applied here to limactl).
 	KindPostconditionFailed ErrorKind = "postcondition_failed"
 	// KindIncompatible means InstanceName already exists but its trusted pins

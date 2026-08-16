@@ -26,7 +26,7 @@ const credentialPath = ProfilePath + "/.credentials.json"
 //
 // The credential lives under the agent's own uid, which means the agent can
 // read what it is authenticated with. That is an accepted, documented hole of
-// the same class as the Hermes inference credential (SECURITY.md), and it is
+// the same class as any other inference credential (SECURITY.md), and it is
 // not fixed here. What the box does change is the blast radius of a compromise:
 // this grant belongs to the box and can be revoked without touching the
 // operator's own.

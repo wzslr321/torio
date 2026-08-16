@@ -20,7 +20,6 @@ import (
 // differs between backends belongs in the small per-backend blocks below; what
 // does not differ is asserted once, for every backend that ships.
 const (
-	backendHermes     = "hermes"
 	backendClaudeCode = "claude-code"
 	backendCodex      = "codex"
 )
@@ -29,7 +28,7 @@ func journeyBackend() string {
 	if b := os.Getenv("PLATFORM_E2E_BACKEND"); b != "" {
 		return b
 	}
-	return backendHermes
+	return backendClaudeCode
 }
 
 // backendProfile is what the journey needs to know about the backend under
@@ -53,16 +52,14 @@ type backendProfile struct {
 	// in a report and "present where this agent looks" are different claims —
 	// and the second is the one that decides whether the vault is reachable.
 	skillFile string
-	// declaresRegistry, declaresService and declaresSession are the three
-	// capabilities. A false one is asserted, not skipped: the contract's claim
-	// is that Torio reports an absent capability as a state, and a journey that
-	// simply did not look would not be testing that.
-	declaresRegistry bool
-	declaresService  bool
-	declaresSession  bool
-	// declaresWaitingMarker is the fourth, and it is separate because a backend
-	// can run a session process without having any way to say that the session is
-	// waiting on a human. Where it is true the journey drives the hook helper and
+	// declaresSession is the interactive-session capability. A false one is
+	// asserted, not skipped: the contract's claim is that Torio reports an
+	// absent capability as a state, and a journey that simply did not look
+	// would not be testing that.
+	declaresSession bool
+	// declaresWaitingMarker is separate because a backend can run a session
+	// process without having any way to say that the session is waiting on a
+	// human. Where it is true the journey drives the hook helper and
 	// reads the answer back out of `torio status`.
 	declaresWaitingMarker bool
 	// requiredChecks are bootstrap checks that must be present and OK. They are
@@ -81,8 +78,6 @@ func profileFor(name string) backendProfile {
 			versionCheck:          "claude_version",
 			versionCommand:        []string{"sudo", "-u", "claude", "--", "claude", "--version"},
 			skillFile:             "/home/claude/.claude/skills/torio-brain/SKILL.md",
-			declaresRegistry:      false,
-			declaresService:       false,
 			declaresSession:       true,
 			declaresWaitingMarker: true,
 			// The four proofs this backend's custody rests on: the identity
@@ -109,8 +104,6 @@ func profileFor(name string) backendProfile {
 			versionCheck:          "codex_version",
 			versionCommand:        []string{"sudo", "-u", "codex", "--", "codex", "--version"},
 			skillFile:             "/home/codex/.codex/skills/torio-brain/SKILL.md",
-			declaresRegistry:      false,
-			declaresService:       false,
 			declaresSession:       true,
 			declaresWaitingMarker: true,
 			// The same custody proofs the other process backend rests on, plus
@@ -127,34 +120,13 @@ func profileFor(name string) backendProfile {
 				"agent_session_helper",
 			},
 		}
-	case backendHermes:
-		return backendProfile{
-			name:                  backendHermes,
-			user:                  "hermes",
-			workspace:             "/home/hermes/projects",
-			vault:                 "/home/hermes/brain",
-			versionCheck:          "hermes_version",
-			versionCommand:        []string{"sudo", "-u", "hermes", "--", "hermes", "--version"},
-			skillFile:             "/home/hermes/.hermes/skills/brain/torio-brain/SKILL.md",
-			declaresRegistry:      true,
-			declaresService:       true,
-			declaresSession:       false,
-			declaresWaitingMarker: false,
-			requiredChecks: []string{
-				"hermes_user",
-				"hermes_torio_projects",
-				"hermes_not_in_docker",
-				"hermes_install",
-				"hermes_shim",
-			},
-		}
 	}
 	// An unknown name is a broken invocation, not a reason to fall back. A
 	// default case here made a typo in a CI matrix run the first backend's
 	// journey twice and report both legs green — the one outcome a two-backend
 	// gate exists to make impossible.
-	Fail(fmt.Sprintf("unknown PLATFORM_E2E_BACKEND %q; known backends are %q, %q and %q",
-		name, backendHermes, backendClaudeCode, backendCodex))
+	Fail(fmt.Sprintf("unknown PLATFORM_E2E_BACKEND %q; known backends are %q and %q",
+		name, backendClaudeCode, backendCodex))
 	return backendProfile{}
 }
 

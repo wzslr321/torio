@@ -35,11 +35,11 @@ func TestTmuxChipPerState(t *testing.T) {
 
 	idle := runningBox("torio-claude-code", "claude-code")
 
-	working := runningBox("torio", "hermes")
+	working := runningBox("torio-codex", "codex")
 	working.Session = status.SessionField{State: status.NotApplicable, Sessions: []status.Session{}}
 	working.Progress = status.ProgressField{State: status.Known, AgeSeconds: 14}
 
-	quiet := runningBox("torio", "hermes")
+	quiet := runningBox("torio-codex", "codex")
 	quiet.Session = status.SessionField{State: status.NotApplicable, Sessions: []status.Session{}}
 
 	unreadable := runningBox("torio-claude-code", "claude-code")
@@ -49,14 +49,14 @@ func TestTmuxChipPerState(t *testing.T) {
 	wakeUnknown.Session.Sessions = []status.Session{{PID: 1}}
 	wakeUnknown.Waiting = status.WaitingField{State: status.Unknown, Waits: []status.Wait{}}
 
-	progressUnknown := runningBox("torio", "hermes")
+	progressUnknown := runningBox("torio-codex", "codex")
 	progressUnknown.Session = status.SessionField{State: status.NotApplicable, Sessions: []status.Session{}}
 	progressUnknown.Progress = status.ProgressField{State: status.Unknown}
 
-	stopped := runningBox("torio", "hermes")
+	stopped := runningBox("torio-codex", "codex")
 	stopped.Box = "stopped"
 
-	broken := runningBox("torio", "hermes")
+	broken := runningBox("torio-codex", "codex")
 	broken.Box = "broken"
 	broken.Session = status.SessionField{State: status.Unknown, Sessions: []status.Session{}}
 	broken.Waiting = status.WaitingField{State: status.Unknown, Waits: []status.Wait{}}
@@ -73,19 +73,19 @@ func TestTmuxChipPerState(t *testing.T) {
 		{"a proven empty box is barely there", idle,
 			"#[fg=" + barDim + "]○ claude-code#[default]"},
 		{"a backend with no sessions shows when it last worked", working,
-			"#[fg=" + barWorking + "]·#[fg=" + barMuted + "] hermes 14s#[default]"},
+			"#[fg=" + barWorking + "]·#[fg=" + barMuted + "] codex 14s#[default]"},
 		{"and nothing at all when it never has", quiet,
-			"#[fg=" + barDim + "]" + glyphNotApplicable + " hermes#[default]"},
+			"#[fg=" + barDim + "]" + glyphNotApplicable + " codex#[default]"},
 		{"an unanswered question stays amber", unreadable,
 			"#[fg=" + barAmber + "]" + glyphUnknown + "#[fg=" + barMuted + "] claude-code#[default]"},
 		{"unknown waiting is not hidden by a live session", wakeUnknown,
 			"#[fg=" + barAmber + "]" + glyphUnknown + "#[fg=" + barMuted + "] claude-code#[default]"},
 		{"unknown progress is not rendered as unsupported", progressUnknown,
-			"#[fg=" + barAmber + "]" + glyphUnknown + "#[fg=" + barMuted + "] hermes#[default]"},
+			"#[fg=" + barAmber + "]" + glyphUnknown + "#[fg=" + barMuted + "] codex#[default]"},
 		{"a stopped box says off", stopped,
-			"#[fg=" + barDim + "]○ hermes off#[default]"},
+			"#[fg=" + barDim + "]○ codex off#[default]"},
 		{"a broken box is not reported as stopped", broken,
-			"#[fg=" + barAmber + "]" + glyphUnknown + "#[fg=" + barMuted + "] hermes#[default]"},
+			"#[fg=" + barAmber + "]" + glyphUnknown + "#[fg=" + barMuted + "] codex#[default]"},
 	} {
 		if got := tmuxCell(tc.in); got != tc.want {
 			t.Errorf("%s:\n got %q\nwant %q", tc.name, got, tc.want)
@@ -119,12 +119,12 @@ func TestTmuxChipCountsSeveralWaitingSessions(t *testing.T) {
 func TestPromptLineCarriesNoEscapes(t *testing.T) {
 	waiting := runningBox("torio-claude-code", "claude-code")
 	waiting.Waiting = status.WaitingField{State: status.Known, Waiting: true, Waits: []status.Wait{{PID: 1, AgeSeconds: 30}}}
-	live := runningBox("torio", "hermes")
+	live := runningBox("torio-codex", "codex")
 	live.Session = status.SessionField{State: status.NotApplicable, Sessions: []status.Session{}}
 
 	line := renderStatusLine(formatPrompt, status.Report{Instances: []status.Instance{live, waiting}})
 
-	want := "hermes " + glyphNotApplicable + promptSeparator + "claude-code NEEDS YOU"
+	want := "codex " + glyphNotApplicable + promptSeparator + "claude-code NEEDS YOU"
 	if line != want {
 		t.Errorf("line = %q, want %q", line, want)
 	}
@@ -138,11 +138,11 @@ func TestPromptDoesNotCollapseUnknownIntoQuiet(t *testing.T) {
 	wakeUnknown.Session.Sessions = []status.Session{{PID: 1}}
 	wakeUnknown.Waiting = status.WaitingField{State: status.Unknown, Waits: []status.Wait{}}
 
-	progressUnknown := runningBox("torio", "hermes")
+	progressUnknown := runningBox("torio-codex", "codex")
 	progressUnknown.Session = status.SessionField{State: status.NotApplicable, Sessions: []status.Session{}}
 	progressUnknown.Progress = status.ProgressField{State: status.Unknown}
 
-	broken := runningBox("torio", "hermes")
+	broken := runningBox("torio-codex", "codex")
 	broken.Box = "broken"
 
 	for _, in := range []status.Instance{wakeUnknown, progressUnknown, broken} {
@@ -178,7 +178,6 @@ func TestShortNameDropsWhatTheBackendAlreadySays(t *testing.T) {
 		in   status.Instance
 		want string
 	}{
-		{runningBox("torio", "hermes"), "hermes"},
 		{runningBox("torio-claude-code", "claude-code"), "claude-code"},
 		{runningBox("daily", "claude-code"), "daily"},
 		{unknown, "torio-claude-code"},
@@ -214,11 +213,11 @@ func TestStatusLineFormatsEndToEnd(t *testing.T) {
 		format string
 		want   string
 	}{
-		{formatPrompt, "hermes off"},
-		{formatTmux, "#[fg=" + barDim + "]○ hermes off#[default]"},
+		{formatPrompt, "codex off"},
+		{formatTmux, "#[fg=" + barDim + "]○ codex off#[default]"},
 	} {
 		fake := &fakeLimaRunner{script: []scriptedResp{
-			{res: execx.Result{ExitCode: 0, Stdout: []byte(statusListJSON("torio", "Stopped") + "\n")}},
+			{res: execx.Result{ExitCode: 0, Stdout: []byte(statusListJSON("torio-codex", "Stopped") + "\n")}},
 		}}
 
 		code, stdout, stderr := runVMWithFake(t, []string{"status", "--format", tc.format}, fake)
@@ -241,7 +240,7 @@ func TestStatusRefusesTwoOutputsAtOnce(t *testing.T) {
 		{"status", "--format", "nonsense"},
 	} {
 		fake := &fakeLimaRunner{script: []scriptedResp{
-			{res: execx.Result{ExitCode: 0, Stdout: []byte(statusListJSON("torio", "Stopped") + "\n")}},
+			{res: execx.Result{ExitCode: 0, Stdout: []byte(statusListJSON("torio-codex", "Stopped") + "\n")}},
 		}}
 
 		code, _, _ := runVMWithFake(t, args, fake)

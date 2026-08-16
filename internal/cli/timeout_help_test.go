@@ -16,7 +16,7 @@ import (
 var recommendedTimeout = regexp.MustCompile(`--timeout[= ]([0-9]+(?:\.[0-9]+)?(?:ns|us|µs|ms|s|m|h)+)`)
 
 // A timeout the CLI tells the operator to pass must be one the CLI accepts.
-// `vm bootstrap` is the longest operation Torio drives — apt plus a Hermes source
+// `vm bootstrap` is the longest operation Torio drives — apt plus a backend
 // install — so a recommendation that policy rejects sends the operator into a
 // dead end with exit 2 instead of the long-running command they were told to run.
 func TestHelpNeverRecommendsATimeoutPolicyRejects(t *testing.T) {

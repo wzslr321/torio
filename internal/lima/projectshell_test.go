@@ -20,7 +20,7 @@ func helperScript(t *testing.T) string {
 	// Resolved for a backend, because that is what ships. The raw embedded file
 	// carries a workspace placeholder and would reject every path it was given —
 	// which would leave the rejection tests below passing for the wrong reason.
-	content, err := projectHelper(embeddedProjectShell, HermesWorkspacePath, "operator shell")
+	content, err := projectHelper(embeddedProjectShell, testWorkspacePath, "operator shell")
 	if err != nil {
 		t.Fatalf("resolving the guest helper: %v", err)
 	}
@@ -64,24 +64,24 @@ func TestProjectShellHelperRejectsMalformedArguments(t *testing.T) {
 		args []string
 	}{
 		{"no arguments", nil},
-		{"two arguments", []string{HermesWorkspacePath + "/demo", HermesWorkspacePath + "/other"}},
+		{"two arguments", []string{testWorkspacePath + "/demo", testWorkspacePath + "/other"}},
 		{"empty argument", []string{""}},
 		{"relative path", []string{"demo"}},
 		{"outside the workspace", []string{"/etc"}},
-		{"the workspace root itself", []string{HermesWorkspacePath}},
-		{"workspace root with a slash", []string{HermesWorkspacePath + "/"}},
-		{"trailing slash", []string{HermesWorkspacePath + "/demo/"}},
-		{"nested below a project", []string{HermesWorkspacePath + "/demo/src"}},
-		{"parent traversal", []string{HermesWorkspacePath + "/../.ssh"}},
-		{"dot segment", []string{HermesWorkspacePath + "/./demo"}},
-		{"flag-shaped id", []string{HermesWorkspacePath + "/-oProxyCommand=touch /tmp/pwned"}},
-		{"space in id", []string{HermesWorkspacePath + "/de mo"}},
-		{"shell metacharacters", []string{HermesWorkspacePath + "/demo;id"}},
-		{"command substitution", []string{HermesWorkspacePath + "/demo$(id)"}},
-		{"newline", []string{HermesWorkspacePath + "/demo\nid"}},
-		{"quote", []string{HermesWorkspacePath + "/de'mo"}},
-		{"overlong id", []string{HermesWorkspacePath + "/" + strings.Repeat("a", 65)}},
-		{"absent project", []string{HermesWorkspacePath + "/definitely-not-a-project"}},
+		{"the workspace root itself", []string{testWorkspacePath}},
+		{"workspace root with a slash", []string{testWorkspacePath + "/"}},
+		{"trailing slash", []string{testWorkspacePath + "/demo/"}},
+		{"nested below a project", []string{testWorkspacePath + "/demo/src"}},
+		{"parent traversal", []string{testWorkspacePath + "/../.ssh"}},
+		{"dot segment", []string{testWorkspacePath + "/./demo"}},
+		{"flag-shaped id", []string{testWorkspacePath + "/-oProxyCommand=touch /tmp/pwned"}},
+		{"space in id", []string{testWorkspacePath + "/de mo"}},
+		{"shell metacharacters", []string{testWorkspacePath + "/demo;id"}},
+		{"command substitution", []string{testWorkspacePath + "/demo$(id)"}},
+		{"newline", []string{testWorkspacePath + "/demo\nid"}},
+		{"quote", []string{testWorkspacePath + "/de'mo"}},
+		{"overlong id", []string{testWorkspacePath + "/" + strings.Repeat("a", 65)}},
+		{"absent project", []string{testWorkspacePath + "/definitely-not-a-project"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -105,7 +105,7 @@ func TestProjectShellHelperRejectsMalformedArguments(t *testing.T) {
 // into the operator's terminal.
 func TestProjectShellHelperNeverEchoesTheRejectedArgument(t *testing.T) {
 	const marker = "MARKERVALUE"
-	_, _, stderr := runHelper(t, HermesWorkspacePath+"/"+marker+";id")
+	_, _, stderr := runHelper(t, testWorkspacePath+"/"+marker+";id")
 	if strings.Contains(stderr, marker) {
 		t.Errorf("stderr = %q, want it to name the rule, not the rejected value", stderr)
 	}
@@ -143,7 +143,7 @@ func TestProjectShellHelperNeverDumpsTheSessionEnvironment(t *testing.T) {
 // TestProjectShellHelperEntersTheGroupWithoutPrivilege proves the session is the
 // operator's own identity under the shared project group, and never a
 // privileged one. sudo or su here would hand the forwarded
-// agent to root and leave root-owned files in a checkout hermes has to keep
+// agent to root and leave root-owned files in a checkout the agent has to keep
 // working in.
 func TestProjectShellHelperEntersTheGroupWithoutPrivilege(t *testing.T) {
 	code := helperCode(t)

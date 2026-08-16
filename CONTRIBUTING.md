@@ -103,7 +103,7 @@ The journey is cut at the hypervisor boundary by the Ginkgo labels `host` and
   `torio vm init` including the image pin and idempotence. Runs on any supported
   host. Prose and generated pages cannot reach the packaged binary and are
   filtered out.
-- **`guest`** — everything from `torio vm start` on: Hermes bootstrap, Brain,
+- **`guest`** — everything from `torio vm start` on: bootstrap, Brain,
   backend, project attach/show/remove. Needs a usable hypervisor:
   Virtualization.framework on macOS, `/dev/kvm` on Linux.
 
@@ -187,7 +187,7 @@ unmerged work comes from that binary or from the test suites, never from
 ## Review checklist
 
 - Does the change stay in scope?
-- Does it duplicate Hermes' Kanban or dispatcher?
+- Does it duplicate something the agent already owns?
 - Is fail-closed behaviour preserved?
 - Did the agent identity gain a new capability? If so, is that capability
   explicit, enumerable and verified?

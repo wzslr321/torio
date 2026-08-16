@@ -54,8 +54,6 @@ python3 "${TIMEOUT}" 30 limactl shell --tty=false "${TORIO_INSTANCE}" -- \
 # needs to show. Collecting both unconditionally is deliberate: this script runs
 # after a failure, when the reason the backend is unknown may be the failure.
 python3 "${TIMEOUT}" 30 limactl shell --tty=false "${TORIO_INSTANCE}" -- \
-  sudo -n -u hermes -- journalctl --user -u hermes-serve.service --no-pager -n 200 \
-  >"${ARTIFACT_DIR}/outer-guest-hermes-serve.txt" 2>&1 || true
 python3 "${TIMEOUT}" 30 limactl shell --tty=false "${TORIO_INSTANCE}" -- \
   sudo -n -u claude -H -- claude --version \
   >"${ARTIFACT_DIR}/outer-guest-claude-version.txt" 2>&1 || true
@@ -67,5 +65,5 @@ python3 "${TIMEOUT}" 30 limactl shell --tty=false "${TORIO_INSTANCE}" -- \
 # The group set and sudo rights of every agent identity that might exist. These
 # are the custody proofs; a run that failed after they drifted should say so.
 python3 "${TIMEOUT}" 30 limactl shell --tty=false "${TORIO_INSTANCE}" -- \
-  sh -c 'for u in hermes claude; do id -nG "$u" 2>/dev/null && sudo -n -l -U "$u" 2>&1; done' \
+  sh -c 'for u in claude codex; do id -nG "$u" 2>/dev/null && sudo -n -l -U "$u" 2>&1; done' \
   >"${ARTIFACT_DIR}/outer-guest-agent-identities.txt" 2>&1 || true

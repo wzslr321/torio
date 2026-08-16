@@ -368,15 +368,14 @@ func TestExplicitConfigCarriesItsOwnRegistry(t *testing.T) {
 }
 
 // TestInstanceForBackendDerivesOneBoxPerBackend pins the mapping the routing
-// flag depends on. The default backend keeps DefaultInstance so a box created
-// before any of this is still the one an unflagged command talks to.
+// flag depends on. Every backend derives its own name; bare DefaultInstance is
+// deliberately not among them, because it named the backend that was removed.
 func TestInstanceForBackendDerivesOneBoxPerBackend(t *testing.T) {
 	for _, tc := range []struct{ backend, want string }{
-		{"", DefaultInstance},
-		{"hermes", DefaultInstance},
 		{"claude-code", InstancePrefix + "claude-code"},
+		{"codex", InstancePrefix + "codex"},
 	} {
-		got, err := InstanceForBackend(tc.backend, "hermes")
+		got, err := InstanceForBackend(tc.backend)
 		if err != nil {
 			t.Fatalf("InstanceForBackend(%q): %v", tc.backend, err)
 		}
@@ -393,8 +392,8 @@ func TestInstanceForBackendDerivesOneBoxPerBackend(t *testing.T) {
 // sanitized. The derived name reaches a limactl argv and a config path segment,
 // so it gets the same shape rule every instance name does.
 func TestInstanceForBackendRefusesANameItCannotDerive(t *testing.T) {
-	for _, bad := range []string{"Has Space", "../etc", strings.Repeat("x", 64)} {
-		if got, err := InstanceForBackend(bad, "hermes"); err == nil {
+	for _, bad := range []string{"", "Has Space", "../etc", strings.Repeat("x", 64)} {
+		if got, err := InstanceForBackend(bad); err == nil {
 			t.Errorf("InstanceForBackend(%q) = %q, want an error", bad, got)
 		}
 	}

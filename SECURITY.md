@@ -21,11 +21,11 @@ Only the latest released version is supported. There is no backport branch.
 
 ## What this project claims
 
-Torio is a control plane that provisions a Lima VM, a service identity and a
+Torio is a control plane that provisions a Lima VM, an agent identity and a
 credential custody boundary. The full model is in
 [`docs/03-architecture.md`](docs/03-architecture.md); this is the short form.
 
-**The trust boundary is the edge of the VM.** Not a process, not the Hermes
+**The trust boundary is the edge of the VM.** Not a process, not the agent's
 profile.
 
 **The threat model is prompt injection and a confused agent** — a poisoned
@@ -59,19 +59,17 @@ trade-off left unstated would misdescribe the boundary.
 - **Data exfiltration is unsolved.** The agent legitimately receives content
   through permitted read tools and has unrestricted egress.
 - **DNS is an accepted covert channel.** There is no DNS filter and no SNI proxy.
-- **`sudo hermes` runs agent-writable code as root.** `/usr/local/bin/hermes` is a
-  root-owned symlink to a file the `hermes` uid can rewrite, it is first on sudo's
-  `secure_path`, and the login user has passwordless sudo. Invoke Hermes as the
-  `hermes` identity, never through `sudo`.
+- **The login user has passwordless sudo.** Provisioning relies on it, so an
+  operator who runs an agent-writable path through `sudo` executes it as root.
+  Invoke the agent as its own identity, never through `sudo`.
 - **`SO_PEERCRED` proves a uid, not a program.** A one-liner run by the agent
   looks identical to the real MCP client, so no per-caller policy rests on it.
 - **The MCP audit log is a narrow write channel** toward a privileged file: on a
   denial the tool name comes from the agent. It is capped and escaped, which
   bounds the bandwidth without removing the channel.
-- **The MCP client configuration is not an OS sandbox.** Claude Code honors a
-  root-owned managed-only declaration and Hermes' agent-owned declaration is
-  checked for drift, but arbitrary code under the agent uid can open any socket
-  its groups permit. The broker's peer-uid check, root-owned exact policy and
+- **The MCP client configuration is not an OS sandbox.** Every backend honors a
+  root-owned declaration, but arbitrary code under the agent uid can open any
+  socket its groups permit. The broker's peer-uid check, root-owned exact policy and
   private OAuth home are the enforcement boundary.
 - **A granted MCP write can be used by prompt injection.** The broker prevents
   undeclared tools and unaudited calls; it cannot tell whether an allowed call
@@ -82,18 +80,17 @@ trade-off left unstated would misdescribe the boundary.
 These need a different class of tooling than a VM and a control plane:
 
 - a VM or kernel escape;
-- a malicious or compromised Hermes runtime;
+- a malicious or compromised agent runtime;
 - anyone with administrative access to the guest;
 - malware requiring an enterprise-grade sandbox;
 - hostile multi-tenant use.
 
 ## Configurations that are never acceptable
 
-- the Hermes backend reachable without authentication on a non-loopback address;
 - a broad mount of a host home directory into the guest;
-- the `hermes` identity in the `docker` group, or reaching `docker.sock`;
+- the agent identity in the `docker` group, or reaching `docker.sock`;
 - host Git write credentials placed on the guest;
-- a persistent forwarded SSH agent, or `SSH_AUTH_SOCK` shared with the `hermes`
+- a persistent forwarded SSH agent, or `SSH_AUTH_SOCK` shared with the agent
   process;
 - automatic merge, push or release — a granted session may *ask* to push, and
   every signature waits for a person at the host, so an unattended one denies;

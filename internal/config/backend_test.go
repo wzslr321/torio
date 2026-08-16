@@ -79,7 +79,7 @@ func TestValidateRejectsAMalformedBackendName(t *testing.T) {
 			t.Errorf("Validate accepted malformed backend name %q", name)
 		}
 	}
-	for _, name := range []string{"hermes", "claude-code", "a"} {
+	for _, name := range []string{"codex", "claude-code", "a"} {
 		if err := (File{SchemaVersion: ConfigSchemaVersion, Backend: name}).Validate(); err != nil {
 			t.Errorf("Validate rejected valid backend name %q: %v", name, err)
 		}

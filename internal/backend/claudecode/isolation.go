@@ -12,7 +12,7 @@ import (
 
 // VerifyIsolation proves the identity holds no authority beyond its own work.
 //
-// It is stricter than the Hermes equivalent, and the extra strictness is the
+// The strictness is the
 // point of this backend's custody story rather than decoration. An interactive
 // agent session runs as this uid: whatever it can reach, the agent can reach,
 // for as long as it is running. So the check does not merely exclude the one

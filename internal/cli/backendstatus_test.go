@@ -28,8 +28,6 @@ func (b statusBackend) Identity() backend.Identity {
 	return backend.Identity{Name: b.name, GuestUser: "agent"}
 }
 func (b statusBackend) StatusChecks() backend.StatusChecks { return b.checks }
-func (statusBackend) Registry() backend.ProjectRegistry    { return nil }
-func (statusBackend) Service() *backend.ServiceSpec        { return nil }
 func (statusBackend) Session() *backend.SessionSpec        { return &backend.SessionSpec{} }
 
 func statusReport(checks ...lima.CheckResult) lima.BootstrapReport {
@@ -48,7 +46,7 @@ func renderStatus(t *testing.T, b backend.Backend, rep lima.BootstrapReport) str
 
 // TestStatusReadsTheCheckNamesTheBackendDeclares is the regression, and it is
 // worth stating what it cost. The renderer built its lookup key by appending
-// "_auth" to the name the backend is registered under. For Hermes that happened
+// "_auth" to the name the backend is registered under. For one backend that happened
 // to be the name of the check; for Claude Code, registered as `claude-code` and
 // recording `claude_auth`, it matched nothing. So a box that had proven it held
 // a credential reported not-applicable — the answer that means Torio has no way
@@ -88,11 +86,11 @@ func TestADeclaredNameIsNotTheRegisteredName(t *testing.T) {
 
 // TestNoAuthCheckIsNotApplicableRatherThanAbsent keeps the honest half of the
 // old behaviour. A backend that declares no auth check has not been found to be
-// logged out, and Hermes is such a backend: it takes its provider credential
-// from the operator's session rather than holding one.
+// logged out — a backend that takes its provider credential from the operator's
+// session rather than holding one is exactly that case.
 func TestNoAuthCheckIsNotApplicableRatherThanAbsent(t *testing.T) {
-	b := statusBackend{name: "hermes", checks: backend.StatusChecks{Version: "hermes_version"}}
-	rep := statusReport(lima.CheckResult{Name: "hermes_version", OK: true, Detail: "0.4.0"})
+	b := statusBackend{name: "no-auth", checks: backend.StatusChecks{Version: "no_auth_version"}}
+	rep := statusReport(lima.CheckResult{Name: "no_auth_version", OK: true, Detail: "0.4.0"})
 	if got := renderStatus(t, b, rep); !strings.Contains(got, `"credentials":"not-applicable"`) {
 		t.Errorf("a backend with no auth check must be not-applicable\ngot: %s", got)
 	}
@@ -223,19 +221,20 @@ func TestAnUndeclaredCheckMatchesNothing(t *testing.T) {
 // a binary — while its help text said it read the guest and changed nothing.
 func TestBackendStatusChangesNothing(t *testing.T) {
 	script := bootstrapHappyResp()
-	script[10] = scriptedResp{res: execx.Result{ExitCode: 1}} // shim points nowhere
+	// The operator shell helper is absent, which a repairing walk installs.
+	script[19] = scriptedResp{res: execx.Result{ExitCode: 1, Stderr: []byte("stat: cannot statx: No such file or directory\n")}}
 	fake := &fakeLimaRunner{script: script}
 
-	code, _, stderr := runVMWithFake(t, []string{"backend", "status"}, fake)
+	code, _, stderr := runVMWithFake(t, []string{"backend", "status", "--backend", vmTestBackendName}, fake)
 	if code == int(ExitOK) {
 		t.Fatal("backend status reported a drifted guest as fine")
 	}
-	if !strings.Contains(stderr, "torio vm bootstrap") {
-		t.Errorf("the failure does not name the command that repairs it\ngot: %s", stderr)
+	if !strings.Contains(stderr, "restart the VM") {
+		t.Errorf("the failure does not name the way to repair it\ngot: %s", stderr)
 	}
 	for i, call := range fake.calls {
 		for _, arg := range call {
-			if arg == "ln" {
+			if arg == "/bin/bash" {
 				t.Fatalf("backend status repaired the guest: call %d = %v", i, call)
 			}
 		}
@@ -248,12 +247,12 @@ func TestBackendStatusChangesNothing(t *testing.T) {
 //
 // Every declared check is covered, because every one of them is recorded
 // through a contract method the bootstrap walk calls. That was not true while
-// the Hermes MCP check was recorded only by the broker verifier: it was
+// one backend's MCP check was recorded only by the broker verifier: it was
 // declared to a renderer that reads the bootstrap report, so `backend status`
 // showed nothing on a box with MCP servers configured — the same silence a
 // backend that declares no check at all produces.
 func TestTheRealBackendsDeclareTheChecksTheyRecord(t *testing.T) {
-	for _, b := range []backend.Backend{lima.Hermes(), claudecode.New(), codex.New()} {
+	for _, b := range []backend.Backend{claudecode.New(), claudecode.New(), codex.New()} {
 		name := b.Identity().Name
 		checks := b.StatusChecks()
 		r := &recordingRunner{}

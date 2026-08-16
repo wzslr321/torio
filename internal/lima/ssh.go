@@ -11,7 +11,7 @@ import (
 // The working directory is pinned rather than inherited. `limactl shell` starts
 // in the host's working directory when that path also exists on the guest, and
 // otherwise falls back to the *Lima login user's* home — which no Torio guest
-// command runs as. The hermes identity cannot enter the operator's home, so a
+// command runs as. The agent identity cannot enter the operator's home, so a
 // command that merely remembers where it started fails there: GNU find restores
 // its initial directory before exiting and reports
 //

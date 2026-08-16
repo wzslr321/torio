@@ -299,7 +299,7 @@ func TestStopFailsClosedWhenCommandExitsZeroButStillRunning(t *testing.T) {
 // session `limactl start` opened, and that session is multiplexed and persistent
 // — so every later guest command inherits a login that predates the group.
 // `torio brain import` failed inside rsync with "cannot stat destination"
-// because the operator could not traverse HermesHome, on a guest whose group
+// because the operator could not traverse testHome, on a guest whose group
 // database was correct. Bootstrap agreed with the database and passed.
 func TestStartDropsTheStaleMultiplexedSession(t *testing.T) {
 	fr := &fakeRunner{script: []scriptedResponse{

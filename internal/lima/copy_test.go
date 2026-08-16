@@ -13,13 +13,13 @@ func TestCopyToGuestUsesPromotedExactArgv(t *testing.T) {
 	fr := &fakeRunner{script: []scriptedResponse{{result: exitResult(0, "", "")}}}
 	a := New(fr)
 
-	if err := a.CopyToGuest(context.Background(), "/private/tmp/torio-brain-import-123/payload", HermesHome+"/.torio-brain-import-staging/payload", HermesHome); err != nil {
+	if err := a.CopyToGuest(context.Background(), "/private/tmp/torio-brain-import-123/payload", testHome+"/.torio-brain-import-staging/payload", testHome); err != nil {
 		t.Fatalf("CopyToGuest: %v", err)
 	}
 	want := []string{
 		"copy",
 		"/private/tmp/torio-brain-import-123/payload/",
-		"torio:/home/hermes/.torio-brain-import-staging/payload/",
+		"torio:/home/agent/.torio-brain-import-staging/payload/",
 	}
 	if got := fr.callArgs(0); !equalArgs(got, want) {
 		t.Fatalf("argv = %#v, want %#v", got, want)
@@ -57,16 +57,16 @@ func TestCopyRejectsPathsOutsideTheTypedBoundary(t *testing.T) {
 		guest string
 		home  string
 	}{
-		{"relative host source", "relative", HermesHome + "/staging", HermesHome},
-		{"host root", "/", HermesHome + "/staging", HermesHome},
-		{"guest outside the identity home", "/private/tmp/staging", "/tmp/staging", HermesHome},
-		{"guest home itself", "/private/tmp/staging", HermesHome, HermesHome},
-		{"guest traversal", "/private/tmp/staging", HermesHome + "/../operator", HermesHome},
-		{"guest remote syntax", "/private/tmp/staging", HermesHome + "/bad:target", HermesHome},
+		{"relative host source", "relative", testHome + "/staging", testHome},
+		{"host root", "/", testHome + "/staging", testHome},
+		{"guest outside the identity home", "/private/tmp/staging", "/tmp/staging", testHome},
+		{"guest home itself", "/private/tmp/staging", testHome, testHome},
+		{"guest traversal", "/private/tmp/staging", testHome + "/../operator", testHome},
+		{"guest remote syntax", "/private/tmp/staging", testHome + "/bad:target", testHome},
 		// The boundary is one identity's home, not any home: a transfer for one
 		// backend must not be accepted into the other's, which is where the
 		// fixed root used to put it.
-		{"another identity's home", "/private/tmp/staging", HermesHome + "/staging", otherHome},
+		{"another identity's home", "/private/tmp/staging", testHome + "/staging", otherHome},
 		{"sibling by prefix", "/private/tmp/staging", otherHome + "-other/staging", otherHome},
 		{"boundary is not absolute", "/private/tmp/staging", otherHome + "/staging", "home/claude"},
 		{"boundary is the root", "/private/tmp/staging", "/staging", "/"},
@@ -90,7 +90,7 @@ func TestCopyRejectsPathsOutsideTheTypedBoundary(t *testing.T) {
 func TestCopyFailureNeverReturnsTransportOutputOrPaths(t *testing.T) {
 	const privateMarker = "private-vault-customer-name"
 	host := "/private/tmp/" + privateMarker
-	guest := HermesHome + "/.torio-brain-import-staging"
+	guest := testHome + "/.torio-brain-import-staging"
 
 	cases := []struct {
 		name string
@@ -112,7 +112,7 @@ func TestCopyFailureNeverReturnsTransportOutputOrPaths(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			fr := &fakeRunner{script: []scriptedResponse{tc.resp}}
-			err := New(fr).CopyToGuest(context.Background(), host, guest, HermesHome)
+			err := New(fr).CopyToGuest(context.Background(), host, guest, testHome)
 			if err == nil {
 				t.Fatal("copy failure returned nil")
 			}
@@ -141,12 +141,12 @@ func TestCopyFromGuestUsesTheMirroredArgv(t *testing.T) {
 	fr := &fakeRunner{script: []scriptedResponse{{result: exitResult(0, "", "")}}}
 	a := New(fr)
 
-	if err := a.CopyFromGuest(context.Background(), HermesHome+"/.torio-brain-sync-staging", "/private/tmp/torio-brain-sync-456", HermesHome); err != nil {
+	if err := a.CopyFromGuest(context.Background(), testHome+"/.torio-brain-sync-staging", "/private/tmp/torio-brain-sync-456", testHome); err != nil {
 		t.Fatalf("CopyFromGuest: %v", err)
 	}
 	want := []string{
 		"copy",
-		"torio:/home/hermes/.torio-brain-sync-staging/",
+		"torio:/home/agent/.torio-brain-sync-staging/",
 		"/private/tmp/torio-brain-sync-456/",
 	}
 	if got := fr.callArgs(0); !equalArgs(got, want) {
@@ -163,11 +163,11 @@ func TestCopyFromGuestRefusesAGuestPathOutsideTheIdentityHome(t *testing.T) {
 
 	for _, guestDir := range []string{
 		"/tmp/anything",
-		HermesHome,
+		testHome,
 		"/home/other/.torio-brain-sync-staging",
-		HermesHome + "/../etc",
+		testHome + "/../etc",
 	} {
-		if err := a.CopyFromGuest(context.Background(), guestDir, "/private/tmp/torio-brain-sync-456", HermesHome); err == nil {
+		if err := a.CopyFromGuest(context.Background(), guestDir, "/private/tmp/torio-brain-sync-456", testHome); err == nil {
 			t.Errorf("CopyFromGuest(%q) was accepted", guestDir)
 		}
 	}

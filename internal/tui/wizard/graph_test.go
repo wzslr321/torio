@@ -6,23 +6,20 @@ import (
 	"github.com/wzslr321/torio/internal/lima"
 )
 
-// hermesFacts is a fully set up Hermes box: a service backend with no auth
-// check of its own. Each test below breaks exactly one fact.
-func hermesFacts() Facts {
+// noAuthFacts is a fully set up box whose backend declares no auth check of its
+// own. Each test below breaks exactly one fact.
+func noAuthFacts() Facts {
 	return Facts{
-		Box:             lima.StateRunning,
-		Bootstrapped:    true,
-		Credential:      CredentialNotApplicable,
-		ServiceDeclared: true,
-		ServeInstalled:  true,
-		ServeRunning:    true,
-		BrainReady:      true,
-		ProjectCount:    1,
+		Box:          lima.StateRunning,
+		Bootstrapped: true,
+		Credential:   CredentialNotApplicable,
+		BrainReady:   true,
+		ProjectCount: 1,
 	}
 }
 
 // claudeFacts is a fully set up Claude Code box: a session backend that holds a
-// credential and installs no service.
+// credential.
 func claudeFacts() Facts {
 	return Facts{
 		Box:          lima.StateRunning,
@@ -64,50 +61,26 @@ func TestNextWalksTheSetupInOrder(t *testing.T) {
 			want: StepBackendLogin,
 		},
 		{
-			name: "service backend with no unit installed",
+			name: "bootstrapped box without a brain",
 			facts: Facts{
-				Box:             lima.StateRunning,
-				Bootstrapped:    true,
-				Credential:      CredentialNotApplicable,
-				ServiceDeclared: true,
-			},
-			want: StepServeInstall,
-		},
-		{
-			name: "service backend whose installed unit is not running",
-			facts: Facts{
-				Box:             lima.StateRunning,
-				Bootstrapped:    true,
-				Credential:      CredentialNotApplicable,
-				ServiceDeclared: true,
-				ServeInstalled:  true,
-			},
-			want: StepServeStart,
-		},
-		{
-			name: "running service backend without a brain",
-			facts: Facts{
-				Box:             lima.StateRunning,
-				Bootstrapped:    true,
-				Credential:      CredentialNotApplicable,
-				ServiceDeclared: true,
-				ServeInstalled:  true,
-				ServeRunning:    true,
+				Box:          lima.StateRunning,
+				Bootstrapped: true,
+				Credential:   CredentialNotApplicable,
 			},
 			want: StepBrainInit,
 		},
 		{
 			name: "brain ready but no projects registered",
 			facts: func() Facts {
-				f := hermesFacts()
+				f := noAuthFacts()
 				f.ProjectCount = 0
 				return f
 			}(),
 			want: StepProjectAdd,
 		},
 		{
-			name:  "hermes fully set up",
-			facts: hermesFacts(),
+			name:  "a no-auth backend fully set up",
+			facts: noAuthFacts(),
 			want:  StepDone,
 		},
 		{
@@ -159,45 +132,21 @@ func TestNextDemandsLoginOnlyForAProvenAbsentCredential(t *testing.T) {
 	}
 }
 
-// A backend that installs no service must never be sent through serve steps.
-// Claude Code declares no unit, so an unset ServeInstalled is not a missing
-// install: there is nothing to install.
-func TestNextSkipsServiceStepsForABackendWithoutAService(t *testing.T) {
-	f := claudeFacts()
-	f.BrainReady = false
-	f.ServeInstalled = false
-	f.ServeRunning = false
-
-	if got := Next(f); got != StepBrainInit {
-		t.Fatalf("Next() = %q, want %q", got, StepBrainInit)
-	}
-}
-
 func TestPlanOmitsStepsTheBackendCannotHave(t *testing.T) {
-	hermes := stepsOf(Plan(hermesFacts()))
-	if contains(hermes, StepBackendLogin) {
-		t.Errorf("hermes plan contains %q, but the backend declares no auth check", StepBackendLogin)
-	}
-	for _, want := range []Step{StepServeInstall, StepServeStart} {
-		if !contains(hermes, want) {
-			t.Errorf("hermes plan is missing %q", want)
-		}
+	noAuth := stepsOf(Plan(noAuthFacts()))
+	if contains(noAuth, StepBackendLogin) {
+		t.Errorf("plan contains %q, but the backend declares no auth check", StepBackendLogin)
 	}
 
 	claude := stepsOf(Plan(claudeFacts()))
 	if !contains(claude, StepBackendLogin) {
 		t.Errorf("claude code plan is missing %q", StepBackendLogin)
 	}
-	for _, unwanted := range []Step{StepServeInstall, StepServeStart} {
-		if contains(claude, unwanted) {
-			t.Errorf("claude code plan contains %q, but the backend declares no service", unwanted)
-		}
-	}
 }
 
 // The rail an operator reads must agree with the step the wizard is running.
 func TestPlanMarksExactlyOneCurrentStepAndItIsTheNextOne(t *testing.T) {
-	f := hermesFacts()
+	f := noAuthFacts()
 	f.BrainReady = false
 
 	plan := Plan(f)
@@ -217,8 +166,8 @@ func TestPlanMarksExactlyOneCurrentStepAndItIsTheNextOne(t *testing.T) {
 
 // Everything before the current step is settled, and nothing after it is.
 func TestPlanOrdersDoneBeforeCurrentBeforePending(t *testing.T) {
-	f := hermesFacts()
-	f.ServeRunning = false
+	f := noAuthFacts()
+	f.BrainReady = false
 
 	seenCurrent := false
 	for _, st := range Plan(f) {
@@ -238,7 +187,7 @@ func TestPlanOrdersDoneBeforeCurrentBeforePending(t *testing.T) {
 
 // A finished setup still renders its rail, with every stage settled.
 func TestPlanOfAFinishedSetupMarksEveryStageDone(t *testing.T) {
-	for _, st := range Plan(hermesFacts()) {
+	for _, st := range Plan(noAuthFacts()) {
 		if st.State != StageDone {
 			t.Fatalf("stage %q is %q, want %q", st.Step, st.State, StageDone)
 		}
@@ -250,7 +199,7 @@ func TestPlanOfAFinishedSetupMarksEveryStageDone(t *testing.T) {
 func TestEveryStepDescribesItself(t *testing.T) {
 	steps := []Step{
 		StepVMInit, StepVMStart, StepBoxUnusable, StepBootstrap, StepBackendLogin,
-		StepServeInstall, StepServeStart, StepBrainInit, StepProjectAdd, StepDone,
+		StepBrainInit, StepProjectAdd, StepDone,
 	}
 	for _, s := range steps {
 		d := Describe(s)

@@ -1,7 +1,6 @@
 package brain
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -16,7 +15,7 @@ import (
 // another identity's home would be a directory the owning identity cannot
 // write, which is exactly how the import transfer failed once before.
 func TestTheVaultFollowsTheBackendIdentity(t *testing.T) {
-	for _, b := range []backend.Backend{lima.Hermes(), claudecode.New(), codex.New()} {
+	for _, b := range []backend.Backend{claudecode.New(), claudecode.New(), codex.New()} {
 		m := New(nil, lima.BootstrapOptions{Backend: b})
 		id := b.Identity()
 
@@ -64,44 +63,6 @@ func TestActivateRetrievalPreservesNotApplicableSkillState(t *testing.T) {
 	}
 	if report.Status.SkillState != SkillNotApplicable {
 		t.Errorf("skill state = %q, want %q", report.Status.SkillState, SkillNotApplicable)
-	}
-}
-
-type testProjectRegistry struct{ created bool }
-
-func (r *testProjectRegistry) Status(_ context.Context, _ backend.Transport, _ string, _ string) (backend.RegistryStatus, error) {
-	return backend.RegistryStatus{Present: r.created, PrimaryMatches: r.created}, nil
-}
-
-func (r *testProjectRegistry) Create(_ context.Context, _ backend.Transport, _ string, _ string, _ string) error {
-	r.created = true
-	return nil
-}
-
-func (*testProjectRegistry) Restore(context.Context, backend.Transport, string) error  { return nil }
-func (*testProjectRegistry) Archive(context.Context, backend.Transport, string) error  { return nil }
-func (*testProjectRegistry) Activate(context.Context, backend.Transport, string) error { return nil }
-
-type registryBackend struct {
-	backend.Backend
-	registry backend.ProjectRegistry
-}
-
-func (b registryBackend) Registry() backend.ProjectRegistry { return b.registry }
-
-func TestInitUsesTheDeclaredProjectRegistry(t *testing.T) {
-	g := readyFake()
-	registry := &testProjectRegistry{}
-	b := registryBackend{Backend: lima.Hermes(), registry: registry}
-
-	if _, err := New(g, lima.BootstrapOptions{Backend: b}).Init(t.Context()); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-	if !registry.created {
-		t.Fatal("Brain did not create its project through the backend registry")
-	}
-	if g.saw("hermes project") {
-		t.Fatalf("Brain bypassed the backend registry: %v", g.calls)
 	}
 }
 
@@ -162,7 +123,7 @@ func TestTheClaudeSkillIsWrittenForClaude(t *testing.T) {
 		t.Errorf("the skill never names the vault it is for, %q", b.Identity().BrainPath)
 	}
 	// The specific ways this would be the other backend's document.
-	for _, foreign := range []string{"/home/hermes", "search_files", "read_file", "skill_view"} {
+	for _, foreign := range []string{"/home/codex", "search_files", "read_file", "skill_view"} {
 		if strings.Contains(text, foreign) {
 			t.Errorf("the Claude skill names %q, which belongs to another backend", foreign)
 		}
@@ -171,24 +132,5 @@ func TestTheClaudeSkillIsWrittenForClaude(t *testing.T) {
 		if !strings.Contains(text, tool) {
 			t.Errorf("the skill never names the %s tool the agent would retrieve with", tool)
 		}
-	}
-}
-
-// TestTheHermesSkillLayoutIsUnchanged guards the backend that has one: the
-// category grouping is load-bearing for its skill index, and losing it would
-// quietly demote the skill to the bottom of an alphabetical list.
-func TestTheHermesSkillLayoutIsUnchanged(t *testing.T) {
-	m := New(nil, lima.BootstrapOptions{Backend: lima.Hermes()})
-	if got, want := m.skillCategoryPath(), lima.HermesProfilePath+"/skills/brain"; got != want {
-		t.Errorf("category path = %q, want %q", got, want)
-	}
-	if got, want := m.skillFilePath(), lima.HermesProfilePath+"/skills/brain/"+SkillName+"/SKILL.md"; got != want {
-		t.Errorf("skill file = %q, want %q", got, want)
-	}
-	if m.skillCategoryFilePath() == "" {
-		t.Error("the category description path is empty; the uncapped index line is how the rule reaches every session")
-	}
-	if m.legacySkillPath() == "" {
-		t.Error("the pre-category path is empty; a stale copy there makes skill lookup ambiguous and refuse outright")
 	}
 }

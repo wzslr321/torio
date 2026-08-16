@@ -29,7 +29,7 @@ func provisionFreshIdentityScript() []scriptedResponse {
 		{result: stdoutResult("directory\n")},                   // stat %F home (useradd made it)
 		{result: stdoutResult("torio-mcp:torio-mcp 755\n")},     // stat %U:%G %a -> default mode, too open
 		{result: stdoutResult("")},                              // chmod 700
-		{result: stdoutResult("hermes torio-projects\n")},       // id -nG hermes -> not yet a client
+		{result: stdoutResult("claude torio-projects\n")},       // id -nG the agent -> not yet a client
 		{result: stdoutResult("")},                              // usermod -aG
 		{result: stdoutResult("directory\n")},                   // policy dir pre-staged by root
 	}
@@ -43,9 +43,9 @@ func identityVerificationScript() []scriptedResponse {
 		{result: stdoutResult("torio-mcp torio-mcp-clients\n")},
 		{result: stdoutResult(sudoDeniedFixture)},
 		{result: stdoutResult("1000\n")},
-		{result: stdoutResult("torio-mcp-clients:x:995:hermes\n")},
-		{result: stdoutResult("hermes torio-projects torio-mcp-clients\n")},
-		{result: stdoutResult("hermes torio-projects torio-mcp-clients\n")},
+		{result: stdoutResult("torio-mcp-clients:x:995:claude\n")},
+		{result: stdoutResult("claude torio-projects torio-mcp-clients\n")},
+		{result: stdoutResult("claude torio-projects torio-mcp-clients\n")},
 		{result: stdoutResult(sudoDeniedFixture)},
 		// Two lines: the verification probe names statControlPath first, so a
 		// present path answers with the control line and its own.
@@ -61,7 +61,7 @@ func TestProvisionMCPBrokerReportsPartialChangesWhenALaterStepFails(t *testing.T
 		{err: fmt.Errorf("probe broker user: unavailable")},
 	}}
 
-	rep, err := New(fr).ProvisionMCPBroker(context.Background())
+	rep, err := New(fr).provisionMCPBrokerBoundary(context.Background(), testAgentIdentity())
 	if err == nil {
 		t.Fatal("later provisioning failure was accepted")
 	}
@@ -72,14 +72,14 @@ func TestProvisionMCPBrokerReportsPartialChangesWhenALaterStepFails(t *testing.T
 
 func TestProvisionMCPBrokerReportsBrokerMembershipMutationWhenVerificationFails(t *testing.T) {
 	fr := &fakeRunner{script: []scriptedResponse{
-		{result: stdoutResult("torio-mcp-clients:x:995:hermes\n")},
+		{result: stdoutResult("torio-mcp-clients:x:995:claude\n")},
 		{result: stdoutResult("997\n")},
 		{result: stdoutResult("torio-mcp\n")}, // broker is not a client yet
 		{result: stdoutResult("")},            // usermod succeeds
 		{result: stdoutResult("torio-mcp\n")}, // verification still misses the group
 	}}
 
-	rep, err := New(fr).ProvisionMCPBroker(context.Background())
+	rep, err := New(fr).provisionMCPBrokerBoundary(context.Background(), testAgentIdentity())
 	if err == nil {
 		t.Fatal("missing broker membership after usermod was accepted")
 	}
@@ -90,7 +90,7 @@ func TestProvisionMCPBrokerReportsBrokerMembershipMutationWhenVerificationFails(
 
 func TestProvisionMCPBrokerReportsHomeMutationWhenLaterReconcileFails(t *testing.T) {
 	fr := &fakeRunner{script: []scriptedResponse{
-		{result: stdoutResult("torio-mcp-clients:x:995:hermes\n")},
+		{result: stdoutResult("torio-mcp-clients:x:995:claude\n")},
 		{result: stdoutResult("997\n")},
 		{result: stdoutResult("torio-mcp torio-mcp-clients\n")},
 		{result: stdoutResult("directory\n")},
@@ -99,7 +99,7 @@ func TestProvisionMCPBrokerReportsHomeMutationWhenLaterReconcileFails(t *testing
 		{result: exitResult(1, "", "refused")}, // chmod fails
 	}}
 
-	rep, err := New(fr).ProvisionMCPBroker(context.Background())
+	rep, err := New(fr).provisionMCPBrokerBoundary(context.Background(), testAgentIdentity())
 	if err == nil {
 		t.Fatal("failed home reconcile was accepted")
 	}
@@ -117,11 +117,11 @@ func TestProvisionMCPBrokerReportsRestartRequiredWhenPolicyIsStillEmpty(t *testi
 		scriptedResponse{result: stdoutResult("")}, // policy directory is empty
 	)
 
-	rep, err := New(&fakeRunner{script: script}).ProvisionMCPBroker(context.Background())
+	rep, err := New(&fakeRunner{script: script}).provisionMCPBrokerBoundary(context.Background(), testAgentIdentity())
 	if err == nil {
 		t.Fatal("empty policy directory was accepted")
 	}
 	if !rep.RestartRequired {
-		t.Fatal("hermes joined the client group before failure but RestartRequired=false")
+		t.Fatal("the agent joined the client group before failure but RestartRequired=false")
 	}
 }

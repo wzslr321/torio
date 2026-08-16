@@ -6,9 +6,9 @@ what it does **not** cover.
 
 ## What Torio is
 
-A thin control plane over Lima, Hermes Agent and Git. It is not an agent
+A thin control plane over Lima, a coding agent and Git. It is not an agent
 framework, a task queue or a worktree manager — those layers either belong to
-Hermes or deliberately do not exist.
+the agent or deliberately do not exist.
 
 ## The trust boundary
 
@@ -16,19 +16,19 @@ One Lima virtual machine — `vz`/aarch64 on a macOS arm64 host, `qemu`/x86_64 o
 a Linux amd64 host
 ([ADR-0002](adr/0002-lima-vm-is-the-trust-boundary.md) §4). Everything the agent does happens
 on that machine's native filesystem. **The boundary is the edge of the VM** — not
-a process, and not the Hermes profile.
+a process, and not the agent's profile.
 
 Two consequences set up the rest of the architecture.
 
 **No broad host mount.** `mounts: []` in the guest template. Repositories and the
 Brain live on the VM's disk, not in a host home directory the guest can see. That
 is why bringing data in (`torio brain import`) is a one-shot, bounded `limactl
-copy` through private staging rather than a copy across a shared path. The Hermes
+copy` through private staging rather than a copy across a shared path. The agent
 profile is not a sandbox and no attempt is made to turn it into one; the isolation
 comes from the VM edge.
 
-**The service identity is not root-equivalent.** The guest has a dedicated
-`hermes` user which is **not in the `docker` group** — the template removes it
+**The agent identity is not root-equivalent.** The guest has a dedicated
+agent user which is **not in the `docker` group** — the template removes it
 during provisioning and `torio vm bootstrap` verifies the absence and fails
 closed. No rootful Docker Engine is installed. Membership of `docker` is root on
 the guest, so it would hand the agent exactly the authority the VM boundary
@@ -47,15 +47,13 @@ credentials, sockets or firewall rules changes that. **"The box prevents
 exfiltration" is not a claim this project makes**, and any document that starts
 implying it is wrong and should be corrected.
 
-**`sudo hermes` runs agent-writable code as root.** `/usr/local/bin/hermes` is a
-root-owned symlink to `/home/hermes/hermes-agent/venv/bin/hermes`, which the
-`hermes` uid owns and can rewrite. That path is first on sudo's `secure_path`,
-and the login user has passwordless sudo — provisioning itself relies on it
+**The login user has passwordless sudo.** Provisioning relies on it
 (`sudo -n usermod …` in `internal/lima/templates/torio.yaml`). An operator who
-types `sudo hermes …` therefore executes whatever is at the target, as root.
-This is an accepted trade-off of reaching Hermes through one stable command
-path, not an oversight — but Hermes should be invoked as the `hermes` identity
-and never through `sudo`.
+runs an agent-writable path through `sudo` therefore executes whatever is at
+that path, as root. The agent binary Torio installs is root-owned and the agent
+identity cannot rewrite it, which is what makes that hazard a matter of operator
+discipline rather than a standing one — but the agent should be invoked as its
+own identity and never through `sudo`.
 
 The controls that exist do one thing: they keep the agent from acquiring a
 durable, transferable capability, and they make every granted capability legible
@@ -69,33 +67,32 @@ and revocable. That is a smaller claim than "safe".
 | Declaration of attached projects (non-secret) | Torio (`config.json`) |
 | Workspace and vault paths | Torio (derived, never supplied) |
 | The operator session that carries write capability | Torio (`project shell`) |
-| Model execution, sessions, memory, profiles | Hermes Agent |
-| Agent-side project registry | Hermes Agent (`hermes project` CLI) |
-| Kanban, dispatch, retry | Hermes Agent |
+| Model execution, sessions, memory, profiles | the agent |
+| Per-project agent state | the agent, as files inside the checkout |
 
-Torio never writes to Hermes' internal state. A project is registered through the
-public `hermes project` CLI, not by touching `~/.hermes/kanban.db`.
+Torio never writes to an agent's internal state. What it owns is the checkout on
+disk and the record of it in `config.json`.
 
 ## Data paths
 
-Three directories under `/home/hermes`, separated on purpose:
+Three directories under the agent's home, separated on purpose. On Claude Code:
 
-- `/home/hermes/.hermes` — Hermes' **profile and application state**
-  (`HermesProfilePath`), `hermes:hermes 0750`;
-- `/home/hermes/brain` — the **Second Brain**, a private Markdown vault
-  (`HermesBrainPath`), `hermes:hermes 0750`;
-- `/home/hermes/projects` — **workspaces**, `hermes:torio-projects 2770` (setgid).
+- `/home/claude/.claude` — the agent's **profile and application state**
+  (`ProfilePath`), `claude:claude 0750`;
+- `/home/claude/brain` — the **Second Brain**, a private Markdown vault
+  (`BrainPath`), `claude:claude 0750`;
+- `/home/claude/projects` — **workspaces**, `claude:torio-projects 2770` (setgid).
 
 Separating the first two is a decision, not cosmetics. `torio vm bootstrap`
 checks the ownership and mode of each path.
 
-The setgid bit on `projects` is what lets the operator and the `hermes` identity
+The setgid bit on `projects` is what lets the operator and the agent identity
 work on the same checkout: both accounts are in `torio-projects`, so files created
 by one are writable by the other. Without it, an operator session would leave
 behind a checkout the agent could not continue in.
 
 **A workspace path is not an input.** It is derived from the project id as
-`/home/hermes/projects/<id>`. The operator supplies an id and a remote, never a
+`<workspace root>/<id>`. The operator supplies an id and a remote, never a
 path, and the config document has no field to hold one.
 
 ## Where write access to an origin comes from
@@ -103,7 +100,7 @@ path, and the config document has no field to hold one.
 This is the one place the architecture says "no" to something that would be
 convenient.
 
-The persistent Hermes has **read** access to an origin and nothing else. It holds
+The agent identity has **read** access to an origin and nothing else. It holds
 no token, does not inherit `SSH_AUTH_SOCK`, and the guest template sets
 `ssh.forwardAgent: false` globally.
 
@@ -145,7 +142,7 @@ cannot tell the two apart, because checking would take a push it does not run
 ## MCP custody boundary
 
 MCP credentials belong to a separate unprivileged identity `torio-mcp`, whose
-home `/home/torio-mcp` is `0700`. The selected agent (`hermes` or `claude`) is
+home `/home/torio-mcp` is `0700`. The selected agent (`claude` or `codex`) is
 not in the owning group and cannot read that directory; it gets only membership
 of `torio-mcp-clients`, which permits connection to policy-specific Unix
 sockets. The explicit tool grant lives outside the agent's profile, in
@@ -155,8 +152,8 @@ The backend launches a credential-free stdio relay. The broker terminates that
 local MCP session, identifies the caller uid through peer credentials, verifies
 the policy tool set against upstream discovery, and carries allowed calls over
 Streamable HTTP using OAuth state owned only by `torio-mcp`. Calls are audited
-without content. Claude Code's MCP declaration is root-managed; Hermes' own
-configuration is agent-writable and therefore checked only as drift.
+without content. Every backend's MCP declaration is root-managed: Claude Code's
+through `/etc/claude-code`, Codex's through `/etc/codex`.
 
 Installation is dormant while any policy service lacks an operator-authorized
 OAuth session. The last `torio mcp login <service>` enables and starts the unit;
@@ -168,22 +165,22 @@ and running policy digest
 
 ## The Second Brain inside projects
 
-The Brain is a separate Hermes Project for working on it directly. Other projects
-reach it through a **global `torio-brain` skill** — retrieval through file and
+The Brain is a directory the agent can be opened in directly. Every project
+reaches it through a **global `torio-brain` skill** — retrieval through file and
 search tools, not injection of content.
 
 The choice is deliberate. Injecting the whole vault into every project's system
 prompt would invalidate the prompt cache on every note change and move private
 content into the context of projects that do not need it. Adding
-`/home/hermes/brain` as a folder of every project has the same effect and is
-forbidden.
+the vault as a folder of every project has the same effect and is forbidden.
 
-## The backend, and reaching it from the host
+## Reaching the agent
 
-`hermes serve` runs as a **user systemd service** on the guest, bound to
-`127.0.0.1:9119` — the guest's loopback, not the VM interface. From the host the
-only route is an SSH tunnel the operator opens. Torio opens no tunnel and starts
-no chat session.
+Every backend Torio ships is a **process, not a service**: it is started inside
+a checkout as the agent identity, over the VM's own SSH, and exits with the
+session. Nothing listens on any address, on the guest or elsewhere. Torio opens
+no tunnel and starts no chat session
+([ADR-0028](adr/0028-the-hermes-backend-is-removed.md)).
 
 ## Where Torio stops
 

@@ -110,17 +110,15 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 	adapter := a.newLima()
 	brainSvc := a.newBrain(adapter, opts)
 	projectSvc := a.newProjects(adapter, opts)
-	serveAdapter := a.newServe()
 	identity := a.backend.Identity()
 	session := a.backend.Session()
 
 	d := tui.Deps{
-		Instance:        a.instance,
-		Backend:         identity.Name,
-		Version:         a.build.Version,
-		ServiceDeclared: a.backend.Service() != nil,
-		Timeout:         a.timeout,
-		LongTimeout:     config.MaxTimeout,
+		Instance:    a.instance,
+		Backend:     identity.Name,
+		Version:     a.build.Version,
+		Timeout:     a.timeout,
+		LongTimeout: config.MaxTimeout,
 
 		VMStatus: adapter.Status,
 		VMInit: func(ctx context.Context, o tui.VMInitOptions) error {
@@ -152,28 +150,6 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 		},
 		CredentialState: func(rep lima.BootstrapReport) string {
 			return credentialState(rep, a.backend.StatusChecks().Auth)
-		},
-
-		ServeStatus: serveAdapter.Status,
-		ServeInstall: func(ctx context.Context) error {
-			_, err := serveAdapter.Install(ctx)
-			return err
-		},
-		ServeStart: func(ctx context.Context) error {
-			_, err := serveAdapter.Start(ctx)
-			return err
-		},
-		ServeStop: func(ctx context.Context) error {
-			_, err := serveAdapter.Stop(ctx)
-			return err
-		},
-		ServeRestart: func(ctx context.Context) error {
-			_, err := serveAdapter.Restart(ctx)
-			return err
-		},
-		ServeLogs: func(ctx context.Context, lines int) (string, error) {
-			rep, err := serveAdapter.Logs(ctx, lines)
-			return rep.Text, err
 		},
 
 		BrainStatus: brainSvc.Status,
@@ -277,17 +253,6 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 
 		Backends: backend.Names(),
 		Rebind:   a.rebindDeps,
-	}
-
-	// Selecting an active project is an operation on a backend's own registry.
-	// A backend that keeps none has nothing to select, so the seam stays nil
-	// and the screen stops offering the key rather than offering one that
-	// always fails (ADR-0009).
-	if a.backend.Registry() != nil {
-		d.ProjectUse = func(ctx context.Context, id string) error {
-			_, err := projectSvc.Use(ctx, id)
-			return err
-		}
 	}
 
 	// A session the backend does not declare stays nil, so the screens report a

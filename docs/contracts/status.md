@@ -116,7 +116,6 @@ What the two shipped backends declare, and why each omission is deliberate:
 | | `SessionProcess` | `ProgressPaths` | `WaitingMarker` |
 |---|---|---|---|
 | Claude Code | `claude` | none — its per-session transcript lives at a path named after the project and session, which no fixed declaration can point at | yes |
-| Hermes | none — a Hermes session is not a process; the service holds sessions as rows, and whether that service is up is what `torio serve status` answers | `state.db`, `state.db-wal` | no — the predicate exists but only in the memory of the running process |
 
 ### What the poll runs
 

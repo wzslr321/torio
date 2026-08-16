@@ -87,7 +87,7 @@ class PlatformE2EContractTests(unittest.TestCase):
         self.assertIn(
             "backend: ${{ fromJSON(inputs.backend != '' "
             "&& format('[\"{0}\"]', inputs.backend) "
-            "|| '[\"hermes\",\"claude-code\",\"codex\"]') }}",
+            "|| '[\"claude-code\",\"codex\"]') }}",
             text,
         )
         # Independent legs: which one broke is the first thing worth knowing.
@@ -170,10 +170,8 @@ class PlatformE2EContractTests(unittest.TestCase):
         self.assertRegex(journey, r'It\("starts a real VM", Label\(guestStage\)')
         for spec in (
             "bootstraps the backend and imports Brain content into the guest",
-            "reports honestly about a service the backend does not declare",
-            "installs and exercises the persistent backend service",
             "attaches, verifies and removes a real Git project non-destructively",
-            "stops services and the VM idempotently",
+            "stops the VM idempotently",
         ):
             with self.subTest(spec=spec):
                 self.assertIn(f'It("{spec}", Label(guestStage)', journey)
@@ -224,9 +222,7 @@ class PlatformE2EContractTests(unittest.TestCase):
             '"brain", "init"',
             '"brain", "import"',
             "brain-fixture-present",
-            '"serve", "install"',
-            '"serve", "start"',
-            '"serve", "status"',
+            '"backend", "status"',
             '"project", "add"',
             '"project", "show"',
             '"project", "remove"',
@@ -301,9 +297,10 @@ class PlatformE2EContractTests(unittest.TestCase):
         text = DIAGNOSTICS.read_text(encoding="utf-8")
         self.assertIn('limactl list --json', text)
         self.assertIn('journalctl -u cloud-final', text)
-        self.assertIn('journalctl --user -u hermes-serve.service', text)
-        self.assertNotIn('/home/hermes/brain', text)
-        self.assertNotIn('/home/hermes/projects', text)
+        self.assertNotIn('/home/claude/brain', text)
+        self.assertNotIn('/home/claude/projects', text)
+        self.assertNotIn('/home/codex/brain', text)
+        self.assertNotIn('/home/codex/projects', text)
 
     def test_outer_diagnostics_record_the_hostagent_socket_path(self) -> None:
         # ha.sock is a socket, so a non-recursive cp of it can never succeed;

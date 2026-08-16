@@ -12,7 +12,7 @@ import (
 
 // The pinned install. Claude Code ships one self-contained binary per platform,
 // published with a per-version manifest carrying a SHA-256 for each — so unlike
-// the Hermes path, which runs a vendor script whose *content* is not pinned,
+// a vendor-script install, whose *content* is not pinned,
 // this install has a checksum to verify and verifies it.
 const (
 	// PromotedVersion is the version a Torio guest runs. It is a constant, not
@@ -25,7 +25,7 @@ const (
 	downloadBaseURL = "https://downloads.claude.ai/claude-code-releases"
 
 	// installDir holds the versioned binaries. It is root-owned, and so is what
-	// it contains: this is where this backend diverges from the Hermes shim,
+	// it contains: this is where this backend diverges from a shim install,
 	// which points a root path at a file the agent's own uid can rewrite.
 	installDir = "/usr/local/lib/torio/claude-code"
 	// commandPath is the stable name on sudo's secure_path. It is a symlink,
