@@ -52,16 +52,14 @@ type backendProfile struct {
 	// in a report and "present where this agent looks" are different claims —
 	// and the second is the one that decides whether the vault is reachable.
 	skillFile string
-	// declaresRegistry, declaresService and declaresSession are the three
-	// capabilities. A false one is asserted, not skipped: the contract's claim
-	// is that Torio reports an absent capability as a state, and a journey that
-	// simply did not look would not be testing that.
-	declaresRegistry bool
-	declaresService  bool
-	declaresSession  bool
-	// declaresWaitingMarker is the fourth, and it is separate because a backend
-	// can run a session process without having any way to say that the session is
-	// waiting on a human. Where it is true the journey drives the hook helper and
+	// declaresSession is the interactive-session capability. A false one is
+	// asserted, not skipped: the contract's claim is that Torio reports an
+	// absent capability as a state, and a journey that simply did not look
+	// would not be testing that.
+	declaresSession bool
+	// declaresWaitingMarker is separate because a backend can run a session
+	// process without having any way to say that the session is waiting on a
+	// human. Where it is true the journey drives the hook helper and
 	// reads the answer back out of `torio status`.
 	declaresWaitingMarker bool
 	// requiredChecks are bootstrap checks that must be present and OK. They are
@@ -80,8 +78,6 @@ func profileFor(name string) backendProfile {
 			versionCheck:          "claude_version",
 			versionCommand:        []string{"sudo", "-u", "claude", "--", "claude", "--version"},
 			skillFile:             "/home/claude/.claude/skills/torio-brain/SKILL.md",
-			declaresRegistry:      false,
-			declaresService:       false,
 			declaresSession:       true,
 			declaresWaitingMarker: true,
 			// The four proofs this backend's custody rests on: the identity
@@ -108,8 +104,6 @@ func profileFor(name string) backendProfile {
 			versionCheck:          "codex_version",
 			versionCommand:        []string{"sudo", "-u", "codex", "--", "codex", "--version"},
 			skillFile:             "/home/codex/.codex/skills/torio-brain/SKILL.md",
-			declaresRegistry:      false,
-			declaresService:       false,
 			declaresSession:       true,
 			declaresWaitingMarker: true,
 			// The same custody proofs the other process backend rests on, plus

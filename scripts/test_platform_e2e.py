@@ -170,10 +170,8 @@ class PlatformE2EContractTests(unittest.TestCase):
         self.assertRegex(journey, r'It\("starts a real VM", Label\(guestStage\)')
         for spec in (
             "bootstraps the backend and imports Brain content into the guest",
-            "reports honestly about a service the backend does not declare",
-            "installs and exercises the persistent backend service",
             "attaches, verifies and removes a real Git project non-destructively",
-            "stops services and the VM idempotently",
+            "stops the VM idempotently",
         ):
             with self.subTest(spec=spec):
                 self.assertIn(f'It("{spec}", Label(guestStage)', journey)
@@ -224,9 +222,7 @@ class PlatformE2EContractTests(unittest.TestCase):
             '"brain", "init"',
             '"brain", "import"',
             "brain-fixture-present",
-            '"serve", "install"',
-            '"serve", "start"',
-            '"serve", "status"',
+            '"backend", "status"',
             '"project", "add"',
             '"project", "show"',
             '"project", "remove"',
