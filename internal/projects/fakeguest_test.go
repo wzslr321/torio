@@ -3,6 +3,8 @@ package projects
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -129,6 +131,8 @@ type fakeGuest struct {
 	// whether a bundle is sitting in staging for the clone to read.
 	copies        []fakeCopy
 	copyErr       error
+	copiesOut     []fakeCopy
+	copyOutErr    error
 	bundleArrived bool
 	// bundleReadable is whether the carried bundle has been handed to the
 	// agent. The transport writes as the login identity, so a bundle that
@@ -138,6 +142,12 @@ type fakeGuest struct {
 	failContains map[string]int
 	truncateOn   string
 	calls        []fakeCall
+
+	// sync is the guest half of a host reconciliation: the refs this checkout
+	// holds and what a fetch from a carried hub bundle put beside them
+	// (ADR-0029). It is nil for every test that does not reconcile, so those
+	// tests still fail loudly on a sync command nothing routes.
+	sync *fakeSyncState
 }
 
 // fakeCopy is one host→guest transfer the manager asked for.
@@ -194,6 +204,9 @@ func (f *fakeGuest) CopyToGuest(_ context.Context, hostDir, guestDir, guestHome 
 		return f.copyErr
 	}
 	f.bundleArrived = true
+	if f.sync != nil && guestDir == testSyncStaging {
+		f.sync.carriedIn = true
+	}
 	return nil
 }
 
@@ -400,7 +413,32 @@ func (f *fakeGuest) route(joined string) (execx.Result, error) {
 		return okResult(""), nil
 
 	}
+	if f.sync != nil {
+		if res, routed := f.sync.route(joined); routed {
+			return res, nil
+		}
+	}
 	return execx.Result{}, fmt.Errorf("unrouted fake guest command: %s", joined)
+}
+
+// CopyFromGuest records the carry a reconciliation makes in the other
+// direction. Like CopyToGuest it asserts the directories rather than moving
+// anything: what a test can prove here is that the manager asked for the
+// staging inside the identity's own home.
+func (f *fakeGuest) CopyFromGuest(_ context.Context, guestDir, hostDir, guestHome string) error {
+	f.copiesOut = append(f.copiesOut, fakeCopy{host: hostDir, guest: guestDir, home: guestHome})
+	if f.copyOutErr != nil {
+		return f.copyOutErr
+	}
+	if f.sync != nil {
+		f.sync.carriedOut = true
+		// The bundle has to land, because the manager proves it arrived before
+		// it reads anything out of it.
+		if err := os.WriteFile(filepath.Join(hostDir, guestBundleName), []byte("bundle\n"), 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // canReadRemote decides whether a remote operation succeeds. A guest reaches a

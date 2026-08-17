@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Added
+
+- **A local project reaches every box through your host.**
+  `torio project sync <id>` reconciles a project that has no remote with a bare
+  repository at `${XDG_DATA_HOME:-~/.local/share}/torio/projects/<id>.git`,
+  carrying branches and tags both ways as Git bundles over the same one-shot
+  transport `brain import` uses. No network, no mount, no remote on either side.
+  A ref is written only where what the other side holds is an ancestor of what
+  is arriving: a ref that moved on both sides is named and left exactly as it
+  was, and the branch the checkout stands on moves through the worktree only
+  where Git will take it, so uncommitted work is never carried and never written
+  over. Once a project has been reconciled, opening it on another backend's
+  guest materializes the checkout from that repository, which is the third
+  source a session draws one from. The host path is derived from the id and
+  recorded nowhere, so every registry entry still means the same thing on every
+  machine. The hub reconciles the selected project on `y`. Settles the transfer
+  ADR-0027 deferred
+  ([ADR-0029](docs/adr/0029-a-local-project-reaches-every-box-through-the-host.md)).
+
 ## 0.3.5 - 2026-08-16
 
 ### Migration

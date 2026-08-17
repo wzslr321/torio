@@ -2037,3 +2037,67 @@ func TestEnterOnALocalProjectCarriesTheRefusal(t *testing.T) {
 		}
 	}
 }
+
+// A project with no remote reaches another box through the host, and the hub
+// has to be able to start that: everything is reachable from the hub, or the
+// operator is back to a command they were never told about (ADR-0029).
+func TestProjectsReconcilesALocalProjectFromTheHub(t *testing.T) {
+	f := &fakeDeps{
+		boxState:    lima.StateRunning,
+		projectList: []projects.Project{{ID: "prezka", Path: "/w/prezka"}},
+	}
+	d := f.deps()
+	gotID := ""
+	d.ProjectSync = func(_ context.Context, id string) (projects.SyncReport, error) {
+		gotID = id
+		return projects.SyncReport{
+			Project: projects.Project{ID: id},
+			HubPath: "/Users/op/.local/share/torio/projects/prezka.git",
+			ToHub:   []projects.RefMove{{Ref: "heads/main", Commits: 2}},
+		}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "y")
+
+	if gotID != "prezka" {
+		t.Errorf("reconciled %q, want the selected project", gotID)
+	}
+	if !strings.Contains(r.projects.keys(r), "y sync") {
+		t.Errorf("footer = %q, want the reconciliation key offered", r.projects.keys(r))
+	}
+}
+
+// A project with a remote already has somewhere its boxes meet, so the key is
+// not offered on one: a key that refuses everything it is pressed on is a dead
+// end with extra steps.
+func TestProjectsOffersNoReconciliationForAProjectWithARemote(t *testing.T) {
+	f := &fakeDeps{
+		boxState: lima.StateRunning,
+		projectList: []projects.Project{
+			{ID: "torio", Remote: "git@github.com:wzslr321/torio.git", Path: "/w/torio"},
+		},
+	}
+	d := f.deps()
+	called := false
+	d.ProjectSync = func(context.Context, string) (projects.SyncReport, error) {
+		called = true
+		return projects.SyncReport{}, nil
+	}
+	r := newRoot(d)
+	drain(t, r, r.probeFacts())
+	r.switchTo(screenProjects)
+	drain(t, r, r.projects.load(d))
+
+	press(t, r, "y")
+
+	if called {
+		t.Error("a project with a remote was reconciled through the host anyway")
+	}
+	if strings.Contains(r.projects.keys(r), "y sync") {
+		t.Error("the footer offers a key that does not apply to the selected project")
+	}
+}

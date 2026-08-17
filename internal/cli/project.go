@@ -25,6 +25,7 @@ type projectService interface {
 	Show(context.Context, string) (projects.ShowReport, error)
 	Remove(context.Context, string) (projects.RemoveReport, error)
 	SetRemote(context.Context, string, string) (projects.SetRemoteReport, error)
+	Sync(context.Context, string) (projects.SyncReport, error)
 	EnterPreflight(context.Context, string) (projects.EnterSession, error)
 	ShellPreflight(context.Context, string) (projects.ShellSession, error)
 	RemoteAccess(context.Context, string, projects.SessionIdentity) (projects.RemoteAccess, error)
@@ -54,6 +55,7 @@ func newProjectCmd(a *app) *cobra.Command {
 	cmd.AddCommand(newProjectShowCmd(a))
 	cmd.AddCommand(newProjectRemoveCmd(a))
 	cmd.AddCommand(newProjectSetRemoteCmd(a))
+	cmd.AddCommand(newProjectSyncCmd(a))
 	cmd.AddCommand(newProjectEnterCmd(a))
 	cmd.AddCommand(newProjectShellCmd(a))
 	cmd.AddCommand(newProjectAgentCmd(a))
@@ -83,8 +85,9 @@ func newProjectAddCmd(a *app) *cobra.Command {
 			"already registered project in another backend's guest, using the remote already on " +
 			"record. Opening a session on such a project does this for you, so this form is for " +
 			"materializing a checkout before you want to work in it. A local project has no " +
-			"remote to materialize from, so it is carried to another backend with " +
-			"`--from-bundle` instead.\n\n" +
+			"remote to materialize from, so it comes from the bare repository on your host " +
+			"that `torio project sync` writes, or from `--from-bundle` where no sync has run " +
+			"yet.\n\n" +
 			"Without --id the project id is <name> itself, which must be a lowercase slug " +
 			"(letters, digits, inner hyphens); pass --id to choose one explicitly.",
 		Args: cobra.RangeArgs(1, 2),
@@ -394,6 +397,164 @@ func newProjectSetRemoteCmd(a *app) *cobra.Command {
 			return a.emitProjectSetRemote(report)
 		},
 	}
+}
+
+// newProjectSyncCmd reconciles a local project with the bare repository on the
+// host that its boxes meet in (ADR-0029).
+//
+// It exists because a project with no remote had no way to reach a second box:
+// the registry listed it everywhere and only the guest that made it could open
+// it. Git is versioning enough without a forge behind it; what was missing was
+// somewhere for two guests to meet.
+func newProjectSyncCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "sync <id>",
+		Short: "Reconcile a project that has no remote with the host repository its boxes meet in",
+		Long: "Carry this box's branches and tags to the bare repository on the host, and the " +
+			"host's back, using Git bundles over the same one-shot transport `brain import` " +
+			"uses. Nothing reaches a network and the checkout gains no remote.\n\n" +
+			"A ref moves only forward: it is written where what the other side holds is an " +
+			"ancestor of what is arriving, and a ref that moved on both sides is named and left " +
+			"exactly as it was, for you to resolve with Git. Uncommitted work is never carried " +
+			"and never written over: while the tree has any, the branch it is on is held back " +
+			"and reported.\n\n" +
+			"A project that has a remote is refused, because its boxes already meet there. " +
+			"Once a project has been reconciled once, opening it on another backend's guest " +
+			"materializes the checkout from the host repository.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Bundling a repository, carrying it and reading refs out of it is
+			// the long shape, exactly as `brain sync` is.
+			ctx, cancel := context.WithTimeout(cmd.Context(), config.MaxTimeout)
+			defer cancel()
+			service, err := a.projectService("project.sync")
+			if err != nil {
+				return err
+			}
+			report, err := service.Sync(ctx, args[0])
+			if err != nil {
+				cliErr := mapProjectError("project.sync", err)
+				cliErr.Details = projectNotesDetails(report.Notes)
+				return cliErr
+			}
+			return a.emitProjectSync(report)
+		},
+	}
+}
+
+type refMoveData struct {
+	Ref     string `json:"ref"`
+	Commits int    `json:"commits"`
+}
+
+type projectSyncData struct {
+	projectData
+	HubPath    string        `json:"hub_path"`
+	HubCreated bool          `json:"hub_created"`
+	ToHub      []refMoveData `json:"carried_to_host"`
+	ToGuest    []refMoveData `json:"carried_to_guest"`
+	Diverged   []string      `json:"diverged"`
+	HeldBack   []string      `json:"held_back"`
+	Notes      []string      `json:"notes"`
+	NextStep   string        `json:"next_step"`
+}
+
+func refMoveView(moves []projects.RefMove) []refMoveData {
+	out := make([]refMoveData, 0, len(moves))
+	for _, m := range moves {
+		out = append(out, refMoveData{Ref: m.Ref, Commits: m.Commits})
+	}
+	return out
+}
+
+func (a *app) emitProjectSync(report projects.SyncReport) error {
+	// What to do next depends on what was left undone. A divergence is resolved
+	// with Git in the host repository, which is the operator's own directory on
+	// their own machine; anything else has nothing outstanding to point at.
+	next := "torio project show " + report.Project.ID
+	switch {
+	case len(report.Diverged) > 0:
+		next = "git -C " + report.HubPath + " log --graph --oneline --all"
+	case len(report.HeldBack) > 0:
+		// The remedy is in the box: commit the work or stash it, then run the
+		// same reconciliation again. An ordinary session is where that happens;
+		// nothing here needs the push-capable one.
+		next = "torio project enter " + report.Project.ID
+	}
+	if a.jsonOut {
+		return writeJSON(a.stdout, successEnvelope("project.sync", projectSyncData{
+			projectData: projectView(report.Project),
+			HubPath:     report.HubPath,
+			HubCreated:  report.HubCreated,
+			ToHub:       refMoveView(report.ToHub),
+			ToGuest:     refMoveView(report.ToGuest),
+			Diverged:    notes(report.Diverged),
+			HeldBack:    notes(report.HeldBack),
+			Notes:       notes(report.Notes),
+			NextStep:    next,
+		}))
+	}
+
+	state := "reconciled"
+	switch {
+	case slices.Contains(report.Notes, "no_history_yet"):
+		state = "no history to carry yet"
+	case report.HubCreated:
+		state = "host repository created from this box"
+	case len(report.Diverged) > 0:
+		state = "reconciled; what diverged was left alone"
+	case len(report.HeldBack) > 0:
+		// Before the level-with-the-host line below, which would otherwise be
+		// the headline over a ref that did not move. Observed on a real box.
+		state = "reconciled; what the tree would not take was left alone"
+	case !report.Moved():
+		state = "already level with the host"
+	}
+	if _, err := fmt.Fprintf(a.stdout, "%s: %s\n", report.Project.ID, state); err != nil {
+		return err
+	}
+	for _, line := range []struct {
+		label string
+		moves []projects.RefMove
+	}{
+		{"carried to the host", report.ToHub},
+		{"carried to this box", report.ToGuest},
+	} {
+		if len(line.moves) == 0 {
+			continue
+		}
+		if _, err := fmt.Fprintf(a.stdout, "  %s: %s\n", line.label, refMoveLine(line.moves)); err != nil {
+			return err
+		}
+	}
+	if len(report.Diverged) > 0 {
+		if _, err := fmt.Fprintf(a.stdout,
+			"  diverged, untouched: %s\n", strings.Join(report.Diverged, " ")); err != nil {
+			return err
+		}
+	}
+	if len(report.HeldBack) > 0 {
+		// Named rather than described: the operator commits or stashes and runs
+		// the same command again, and knowing which branch is what makes that
+		// possible.
+		if _, err := fmt.Fprintf(a.stdout,
+			"  held back while the tree has uncommitted work: %s\n", strings.Join(report.HeldBack, " ")); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintf(a.stdout, "  host repository: %s\nnext: %s\n", report.HubPath, next)
+	return err
+}
+
+// refMoveLine renders the refs one direction carried, with the distance each
+// covered. A ref arriving for the first time counts its whole history, which is
+// what the number means and why it is not called "new commits".
+func refMoveLine(moves []projects.RefMove) string {
+	parts := make([]string, 0, len(moves))
+	for _, m := range moves {
+		parts = append(parts, fmt.Sprintf("%s +%d", m.Ref, m.Commits))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // newProjectEnterCmd opens an ordinary interactive project session. The SSH

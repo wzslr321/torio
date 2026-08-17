@@ -334,6 +334,18 @@ func (s *projectsScreen) updateList(r *root, msg tea.KeyMsg) tea.Cmd {
 		}
 		s.openEdit(p)
 		return textinput.Blink
+	case "y":
+		p, ok := s.selected()
+		if !ok || !canSync(r, p) {
+			return nil
+		}
+		return r.runNoted("reconciling "+p.ID+" with the host", true, func(ctx context.Context) (string, error) {
+			report, err := d.ProjectSync(ctx, p.ID)
+			if err != nil {
+				return "", err
+			}
+			return syncNote(report), nil
+		})
 	case "enter":
 		p, ok := s.selected()
 		if !ok {
@@ -436,6 +448,12 @@ func (s *projectsScreen) keys(r *root) string {
 	}
 	if r.deps.ProjectSetRemote != nil {
 		parts = append(parts, "e remote")
+	}
+	// Offered on the selected project rather than on the build, because whether
+	// it applies is a fact about the project: one with a remote already has
+	// somewhere its boxes meet (ADR-0029).
+	if p, ok := s.selected(); ok && canSync(r, p) {
+		parts = append(parts, "y sync")
 	}
 	if r.deps.AgentSpec == nil {
 		parts = append(parts, "enter open")
@@ -585,6 +603,39 @@ func (s *projectsScreen) viewShow() string {
 		b.WriteString(styMuted.Render("  "+issue) + "\n")
 	}
 	return b.String()
+}
+
+// canSync reports whether the host reconciliation applies to this project: a
+// seam to run it, and a project that has no remote to run it instead.
+func canSync(r *root, p projects.Project) bool {
+	return r.deps.ProjectSync != nil && p.Remote == ""
+}
+
+// syncNote is one reconciliation as one line. It names refs and counts, which
+// is what the report carries: no file inside the checkout and no line of any
+// commit reaches the hub, as `project show` does not either.
+func syncNote(rep projects.SyncReport) string {
+	parts := []string{rep.Project.ID + ": "}
+	switch {
+	case rep.HubCreated:
+		parts = append(parts, "host repository created")
+	case !rep.Moved() && len(rep.HeldBack) > 0:
+		// "level with the host" over a ref that did not move reads as a
+		// contradiction of the clause right after it.
+		parts = append(parts, "nothing carried")
+	case !rep.Moved():
+		parts = append(parts, "level with the host")
+	default:
+		parts = append(parts, plural(len(rep.ToHub), "ref", "refs")+" to the host, "+
+			plural(len(rep.ToGuest), "ref", "refs")+" back")
+	}
+	if len(rep.Diverged) > 0 {
+		parts = append(parts, " · diverged, untouched: "+strings.Join(rep.Diverged, " "))
+	}
+	if len(rep.HeldBack) > 0 {
+		parts = append(parts, " · held back by uncommitted work: "+strings.Join(rep.HeldBack, " "))
+	}
+	return strings.Join(parts, "")
 }
 
 // deployKeyDetail is the operator's way forward when an add fails with a key

@@ -61,6 +61,10 @@ type fakeProjectService struct {
 	setRemoteURL    string
 	setRemoteReport projects.SetRemoteReport
 	setRemoteErr    error
+
+	syncID     string
+	syncReport projects.SyncReport
+	syncErr    error
 }
 
 func (f *fakeProjectService) Add(ctx context.Context, req projects.AddRequest) (projects.AddReport, error) {
@@ -86,6 +90,11 @@ func (f *fakeProjectService) Remove(_ context.Context, id string) (projects.Remo
 func (f *fakeProjectService) SetRemote(_ context.Context, id, remote string) (projects.SetRemoteReport, error) {
 	f.setRemoteID, f.setRemoteURL = id, remote
 	return f.setRemoteReport, f.setRemoteErr
+}
+
+func (f *fakeProjectService) Sync(_ context.Context, id string) (projects.SyncReport, error) {
+	f.syncID = id
+	return f.syncReport, f.syncErr
 }
 
 func (f *fakeProjectService) EnterPreflight(_ context.Context, id string) (projects.EnterSession, error) {
@@ -1310,5 +1319,125 @@ func TestProjectEnterOnALocalProjectSaysWhyItCannotMaterialize(t *testing.T) {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr = %q, want it to name %q", stderr, want)
 		}
+	}
+}
+
+// A reconciliation says what moved in each direction and where the host
+// repository is, because that directory is where an operator resolves anything
+// it refused to touch.
+func TestProjectSyncReportsWhatMovedEachWay(t *testing.T) {
+	service := &fakeProjectService{
+		syncReport: projects.SyncReport{
+			Project:  projects.Project{ID: "prezka", DisplayName: "Prezka", Path: claudecode.WorkspacePath + "/prezka"},
+			HubPath:  "/Users/op/.local/share/torio/projects/prezka.git",
+			ToHub:    []projects.RefMove{{Ref: "heads/main", Commits: 3}},
+			ToGuest:  []projects.RefMove{{Ref: "heads/topic", Commits: 1}},
+			Diverged: []string{"heads/spike"},
+		},
+	}
+
+	code, stdout, stderr := runProjectCLI(t, []string{"project", "sync", "prezka"}, service)
+
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr)
+	}
+	if service.syncID != "prezka" {
+		t.Errorf("reconciled %q, want the id given", service.syncID)
+	}
+	for _, want := range []string{"heads/main", "heads/topic", "heads/spike", "prezka.git"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout = %q, want it to name %q", stdout, want)
+		}
+	}
+}
+
+// A ref left alone has to be answerable, and the answer is Git in the host
+// repository. The next step names it rather than describing it.
+func TestProjectSyncPointsAtTheHostRepositoryWhenARefDiverged(t *testing.T) {
+	service := &fakeProjectService{
+		syncReport: projects.SyncReport{
+			Project:  projects.Project{ID: "prezka"},
+			HubPath:  "/Users/op/.local/share/torio/projects/prezka.git",
+			Diverged: []string{"heads/main"},
+		},
+	}
+
+	_, stdout, _ := runProjectCLI(t, []string{"project", "sync", "prezka"}, service)
+
+	if !strings.Contains(stdout, "git -C /Users/op/.local/share/torio/projects/prezka.git") {
+		t.Errorf("stdout = %q, want the command that resolves a divergence", stdout)
+	}
+}
+
+func TestProjectSyncEmitsOneEnvelope(t *testing.T) {
+	service := &fakeProjectService{
+		syncReport: projects.SyncReport{
+			Project:    projects.Project{ID: "prezka"},
+			HubPath:    "/Users/op/.local/share/torio/projects/prezka.git",
+			HubCreated: true,
+			ToHub:      []projects.RefMove{{Ref: "heads/main", Commits: 3}},
+			HeldBack:   []string{"heads/main"},
+			Notes:      []string{"no_history_yet"},
+		},
+	}
+
+	code, stdout, _ := runProjectCLI(t, []string{"--json", "project", "sync", "prezka"}, service)
+
+	if code != int(ExitOK) {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			HubPath    string `json:"hub_path"`
+			HubCreated bool   `json:"hub_created"`
+			ToHub      []struct {
+				Ref     string `json:"ref"`
+				Commits int    `json:"commits"`
+			} `json:"carried_to_host"`
+			HeldBack []string `json:"held_back"`
+			Notes    []string `json:"notes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("stdout is not one envelope: %v; got %q", err, stdout)
+	}
+	if !env.OK || !env.Data.HubCreated {
+		t.Errorf("envelope = %#v, want a successful creation reported", env)
+	}
+	if len(env.Data.ToHub) != 1 || env.Data.ToHub[0].Ref != "heads/main" || env.Data.ToHub[0].Commits != 3 {
+		t.Errorf("carried_to_host = %#v, want heads/main with 3 commits", env.Data.ToHub)
+	}
+	if len(env.Data.HeldBack) != 1 {
+		t.Errorf("held_back = %v, want the ref that was not written", env.Data.HeldBack)
+	}
+}
+
+func TestProjectSyncRequiresAnID(t *testing.T) {
+	code, _, _ := runProjectCLI(t, []string{"project", "sync"}, &fakeProjectService{})
+	if code != int(ExitUsage) {
+		t.Errorf("exit = %d, want %d", code, ExitUsage)
+	}
+}
+
+// A ref the tree would not take is the headline, not a footnote under one
+// saying nothing moved. Observed on a real box, where a held-back branch was
+// reported under "already level with the host".
+func TestProjectSyncDoesNotCallAHeldBackRefLevel(t *testing.T) {
+	service := &fakeProjectService{
+		syncReport: projects.SyncReport{
+			Project:  projects.Project{ID: "prezka"},
+			HubPath:  "/Users/op/.local/share/torio/projects/prezka.git",
+			HeldBack: []string{"heads/main"},
+		},
+	}
+
+	_, stdout, _ := runProjectCLI(t, []string{"project", "sync", "prezka"}, service)
+
+	if strings.Contains(stdout, "already level with the host") {
+		t.Errorf("stdout = %q, want the held-back ref to decide the headline", stdout)
+	}
+	if !strings.Contains(stdout, "next: torio project enter prezka") {
+		t.Errorf("stdout = %q, want the session that settles it named", stdout)
 	}
 }
