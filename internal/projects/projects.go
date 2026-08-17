@@ -184,6 +184,47 @@ type SetRemoteReport struct {
 	Notes     []string
 }
 
+// SyncReport is one reconciliation between a local project's checkout and the
+// bare repository on the host (ADR-0029).
+//
+// It names refs and counts commits. A ref name is ordinary: `project shell`
+// already prints the branch a session opens on, and an operator resolving a
+// divergence needs to know which one it is. Nothing below carries a file name,
+// a diff or a line of any commit.
+type SyncReport struct {
+	Project Project
+	// HubPath is the host repository, and is the one path worth naming: it is
+	// the operator's own, on their own machine, and it is where they resolve a
+	// divergence with ordinary Git.
+	HubPath string
+	// HubCreated reports that this run made the host repository, which happens
+	// once per project.
+	HubCreated bool
+	// ToHub and ToGuest are the refs each direction moved forward.
+	ToHub   []RefMove
+	ToGuest []RefMove
+	// Diverged names the refs that moved on both sides. Neither side was
+	// touched: the divergence is a decision somebody made, and Torio does not
+	// merge a repository it does not own.
+	Diverged []string
+	// HeldBack names the refs a fast-forward would have written through the
+	// working tree while that tree had uncommitted work.
+	HeldBack []string
+	Notes    []string
+}
+
+// Moved reports whether the reconciliation carried anything.
+func (r SyncReport) Moved() bool { return len(r.ToHub) > 0 || len(r.ToGuest) > 0 }
+
+// RefMove is one ref that moved forward, and by how far.
+type RefMove struct {
+	// Ref is the name without the leading refs/: "heads/main", "tags/v1".
+	Ref string
+	// Commits is how many commits the move covered. For a ref arriving where
+	// there was none, it is the whole history that arrived.
+	Commits int
+}
+
 // CheckoutStatus is the derived state of the guest checkout. It carries only
 // booleans and metadata — never a file name, a diff, or raw Git output.
 type CheckoutStatus struct {

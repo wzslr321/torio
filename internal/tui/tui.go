@@ -187,6 +187,12 @@ type Deps struct {
 	// a deploy key: the promotion is the moment the guest first has to read the
 	// remote, so it is the moment the key first means anything (ADR-0027).
 	ProjectSetRemote func(ctx context.Context, id, remote string) (*projects.DeployKey, error)
+
+	// ProjectSync reconciles a project that has no remote with the bare
+	// repository on the host its boxes meet in (ADR-0029). It is here for the
+	// same reason the correction above is: the hub is where a local project is
+	// seen, and it is where carrying it to another box has to be startable.
+	ProjectSync func(ctx context.Context, id string) (projects.SyncReport, error)
 }
 
 // Run opens the hub and blocks until the operator quits.

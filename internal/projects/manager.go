@@ -29,6 +29,10 @@ type Guest interface {
 	// the bundle attach (ADR-0027): a repository that has no remote arrives as
 	// a file or it does not arrive at all.
 	CopyToGuest(ctx context.Context, hostSourceDir, guestDestinationDir, guestHome string) error
+	// CopyFromGuest is the same carry outward, and it is what lets a local
+	// project reach another box: the host repository it meets its other boxes
+	// in is written from a bundle this brings out (ADR-0029).
+	CopyFromGuest(ctx context.Context, guestSourceDir, hostDestinationDir, guestHome string) error
 }
 
 var _ Guest = (*lima.Adapter)(nil)
@@ -66,6 +70,14 @@ type Manager struct {
 	registry      Registry
 	bootstrapOpts lima.BootstrapOptions
 	agent         SSHAgent
+	// hostGit runs Git on the host, against the bare repository a local project
+	// meets its other boxes in. It is a seam for the same reason the guest
+	// boundary is one: a test must be able to drive a whole reconciliation
+	// without a Git binary or a directory to write in.
+	hostGit HostRunner
+	// hubRoot overrides where those repositories live. Empty means the resolved
+	// default; tests point it at a temporary directory.
+	hubRoot string
 }
 
 // New builds a Manager over a guest and a config registry. The bootstrap
@@ -77,6 +89,7 @@ func New(guest Guest, registry Registry, opts lima.BootstrapOptions) *Manager {
 		registry:      registry,
 		bootstrapOpts: opts,
 		agent:         hostSSHAgent{runner: &execx.ExecRunner{}},
+		hostGit:       hostExecRunner{},
 	}
 }
 
@@ -236,7 +249,27 @@ func (m *Manager) Add(ctx context.Context, req AddRequest) (AddReport, error) {
 		report.Notes = append(report.Notes, "initialized_local")
 
 	default:
-		return report, localProjectNeedsASourceError(op, req.ID)
+		// An id on its own, for a project the record says is local. The box
+		// either already holds it, or it is materialized from the host
+		// repository the project meets its other boxes in (ADR-0029). Only
+		// where there is no host repository yet is there nothing to do this
+		// from, and the refusal names both ways of making one.
+		if status.PathExists {
+			if err := requireAdoptable(op, req.ID, status); err != nil {
+				return report, err
+			}
+			report.Adopted = true
+			break
+		}
+		materialized, err := m.attachFromHub(ctx, op, req.ID, workspace)
+		if err != nil {
+			return report, err
+		}
+		if !materialized {
+			return report, localProjectNeedsASourceError(op, req.ID)
+		}
+		report.Cloned = true
+		report.Notes = append(report.Notes, "attached_from_host")
 	}
 
 	if err := m.ensureSharedPermissions(ctx, op, workspace); err != nil {
@@ -856,18 +889,20 @@ func requireOneAttachSource(req AddRequest) error {
 }
 
 // localProjectNeedsASourceError is the one shape Add cannot answer: a record
-// that says the project is local, on a guest that does not hold it.
+// that says the project is local, on a guest that does not hold it, with
+// nothing on the host to make it from.
 //
-// Materializing clones from the remote on record (ADR-0024), and there is none
-// to clone from. The two ways forward are both real and neither is Torio's to
-// choose: carry the repository in, or give the project a remote so every guest
-// can reach it. Both are named, because a refusal that names no next step is
-// where an operator stops.
+// Materializing draws from the remote on record, a carried bundle, or the host
+// repository the project's boxes meet in (ADR-0024, ADR-0029), and here there
+// is none of the three. Every way forward is real and none is Torio's to
+// choose, so all of them are named: a refusal that names no next step is where
+// an operator stops.
 func localProjectNeedsASourceError(op, id string) error {
 	return &Error{Op: op, Kind: KindPrecondition, Err: fmt.Errorf(
-		"project %q is local: it has no remote on record, so there is nothing to clone it from here. "+
-			"Carry it in with `torio project add %s --from-bundle <file>`, or give it a remote with "+
-			"`torio project set-remote %s <remote>` so every guest can reach it", id, id, id)}
+		"project %q is local and nothing on this machine holds it yet. Run `torio project sync %s` "+
+			"on the box that has it, then open it here; or carry it in with "+
+			"`torio project add %s --from-bundle <file>`; or give it a remote with "+
+			"`torio project set-remote %s <remote>`", id, id, id, id)}
 }
 
 // unreadableRemoteError says what the operator has to do next, and says it

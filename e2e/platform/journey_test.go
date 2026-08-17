@@ -85,6 +85,7 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 		torio           *driver
 		workDir         string
 		fixtureDir      string
+		hostDataHome    string
 		artifactDir     string
 		instanceName    string
 		fixtureRemote   string
@@ -134,7 +135,8 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 		fixtureCommit = environmentOr("PLATFORM_E2E_FIXTURE_COMMIT", defaultFixtureCommit)
 		repositoryRoot = resolveRepositoryRoot()
 		externalCleanup = os.Getenv("PLATFORM_E2E_EXTERNAL_CLEANUP") == "1"
-		torio = newDriver(binary, artifactDir, filepath.Join(workDir, "xdg"))
+		hostDataHome = filepath.Join(workDir, "xdg-data")
+		torio = newDriver(binary, artifactDir, filepath.Join(workDir, "xdg"), hostDataHome)
 
 		captureTechnicalVersions(artifactDir)
 		exists, listErr := limaInstanceExists(instanceName)
@@ -354,6 +356,59 @@ var _ = Describe("the release-shaped Torio product journey", Ordered, func() {
 		removed := torio.mustRun("project-remove-local", "project.remove", "project", "remove", "ci-local")
 		expectData(removed, map[string]any{"checkout_retained": true})
 	}, SpecTimeout(6*time.Minute))
+
+	// A local project reaches every box through the host (ADR-0029). The whole
+	// round trip against a real guest: an empty repository has nothing to
+	// carry, a commit makes the host repository, the checkout is removed, and
+	// the project is materialized back out of that repository. It reaches no
+	// network either, so it costs a bundle and two copies.
+	It("carries a project that has no remote through the host and back", Label(guestStage), func(ctx SpecContext) {
+		torio.setContext(ctx)
+		workspace := profile.workspace + "/ci-carried"
+		added := torio.mustRun("carried-add", "project.add", "project", "add", "ci-carried", "--local")
+		expectData(added, map[string]any{"initialized": true, "registered": true})
+
+		// Nothing has been committed, so there is nothing to make a host
+		// repository out of, and saying so is the whole answer.
+		empty := torio.mustRun("carried-sync-empty", "project.sync", "project", "sync", "ci-carried")
+		expectData(empty, map[string]any{"hub_created": false, "notes": []any{"no_history_yet"}})
+
+		commit := torio.mustRun("carried-commit", "vm.ssh", "vm", "ssh", "--",
+			"sudo", "-u", profile.user, "--", "git", "-C", workspace,
+			"-c", "user.name=torio", "-c", "user.email=torio@localhost",
+			"commit", "-q", "--allow-empty", "-m", "carried")
+		expectData(commit, map[string]any{"exit_code": float64(0)})
+
+		carried := torio.mustRun("carried-sync", "project.sync", "project", "sync", "ci-carried")
+		expectData(carried, map[string]any{
+			"hub_created":     true,
+			"carried_to_host": []any{map[string]any{"ref": "heads/main", "commits": float64(1)}},
+			"diverged":        []any{},
+			"held_back":       []any{},
+		})
+		hub := filepath.Join(hostDataHome, "torio", "projects", "ci-carried.git")
+		Expect(hub).To(BeADirectory(), "the host repository a sync writes")
+
+		// The state every other box is in: the project is on record and this
+		// guest holds no checkout of it. The host repository is what it is
+		// materialized from.
+		gone := torio.mustRun("carried-remove-checkout", "vm.ssh", "vm", "ssh", "--",
+			"sudo", "-n", "rm", "-rf", workspace)
+		expectData(gone, map[string]any{"exit_code": float64(0)})
+		materialized := torio.mustRun("carried-materialize", "project.add", "project", "add", "ci-carried")
+		expectData(materialized, map[string]any{"cloned": true, "notes": []any{"attached_from_host"}})
+		head := torio.mustRun("carried-head", "vm.ssh", "vm", "ssh", "--",
+			"sudo", "-u", profile.user, "--", "git", "-C", workspace, "symbolic-ref", "HEAD")
+		expectData(head, map[string]any{"exit_code": float64(0), "stdout": "refs/heads/main\n"})
+		// What arrived is the local project, not a clone of something: a
+		// checkout with no origin is what agreement means for one (ADR-0027).
+		origin := torio.mustRun("carried-origin", "vm.ssh", "vm", "ssh", "--",
+			"sudo", "-u", profile.user, "--", "git", "-C", workspace, "remote")
+		expectData(origin, map[string]any{"exit_code": float64(0), "stdout": ""})
+
+		removed := torio.mustRun("carried-remove", "project.remove", "project", "remove", "ci-carried")
+		expectData(removed, map[string]any{"checkout_retained": true})
+	}, SpecTimeout(8*time.Minute))
 
 	It("stops the VM idempotently", Label(guestStage), func(ctx SpecContext) {
 		torio.setContext(ctx)

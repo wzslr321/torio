@@ -391,6 +391,7 @@ torio project add <name> [remote] [--id SLUG] [--use]
 torio project list
 torio project show <id>
 torio project use <id>
+torio project sync <id>
 torio project remove <id>
 torio project agent <id> [--push-grant]
 torio project enter <id>
@@ -437,6 +438,29 @@ torio project shell <id>
   rather than retyped: a typo would put a different repository behind an
   identifier that already means something. An unregistered id has nothing to
   complete from and is a usage error (exit 2).
+- `sync` reconciles a project that has **no remote** with a bare repository on
+  the host at `${XDG_DATA_HOME:-~/.local/share}/torio/projects/<id>.git`, which
+  is where that project's boxes meet
+  ([ADR-0029](../adr/0029-a-local-project-reaches-every-box-through-the-host.md)).
+  Each side writes a Git bundle, the one-shot transport carries the file, and
+  the other side reads refs out of it: nothing reaches a network and neither
+  repository gains a remote. **A ref moves only forward** — it is written only
+  where the value the other side holds is an ancestor of the one arriving, and a
+  ref that moved on both sides is reported in `diverged` and left exactly as it
+  was. Uncommitted work is never committed and never written over: the branch
+  the checkout stands on moves through the worktree with `merge --ff-only`, so
+  Git itself decides whether the tree can take it, and a refusal is reported in
+  `held_back` rather than forced. A project that has a remote
+  is refused (exit 4): its boxes already meet there. The host path is derived
+  from the id and is never recorded, so every registry entry still means the
+  same thing on every machine
+  ([ADR-0023](../adr/0023-recorded-remotes-are-resolvable-from-a-guest.md)).
+- `add <id>` with no remote, for a project the record says is **local**,
+  materializes the checkout from that host repository where one exists. It is
+  the third source a session may draw a checkout from, after the remote on
+  record and a carried bundle
+  ([ADR-0024](../adr/0024-a-session-materializes-the-checkout-it-needs.md)).
+  With none, the refusal names all three ways of getting one.
 - `list` reads only the config and runs no guest command — it works with the VM
   shut down.
 - `show` reports the registry entry and the checkout state.

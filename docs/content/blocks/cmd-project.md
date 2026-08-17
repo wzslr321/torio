@@ -10,6 +10,7 @@ takes no action itself; an absent or unknown subcommand is a usage error.
 | `torio project show <id>` | Report the shared entry, checkout state, and backend registry state where one is declared. Reports drift without repairing it, and returns no filenames, diffs, or raw Git output. |
 | `torio project use <id>` | Make a project active in the backend registry. A backend with no registry refuses the command. |
 | `torio project set-remote <id> <remote>` | Replace the remote of a project already on record. The registry is shared, so the correction applies to every backend. The checkout on the selected backend's guest is repointed when its origin still holds the remote being replaced; any other origin is reported and left alone. The id and display name do not change. It is also how a local project gets its first remote: the guest must be able to read it, so this is where a deploy key is provisioned for a private one. A remote cannot be removed — other guests' checkouts still point at it. |
+| `torio project sync <id>` | Reconcile a project that has no remote with the bare repository on your host that its boxes meet in, carrying branches and tags both ways as Git bundles over the same one-shot transport `brain import` uses. A ref is written only where what the other side holds is an ancestor of what is arriving; a ref that moved on both sides is named and left as it was. Uncommitted work is never carried. The branch the checkout stands on moves through the worktree, and where Git refuses that because work in the tree would be written over, the branch is held back and named rather than forced. A project that has a remote is refused: its boxes already meet there. |
 | `torio project remove <id>` | Archive the backend registry entry where declared, then drop the shared entry. The checkout and deploy key are retained and reported. |
 | `torio project enter <id>` | Open an ordinary interactive terminal in the checkout with SSH agent forwarding disabled. A registered project with no checkout on this backend's guest is materialized from the remote on record first. Interactive, so it does not support `--json`. |
 | `torio project agent <id>` | Start the configured backend inside the checkout, running as the backend identity rather than as you. A registered project with no checkout on this backend's guest is materialized from the remote on record first. No SSH agent is forwarded and the connection is never multiplexed, so it cannot inherit an operator write connection. The guest's own read route remains available. Interactive; `--json` is a usage error. A backend that declares no interactive session has nothing to open. |
@@ -33,11 +34,23 @@ push.
 **A project needs no remote.** `--local` records a project with none: it is an
 empty repository in the guest that made it, and it is on no forge. `--from-bundle`
 records the same kind of project from a repository that already exists on your
-machine. Both are listed on every backend, because the registry is shared, and
-opening one on a guest that does not hold it says so rather than guessing —
-carry it there with another bundle, or give it a remote. Where the local
-checkout has no origin, that is agreement; an origin appearing on one is
-ordinary drift.
+machine. Both are listed on every backend, because the registry is shared. Where
+the local checkout has no origin, that is agreement; an origin appearing on one
+is ordinary drift.
+
+**A local project reaches your other boxes through your host.**
+`torio project sync <id>` writes a bare repository at
+`${XDG_DATA_HOME:-~/.local/share}/torio/projects/<id>.git` and reconciles this
+box's branches and tags with it, both ways. That path is derived from the id on
+the machine that needs it and is recorded nowhere, so every registry entry keeps
+meaning the same thing on every machine. Once a project has been reconciled
+once, opening it on another backend's guest materializes the checkout from
+there, the way a project with a remote is materialized from the remote. What
+arrives is the branch the host repository points at; the other branches come in
+at the first `torio project sync` on that box. Before
+that first reconciliation there is nothing to make it from, and opening it says
+so rather than guessing. The host repository holds what a sync carried; Torio
+does not schedule one and does not call the directory a backup.
 
 **Torio stores no host Git credential.** A remote the guest cannot read without
 prompting fails closed. For an SSH remote, `add` generates a deploy key on the

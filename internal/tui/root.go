@@ -78,6 +78,9 @@ type opMsg struct {
 	label  string
 	err    error
 	detail string
+	// note is what a success is worth saying, where "finished" would say
+	// nothing: a reconciliation either carried something or it did not.
+	note string
 }
 
 // specMsg carries a resolved interactive session, which the hub then hands the
@@ -291,6 +294,27 @@ func (r *root) runDetailed(label string, long bool, fn func(context.Context) (st
 		defer cancel()
 		detail, err := fn(ctx)
 		return opMsg{label: label, err: err, detail: detail}
+	}
+}
+
+// runNoted is run for an operation whose outcome is a line rather than a state
+// change the screens already show. The note is built off the ui loop and
+// travels back in the message, because nothing outside Update may write what
+// the hub is showing.
+func (r *root) runNoted(label string, long bool, fn func(context.Context) (string, error)) tea.Cmd {
+	if r.busy != "" {
+		return nil
+	}
+	r.busy = label
+	r.busyStart = time.Now()
+	r.errText = ""
+	r.errDetail = ""
+	r.note = ""
+	return func() tea.Msg {
+		ctx, cancel := r.opContext(long)
+		defer cancel()
+		note, err := fn(ctx)
+		return opMsg{label: label, err: err, note: note}
 	}
 }
 
@@ -562,6 +586,9 @@ func (r *root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return r, nil
 		}
 		r.note = msg.label + " finished"
+		if msg.note != "" {
+			r.note = msg.note
+		}
 		return r, r.afterChange()
 
 	case rebindMsg:

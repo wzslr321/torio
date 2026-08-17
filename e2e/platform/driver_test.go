@@ -35,7 +35,13 @@ type driver struct {
 	commandWait time.Duration
 }
 
-func newDriver(binary, artifactDir, xdgConfigHome string) *driver {
+// newDriver builds the CLI harness. Both XDG roots are redirected into the
+// suite's own working directory: the config root holds the registry a journey
+// writes, and the data root holds what Torio keeps beside it, which is the host
+// vault and the bare repository a local project reconciles through (ADR-0025,
+// ADR-0029). A journey that wrote either into the operator's own data directory
+// would leave a repository behind on every developer machine it ran on.
+func newDriver(binary, artifactDir, xdgConfigHome, xdgDataHome string) *driver {
 	GinkgoHelper()
 	Expect(binary).NotTo(BeEmpty(), "PLATFORM_E2E_TORIO_BIN is required")
 	info, err := os.Stat(binary)
@@ -47,7 +53,9 @@ func newDriver(binary, artifactDir, xdgConfigHome string) *driver {
 	return &driver{
 		binary:      binary,
 		artifactDir: artifactDir,
-		env:         replaceEnvironment(os.Environ(), "XDG_CONFIG_HOME", xdgConfigHome),
+		env: replaceEnvironment(
+			replaceEnvironment(os.Environ(), "XDG_CONFIG_HOME", xdgConfigHome),
+			"XDG_DATA_HOME", xdgDataHome),
 		context:     context.Background(),
 		commandWait: commandWait,
 	}

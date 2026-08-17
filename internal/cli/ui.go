@@ -219,6 +219,9 @@ func (a *app) tuiDeps() (tui.Deps, error) {
 			}
 			return nil, nil
 		},
+		// The command's own call: one reconciliation means the same thing
+		// whichever surface started it.
+		ProjectSync: projectSvc.Sync,
 		ProjectSetRemote: func(ctx context.Context, id, remote string) (*projects.DeployKey, error) {
 			report, err := projectSvc.SetRemote(ctx, id, remote)
 			if err != nil {
